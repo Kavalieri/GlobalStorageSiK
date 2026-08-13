@@ -386,6 +386,16 @@ local function sweepPendingReturns()
 					end
 				end
 				pendingReturns[itemId] = nil
+			elseif not info.loggedWaitingActive then
+				-- DIAGNOSTICO (2026-08-13): antes esto era silencioso - no había
+				-- forma de distinguir "el item volverá en cuanto pares de
+				-- craftear" de "esto está roto". Se loguea UNA vez por item (no
+				-- cada tick, para no inundar el log) en cuanto se detecta el
+				-- primer aplazamiento por cola de crafteo/construcción activa.
+				info.loggedWaitingActive = true
+				sessionDebugLog("sweepPendingReturns itemId=" .. tostring(itemId)
+					.. " fullType=" .. tostring(info.fullType)
+					.. " aplazado (accion craft/build activa en cola, se reintentara en cuanto la cola quede vacia)")
 			end
 		end
 	end

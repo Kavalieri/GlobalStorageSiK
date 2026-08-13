@@ -251,7 +251,15 @@ local function checkPendingCraftStarts()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
-			originalStartHandcraft(entry.self, entry.force)
+			-- pcall (2026-08-13, diagnostico): si originalStartHandcraft revienta
+			-- al llamarlo DIFERIDO desde el tick (en vez de sincrono desde el
+			-- clic original), antes se perdia en silencio - ningun END/RESULT,
+			-- sin ninguna pista en el log de por que. Con esto queda registrado.
+			local okCall, errCall = pcall(originalStartHandcraft, entry.self, entry.force)
+			if not okCall then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt RESUME operationId=" .. tostring(entry.operationId)
+					.. " originalStartHandcraft ERROR: " .. tostring(errCall))
+			end
 			activeOperationId = nil
 			restore()
 		end
@@ -503,7 +511,17 @@ local function checkPendingNeatCraftStarts()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
-			originalNeatStartHandcraft(entry.self, entry.force, entry.craftTimes)
+			-- pcall (2026-08-13, diagnostico): igual que en checkPendingCraftStarts
+			-- - sospecha principal de por que Neat se queda mudo (sin END/RESULT)
+			-- tras esperar confirmacion del servidor: originalNeatStartHandcraft
+			-- puede no tolerar bien ser llamado diferido desde el tick en vez de
+			-- sincrono desde onCraftButtonClick, y sin esto un error ahi se perdia
+			-- en silencio sin dejar ningun rastro.
+			local okCall, errCall = pcall(originalNeatStartHandcraft, entry.self, entry.force, entry.craftTimes)
+			if not okCall then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
+					.. " originalNeatStartHandcraft ERROR: " .. tostring(errCall))
+			end
 			activeOperationId = nil
 			restore()
 		end

@@ -1,9 +1,9 @@
 name=Global Storage SiK [42.20+]
 id=GlobalStorageSiK
-description=Build 42.20+ v1.3.59. Todos los contenedores de tu base en un inventario de red unificado, buscable y auto-organizado. Addons opcionales.
+description=Build 42.20+ v1.3.60. Todos los contenedores de tu base en un inventario de red unificado, buscable y auto-organizado. Addons opcionales.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.3.59
+modversion=1.3.60
 versionMin=42.19.0
 require=\NeatUI_Framework
