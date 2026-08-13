@@ -18,6 +18,13 @@ local active = false
 local corner1 = nil
 local terminalRef = nil
 local overlay = nil
+--- Ultima casilla bajo el raton en la que se reconstruyo el preview -
+--- revisado 2026-08-14 junto al fix de parpadeo/FPS de GS_NodeHighlight.lua:
+--- mismo patron (clearAll + reconstruccion completa, hasta 400 casillas con
+--- registro FBO cada una) pero disparado en CADA TICK mientras se dibuja una
+--- zona, sin comprobar si el raton se habia movido. Ahora solo se reconstruye
+--- cuando la casilla bajo el raton cambia de verdad.
+local lastPreviewHover = nil
 
 --- Normaliza objeto o casilla a IsoGridSquare.
 ---@param objOrSq any
@@ -149,6 +156,7 @@ local function updatePreviewHighlights()
 	end
 
 	local hover = squareUnderMouse()
+	lastPreviewHover = hover
 	if corner1 and GlobalStorageSiK.WorldHighlight then
 		GlobalStorageSiK.WorldHighlight.highlightSquare(corner1, 0.2, 0.85, 0.35)
 	end
@@ -314,6 +322,7 @@ function GlobalStorageSiK.ZonePicker.start(terminal)
 	end
 	active = true
 	corner1 = nil
+	lastPreviewHover = nil
 	clearPreviewHighlights()
 	terminalRef = terminal
 	suspendTerminal(terminal)
@@ -344,9 +353,14 @@ function GlobalStorageSiK.ZonePicker.install()
 	end
 
 	local function onTick()
-		if active then
-			updatePreviewHighlights()
+		if not active then
+			return
 		end
+		local hover = squareUnderMouse()
+		if hover == lastPreviewHover then
+			return
+		end
+		updatePreviewHighlights()
 	end
 
 	if Events and Events.OnKeyPressed then
