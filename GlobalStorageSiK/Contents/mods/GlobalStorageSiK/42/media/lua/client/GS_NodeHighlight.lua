@@ -24,7 +24,17 @@ local state = {
 }
 
 local tickAcc = 0
-local REFRESH_TICKS = 45
+-- Subido de 45 a 400 (2026-08-14, reporte de jugador: parpadeo residual del
+-- borde blanco 1-2 veces/segundo tras el fix de reapplyAfterRefresh): este
+-- refresco periodico solo existe como red de seguridad por si el motor
+-- "olvida" el resaltado (ej. tras descargar/recargar el chunk) - no hace
+-- falta que corra a casi 1Hz para cumplir ese papel, y como reaplica
+-- incondicionalmente (no hay API de Lua para consultar "sigue resaltado?"),
+-- cada ciclo reinicia la animacion de brillo del motor igual que el bug ya
+-- corregido en reapplyAfterRefresh, solo que a ritmo mas lento. Cada ~6-13s
+-- (segun fps) sigue siendo de sobra para recuperarse de una perdida real,
+-- sin que se note como parpadeo visible.
+local REFRESH_TICKS = 400
 
 --- Comprueba si un nodo pertenece a la zona indicada.
 ---@param node table
