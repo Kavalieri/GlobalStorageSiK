@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Reads whatever the disk tells it to and nothing else. No questions asked, no judgement about your pre-apocalypse life choices.",
+	"Tooltip_GS_ReaderCasing": "The shell that stops the rest of the parts from quitting after the first drop. Recycled sheet metal, undamaged pride.",
+	"Tooltip_GS_ReaderCircuit": "The reader's brain. Doesn't know there are zombies outside, and honestly, happier that way.",
+	"Tooltip_GS_ReaderAntenna": "Picks up the SiK network signal from across the room. From across the county, don't push your luck.",
+	"Tooltip_GS_FloppyDisk": "1.44 MB of software that survived the apocalypse better than most people did.",
+	"Tooltip_GS_FloppyDisk_Blank": "Unformatted, unlabeled, and full of potential. Whatever ends up on it is entirely your doing.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "One program, one purpose: politely evicting a SiK terminal from whatever it's plugged into.",
+	"Tooltip_GS_PC_Tower": "A metal box shaped like a box. Everything useful happens inside it.",
+	"Tooltip_GS_Motherboard": "Holds every other part of the computer together and never gets a thank you.",
+	"Tooltip_GS_IODevice": "Translates buttons and cables into something the computer understands. A quiet little polyglot.",
+	"Tooltip_GS_Keyboard": "Plenty of keys for typing passwords nobody's ever going to check again.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": the only magazine still publishing on schedule, even with no one left to deliver it.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": build your own PC from spare parts and a blind faith in twenty-year-old electronics.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"GS Disk Utilities\": step-by-step instructions for writing a program onto a blank disk. Requires standing close enough to a terminal to bother.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "One program, one purpose: teaching a terminal to keep its own Floppy Drive plugged in, so it doesn't have to ride in your pockets anymore.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Disk Tools\": step-by-step instructions for writing the disk that installs the Floppy Drive into a terminal's network. Requires standing close enough to a terminal to bother.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Disk Tools\": step-by-step instructions for writing the disk that carries the GS network's own operating system. Requires standing close enough to a terminal to bother.",
+	"Tooltip_GS_Manual_SolderingIron": "A scrappy DIY guide to building your own soldering iron out of scavenged parts. Reading it alone won't get you anywhere - somebody has to actually allow this shortcut first."
+}

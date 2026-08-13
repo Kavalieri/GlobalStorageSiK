@@ -1,0 +1,140 @@
+VERSION = 1,
+
+option GSSiK_Addon_Builder.LootPeripheralWeight
+{
+	type = double,
+	default = 0.08,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Builder,
+	translation = GSSiK_Addon_Builder_LootPeripheralWeight,
+}
+
+option GSSiK_Addon_Builder.LootMagazineWeight
+{
+	type = double,
+	default = 0.35,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Builder,
+	translation = GSSiK_Addon_Builder_LootMagazineWeight,
+}
+
+option GSSiK_Addon_Builder.LootDiskProgramMagazineWeight
+{
+	type = double,
+	default = 0.3,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Builder,
+	translation = GSSiK_Addon_Builder_LootDiskProgramMagazineWeight,
+}
+
+option GSSiK_Addon_Builder.LootComponentWeight
+{
+	type = double,
+	default = 0.2,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Builder,
+	translation = GSSiK_Addon_Builder_LootComponentWeight,
+}
+
+option GSSiK_Addon_Builder.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Builder_Debug,
+	translation = GSSiK_Addon_Builder_DebugMode,
+}
+
+option GSSiK_Addon_Builder.LootInstallDiskWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Builder,
+	translation = GSSiK_Addon_Builder_LootInstallDiskWeight,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardFrame_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardFrame_Enable,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardFrame_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardFrame_RequireBook,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardPanel_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardPanel_Enable,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardPanel_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardPanel_RequireBook,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardStylus_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardStylus_Enable,
+}
+
+option GSSiK_Addon_Builder.Recipe_WhiteboardStylus_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_WhiteboardStylus_RequireBook,
+}
+
+option GSSiK_Addon_Builder.Recipe_DigitalWhiteboard_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_DigitalWhiteboard_Enable,
+}
+
+option GSSiK_Addon_Builder.Recipe_DigitalWhiteboard_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_DigitalWhiteboard_RequireBook,
+}
+
+option GSSiK_Addon_Builder.Recipe_BuilderDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_BuilderDisk_Enable,
+}
+
+option GSSiK_Addon_Builder.Recipe_BuilderDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Builder_Recipes,
+	translation = GSSiK_Addon_Builder_Recipe_BuilderDisk_RequireBook,
+}
+

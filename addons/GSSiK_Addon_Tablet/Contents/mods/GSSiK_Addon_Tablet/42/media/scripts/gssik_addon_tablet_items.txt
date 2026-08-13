@@ -1,0 +1,341 @@
+module GSSiK_Addon_Tablet
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	/* Chip WiFi por tier: componente propio que da el salto de potencia a
+	   cada antena (Tier 1/2/3). Se fabrica con materiales vanilla, sin
+	   depender de la antena - solo la antena en si consume la del tier
+	   anterior al mejorarse (ver recetas "Build GS WiFi Antenna T2/T3"). */
+	item GS_WifiChip_T1
+	{
+		DisplayName = GS WiFi Chip T1,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_WifiChip_T1,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_WifiChip_T2
+	{
+		DisplayName = GS WiFi Chip T2,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_WifiChip_T2,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_WifiChip_T3
+	{
+		DisplayName = GS WiFi Chip T3,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_WifiChip_T3,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Periférico a instalar en el terminal (emite servicio inalámbrico a la
+	   red). Se consume al instalar mediante su disquete; el disquete se
+	   conserva. Vive en el terminal, no lo lleva el jugador encima. 3
+	   tiers independientes - el rango de la red depende de CUAL de los 3
+	   este instalado, no de la tableta que lleve el jugador (ver
+	   GS_Addons.getWirelessRangeForNetwork). */
+	item GS_WifiAntenna
+	{
+		DisplayName = GS WiFi Antenna T1,
+		DisplayCategory = Electronics,
+		Weight = 3.0,
+		ItemType = base:normal,
+		Icon = GS_WifiAntenna,
+		WorldStaticModel = RadioReceiver_Ground,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	item GS_WifiAntenna_T2
+	{
+		DisplayName = GS WiFi Antenna T2,
+		DisplayCategory = Electronics,
+		Weight = 3.2,
+		ItemType = base:normal,
+		Icon = GS_WifiAntenna_T2,
+		WorldStaticModel = RadioReceiver_Ground,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	item GS_WifiAntenna_T3
+	{
+		DisplayName = GS WiFi Antenna T3,
+		DisplayCategory = Electronics,
+		Weight = 3.5,
+		ItemType = base:normal,
+		Icon = GS_WifiAntenna_T3,
+		WorldStaticModel = RadioReceiver_Ground,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	item GS_WifiAntenna_Dish
+	{
+		DisplayName = GS Antenna Dish,
+		DisplayCategory = Electronics,
+		Weight = 1.0,
+		ItemType = base:normal,
+		Icon = GS_WifiAntenna_Dish,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_WifiAntenna_Transmitter
+	{
+		DisplayName = GS Antenna Transmitter,
+		DisplayCategory = Electronics,
+		Weight = 0.4,
+		ItemType = base:normal,
+		Icon = GS_WifiAntenna_Transmitter,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Disquete de instalación propio del addon. Se conserva al instalar. */
+	item GS_FloppyDisk_Tablet
+	{
+		DisplayName = GS Tablet Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_Tablet,
+		Tooltip = Tooltip_GS_FloppyDisk_Tablet,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppy;GSSiKAddonDisk,
+	}
+
+	/* Tier 1: item básico que lleva el jugador encima. Con la Antena
+	   instalada en un terminal de la red y esta tableta en el inventario,
+	   da acceso al almacén desde el rango que definas en sandbox. Base
+	   sobre la que se montan los tiers superiores. */
+	item GS_Tablet
+	{
+		DisplayName = GS Tablet,
+		DisplayCategory = Electronics,
+		Weight = 0.35,
+		ItemType = base:normal,
+		Icon = GS_Tablet,
+		WorldStaticModel = WalkieTalkieValue,
+		Tags = GlobalStorageSiK;GSSiKAccessTablet,
+		OnCreate = GSSiK_Addon_Tablet.ItemHooks.onCreateTablet,
+	}
+
+	item GS_Tablet_Screen
+	{
+		DisplayName = GS Tablet Screen,
+		DisplayCategory = Electronics,
+		Weight = 0.3,
+		ItemType = base:normal,
+		Icon = GS_Tablet_Screen,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_Tablet_Battery
+	{
+		DisplayName = GS Tablet Battery,
+		DisplayCategory = Electronics,
+		Weight = 0.3,
+		ItemType = base:normal,
+		Icon = GS_Tablet_Battery,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Tier 2a: Tableta base + módulo propio → acceso al almacén + pestaña
+	   Craft si el addon Craft está instalado en la red. */
+	item GS_TabletCraft
+	{
+		DisplayName = GS Craft Tablet,
+		DisplayCategory = Electronics,
+		Weight = 0.45,
+		ItemType = base:normal,
+		Icon = GS_TabletCraft,
+		WorldStaticModel = WalkieTalkieValue,
+		Tags = GlobalStorageSiK;GSSiKCraftTablet,
+		OnCreate = GSSiK_Addon_Tablet.ItemHooks.onCreateCraftTablet,
+	}
+
+	item GS_TabletCraft_Module
+	{
+		DisplayName = GS Craft Tablet Module,
+		DisplayCategory = Electronics,
+		Weight = 0.3,
+		ItemType = base:normal,
+		Icon = GS_TabletCraft_Module,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Tier 2b: Tableta base + módulo propio → acceso al almacén + pestaña
+	   Build si el addon Builder está instalado en la red. */
+	item GS_TabletBuilder
+	{
+		DisplayName = GS Builder Tablet,
+		DisplayCategory = Electronics,
+		Weight = 0.45,
+		ItemType = base:normal,
+		Icon = GS_TabletBuilder,
+		WorldStaticModel = WalkieTalkieValue,
+		Tags = GlobalStorageSiK;GSSiKBuilderTablet,
+		OnCreate = GSSiK_Addon_Tablet.ItemHooks.onCreateBuilderTablet,
+	}
+
+	item GS_TabletBuilder_Module
+	{
+		DisplayName = GS Builder Tablet Module,
+		DisplayCategory = Electronics,
+		Weight = 0.3,
+		ItemType = base:normal,
+		Icon = GS_TabletBuilder_Module,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Tier 3: une una Tableta Craft y una Tableta Builder ya montadas → da
+	   acceso a ambos addons a la vez si están instalados. */
+	item GS_TabletMaster
+	{
+		DisplayName = GS Master Tablet,
+		DisplayCategory = Electronics,
+		Weight = 0.6,
+		ItemType = base:normal,
+		Icon = GS_TabletMaster,
+		WorldStaticModel = WalkieTalkieValue,
+		Tags = GlobalStorageSiK;GSSiKMasterTablet,
+		OnCreate = GSSiK_Addon_Tablet.ItemHooks.onCreateMasterTablet,
+	}
+
+	item GS_TabletMaster_Core
+	{
+		DisplayName = GS Master Tablet Core,
+		DisplayCategory = Electronics,
+		Weight = 0.35,
+		ItemType = base:normal,
+		Icon = GS_TabletMaster_Core,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Cada elemento craftable tiene su propia revista (enseña ese ítem y
+	   sus componentes). La revista de programación del disquete va aparte,
+	   compartida por todo el addon, igual criterio que en Craft y Builder. */
+	item GS_Manual_Antenna
+	{
+		DisplayName = GS Network Monthly: Antenna,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS Antenna Dish;Build GS Antenna Transmitter;Build GS WiFi Chip T1;Build GS WiFi Antenna,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	/* Revista avanzada: mejora de antena (T2/T3). Deliberadamente separada
+	   de GS_Manual_Antenna - un tecnico que sabe montar la antena base no
+	   tiene por que saber mejorarla, y asi la progresion de tier tiene su
+	   propio hallazgo/aprendizaje en el mundo, no llega gratis con la
+	   revista basica. */
+	item GS_Manual_AntennaAdvanced
+	{
+		DisplayName = GS Network Monthly: Antenna Upgrades,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS WiFi Chip T2;Build GS WiFi Antenna T2;Build GS WiFi Chip T3;Build GS WiFi Antenna T3,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_TabletBase
+	{
+		DisplayName = GS Network Monthly: Tablet,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS Tablet Screen;Build GS Tablet Battery;Build GS Tablet,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_TabletCraft
+	{
+		DisplayName = GS Network Monthly: Craft Tablet,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Build GS Craft Tablet Module;Build GS Craft Tablet,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_TabletBuilder
+	{
+		DisplayName = GS Network Monthly: Builder Tablet,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Build GS Builder Tablet Module;Build GS Builder Tablet,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_TabletMaster
+	{
+		DisplayName = GS Network Monthly: Master Tablet,
+		DisplayCategory = RecipeResource,
+		Weight = 0.3,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -10,
+		StressChange = -5,
+		LearnedRecipes = Build GS Master Tablet Core;Build GS Master Tablet,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_Tablet_DiskProgram
+	{
+		DisplayName = GS Disk Tools: Tablet Install,
+		DisplayCategory = RecipeResource,
+		Weight = 0.3,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Program GS Tablet Install Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+}

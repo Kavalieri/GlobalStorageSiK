@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Liest, was die Diskette ihm sagt, und sonst nichts. Keine Fragen, kein Urteil über deine Lebensentscheidungen vor der Apokalypse.",
+	"Tooltip_GS_ReaderCasing": "Die Hülle, die verhindert, dass der Rest nach dem ersten Sturz aufgibt. Recyceltes Blech, unbeschädigter Stolz.",
+	"Tooltip_GS_ReaderCircuit": "Das Gehirn des Laufwerks. Weiß nichts von Zombies draußen, und ehrlich gesagt, so ist es glücklicher.",
+	"Tooltip_GS_ReaderAntenna": "Empfängt das SiK Netzwerksignal quer durch den Raum. Quer durch den Landkreis, überstrapaziere dein Glück nicht.",
+	"Tooltip_GS_FloppyDisk": "1,44 MB Software, die die Apokalypse besser überstanden hat als die meisten Menschen.",
+	"Tooltip_GS_FloppyDisk_Blank": "Unformatiert, unbeschriftet und voller Möglichkeiten. Was am Ende darauf landet, ist ganz deine Sache.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "Ein Programm, ein Zweck: ein SiK Terminal höflich aus dem hinauswerfen, woran es angeschlossen ist.",
+	"Tooltip_GS_PC_Tower": "Eine Metallkiste in Kistenform. Alles Nützliche passiert im Inneren.",
+	"Tooltip_GS_Motherboard": "Hält alle anderen Teile des Computers zusammen und bekommt dafür nie ein Dankeschön.",
+	"Tooltip_GS_IODevice": "Übersetzt Tasten und Kabel in etwas, das der Computer versteht. Ein stiller kleiner Sprachtalentierter.",
+	"Tooltip_GS_Keyboard": "Genug Tasten, um Passwörter zu tippen, die nie wieder jemand kontrollieren wird.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": das einzige Magazin, das noch pünktlich erscheint, auch wenn niemand mehr da ist, um es auszuliefern.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": baue deinen eigenen PC aus Ersatzteilen und blindem Vertrauen in zwanzig Jahre alte Elektronik.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"GS Diskettenwerkzeuge\": Schritt für Schritt Anleitung, um ein Programm auf eine leere Diskette zu schreiben. Erfordert genug Nähe zu einem Terminal, damit es sich überhaupt lohnt.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "Ein Programm, ein Zweck: bringt einem Terminal bei, sein eigenes Diskettenlaufwerk angeschlossen zu halten, statt es in deinen Taschen herumzuschleppen.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Diskettenwerkzeuge\": Schritt für Schritt Anleitung, um die Diskette zu beschreiben, die das Diskettenlaufwerk im Netzwerk eines Terminals installiert. Erfordert genug Nähe zu einem Terminal, damit es sich überhaupt lohnt.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Diskettenwerkzeuge\": Schritt für Schritt Anleitung, um die Diskette zu beschreiben, die das eigene Betriebssystem des GS-Netzwerks trägt. Erfordert genug Nähe zu einem Terminal, damit es sich überhaupt lohnt.",
+	"Tooltip_GS_Manual_SolderingIron": "Eine improvisierte Anleitung, um sich aus Schrottteilen einen eigenen Lötkolben zu bauen. Nur Lesen bringt nichts - jemand muss diese Abkürzung erst erlauben."
+}

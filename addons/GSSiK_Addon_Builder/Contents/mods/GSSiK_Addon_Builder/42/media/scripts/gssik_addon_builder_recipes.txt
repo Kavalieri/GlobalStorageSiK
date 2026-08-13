@@ -1,0 +1,124 @@
+module GSSiK_Addon_Builder
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	craftRecipe Build GS Whiteboard Frame
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Builder_RecipeTests.Recipe_WhiteboardFrame_Enable,
+		inputs
+		{
+			item 2 [Base.ScrapMetal],
+			item 1 [Base.SheetMetal],
+			item 1 [Base.Hammer] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Builder.GS_DigitalWhiteboard_Frame,
+		}
+	}
+
+	craftRecipe Build GS Whiteboard Display Panel
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Builder_RecipeTests.Recipe_WhiteboardPanel_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.Wire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Builder.GS_DigitalWhiteboard_Screen,
+		}
+	}
+
+	craftRecipe Build GS Whiteboard Stylus
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Builder_RecipeTests.Recipe_WhiteboardStylus_Enable,
+		inputs
+		{
+			item 1 [Base.Pen],
+			item 2 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Builder.GS_DigitalWhiteboard_Stylus,
+		}
+	}
+
+	/* Montaje final: junta las 3 piezas + soldador + destornillador
+	   cualquiera, igual patron que el lector de disquetes del Core y la
+	   impresora 3D del addon Craft. */
+	craftRecipe Build GS Digital Whiteboard
+	{
+		timedAction = MakingElectrical,
+		time = 110,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:6,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Builder_RecipeTests.Recipe_DigitalWhiteboard_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Builder.GS_DigitalWhiteboard_Frame],
+			item 1 [GSSiK_Addon_Builder.GS_DigitalWhiteboard_Screen],
+			item 1 [GSSiK_Addon_Builder.GS_DigitalWhiteboard_Stylus],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Builder.GS_DigitalWhiteboard,
+		}
+	}
+
+	/* Disquete de instalacion: requiere la revista aparte (needToBeLearn via
+	   LearnedRecipes de GS_Manual_Builder_DiskProgram) y un disquete en
+	   blanco del Core. */
+	craftRecipe Program GS Builder Install Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Builder_RecipeTests.Recipe_BuilderDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Builder.GS_FloppyDisk_Builder,
+		}
+	}
+}

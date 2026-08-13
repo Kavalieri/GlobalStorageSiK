@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "只会读取磁盘上告诉它的内容，别的什么都不做。不问问题，也不评判你末日前的人生选择。",
+	"Tooltip_GS_ReaderCasing": "阻止其他零件在第一次摔落后就“撂挑子”的外壳。回收板材制成，自尊心完好无损。",
+	"Tooltip_GS_ReaderCircuit": "软驱的大脑。不知道外面有丧尸，老实说，这样反而更快乐。",
+	"Tooltip_GS_ReaderAntenna": "能接收到房间另一头的 SiK 网络信号。至于整个郡那么远——别太贪心。",
+	"Tooltip_GS_FloppyDisk": "1.44MB 的软件，比大多数人都更好地撑过了末日。",
+	"Tooltip_GS_FloppyDisk_Blank": "未格式化，未贴标签，充满可能性。最终写上去的东西，全看你自己。",
+	"Tooltip_GS_FloppyDisk_Uninstall": "一个程序，一个目的：礼貌地把 SiK 终端从它所连接的东西上请出去。",
+	"Tooltip_GS_PC_Tower": "一个形状像盒子的金属盒子。所有有用的事都发生在里面。",
+	"Tooltip_GS_Motherboard": "把电脑其他所有零件连接在一起，却从没得到过一句感谢。",
+	"Tooltip_GS_IODevice": "把按钮和线缆翻译成电脑能懂的东西。一个安静的小小多语言者。",
+	"Tooltip_GS_Keyboard": "足够多的按键，可以打出再也不会有人检查的密码。",
+	"Tooltip_GS_Manual_TerminalUnit": "《GS网络月刊》：唯一还在按时出版的杂志，哪怕已经没有人来配送了。",
+	"Tooltip_GS_Manual_PCBuild": "《家用电脑指南》：用零散配件和对二十年前电子产品的盲目信任，组装属于你自己的电脑。",
+	"Tooltip_GS_Manual_DiskPrograms": "《GS磁盘工具》：手把手教你如何把程序写入一张空白磁盘。需要站得离终端足够近才值得费这个劲。",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "一张盘，一个使命：教会终端把自己的软驱常驻连接，不用再一直揣在你兜里晃荡。",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "《GS磁盘工具》：手把手教你如何写入把软驱安装进终端网络所需的程序磁盘。需要站得离终端足够近才值得费这个劲。",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "《GS磁盘工具》：手把手教你如何写入承载 GS 网络自身操作系统的磁盘。需要站得离终端足够近才值得费这个劲。",
+	"Tooltip_GS_Manual_SolderingIron": "一份简陋的自制电烙铁指南，教你用捡来的零件拼出一把烙铁。光看这本杂志没用——得先有人开了这个口子才行。"
+}

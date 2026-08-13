@@ -1,0 +1,16 @@
+{
+	"GSSiK_Addon_Craft.GS_Printer3D": "3D-принтер GS",
+	"GSSiK_Addon_Craft.GS_Printer3D_Frame": "Корпус принтера GS",
+	"GSSiK_Addon_Craft.GS_Printer3D_ExtruderHead": "Экструзионная головка GS",
+	"GSSiK_Addon_Craft.GS_Printer3D_ControlBoard": "Плата управления принтером GS",
+	"GSSiK_Addon_Craft.GS_FloppyDisk_Craft": "10 - Дискета: Craft GS",
+	"GSSiK_Addon_Craft.GS_Manual_Craft": "GS Network Monthly: Craft",
+	"GSSiK_Addon_Craft.GS_Manual_Craft_DiskProgram": "10 - GS Disk Tools: программирование дискеты Craft",
+	"ItemName_GSSiK_Addon_Craft.GS_Printer3D": "3D-принтер GS",
+	"ItemName_GSSiK_Addon_Craft.GS_Printer3D_Frame": "Корпус принтера GS",
+	"ItemName_GSSiK_Addon_Craft.GS_Printer3D_ExtruderHead": "Экструзионная головка GS",
+	"ItemName_GSSiK_Addon_Craft.GS_Printer3D_ControlBoard": "Плата управления принтером GS",
+	"ItemName_GSSiK_Addon_Craft.GS_FloppyDisk_Craft": "10 - Дискета: Craft GS",
+	"ItemName_GSSiK_Addon_Craft.GS_Manual_Craft": "GS Network Monthly: Craft",
+	"ItemName_GSSiK_Addon_Craft.GS_Manual_Craft_DiskProgram": "10 - GS Disk Tools: программирование дискеты Craft"
+}

@@ -1,0 +1,101 @@
+module GSSiK_Addon_Builder
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	/* Periférico a instalar en el terminal. Se consume al instalar; el
+	   disquete de instalación (GS_FloppyDisk_Builder, ver mas abajo) se
+	   conserva. */
+	item GS_DigitalWhiteboard
+	{
+		DisplayName = GS Digital Whiteboard,
+		DisplayCategory = Electronics,
+		Weight = 4.0,
+		ItemType = base:normal,
+		Icon = GS_DigitalWhiteboard,
+		WorldStaticModel = RadioReceiver_Ground,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	/* Piezas intermedias de la Pizarra Digital GS (montaje final en receta
+	   aparte, igual patron que el lector de disquetes del Core). */
+	item GS_DigitalWhiteboard_Frame
+	{
+		DisplayName = GS Whiteboard Frame,
+		DisplayCategory = Electronics,
+		Weight = 2.5,
+		ItemType = base:normal,
+		Icon = GS_DigitalWhiteboard_Frame,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_DigitalWhiteboard_Screen
+	{
+		DisplayName = GS Whiteboard Display Panel,
+		DisplayCategory = Electronics,
+		Weight = 0.5,
+		ItemType = base:normal,
+		Icon = GS_DigitalWhiteboard_Screen,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_DigitalWhiteboard_Stylus
+	{
+		DisplayName = GS Whiteboard Stylus,
+		DisplayCategory = Electronics,
+		Weight = 0.2,
+		ItemType = base:normal,
+		Icon = GS_DigitalWhiteboard_Stylus,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Disquete de instalacion propio del addon Builder. Se conserva al
+	   instalar, no se consume. */
+	item GS_FloppyDisk_Builder
+	{
+		DisplayName = GS Builder Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_Builder,
+		Tooltip = Tooltip_GS_FloppyDisk_Builder,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppy;GSSiKAddonDisk,
+	}
+
+	item GS_Manual_Builder
+	{
+		DisplayName = GS Network Monthly: Builder,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS Whiteboard Frame;Build GS Whiteboard Display Panel;Build GS Whiteboard Stylus;Build GS Digital Whiteboard,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	/* Revista separada: solo enseña a programar el disquete de instalacion,
+	   igual criterio que en el addon Craft. */
+	item GS_Manual_Builder_DiskProgram
+	{
+		DisplayName = GS Disk Tools: Builder Install,
+		DisplayCategory = RecipeResource,
+		Weight = 0.3,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Program GS Builder Install Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+}

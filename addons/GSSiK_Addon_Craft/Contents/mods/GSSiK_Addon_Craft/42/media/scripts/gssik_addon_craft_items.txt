@@ -1,0 +1,102 @@
+module GSSiK_Addon_Craft
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	/* Periférico a instalar en el terminal (sustituye al antiguo "módulo").
+	   Se consume al instalar; el disquete de instalación (GS_FloppyDisk_Craft,
+	   ver mas abajo) se conserva. */
+	item GS_Printer3D
+	{
+		DisplayName = GS 3D Printer,
+		DisplayCategory = Electronics,
+		Weight = 4.0,
+		ItemType = base:normal,
+		Icon = GS_Printer3D,
+		WorldStaticModel = RadioReceiver_Ground,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	/* Piezas intermedias de la impresora 3D (montaje final en receta aparte,
+	   igual que GS_ReaderCasing/Circuit/Antenna del Core). */
+	item GS_Printer3D_Frame
+	{
+		DisplayName = GS Printer Frame,
+		DisplayCategory = Electronics,
+		Weight = 2.5,
+		ItemType = base:normal,
+		Icon = GS_Printer3D_Frame,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_Printer3D_ExtruderHead
+	{
+		DisplayName = GS Printer Extruder Head,
+		DisplayCategory = Electronics,
+		Weight = 0.5,
+		ItemType = base:normal,
+		Icon = GS_Printer3D_ExtruderHead,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_Printer3D_ControlBoard
+	{
+		DisplayName = GS Printer Control Board,
+		DisplayCategory = Electronics,
+		Weight = 0.4,
+		ItemType = base:normal,
+		Icon = GS_Printer3D_ControlBoard,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Disquete de instalacion propio del addon Craft. Se conserva al instalar
+	   (igual que GS_FloppyDisk del Core), no hace falta reprogramarlo cada vez. */
+	item GS_FloppyDisk_Craft
+	{
+		DisplayName = GS Craft Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_Craft,
+		Tooltip = Tooltip_GS_FloppyDisk_Craft,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppy;GSSiKAddonDisk,
+	}
+
+	item GS_Manual_Craft
+	{
+		DisplayName = GS Network Monthly: Craft,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS Printer Frame;Build GS Printer Extruder Head;Build GS Printer Control Board;Build GS 3D Printer,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	/* Revista separada: solo enseña a programar el disquete de instalacion.
+	   Deliberadamente aparte del manual principal (el jugador puede saber
+	   montar la impresora sin saber aun programar su disco de instalacion). */
+	item GS_Manual_Craft_DiskProgram
+	{
+		DisplayName = GS Disk Tools: Craft Install,
+		DisplayCategory = RecipeResource,
+		Weight = 0.3,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Program GS Craft Install Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+}

@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Lit ce que la disquette lui dit, rien de plus. Aucune question posée, aucun jugement sur vos choix de vie d'avant l'apocalypse.",
+	"Tooltip_GS_ReaderCasing": "La coque qui empêche le reste des pièces d'abandonner après la première chute. Tôle recyclée, fierté intacte.",
+	"Tooltip_GS_ReaderCircuit": "Le cerveau du lecteur. Ne sait pas qu'il y a des zombies dehors, et franchement, plus heureux ainsi.",
+	"Tooltip_GS_ReaderAntenna": "Capte le signal du réseau SiK à travers la pièce. À travers le comté, ne poussez pas votre chance.",
+	"Tooltip_GS_FloppyDisk": "1,44 Mo de logiciel qui a mieux survécu à l'apocalypse que la plupart des gens.",
+	"Tooltip_GS_FloppyDisk_Blank": "Non formatée, sans étiquette, pleine de potentiel. Ce qui finit dessus ne dépend que de vous.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "Un programme, un but : expulser poliment un terminal SiK de tout ce à quoi il est branché.",
+	"Tooltip_GS_PC_Tower": "Une boîte en métal en forme de boîte. Tout ce qui compte se passe à l'intérieur.",
+	"Tooltip_GS_Motherboard": "Tient ensemble toutes les autres pièces de l'ordinateur et ne reçoit jamais de remerciement.",
+	"Tooltip_GS_IODevice": "Traduit boutons et câbles en quelque chose que l'ordinateur comprend. Un petit polyglotte discret.",
+	"Tooltip_GS_Keyboard": "Assez de touches pour taper des mots de passe que plus personne ne vérifiera jamais.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\" : le seul magazine encore publié à l'heure, même sans personne pour le livrer.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\" : construisez votre propre PC à partir de pièces détachées et d'une confiance aveugle envers de l'électronique vieille de vingt ans.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"Utilitaires disque GS\" : instructions étape par étape pour écrire un programme sur une disquette vierge. Nécessite d'être assez près d'un terminal pour que ça vaille la peine.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "Un programme, un but : apprendre à un terminal à garder son propre lecteur disquette branché, pour qu'il arrête de traîner dans vos poches.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"Utilitaires disque GS\" : instructions étape par étape pour écrire la disquette qui installe le lecteur disquette dans le réseau d'un terminal. Nécessite d'être assez près d'un terminal pour que ça vaille la peine.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"Utilitaires disque GS\" : instructions étape par étape pour écrire la disquette qui porte le système d'exploitation du réseau GS lui-même. Nécessite d'être assez près d'un terminal pour que ça vaille la peine.",
+	"Tooltip_GS_Manual_SolderingIron": "Un guide de fortune pour se construire son propre fer à souder avec des pièces récupérées. Le lire seul ne mène à rien - quelqu'un doit d'abord avoir autorisé ce raccourci."
+}

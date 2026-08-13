@@ -1,0 +1,140 @@
+VERSION = 1,
+
+option GSSiK_Addon_Craft.LootPeripheralWeight
+{
+	type = double,
+	default = 0.08,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Craft,
+	translation = GSSiK_Addon_Craft_LootPeripheralWeight,
+}
+
+option GSSiK_Addon_Craft.LootMagazineWeight
+{
+	type = double,
+	default = 0.35,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Craft,
+	translation = GSSiK_Addon_Craft_LootMagazineWeight,
+}
+
+option GSSiK_Addon_Craft.LootDiskProgramMagazineWeight
+{
+	type = double,
+	default = 0.3,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Craft,
+	translation = GSSiK_Addon_Craft_LootDiskProgramMagazineWeight,
+}
+
+option GSSiK_Addon_Craft.LootComponentWeight
+{
+	type = double,
+	default = 0.2,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Craft,
+	translation = GSSiK_Addon_Craft_LootComponentWeight,
+}
+
+option GSSiK_Addon_Craft.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Craft_Debug,
+	translation = GSSiK_Addon_Craft_DebugMode,
+}
+
+option GSSiK_Addon_Craft.LootInstallDiskWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Craft,
+	translation = GSSiK_Addon_Craft_LootInstallDiskWeight,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterFrame_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterFrame_Enable,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterFrame_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterFrame_RequireBook,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterExtruderHead_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterExtruderHead_Enable,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterExtruderHead_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterExtruderHead_RequireBook,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterControlBoard_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterControlBoard_Enable,
+}
+
+option GSSiK_Addon_Craft.Recipe_PrinterControlBoard_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_PrinterControlBoard_RequireBook,
+}
+
+option GSSiK_Addon_Craft.Recipe_Printer3D_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_Printer3D_Enable,
+}
+
+option GSSiK_Addon_Craft.Recipe_Printer3D_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_Printer3D_RequireBook,
+}
+
+option GSSiK_Addon_Craft.Recipe_CraftDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_CraftDisk_Enable,
+}
+
+option GSSiK_Addon_Craft.Recipe_CraftDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Recipes,
+	translation = GSSiK_Addon_Craft_Recipe_CraftDisk_RequireBook,
+}
+

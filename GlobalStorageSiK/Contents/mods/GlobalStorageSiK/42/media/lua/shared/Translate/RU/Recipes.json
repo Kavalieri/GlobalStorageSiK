@@ -1,0 +1,11 @@
+{
+	"Build GS PC Tower": "Собрать ПК GS: корпус",
+	"Build GS Motherboard": "Собрать ПК GS: материнская плата",
+	"Build GS IO Controller": "Собрать ПК GS: контроллер ввода-вывода",
+	"Build GS Keyboard": "Собрать ПК GS: клавиатура",
+	"Build GS Reader Casing": "Собрать дисковод GS: корпус",
+	"Build GS Reader Circuit Board": "Собрать дисковод GS: плата",
+	"Build GS Reader Antenna": "Собрать дисковод GS: антенна",
+	"Build GS Terminal Reader": "Собрать дисковод GS",
+	"Build GS Desktop Computer": "Собрать настольный компьютер"
+}

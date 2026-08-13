@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Czyta to, co każe mu dyskietka, i nic więcej. Bez pytań, bez oceniania twoich życiowych wyborów sprzed apokalipsy.",
+	"Tooltip_GS_ReaderCasing": "Obudowa, która nie pozwala reszcie części poddać się po pierwszym upadku. Blacha z odzysku, duma nienaruszona.",
+	"Tooltip_GS_ReaderCircuit": "Mózg napędu. Nie wie, że na zewnątrz są zombie, i szczerze mówiąc, jest szczęśliwszy w niewiedzy.",
+	"Tooltip_GS_ReaderAntenna": "Odbiera sygnał sieci SiK z drugiego końca pokoju. Z drugiego końca powiatu, nie kuś losu.",
+	"Tooltip_GS_FloppyDisk": "1,44 MB oprogramowania, które przetrwało apokalipsę lepiej niż większość ludzi.",
+	"Tooltip_GS_FloppyDisk_Blank": "Niesformatowana, bez etykiety, pełna potencjału. To, co na niej wyląduje, zależy tylko od ciebie.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "Jeden program, jeden cel: grzecznie wyrzucić terminal SiK z czegokolwiek, do czego jest podłączony.",
+	"Tooltip_GS_PC_Tower": "Metalowe pudełko w kształcie pudełka. Wszystko co użyteczne dzieje się w środku.",
+	"Tooltip_GS_Motherboard": "Trzyma razem wszystkie inne części komputera i nigdy nie dostaje podziękowania.",
+	"Tooltip_GS_IODevice": "Tłumaczy przyciski i kable na coś, co rozumie komputer. Cichy mały poliglota.",
+	"Tooltip_GS_Keyboard": "Dość klawiszy, by wpisać hasła, których nikt już nigdy nie sprawdzi.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": jedyny magazyn wciąż wydawany na czas, nawet gdy nie ma już komu go dostarczać.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": zbuduj własny PC z części zamiennych i ślepej wiary w dwudziestoletnią elektronikę.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"Narzędzia dyskowe GS\": instrukcje krok po kroku, jak zapisać program na pustej dyskietce. Wymaga stania wystarczająco blisko terminala, żeby się to opłacało.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "Jeden program, jeden cel: uczy terminal, jak trzymać własny Napęd Dyskietek podłączony na stałe, żeby przestał jeździć w twojej kieszeni.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"Narzędzia dyskowe GS\": instrukcje krok po kroku, jak zapisać dyskietkę instalującą Napęd Dyskietek w sieci terminala. Wymaga stania wystarczająco blisko terminala, żeby się to opłacało.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"Narzędzia dyskowe GS\": instrukcje krok po kroku, jak zapisać dyskietkę niosącą własny system operacyjny sieci GS. Wymaga stania wystarczająco blisko terminala, żeby się to opłacało.",
+	"Tooltip_GS_Manual_SolderingIron": "Naprędce sklecony poradnik, jak zbudować własną lutownicę z odzyskanych części. Samo przeczytanie nic nie da - ktoś najpierw musi pozwolić na ten skrót."
+}

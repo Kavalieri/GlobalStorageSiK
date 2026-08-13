@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Lê o que o disquete manda, e nada mais. Sem perguntas, sem julgamento sobre suas escolhas de vida antes do apocalipse.",
+	"Tooltip_GS_ReaderCasing": "A carcaça que impede o resto das peças de desistir após a primeira queda. Chapa reciclada, orgulho intacto.",
+	"Tooltip_GS_ReaderCircuit": "O cérebro do leitor. Não sabe que há zumbis lá fora e, sinceramente, está mais feliz assim.",
+	"Tooltip_GS_ReaderAntenna": "Capta o sinal da rede SiK do outro lado da sala. Do outro lado do condado, não force a sorte.",
+	"Tooltip_GS_FloppyDisk": "1,44 MB de software que sobreviveu ao apocalipse melhor do que a maioria das pessoas.",
+	"Tooltip_GS_FloppyDisk_Blank": "Sem formatação, sem etiqueta, cheio de potencial. O que acaba nele é escolha sua.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "Um programa, um propósito: expulsar educadamente um terminal SiK de onde quer que esteja conectado.",
+	"Tooltip_GS_PC_Tower": "Uma caixa de metal em formato de caixa. Tudo de útil acontece lá dentro.",
+	"Tooltip_GS_Motherboard": "Mantém todas as outras peças do computador juntas e nunca recebe um agradecimento.",
+	"Tooltip_GS_IODevice": "Traduz botões e cabos para algo que o computador entende. Um pequeno poliglota discreto.",
+	"Tooltip_GS_Keyboard": "Teclas suficientes para digitar senhas que ninguém nunca mais vai conferir.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": a única revista que ainda é publicada no prazo, mesmo sem ninguém para entregá la.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": monte seu próprio PC com peças avulsas e fé cega em eletrônicos de vinte anos atrás.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"Utilitários de Disco GS\": instruções passo a passo para gravar um programa em um disquete em branco. Exige ficar perto o suficiente de um terminal para valer a pena.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "Um programa, um propósito: ensinar um terminal a manter seu próprio Drive de Disquete conectado, para que pare de andar nos seus bolsos.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"Utilitários de Disco GS\": instruções passo a passo para gravar o disquete que instala o Drive de Disquete na rede de um terminal. Exige ficar perto o suficiente de um terminal para valer a pena.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"Utilitários de Disco GS\": instruções passo a passo para gravar o disquete que carrega o próprio sistema operacional da rede GS. Exige ficar perto o suficiente de um terminal para valer a pena.",
+	"Tooltip_GS_Manual_SolderingIron": "Um guia improvisado para construir seu próprio ferro de solda com peças recuperadas. Só ler não leva a lugar nenhum - alguém precisa ter liberado esse atalho antes."
+}

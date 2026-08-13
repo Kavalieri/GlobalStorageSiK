@@ -1,0 +1,558 @@
+VERSION = 1,
+
+option GSSiK_Addon_Tablet.Tier1Range
+{
+	type = integer,
+	default = 40,
+	min = 10,
+	max = 500,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_Tier1Range,
+}
+
+option GSSiK_Addon_Tablet.Tier2Range
+{
+	type = integer,
+	default = 70,
+	min = 10,
+	max = 500,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_Tier2Range,
+}
+
+option GSSiK_Addon_Tablet.Tier3Range
+{
+	type = integer,
+	default = 120,
+	min = 10,
+	max = 500,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_Tier3Range,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaWeight
+{
+	type = double,
+	default = 0.06,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaWeight,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaDishWeight
+{
+	type = double,
+	default = 0.18,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaDishWeight,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaTransmitterWeight
+{
+	type = double,
+	default = 0.18,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaTransmitterWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletScreenWeight
+{
+	type = double,
+	default = 0.25,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletScreenWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletBatteryWeight
+{
+	type = double,
+	default = 0.25,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletBatteryWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletCraftWeight
+{
+	type = double,
+	default = 0.08,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletCraftWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletCraftModuleWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletCraftModuleWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletBuilderWeight
+{
+	type = double,
+	default = 0.08,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletBuilderWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletBuilderModuleWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletBuilderModuleWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletMasterWeight
+{
+	type = double,
+	default = 0.02,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletMasterWeight,
+}
+
+option GSSiK_Addon_Tablet.LootTabletMasterCoreWeight
+{
+	type = double,
+	default = 0.06,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootTabletMasterCoreWeight,
+}
+
+option GSSiK_Addon_Tablet.LootManualAntennaWeight
+{
+	type = double,
+	default = 0.3,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualAntennaWeight,
+}
+
+option GSSiK_Addon_Tablet.LootManualAntennaAdvancedWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaChipWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaChipWeight,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaT2Weight
+{
+	type = double,
+	default = 0.03,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaT2Weight,
+}
+
+option GSSiK_Addon_Tablet.LootAntennaT3Weight
+{
+	type = double,
+	default = 0.015,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootAntennaT3Weight,
+}
+
+option GSSiK_Addon_Tablet.LootManualTabletWeight
+{
+	type = double,
+	default = 0.35,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualTabletWeight,
+}
+
+option GSSiK_Addon_Tablet.LootManualTabletCraftWeight
+{
+	type = double,
+	default = 0.25,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualTabletCraftWeight,
+}
+
+option GSSiK_Addon_Tablet.LootManualTabletBuilderWeight
+{
+	type = double,
+	default = 0.25,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualTabletBuilderWeight,
+}
+
+option GSSiK_Addon_Tablet.LootManualTabletMasterWeight
+{
+	type = double,
+	default = 0.12,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootManualTabletMasterWeight,
+}
+
+option GSSiK_Addon_Tablet.LootDiskProgramMagazineWeight
+{
+	type = double,
+	default = 0.3,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight,
+}
+
+option GSSiK_Addon_Tablet.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Tablet_Debug,
+	translation = GSSiK_Addon_Tablet_DebugMode,
+}
+
+option GSSiK_Addon_Tablet.LootInstallDiskWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Tablet,
+	translation = GSSiK_Addon_Tablet_LootInstallDiskWeight,
+}
+
+option GSSiK_Addon_Tablet.Recipe_AntennaDish_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_AntennaDish_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_AntennaDish_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_AntennaDish_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_AntennaTransmitter_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_AntennaTransmitter_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_AntennaTransmitter_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_AntennaTransmitter_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntenna_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntenna_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntenna_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntenna_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletScreen_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletScreen_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletScreen_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletScreen_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletBattery_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletBattery_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletBattery_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletBattery_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_Tablet_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_Tablet_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_Tablet_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_Tablet_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_CraftTabletModule_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_CraftTabletModule_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_CraftTabletModule_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_CraftTabletModule_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_CraftTablet_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_CraftTablet_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_CraftTablet_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_CraftTablet_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_BuilderTabletModule_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_BuilderTabletModule_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_BuilderTabletModule_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_BuilderTabletModule_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_BuilderTablet_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_BuilderTablet_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_BuilderTablet_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_BuilderTablet_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_MasterTabletCore_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_MasterTabletCore_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_MasterTabletCore_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_MasterTabletCore_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_MasterTablet_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_MasterTablet_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_MasterTablet_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_MasterTablet_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletDisk_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_TabletDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesTiers,
+	translation = GSSiK_Addon_Tablet_Recipe_TabletDisk_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT1_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT1_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT1_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT1_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT2_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT2_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT2_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT2_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntennaT2_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntennaT2_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntennaT2_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntennaT2_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT3_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT3_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiChipT3_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiChipT3_RequireBook,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntennaT3_Enable
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntennaT3_Enable,
+}
+
+option GSSiK_Addon_Tablet.Recipe_WifiAntennaT3_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Tablet_RecipesHW,
+	translation = GSSiK_Addon_Tablet_Recipe_WifiAntennaT3_RequireBook,
+}
+

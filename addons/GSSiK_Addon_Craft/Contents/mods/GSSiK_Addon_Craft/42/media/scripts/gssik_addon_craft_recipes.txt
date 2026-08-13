@@ -1,0 +1,123 @@
+module GSSiK_Addon_Craft
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	craftRecipe Build GS Printer Frame
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Craft_RecipeTests.Recipe_PrinterFrame_Enable,
+		inputs
+		{
+			item 2 [Base.ScrapMetal],
+			item 1 [Base.SheetMetal],
+			item 1 [Base.Hammer] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Craft.GS_Printer3D_Frame,
+		}
+	}
+
+	craftRecipe Build GS Printer Extruder Head
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:4,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Craft_RecipeTests.Recipe_PrinterExtruderHead_Enable,
+		inputs
+		{
+			item 2 [Base.Pipe],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Craft.GS_Printer3D_ExtruderHead,
+		}
+	}
+
+	craftRecipe Build GS Printer Control Board
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Craft_RecipeTests.Recipe_PrinterControlBoard_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.Wire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Craft.GS_Printer3D_ControlBoard,
+		}
+	}
+
+	/* Montaje final: junta las 3 piezas + soldador + destornillador cualquiera,
+	   igual patron que el lector de disquetes del Core. */
+	craftRecipe Build GS 3D Printer
+	{
+		timedAction = MakingElectrical,
+		time = 120,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:8,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Craft_RecipeTests.Recipe_Printer3D_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Craft.GS_Printer3D_Frame],
+			item 1 [GSSiK_Addon_Craft.GS_Printer3D_ExtruderHead],
+			item 1 [GSSiK_Addon_Craft.GS_Printer3D_ControlBoard],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Craft.GS_Printer3D,
+		}
+	}
+
+	/* Disquete de instalacion: requiere haber leido la revista del addon
+	   (needToBeLearn via LearnedRecipes del manual) y un disquete en blanco
+	   del Core, igual criterio que los discos de sistema. */
+	craftRecipe Program GS Craft Install Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Craft_RecipeTests.Recipe_CraftDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Craft.GS_FloppyDisk_Craft,
+		}
+	}
+}

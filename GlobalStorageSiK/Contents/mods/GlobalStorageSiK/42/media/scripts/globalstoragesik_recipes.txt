@@ -1,0 +1,446 @@
+module GlobalStorageSiK
+{
+	imports
+	{
+		Base
+	}
+
+	/* ── Items intermedios ──────────────────────────────────────────────────── */
+
+	/* GS_SolderingIron es la unica pieza del mod pensada para ser SOLO de
+	   hallazgo: es la herramienta que exige cualquier otra receta del mod
+	   (ver "mode:keep flags[Prop1]" en el resto de este fichero), asi que
+	   craftearla desde cero rompe la logica de "necesitas encontrar UNA
+	   herramienta antes de poder montar el resto". Esta receta existe solo
+	   para quien quiera facilitar esa parte: oculta salvo que se active
+	   GlobalStorageSiK.EnableSolderingIronCraft en el sandbox (false por
+	   defecto). SkillRequired = Electricity:7 FIJO en el script (no dinamico
+	   como se probo al principio): la version dinamica no mostraba la
+	   etiqueta de nivel en el menu de crafteo, dejando al jugador sin forma
+	   de ver el requisito - se prefiere consistencia visual con el resto de
+	   recetas del mod a la posibilidad de ajustar el nivel por sandbox.
+	   Deliberadamente la receta mas dificil y lenta del mod (mayor tiempo,
+	   mayor XP, mas herramientas exigidas, el nivel mas alto de Electricity
+	   de todo el mod) - "facil de activar, dificil de completar" a proposito. */
+	/* Los 3 componentes propios del soldador: solo materiales vanilla (no
+	   pueden exigir GS_SolderingIron como herramienta - es lo que se esta
+	   construyendo), cada uno con su propia opcion Enable/RequireBook y
+	   ademas supeditados a EnableSolderingIronCraft (sin sentido craftear
+	   piezas sueltas si el soldador en si sigue siendo solo de hallazgo). */
+	craftRecipe Build GS Soldering Tip
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:1,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_SolderingTip_Enable,
+		inputs
+		{
+			item 1 [Base.ScrapMetal],
+			item 1 [Base.Screws],
+			item 1 tags[base:pliers] mode:keep,
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_SolderingTip,
+		}
+	}
+
+	craftRecipe Build GS Soldering Resistance Coil
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:2,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_SolderingResistance_Enable,
+		inputs
+		{
+			item 2 [Base.ElectricWire],
+			item 1 [Base.ElectronicsScrap],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_SolderingResistance,
+		}
+	}
+
+	craftRecipe Build GS Soldering Handle
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:1,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_SolderingHandle_Enable,
+		inputs
+		{
+			item 1 [Base.SheetMetal],
+			item 2 [Base.DuctTape],
+			item 1 tags[base:screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_SolderingHandle,
+		}
+	}
+
+	craftRecipe Build GS Soldering Iron
+	{
+		timedAction = MakingElectrical,
+		time = 240,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:10,
+		SkillRequired = Electricity:7,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.canCraftSolderingIron,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingTip],
+			item 1 [GlobalStorageSiK.GS_SolderingResistance],
+			item 1 [GlobalStorageSiK.GS_SolderingHandle],
+			item 1 [Base.DuctTape],
+			item 1 tags[base:screwdriver] mode:keep,
+			item 1 tags[base:pliers] mode:keep,
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_SolderingIron,
+		}
+	}
+
+	craftRecipe Build GS PC Tower
+	{
+		timedAction = MakingElectrical,
+		time = 120,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_PCTower_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
+			item 4 [Base.SheetMetal],
+			item 2 [Base.NutsBolts],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_PC_Tower,
+		}
+	}
+
+	craftRecipe Build GS Motherboard
+	{
+		timedAction = MakingElectrical,
+		time = 150,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:8,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_Motherboard_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
+			item 1 tags[base:screwdriver] mode:keep,
+			item 3 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_Motherboard,
+		}
+	}
+
+	craftRecipe Build GS IO Controller
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:4,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_IOController_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
+			item 1 tags[base:screwdriver] mode:keep,
+			item 2 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+			item 1 [Base.DuctTape],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_IODevice,
+		}
+	}
+
+	craftRecipe Build GS Keyboard
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:2,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_Keyboard_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
+			item 1 [Base.ElectronicsScrap],
+			item 3 [Base.ElectricWire],
+			item 4 [Base.Screws],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_Keyboard,
+		}
+	}
+
+	/* ── Piezas intermedias del LECTOR (no del terminal antiguo) ────────────── */
+
+	craftRecipe Build GS Reader Casing
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_ReaderCasing_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
+			item 2 [Base.SheetMetal],
+			item 1 [Base.NutsBolts],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_ReaderCasing,
+		}
+	}
+
+	craftRecipe Build GS Reader Circuit Board
+	{
+		timedAction = MakingElectrical,
+		time = 130,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:7,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_ReaderCircuit_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
+			item 1 tags[base:screwdriver] mode:keep,
+			item 2 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_ReaderCircuit,
+		}
+	}
+
+	craftRecipe Build GS Reader Antenna
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_ReaderAntenna_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
+			item 1 tags[base:screwdriver] mode:keep,
+			item 1 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+			item 1 [Base.DuctTape],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_ReaderAntenna,
+		}
+	}
+
+	/* ── Lector de terminal SiK: mismos materiales que "Build GS Terminal
+	   Unit", pero el resultado es el lector portatil (no colocable), usado
+	   por el nuevo metodo de instalacion sobre un ordenador ya puesto en
+	   el mapa (ver GS_ItemActions.lua / GS_TerminalAccess.installOnObject).
+	   No sustituye a la receta de arriba: coexisten mientras se valida el
+	   nuevo metodo. */
+
+	craftRecipe Build GS Terminal Reader
+	{
+		timedAction = MakingElectrical,
+		time = 300,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:20,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_TerminalReader_Enable,
+		/* SIN OnCreate: el lector es base:normal, no un moveable que cambia
+		   de identidad al crear/coger: no necesita el re-estampado que si
+		   hace falta para GS_TerminalUnit. Usar aqui GS_OnCreate_TerminalCraftOutput
+		   por error volveria a marcar la salida como GS_TerminalUnit
+		   (comparte el mismo OnCreate generico), sobreescribiendo nombre e
+		   identidad del lector - confirmado al revisar GS_ItemHooks.applyForOutput. */
+		/* SIN disquete: el disquete no es una pieza del lector, es lo que se
+		   usa JUNTO al lector para instalar el terminal en un PC del mapa
+		   (ver GS_ItemActions.lua). No tiene sentido narrativo ni de
+		   crafteo que fabricar el lector consuma o exija el disquete. */
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
+			item 1 [GlobalStorageSiK.GS_ReaderCasing],
+			item 1 [GlobalStorageSiK.GS_ReaderCircuit],
+			item 1 [GlobalStorageSiK.GS_ReaderAntenna],
+			item 1 [Base.DuctTape],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_TerminalReader,
+		}
+	}
+
+	/* ── Receta que ensena el manual "Home Computing Digest" ─────────────────
+	   El manual (GS_Manual_PCBuild) la ensena via LearnedRecipes (mecanismo
+	   vanilla de revista/manual, igual que cualquier receta normal - no
+	   depende de nuestro codigo para dispararse). La ventana "Conseguir PC"
+	   (GS_PCAcquireUI/GS_PCAcquire.lua) comprueba si el jugador la CONOCE
+	   (GlobalStorageSiK.CraftUtils.knowsRecipe), no si "ha leido el manual":
+	   antes se marcaba un ModData de personaje a mano en el evento
+	   OnReadLiterature, que depende de un orden de parametros (item, jugador)
+	   no confirmado en toda instalacion/idioma de B42 y podia fallar en
+	   silencio sin avisar a nadie. Comprobar la receta aprendida reutiliza el
+	   mismo sistema robusto (con varios metodos de fallback) que ya usan el
+	   resto de manuales del mod. La entrega real del PC la sigue haciendo
+	   GS_PCAcquire.craft (validado en servidor) - esta receta nunca se
+	   ejecuta desde el menu de crafteo vanilla. */
+	craftRecipe Build GS Desktop Computer
+	{
+		timedAction = MakingElectrical,
+		time = 150,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:12,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_DesktopComputer_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
+			item 1 [GlobalStorageSiK.GS_IODevice],
+			item 1 [GlobalStorageSiK.GS_Keyboard],
+			item 1 [GlobalStorageSiK.GS_Motherboard],
+			item 1 [GlobalStorageSiK.GS_PC_Tower],
+			item 1 [Base.NutsBolts],
+		}
+		outputs
+		{
+			item 1 Base.Mov_DesktopComputer,
+		}
+	}
+
+	/* ── Mecánica de "programar" disquetes ───────────────────────────────────
+	   Convierte un disquete en blanco (GS_FloppyDisk_Blank) en un disquete
+	   con un programa concreto. Accesible desde el panel de crafteo vanilla
+	   (solo pide el disquete en blanco + la receta aprendida, sin más) Y
+	   desde el propio disquete en blanco por clic derecho > Global Storage,
+	   donde además se exige un terminal cerca (ver GS_DiskProgramming.lua /
+	   GS_ItemActions.lua) - eso último es una comprobación NUESTRA, no de
+	   esta receta vanilla. */
+	craftRecipe Program GS Network Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_NetworkDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_FloppyDisk,
+		}
+	}
+
+	craftRecipe Program GS Uninstall Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_UninstallDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_FloppyDisk_Uninstall,
+		}
+	}
+
+	/* Graba el disquete que instala el Lector (GS_TerminalReader) en la
+	   red del terminal en vez de llevarlo encima. Igual patron que
+	   "Program GS Uninstall Disk": se conserva, no se consume al usarlo. */
+	craftRecipe Program GS Floppy Drive Network Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		needToBeLearn = true,
+		OnTest = GS_RecipeTests.Recipe_DriveDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GlobalStorageSiK.GS_FloppyDisk_DriveInstall,
+		}
+	}
+
+	/* ── Recetas retiradas (v1.2.58) ─────────────────────────────────────────
+	   "Build GS Terminal Unit", "Install GS Terminal" y "Build Desktop
+	   Computer" se eliminaron: el metodo nuevo (lector + disquete sobre un
+	   PC ya en el mapa, o "Conseguir PC" - ver GS_PCAcquireUI.lua) ya esta
+	   validado y es el unico soportado. Los items GS_TerminalUnit /
+	   GS_Manual_TerminalUnit NO se tocan (compatibilidad con partidas viejas
+	   - un terminal ya colocado sigue detectandose y funcionando igual,
+	   solo deja de poder CREARSE uno nuevo por esta via). Ver
+	   GS_TerminalLegacyGuard.lua para el aviso a jugadores que aun tengan
+	   el manual/piezas antiguas sin usar. */
+}

@@ -1,0 +1,396 @@
+module GlobalStorageSiK
+{
+	imports
+	{
+		Base
+	}
+
+	/* Disquete con el sistema operativo GS: se encuentra en el mundo, no se consume */
+	item GS_FloppyDisk
+	{
+		DisplayName = GS Network Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		/* El modelo "Diskette" (icono, StaticModel, WorldStaticModel) ya no
+		   existe en Build 42.20 (activo eliminado del vanilla). Sin modelo
+		   3D propio disponible, se usa icono 2D propio y se quitan
+		   StaticModel/WorldStaticModel: el item no necesita representacion
+		   3D en mano/suelo, solo icono 2D. */
+		Icon = GS_FloppyDisk,
+		Tooltip = Tooltip_GS_FloppyDisk,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppy,
+	}
+
+	/* Disquete en blanco, sin programar: se encuentra por el mundo. Materia
+	   prima de la mecánica de "programar" (ver GS_DiskProgramming.lua): una
+	   revista aprendida + un terminal cerca lo convierte en un disquete con
+	   un programa concreto. Por sí solo no hace nada. */
+	item GS_FloppyDisk_Blank
+	{
+		DisplayName = GS Blank Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_Blank,
+		Tooltip = Tooltip_GS_FloppyDisk_Blank,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppyBlank,
+	}
+
+	/* Disquete ya programado con el programa de desinstalación, producto de
+	   la receta "Program GS Uninstall Disk". De momento sin uso real (la
+	   acción de desinstalar en sí no está implementada todavía), solo la
+	   mecánica de programarlo. */
+	item GS_FloppyDisk_Uninstall
+	{
+		DisplayName = GS Uninstall Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_UninstallDisk,
+		Tooltip = Tooltip_GS_FloppyDisk_Uninstall,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppyUninstall,
+	}
+
+	/* Disquete programado para instalar el Lector (GS_TerminalReader,
+	   alias "GS Floppy Drive") directamente en la red de un terminal, en
+	   vez de tener que llevarlo encima. Igual que el disquete de
+	   desinstalar: se conserva, no se consume al instalar/desinstalar. */
+	item GS_FloppyDisk_DriveInstall
+	{
+		DisplayName = GS Drive Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_DriveInstall,
+		Tooltip = Tooltip_GS_FloppyDisk_DriveInstall,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppyDriveInstall,
+	}
+
+	/* Carcasa metálica del terminal (item intermedio) */
+	item GS_PC_Tower
+	{
+		DisplayName = GS PC Tower,
+		DisplayCategory = Electronics,
+		Weight = 5.0,
+		ItemType = base:normal,
+		Icon = GS_PC_Tower,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Placa base del terminal (item intermedio) */
+	item GS_Motherboard
+	{
+		DisplayName = GS Motherboard,
+		DisplayCategory = Electronics,
+		Weight = 0.8,
+		ItemType = base:normal,
+		Icon = GS_Motherboard,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Controlador de entrada/salida (item intermedio) */
+	item GS_IODevice
+	{
+		DisplayName = GS I/O Controller,
+		DisplayCategory = Electronics,
+		Weight = 0.4,
+		ItemType = base:normal,
+		Icon = GS_IODevice,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Teclado del terminal (item intermedio) */
+	item GS_Keyboard
+	{
+		DisplayName = GS Keyboard,
+		DisplayCategory = Electronics,
+		Weight = 0.6,
+		ItemType = base:normal,
+		Icon = GS_Keyboard,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Lector de DISQUETES SiK (no "de terminal" - lee el disquete de red, no
+	   instala nada por si solo). Instala el programa GS sobre un ordenador ya
+	   colocado en el mapa junto con el disquete. No es colocable ni un mueble:
+	   es un objeto de inventario normal, con icono propio y nombrable, a
+	   diferencia del GS_TerminalUnit (base:moveable) que nunca se pudo
+	   renombrar de forma fiable como objeto del mundo. */
+	item GS_TerminalReader
+	{
+		DisplayName = GS Floppy Drive,
+		DisplayCategory = Electronics,
+		Weight = 1.0,
+		ItemType = base:normal,
+		Icon = GS_TerminalReader,
+		Tags = GlobalStorageSiK;GlobalStorageSiKReader,
+	}
+
+	/* Piezas intermedias del LECTOR (no del terminal antiguo): un lector
+	   de mano no lleva carcasa de torre ni teclado, asi que usa sus propios
+	   nombres en vez de reciclar "GS PC Tower"/"GS Keyboard" (que no tienen
+	   sentido para un dispositivo portatil). Misma dificultad/materiales
+	   base que las piezas del terminal antiguo, ver recetas correspondientes. */
+	item GS_ReaderCasing
+	{
+		DisplayName = GS Reader Casing,
+		DisplayCategory = Electronics,
+		Weight = 3.0,
+		ItemType = base:normal,
+		Icon = GS_ReaderCasing,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_ReaderCircuit
+	{
+		DisplayName = GS Reader Circuit Board,
+		DisplayCategory = Electronics,
+		Weight = 0.6,
+		ItemType = base:normal,
+		Icon = GS_ReaderCircuit,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_ReaderAntenna
+	{
+		DisplayName = GS Reader Sensor,
+		DisplayCategory = Electronics,
+		Weight = 0.3,
+		ItemType = base:normal,
+		Icon = GS_ReaderAntenna,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Soldador de electronica: herramienta reutilizable (mode:keep en las
+	   recetas del mod), nunca se consume. Obligatoria junto a un
+	   destornillador cualquiera para todo crafteo de piezas, lector y PC del
+	   mod. Se encuentra por el mundo, no se craftea. */
+	/* Arma cuerpo a cuerpo improvisada ademas de herramienta de crafteo: perfil
+	   de combate calcado del Nightstick (porra de policia) vanilla, con el
+	   doble de ConditionMax (30 en vez de 15) - misma probabilidad de perder
+	   condicion por golpe (ConditionLowerChanceOneIn), asi que aguanta el
+	   doble de uso antes de romperse. Modelo/sonidos reutilizados del
+	   soplete/soldador de gas vanilla (Base.BlowTorch) por ser el mas
+	   parecido ya existente - sin asset propio de combate. */
+	item GS_SolderingIron
+	{
+		DisplayName = GS Soldering Iron,
+		DisplayCategory = ToolWeapon,
+		ItemType = base:weapon,
+		Weight = 0.6,
+		Icon = GS_SolderingIron,
+		Tags = GlobalStorageSiK;GlobalStorageSiKTool,
+		StaticModel = BlowTorch,
+		WorldStaticModel = BlowtorchGround,
+		WeaponSprite = BlowTorch,
+		BaseSpeed = 1.0,
+		Categories = base:smallblunt,
+		SubCategory = Swinging,
+		SwingAnim = Bat,
+		IdleAnim = Idle_Weapon2,
+		RunAnim = Run_Weapon2,
+		MinDamage = 0.6,
+		MaxDamage = 1.1,
+		MinRange = 0.61,
+		MaxRange = 1.2,
+		MinAngle = 0.72,
+		MaxHitcount = 2,
+		CriticalChance = 25.0,
+		CritDmgMultiplier = 2.0,
+		KnockdownMod = 0.0,
+		KnockBackOnNoDeath = false,
+		PushBackMod = 0.3,
+		DoorDamage = 1,
+		TreeDamage = 0,
+		SwingAmountBeforeImpact = 0.02,
+		SplatBloodOnNoDeath = false,
+		SplatNumber = 1,
+		Swingtime = 2.0,
+		MinimumSwingtime = 2.0,
+		WeaponLength = 0.45,
+		ConditionMax = 30,
+		ConditionLowerChanceOneIn = 20,
+		BreakSound = NightstickBreak,
+		HitSound = NightstickHit,
+		DoorHitSound = NightstickHit,
+		HitFloorSound = NightstickHit,
+		DropSound = NightstickDrop,
+		SwingSound = NightstickSwing,
+	}
+
+	/* Componentes propios del soldador (GS_SolderingIron): cada uno con su
+	   propia receta de vanilla (sin el soldador como requisito - no puede
+	   exigirse la herramienta que aun no existe), su propia opcion de
+	   sandbox y su propio peso de loot, igual que el resto de piezas
+	   intermedias del mod (ver GS_Distributions.lua, partsW). */
+	item GS_SolderingTip
+	{
+		DisplayName = GS Soldering Tip,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_SolderingTip,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_SolderingResistance
+	{
+		DisplayName = GS Soldering Resistance Coil,
+		DisplayCategory = Electronics,
+		Weight = 0.15,
+		ItemType = base:normal,
+		Icon = GS_SolderingResistance,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_SolderingHandle
+	{
+		DisplayName = GS Soldering Handle,
+		DisplayCategory = Electronics,
+		Weight = 0.2,
+		ItemType = base:normal,
+		Icon = GS_SolderingHandle,
+		Tags = GlobalStorageSiK,
+	}
+
+	/* Revista de receta B42 (ItemType literature + LearnedRecipes + OnCreate magazine) */
+	item GS_Manual_TerminalUnit
+	{
+		DisplayName = GS Network Monthly: I/O Hardware,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -20,
+		StressChange = -15,
+		/* Solo piezas del LECTOR (I/O) - las del PC (torre/placa/IO/teclado) se
+		   ensenan en GS_Manual_PCBuild, ya que solo sirven para montar el PC,
+		   no tiene sentido narrativo que esta revista las enseñe tambien. */
+		LearnedRecipes = Build GS Terminal Reader;Build GS Reader Casing;Build GS Reader Circuit Board;Build GS Reader Antenna,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	/* Segundo manual, DELIBERADAMENTE separado del de la red SiK: enseña a
+	   fabricar un ordenador de sobremesa vanilla LISO (sin ningun dato/red
+	   SiK), para el jugador que no encuentre uno en el mundo. No tiene
+	   sentido narrativo que el manual de la red SiK enseñe electronica de
+	   PC generica - son dos saberes distintos (montar hardware de PC desde
+	   cero, muy anterior y ajeno a SiK, frente al software/red de SiK en
+	   si). Encontrable en libreria/tienda de electronica igual que el otro
+	   manual, pero como item independiente. */
+	item GS_Manual_PCBuild
+	{
+		DisplayName = Home Computing Digest: GS PC Hardware,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics01,
+		BoredomChange = -20,
+		StressChange = -15,
+		/* Ensena "Build GS Desktop Computer" (globalstoragesik_recipes.txt) al
+		   terminar de leer - mismo mecanismo LearnedRecipes que ya usa
+		   GS_Manual_TerminalUnit arriba (probado y funcionando), no un
+		   ModData propio marcado a mano por evento OnReadLiterature (ese
+		   metodo dependia de un orden de parametros no confirmado en toda
+		   instalacion/idioma de B42 y podia fallar en silencio). La ventana
+		   "Conseguir PC" comprueba si el jugador conoce esta receta, no si ha
+		   leido el item. TAMBIEN ensena las 4 piezas del PC (torre, placa,
+		   IO, teclado): solo sirven para montar el PC, tiene mas sentido
+		   narrativo que esta revista (no la de la red SiK) las enseñe. */
+		LearnedRecipes = Build GS Desktop Computer;Build GS PC Tower;Build GS Motherboard;Build GS IO Controller;Build GS Keyboard,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	/* Tercer manual: mecanica de "programar" disquetes (ver
+	   GS_DiskProgramming.lua). Regla del set: una revista = una receta de
+	   programacion de disco, nunca varias en la misma - por eso este solo
+	   enseña el de desinstalar, y el disco de red tiene su propia revista
+	   aparte (GS_Manual_NetworkDisk_DiskProgram) en vez de compartir esta. */
+	item GS_Manual_DiskPrograms
+	{
+		DisplayName = GS Disk Utilities: Programming Guide,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Program GS Uninstall Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+		Tooltip = Tooltip_GS_Manual_DiskPrograms,
+	}
+
+	/* Revista de programacion: enseña a grabar el disquete que instala el
+	   Lector (GS_TerminalReader) directamente en la red del terminal. */
+	item GS_Manual_DriveInstall_DiskProgram
+	{
+		DisplayName = GS Disk Tools: Floppy Drive Network Install,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Program GS Floppy Drive Network Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+		Tooltip = Tooltip_GS_Manual_DriveInstall_DiskProgram,
+	}
+
+	/* Revista dedicada solo a la receta del soldador (GS_SolderingIron):
+	   no encaja narrativamente en GS_Manual_TerminalUnit (esa es solo piezas
+	   del lector) ni en GS_Manual_PCBuild (solo piezas del PC) - el soldador
+	   es una herramienta general, asi que tiene su propia guia aparte, igual
+	   que cada disco de programacion tiene la suya. La receta que enseña
+	   sigue oculta salvo que se active GlobalStorageSiK.EnableSolderingIronCraft
+	   en el sandbox (ver GS_RecipeTests.lua) - leer esta revista sin esa
+	   opcion activada no hace nada util todavia. */
+	item GS_Manual_SolderingIron
+	{
+		DisplayName = GS Electronics Workshop: DIY Soldering Iron,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS Soldering Iron;Build GS Soldering Tip;Build GS Soldering Resistance Coil;Build GS Soldering Handle,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+		Tooltip = Tooltip_GS_Manual_SolderingIron,
+	}
+
+	/* Revista de programacion dedicada solo al disco OS/red principal
+	   (GS_FloppyDisk) - antes ese disco era solo de hallazgo, sin receta.
+	   Numerada "00": es el primero de la familia de discos de la red. */
+	item GS_Manual_NetworkDisk_DiskProgram
+	{
+		DisplayName = GS Disk Tools: Network Install,
+		DisplayCategory = RecipeResource,
+		Weight = 0.4,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Program GS Network Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+		Tooltip = Tooltip_GS_Manual_NetworkDisk_DiskProgram,
+	}
+}

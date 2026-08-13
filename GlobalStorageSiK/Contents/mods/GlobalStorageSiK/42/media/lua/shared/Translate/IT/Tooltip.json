@@ -1,0 +1,20 @@
+{
+	"Tooltip_GS_TerminalReader": "Legge quello che gli dice un floppy, e nient'altro. Senza domande, senza giudicare le tue scelte di vita pre-apocalisse.",
+	"Tooltip_GS_ReaderCasing": "Un case che impedisce alle altre parti di arrendersi dopo la prima caduta. Lamiera di recupero, orgoglio intatto.",
+	"Tooltip_GS_ReaderCircuit": "Il cervello del lettore. Non sa che fuori ci sono gli zombie, e onestamente è più felice così.",
+	"Tooltip_GS_ReaderAntenna": "Capta il segnale della rete SiK dall'altra parte della stanza. Dall'altra parte dell'isolato, ma non tentare la sorte.",
+	"Tooltip_GS_FloppyDisk": "1,44 MB di software che ha superato l'apocalisse meglio della maggior parte delle persone.",
+	"Tooltip_GS_FloppyDisk_Blank": "Non formattato, senza etichetta, pieno di potenziale. Cosa ci finirà sopra dipende solo da te.",
+	"Tooltip_GS_FloppyDisk_Uninstall": "Un programma, un solo scopo: sfrattare educatamente il terminale SiK da qualsiasi cosa a cui sia collegato.",
+	"Tooltip_GS_PC_Tower": "Una scatola di metallo a forma di scatola. Tutto ciò che è utile succede dentro.",
+	"Tooltip_GS_Motherboard": "Tiene insieme tutte le altre parti del computer e non riceve mai un ringraziamento.",
+	"Tooltip_GS_IODevice": "Traduce pulsanti e cavi in qualcosa che il computer capisce. Un piccolo poliglotta silenzioso.",
+	"Tooltip_GS_Keyboard": "Abbastanza tasti per digitare password che ormai nessuno controllerà più.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": l'unica rivista ancora pubblicata puntualmente, anche quando non c'è più nessuno a cui consegnarla.",
+	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": costruisci il tuo PC con pezzi di ricambio e cieca fiducia in un'elettronica vecchia vent'anni.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"GS Disk Tools\": istruzioni passo passo per scrivere un programma su un floppy vuoto. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_FloppyDisk_DriveInstall": "Un programma, uno scopo: insegnare a un terminale a tenere collegato il proprio Floppy Drive, così la smette di stare in tasca.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Disk Tools\": istruzioni passo passo per scrivere il floppy che installa il Floppy Drive nella rete di un terminale. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Disk Tools\": istruzioni passo passo per scrivere il floppy che contiene il sistema operativo della rete GS stessa. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_Manual_SolderingIron": "Una guida improvvisata per costruirsi un saldatore con pezzi di recupero. Leggerla da sola non porta a nulla - qualcuno deve prima aver sbloccato questa scorciatoia."
+}

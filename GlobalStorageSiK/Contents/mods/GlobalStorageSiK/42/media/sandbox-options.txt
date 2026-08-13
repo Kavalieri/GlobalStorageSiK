@@ -1,0 +1,736 @@
+VERSION = 1,
+
+option GlobalStorageSiK.DebugSkipTerminalAccess
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugSkipTerminalAccess,
+}
+
+option GlobalStorageSiK.TerminalProximityRange
+{
+	type = integer,
+	default = 2,
+	min = 1,
+	max = 15,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_TerminalProximityRange,
+}
+
+option GlobalStorageSiK.TerminalNetworkRange
+{
+	type = integer,
+	default = 40,
+	min = 5,
+	max = 200,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_TerminalNetworkRange,
+}
+
+option GlobalStorageSiK.TerminalNetworkHeight
+{
+	type = integer,
+	default = 0,
+	min = 0,
+	max = 20,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_TerminalNetworkHeight,
+}
+
+option GlobalStorageSiK.AccessHysteresisTiles
+{
+	type = integer,
+	default = 1,
+	min = 0,
+	max = 5,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_AccessHysteresisTiles,
+}
+
+option GlobalStorageSiK.MaxTerminalsPerNetwork
+{
+	type = integer,
+	default = 8,
+	min = 1,
+	max = 32,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_MaxTerminalsPerNetwork,
+}
+
+option GlobalStorageSiK.MaxZonesPerNetwork
+{
+	type = integer,
+	default = 8,
+	min = 1,
+	max = 32,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_MaxZonesPerNetwork,
+}
+
+option GlobalStorageSiK.MaxNodesPerNetwork
+{
+	type = integer,
+	default = 128,
+	min = 4,
+	max = 256,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_MaxNodesPerNetwork,
+}
+
+option GlobalStorageSiK.DebugSkipContainerRange
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugSkipContainerRange,
+}
+
+option GlobalStorageSiK.TerminalContainerMaxDistance
+{
+	type = integer,
+	default = 40,
+	min = 5,
+	max = 500,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_TerminalContainerMaxDistance,
+}
+
+option GlobalStorageSiK.MaxContainersPerZone
+{
+	type = integer,
+	default = 128,
+	min = 16,
+	max = 512,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_MaxContainersPerZone,
+}
+
+option GlobalStorageSiK.AllowMarkedContainers
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_AllowMarkedContainers,
+}
+
+option GlobalStorageSiK.AllowSafehouseImport
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_AllowSafehouseImport,
+}
+
+option GlobalStorageSiK.RescanOnTerminalOpen
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_RescanOnTerminalOpen,
+}
+
+option GlobalStorageSiK.ReaderAcquireCraftTime
+{
+	type = integer,
+	default = 300,
+	min = 10,
+	max = 2000,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_ReaderAcquireCraftTime,
+}
+
+option GlobalStorageSiK.PCAcquireCraftTime
+{
+	type = integer,
+	default = 100,
+	min = 10,
+	max = 2000,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_PCAcquireCraftTime,
+}
+
+option GlobalStorageSiK.TerminalInstallTime
+{
+	type = integer,
+	default = 90,
+	min = 10,
+	max = 2000,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_TerminalInstallTime,
+}
+
+option GlobalStorageSiK.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugMode,
+}
+
+option GlobalStorageSiK.DebugModeUI
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugModeUI,
+}
+
+option GlobalStorageSiK.DebugCatNetwork
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatNetwork,
+}
+
+option GlobalStorageSiK.DebugCatTerminalAccess
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatTerminalAccess,
+}
+
+option GlobalStorageSiK.DebugCatCraft
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatCraft,
+}
+
+option GlobalStorageSiK.DebugCatInventory
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatInventory,
+}
+
+option GlobalStorageSiK.DebugCatTooltip
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatTooltip,
+}
+
+option GlobalStorageSiK.DebugCatUI
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatUI,
+}
+
+option GlobalStorageSiK.DebugCatRouter
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatRouter,
+}
+
+option GlobalStorageSiK.RequirePower
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_RequirePower,
+}
+
+option GlobalStorageSiK.EnableFuelConsumption
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_EnableFuelConsumption,
+}
+
+option GlobalStorageSiK.FuelConsumptionBase
+{
+	type = double,
+	default = 0.05,
+	min = 0.0,
+	max = 5.0,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_FuelConsumptionBase,
+}
+
+option GlobalStorageSiK.FuelConsumptionPerContainer
+{
+	type = double,
+	default = 0.01,
+	min = 0.0,
+	max = 2.0,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_FuelConsumptionPerContainer,
+}
+
+option GlobalStorageSiK.EnableGeneratorGrid
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_EnableGeneratorGrid,
+}
+
+option GlobalStorageSiK.EnableBatteryCompat
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Power,
+	translation = GlobalStorageSiK_EnableBatteryCompat,
+}
+
+option GlobalStorageSiK.RemoteTransferEnabled
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_RemoteTransferEnabled,
+}
+
+option GlobalStorageSiK.AutoSortEnabled
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_AutoSortEnabled,
+}
+
+option GlobalStorageSiK.BulkDepositEnabled
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_BulkDepositEnabled,
+}
+
+option GlobalStorageSiK.RejectDepositIfNoMatch
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_RejectDepositIfNoMatch,
+}
+
+option GlobalStorageSiK.RespectFavoriteItems
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_RespectFavoriteItems,
+}
+
+option GlobalStorageSiK.RespectEquippedItems
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_RespectEquippedItems,
+}
+
+option GlobalStorageSiK.MaxItemsPerBulkTick
+{
+	type = integer,
+	default = 50,
+	min = 10,
+	max = 200,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_MaxItemsPerBulkTick,
+}
+
+option GlobalStorageSiK.RequireRecipeBooks
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_RequireRecipeBooks,
+}
+
+option GlobalStorageSiK.RequireWorkbench
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_RequireWorkbench,
+}
+
+option GlobalStorageSiK.LootBooksWeight
+{
+	type = double,
+	default = 2.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootBooksWeight,
+}
+
+option GlobalStorageSiK.LootFloppyDiskWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootFloppyDiskWeight,
+}
+
+option GlobalStorageSiK.LootBlankDiskWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootBlankDiskWeight,
+}
+
+option GlobalStorageSiK.LootUninstallDiskWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootUninstallDiskWeight,
+}
+
+option GlobalStorageSiK.LootDriveDiskWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootDriveDiskWeight,
+}
+
+option GlobalStorageSiK.LootManualWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootManualWeight,
+}
+
+option GlobalStorageSiK.LootDiskProgramMagazineWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootDiskProgramMagazineWeight,
+}
+
+option GlobalStorageSiK.LootSolderingIronWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootSolderingIronWeight,
+}
+
+option GlobalStorageSiK.LootPCPartsWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootPCPartsWeight,
+}
+
+option GlobalStorageSiK.LootTerminalReaderWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootTerminalReaderWeight,
+}
+
+option GlobalStorageSiK.LootSolderingIronManualWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootSolderingIronManualWeight,
+}
+
+option GlobalStorageSiK.EnableSolderingIronCraft
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_EnableSolderingIronCraft,
+}
+
+option GlobalStorageSiK.Recipe_PCTower_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_PCTower_Enable,
+}
+
+option GlobalStorageSiK.Recipe_PCTower_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_PCTower_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_Motherboard_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_Motherboard_Enable,
+}
+
+option GlobalStorageSiK.Recipe_Motherboard_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_Motherboard_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_IOController_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_IOController_Enable,
+}
+
+option GlobalStorageSiK.Recipe_IOController_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_IOController_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_Keyboard_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_Keyboard_Enable,
+}
+
+option GlobalStorageSiK.Recipe_Keyboard_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_Keyboard_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_DesktopComputer_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_DesktopComputer_Enable,
+}
+
+option GlobalStorageSiK.Recipe_DesktopComputer_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_PC,
+	translation = GlobalStorageSiK_Recipe_DesktopComputer_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_TerminalReader_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_TerminalReader_Enable,
+}
+
+option GlobalStorageSiK.Recipe_TerminalReader_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_TerminalReader_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_ReaderCasing_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderCasing_Enable,
+}
+
+option GlobalStorageSiK.Recipe_ReaderCasing_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderCasing_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_ReaderCircuit_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderCircuit_Enable,
+}
+
+option GlobalStorageSiK.Recipe_ReaderCircuit_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderCircuit_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_ReaderAntenna_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderAntenna_Enable,
+}
+
+option GlobalStorageSiK.Recipe_ReaderAntenna_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Reader,
+	translation = GlobalStorageSiK_Recipe_ReaderAntenna_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_NetworkDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_NetworkDisk_Enable,
+}
+
+option GlobalStorageSiK.Recipe_NetworkDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_NetworkDisk_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_UninstallDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_UninstallDisk_Enable,
+}
+
+option GlobalStorageSiK.Recipe_UninstallDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_UninstallDisk_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_DriveDisk_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_DriveDisk_Enable,
+}
+
+option GlobalStorageSiK.Recipe_DriveDisk_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft_Disk,
+	translation = GlobalStorageSiK_Recipe_DriveDisk_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_SolderingIron_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingIron_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_SolderingTip_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingTip_Enable,
+}
+
+option GlobalStorageSiK.Recipe_SolderingTip_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingTip_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_SolderingResistance_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingResistance_Enable,
+}
+
+option GlobalStorageSiK.Recipe_SolderingResistance_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingResistance_RequireBook,
+}
+
+option GlobalStorageSiK.Recipe_SolderingHandle_Enable
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingHandle_Enable,
+}
+
+option GlobalStorageSiK.Recipe_SolderingHandle_RequireBook
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Craft,
+	translation = GlobalStorageSiK_Recipe_SolderingHandle_RequireBook,
+}
+
+option GlobalStorageSiK.LootSolderingPartsWeight
+{
+	type = double,
+	default = 1.0,
+	min = 0.0,
+	max = 20.0,
+	page = GlobalStorageSiK_Loot,
+	translation = GlobalStorageSiK_LootSolderingPartsWeight,
+}
+

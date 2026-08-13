@@ -1,0 +1,433 @@
+module GSSiK_Addon_Tablet
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	craftRecipe Build GS Antenna Dish
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_AntennaDish_Enable,
+		inputs
+		{
+			item 1 [Base.ScrapMetal],
+			item 1 [Base.ElectronicsScrap],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiAntenna_Dish,
+		}
+	}
+
+	craftRecipe Build GS Antenna Transmitter
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:4,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_AntennaTransmitter_Enable,
+		inputs
+		{
+			item 1 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiAntenna_Transmitter,
+		}
+	}
+
+	/* Chip WiFi T1: componente propio que va DENTRO de la antena T1, no la
+	   sustituye - Dish+Transmisor siguen siendo la estructura, el chip es
+	   la electronica que le da rango real. Solo materiales vanilla, no
+	   depende de ninguna antena existente (es la base de la cadena). */
+	craftRecipe Build GS WiFi Chip T1
+	{
+		timedAction = MakingElectrical,
+		time = 70,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiChipT1_Enable,
+		inputs
+		{
+			item 1 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiChip_T1,
+		}
+	}
+
+	craftRecipe Build GS WiFi Antenna
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:8,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiAntenna_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_WifiAntenna_Dish],
+			item 1 [GSSiK_Addon_Tablet.GS_WifiAntenna_Transmitter],
+			item 1 [GSSiK_Addon_Tablet.GS_WifiChip_T1],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiAntenna,
+		}
+	}
+
+	/* ── Mejora de antena (Tier 2 y Tier 3): cada chip se fabrica con
+	   materiales vanilla; cada antena de tier superior CONSUME la antena
+	   del tier anterior entera (se desmonta y se reconstruye con el chip
+	   nuevo dentro) - no se acumulan antenas viejas, cada mejora es un
+	   paso real, igual dificultad creciente que el resto del mod. ── */
+	craftRecipe Build GS WiFi Chip T2
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiChipT2_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
+			item 1 [Base.Screws],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiChip_T2,
+		}
+	}
+
+	craftRecipe Build GS WiFi Antenna T2
+	{
+		timedAction = MakingElectrical,
+		time = 130,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:10,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiAntennaT2_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_WifiAntenna],
+			item 1 [GSSiK_Addon_Tablet.GS_WifiChip_T2],
+			item 1 [Base.DuctTape],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiAntenna_T2,
+		}
+	}
+
+	craftRecipe Build GS WiFi Chip T3
+	{
+		timedAction = MakingElectrical,
+		time = 110,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:7,
+		SkillRequired = Electricity:7,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiChipT3_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+			item 1 [Base.Screws],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiChip_T3,
+		}
+	}
+
+	craftRecipe Build GS WiFi Antenna T3
+	{
+		timedAction = MakingElectrical,
+		time = 160,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:14,
+		SkillRequired = Electricity:8,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_WifiAntennaT3_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_WifiAntenna_T2],
+			item 1 [GSSiK_Addon_Tablet.GS_WifiChip_T3],
+			item 1 [Base.DuctTape],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_WifiAntenna_T3,
+		}
+	}
+
+	craftRecipe Program GS Tablet Install Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_TabletDisk_Enable,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet,
+		}
+	}
+
+	craftRecipe Build GS Tablet Screen
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_TabletScreen_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_Tablet_Screen,
+		}
+	}
+
+	craftRecipe Build GS Tablet Battery
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:4,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_TabletBattery_Enable,
+		inputs
+		{
+			item 1 [Base.ScrapMetal],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_Tablet_Battery,
+		}
+	}
+
+	/* Tier 1: item basico que lleva el jugador. Con la Antena instalada en
+	   un terminal y esto en el inventario, ya hay acceso al almacen. */
+	craftRecipe Build GS Tablet
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:8,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_Tablet_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_Tablet_Screen],
+			item 1 [GSSiK_Addon_Tablet.GS_Tablet_Battery],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_Tablet,
+		}
+	}
+
+	craftRecipe Build GS Craft Tablet Module
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_CraftTabletModule_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletCraft_Module,
+		}
+	}
+
+	/* Sube de tier consumiendo la Tableta base ya montada: mas dificil que
+	   tier 1 (Electricidad 6) y mezcla tornillos vanilla. */
+	craftRecipe Build GS Craft Tablet
+	{
+		timedAction = MakingElectrical,
+		time = 120,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:10,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_CraftTablet_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_Tablet],
+			item 1 [GSSiK_Addon_Tablet.GS_TabletCraft_Module],
+			item 2 [Base.Nails],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletCraft,
+		}
+	}
+
+	craftRecipe Build GS Builder Tablet Module
+	{
+		timedAction = MakingElectrical,
+		time = 100,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:5,
+		SkillRequired = Electricity:5,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_BuilderTabletModule_Enable,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.Wire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletBuilder_Module,
+		}
+	}
+
+	craftRecipe Build GS Builder Tablet
+	{
+		timedAction = MakingElectrical,
+		time = 120,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:10,
+		SkillRequired = Electricity:6,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_BuilderTablet_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_Tablet],
+			item 1 [GSSiK_Addon_Tablet.GS_TabletBuilder_Module],
+			item 2 [Base.Nails],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletBuilder,
+		}
+	}
+
+	craftRecipe Build GS Master Tablet Core
+	{
+		timedAction = MakingElectrical,
+		time = 110,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:6,
+		SkillRequired = Electricity:7,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_MasterTabletCore_Enable,
+		inputs
+		{
+			item 3 [Base.ElectronicsScrap],
+			item 2 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletMaster_Core,
+		}
+	}
+
+	/* Tier maximo: junta una Tableta Craft y una Tableta Builder ya
+	   montadas, mas caro que fabricar cada tier por separado. */
+	craftRecipe Build GS Master Tablet
+	{
+		timedAction = MakingElectrical,
+		time = 150,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:14,
+		SkillRequired = Electricity:8,
+		needToBeLearn = true,
+		OnTest = GSSiK_Addon_Tablet_RecipeTests.Recipe_MasterTablet_Enable,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Tablet.GS_TabletCraft],
+			item 1 [GSSiK_Addon_Tablet.GS_TabletBuilder],
+			item 1 [GSSiK_Addon_Tablet.GS_TabletMaster_Core],
+			item 1 [Base.DuctTape],
+			item 2 [Base.Nails],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Tablet.GS_TabletMaster,
+		}
+	}
+}
