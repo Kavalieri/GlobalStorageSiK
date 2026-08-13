@@ -1,0 +1,6 @@
+version=1
+id=3750612158
+title=Global Storage SiK [42.20+]
+description=Global Storage SiK [42.20+]
+tags=Build 42;Items;Multiplayer;Interface;QOL;Misc;Addons SiK
+visibility=public

@@ -1,0 +1,6 @@
+version=1
+id=3752379947
+title=GSSiK Addon - Tablet [42.20+]
+description=GSSiK Addon - Tablet [42.20+]
+tags=Build 42;Items;Multiplayer;Interface;QOL;Misc;Addons SiK
+visibility=public
