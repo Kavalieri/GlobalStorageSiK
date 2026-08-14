@@ -245,19 +245,23 @@ local function ensureRecMediaIndexBuilt()
 				local line = media.lines[i]
 				local codes = line and line.codes
 				if codes then
-					-- Implementacion PROPIA, deliberadamente distinta en forma a
-					-- cualquier mod de terceros (ver comentario largo de
-					-- getBookSkillTrainingLines): en vez de trocear "codes" por
-					-- comas y extraer el trigrama de cada trozo, recorremos
-					-- nuestro propio mapa de trigramas conocidos (copiado del
-					-- vainilla, ver VHS_TRIGRAM_TO_PERK_KEY) y buscamos cada uno
-					-- como token exacto delimitado por comas dentro de la cadena
-					-- completa - envolver con comas al principio/final permite un
-					-- find() de texto plano seguro (sin falsos positivos por
-					-- coincidencia parcial, ej. "SPR" dentro de "RCP=SPRocket").
-					local codesText = "," .. tostring(codes) .. ","
-					for trigram, perkKey in pairs(VHS_TRIGRAM_TO_PERK_KEY) do
-						if not seen[perkKey] and codesText:find("," .. trigram .. ",", 1, true) then
+					-- BUG REAL CORREGIDO (2026-08-14, reportado con un caso real:
+					-- "VHS: Cultivar hierbas en casa" mostraba "nada que aprender"
+					-- pese a enseñar Farming): confirmado leyendo directamente
+					-- shared/RecordedMedia/recorded_media.lua (fuente vainilla, no
+					-- una suposicion) que cada codigo lleva SIEMPRE una cantidad
+					-- pegada sin separador, ej. codes = "FRM+1" o
+					-- "BOR-1,FRM+1,RCP=base:basil growing season". La version
+					-- anterior buscaba el trigrama como token EXACTO delimitado por
+					-- comas (",FRM,") y nunca podia coincidir con ",FRM+1,". Ahora
+					-- se trocea por comas y se lee solo el PREFIJO de letras
+					-- mayusculas de cada trozo (se detiene solo en encontrar el
+					-- primer caracter no-mayuscula, sea "+", "-" o el "=" de RCP=),
+					-- que es precisamente el trigrama sin su cantidad.
+					for segment in tostring(codes):gmatch("[^,]+") do
+						local trigram = segment:match("^%u+")
+						local perkKey = trigram and VHS_TRIGRAM_TO_PERK_KEY[trigram]
+						if perkKey and not seen[perkKey] then
 							seen[perkKey] = true
 							skillNames[#skillNames + 1] = getText(perkKey)
 						end
