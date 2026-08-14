@@ -132,17 +132,32 @@ local function truncate(text, maxW)
 end
 
 --- Interpretacion PROPIA (no la del mod "Show VHS skills in tooltip", retirado
---- por incompatibilidad real - ver notas de version) de que skill enseña un
---- item: lee directamente los campos de script vainilla SkillTrained/
---- LvlSkillTrained/getMaxLevelTrained (misma API publica que ya usa el propio
---- juego en ISReadABook.lua para libros), sin depender de ningun otro mod ni
---- reconstruir su tabla de datos. Se excluyen libros/revistas (isLiterature):
---- vanilla YA les muestra esta info en su propio tooltip nativo, duplicarla
---- ahi no aporta nada - esto es solo para lo que vanilla NO cubre (cintas VHS
---- y cualquier otro item moddeado con estos mismos campos).
+--- por incompatibilidad real con nuestro propio parche de ISToolTipInv.render
+--- Y el de "Magic Accessories" - ver installHooks mas abajo) de que skill
+--- enseña un item: lee directamente los campos de script vainilla
+--- SkillTrained/LvlSkillTrained/getMaxLevelTrained (misma API publica que ya
+--- usa el propio juego en ISReadABook.lua para libros), sin depender de
+--- ningun otro mod ni reconstruir su tabla de datos. Se excluyen
+--- libros/revistas (isLiterature): vanilla YA les muestra esta info en su
+--- propio tooltip nativo, duplicarla ahi no aporta nada.
+---
+--- BUG REAL CONFIRMADO (2026-08-14, reportado explicitamente): el comentario
+--- de esta funcion siempre dijo que cubria "cintas VHS y cualquier otro item
+--- moddeado con estos mismos campos", pero NUNCA fue cierto para VHS de
+--- verdad - las cintas VHS NO usan getSkillTrained()/SkillBook (eso es
+--- exclusivo de libros), sino un sistema completamente distinto: el item
+--- referencia un indice de "medio grabado" (getRecordedMediaIndex()) que
+--- apunta a una entrada del global RecMedia (definiciones de radio/TV,
+--- scripteadas), cuyas lineas de dialogo llevan "codigos" de 3 letras
+--- (SPR, CRP, DOC...) que el propio vainilla interpreta en
+--- shared/RadioCom/ISRadioInteractions.lua para dar XP al verlo/escucharlo -
+--- confirmado leyendo ese fichero vainilla directamente, mismo trigrama que
+--- usa el mod retirado "Show VHS skills in tooltip" (workshop 3716522633,
+--- ver SVSIT_data.lua/SVSIT_logic.lua/SVSIT_parser.lua para la referencia
+--- original de este enfoque). Ver getVHSTrainingLines mas abajo.
 ---@param item table|nil InventoryItem
 ---@return string[]|nil
-local function getSkillTrainingLines(item)
+local function getBookSkillTrainingLines(item)
 	if not item or not item.getSkillTrained then
 		return nil
 	end
@@ -175,6 +190,135 @@ local function getSkillTrainingLines(item)
 		line = perkName
 	end
 	return { T("IGUI_GS_VHSSkillHeader"), line }
+end
+
+--- Trigrama -> clave getText del perk, copiado DIRECTAMENTE de
+--- shared/RadioCom/ISRadioInteractions.lua (linea Interactions.XXX =
+--- function(...) doSkill(_player, _amount, getText("IGUI_perks_..."),
+--- Perks...) end) - fuente unica de verdad vainilla, no una copia de otro
+--- mod. Solo trigramas de SKILL (Interactions tambien tiene ANG/BOR/END/...
+--- para stats como hambre/animo, deliberadamente fuera de este mapa).
+local VHS_TRIGRAM_TO_PERK_KEY = {
+	SPR = "IGUI_perks_Sprinting", LFT = "IGUI_perks_Lightfooted", NIM = "IGUI_perks_Nimble",
+	SNE = "IGUI_perks_Sneaking", BAA = "IGUI_perks_Axe", BUA = "IGUI_perks_Blunt",
+	CRP = "IGUI_perks_Carpentry", COO = "IGUI_perks_Cooking", FRM = "IGUI_perks_Farming",
+	DOC = "IGUI_perks_Doctor", ELC = "IGUI_perks_Electricity", MTL = "IGUI_perks_MetalWelding",
+	FKN = "IGUI_perks_FlintKnapping", CRV = "IGUI_perks_Carving", AIM = "IGUI_perks_Aiming",
+	REL = "IGUI_perks_Reloading", FIS = "IGUI_perks_Fishing", TRA = "IGUI_perks_Trapping",
+	FOR = "IGUI_perks_Foraging", TAI = "IGUI_perks_Tailoring", MEC = "IGUI_perks_Mechanics",
+	CMB = "IGUI_perks_Combat", SPE = "IGUI_perks_Spear", SBU = "IGUI_perks_SmallBlunt",
+	LBA = "IGUI_perks_LongBlade", SBA = "IGUI_perks_SmallBlade", MAS = "IGUI_perks_Masonry",
+	POT = "IGUI_perks_Pottery", BLA = "IGUI_perks_Blacksmith", GLA = "IGUI_perks_Glassmaking",
+	HUS = "IGUI_perks_Husbandry", BUT = "IGUI_perks_Butchering", TRK = "IGUI_perks_Tracking",
+}
+
+--- id de RecMedia -> { skillNames = {...}, empty = boolean }. Construido UNA
+--- vez (perezoso, en el primer item VHS que se inspeccione) recorriendo el
+--- global RecMedia entero - caro para hacerlo por item, barato hacerlo una
+--- sola vez para toda la sesion (RecMedia no cambia en caliente).
+local recMediaSkillsById = nil
+--- nombre de pantalla del item -> id de RecMedia, para poder correlacionar
+--- un InventoryItem con su entrada de RecMedia. NO se usa
+--- rm:getMediaDataFromIndex(index) directo pese a que
+--- item:getRecordedMediaIndex() SI funciona: ese metodo espera un "short"
+--- del lado Java y Kahlua siempre pasa numeros como Double, lo que revienta
+--- con un error real de tipo (mismo hallazgo exacto que el mod retirado
+--- "Show VHS skills in tooltip", ver comentario en su SVSIT_logic.lua) - por
+--- eso se correlaciona por NOMBRE, mismo rodeo que ese mod ya validaba en
+--- producción.
+local mediaIdByDisplayName = nil
+
+local function ensureRecMediaIndexBuilt()
+	if recMediaSkillsById then
+		return
+	end
+	recMediaSkillsById = {}
+	mediaIdByDisplayName = {}
+	if not rawget(_G, "RecMedia") then
+		return
+	end
+	for id, media in pairs(RecMedia) do
+		local skillNames = {}
+		local seen = {}
+		if media.lines then
+			for i = 1, #media.lines do
+				local line = media.lines[i]
+				local codes = line and line.codes
+				if codes then
+					-- Implementacion PROPIA, deliberadamente distinta en forma a
+					-- cualquier mod de terceros (ver comentario largo de
+					-- getBookSkillTrainingLines): en vez de trocear "codes" por
+					-- comas y extraer el trigrama de cada trozo, recorremos
+					-- nuestro propio mapa de trigramas conocidos (copiado del
+					-- vainilla, ver VHS_TRIGRAM_TO_PERK_KEY) y buscamos cada uno
+					-- como token exacto delimitado por comas dentro de la cadena
+					-- completa - envolver con comas al principio/final permite un
+					-- find() de texto plano seguro (sin falsos positivos por
+					-- coincidencia parcial, ej. "SPR" dentro de "RCP=SPRocket").
+					local codesText = "," .. tostring(codes) .. ","
+					for trigram, perkKey in pairs(VHS_TRIGRAM_TO_PERK_KEY) do
+						if not seen[perkKey] and codesText:find("," .. trigram .. ",", 1, true) then
+							seen[perkKey] = true
+							skillNames[#skillNames + 1] = getText(perkKey)
+						end
+					end
+				end
+			end
+		end
+		recMediaSkillsById[id] = { skillNames = skillNames }
+		local okName, displayName = pcall(getText, media.itemDisplayName)
+		if okName and displayName and displayName ~= "" then
+			mediaIdByDisplayName[displayName] = id
+		end
+	end
+end
+
+--- Ver comentario largo de getBookSkillTrainingLines - camino REAL para
+--- cintas VHS (y cualquier otro "medio grabado" que use el mismo sistema
+--- vainilla de RecMedia, no solo items con "VHS" en el fullType). A peticion
+--- explicita: si el item ES un medio grabado correlacionado pero no enseña
+--- nada, se devuelve la linea "nada que aprender" en vez de no mostrar
+--- nada - distingue "confirmado que no enseña" de "no hemos podido saber
+--- que es este item".
+---@param item table|nil InventoryItem
+---@return string[]|nil
+local function getVHSTrainingLines(item)
+	if not item or not item.getRecordedMediaIndex then
+		return nil
+	end
+	local okIdx, idx = pcall(function() return item:getRecordedMediaIndex() end)
+	if not okIdx or not idx or idx < 0 then
+		return nil
+	end
+	ensureRecMediaIndexBuilt()
+	local okName, displayName = pcall(function() return item:getDisplayName() end)
+	local mediaId = okName and displayName and mediaIdByDisplayName[displayName]
+	if not mediaId then
+		-- No pudimos correlacionar este item concreto con ninguna entrada de
+		-- RecMedia por nombre - no afirmar "nada que aprender" sin estar
+		-- seguros, mejor no mostrar nada (mismo criterio conservador que el
+		-- resto del tooltip).
+		return nil
+	end
+	local data = recMediaSkillsById[mediaId]
+	if not data or #data.skillNames == 0 then
+		return { T("IGUI_GS_VHSSkillHeader"), T("IGUI_GS_VHSNothingToLearn") }
+	end
+	local lines = { T("IGUI_GS_VHSSkillHeader") }
+	for i = 1, #data.skillNames do
+		lines[#lines + 1] = data.skillNames[i]
+	end
+	return lines
+end
+
+---@param item table|nil InventoryItem
+---@return string[]|nil
+local function getSkillTrainingLines(item)
+	local bookLines = getBookSkillTrainingLines(item)
+	if bookLines then
+		return bookLines
+	end
+	return getVHSTrainingLines(item)
 end
 
 --- Dibuja la extension de red justo debajo del tooltip de item vanilla,

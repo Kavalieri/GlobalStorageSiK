@@ -680,6 +680,7 @@
 	"IGUI_GS_VHSSkillHeader": "Enseigne :",
 	"IGUI_GS_VHSSkillLine": "{1} (niveau {2})",
 	"IGUI_GS_VHSSkillLineRange": "{1} (niveau {2}, jusqu'à {3})",
+	"IGUI_GS_VHSNothingToLearn": "Rien à apprendre ici.",
 	"IGUI_GS_ColTerminalName": "Nom",
 	"IGUI_GS_ColTerminalCoords": "Coordonnées",
 	"IGUI_GS_ColTerminalRole": "Rôle",

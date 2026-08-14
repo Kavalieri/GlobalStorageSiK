@@ -680,6 +680,7 @@
 	"IGUI_GS_VHSSkillHeader": "教授技能：",
 	"IGUI_GS_VHSSkillLine": "{1}（等级 {2}）",
 	"IGUI_GS_VHSSkillLineRange": "{1}（等级 {2}，最高至 {3}）",
+	"IGUI_GS_VHSNothingToLearn": "没有可学的内容。",
 	"IGUI_GS_ColTerminalName": "名称",
 	"IGUI_GS_ColTerminalCoords": "坐标",
 	"IGUI_GS_ColTerminalRole": "角色",
