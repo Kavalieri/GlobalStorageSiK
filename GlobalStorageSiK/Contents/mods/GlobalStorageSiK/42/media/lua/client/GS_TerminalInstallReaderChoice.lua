@@ -346,8 +346,7 @@ function GlobalStorageSiK.TerminalInstallReaderChoice.show(player, target)
 	ui.target = target
 	ui:initialise()
 	ui:addToUIManager()
-	ui:setX(getCore():getScreenWidth() / 2 - PANEL_W / 2)
-	ui:setY(getCore():getScreenHeight() / 2 - panelH / 2)
+	GlobalStorageSiK.TerminalChrome.centerModal(ui)
 	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
 	GlobalStorageSiK.TerminalInstallReaderChoice.instance = ui
 end

@@ -1316,6 +1316,12 @@ function GS_TerminalUI:onRenameNetwork(name)
 	})
 end
 
+function GS_TerminalUI:onLeaveNetwork()
+	GlobalStorageSiK.NetClient.sendCommand("leaveNetwork", {
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
 function GS_TerminalUI:onRemovePermissionUser(username)
 	GlobalStorageSiK.NetClient.sendCommand("removePermissionUser", {
 		username = username or "",

@@ -228,7 +228,7 @@ function GlobalStorageSiK.PCAcquireUI.show(player)
 	ui.player = player
 	ui:initialise()
 	ui:addToUIManager()
-	ui:setX(math.floor((getCore():getScreenWidth() - PANEL_W) / 2))
+	GlobalStorageSiK.TerminalChrome.centerModal(ui)
 	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
 	GlobalStorageSiK.PCAcquireUI.instance = ui
 end

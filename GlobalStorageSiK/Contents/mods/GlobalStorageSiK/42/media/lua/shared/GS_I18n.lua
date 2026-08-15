@@ -54,6 +54,11 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_PickMember = "Select player or faction...",
 	IGUI_GS_PickGroupFaction = "My Faction",
 	IGUI_GS_PickGroupServer = "Server",
+	IGUI_GS_PickGroupServerEmpty = "Server (nobody online)",
+	IGUI_GS_LeftNetworkMsg = "You left the network",
+	IGUI_GS_TerminalDefaultNameFmt = "Terminal {1}",
+	IGUI_GS_MemberEditorLeaveBtn = "Leave network",
+	IGUI_GS_MemberEditorLeaveConfirm = "Leave this network? If you're the owner, ownership passes automatically to another admin or member, same as on death.",
 	IGUI_GS_PermAddBlockTitle = "Grant access",
 	IGUI_GS_AddMember = "Add",
 	IGUI_GS_BlockedTabletAddon = "Craft and install the Wireless Tablet Link module on a GS terminal, and enable the tablet addon mod.",
@@ -467,7 +472,6 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_PermOnlyOwnerTransferMsg = "Only the owner can transfer the network",
 	IGUI_GS_PermOwnershipTransferredMsg = "Ownership transferred to {1}",
 	IGUI_GS_ZoneSourceStructure = "Structure",
-	IGUI_GS_PermAddOnlineHint = "Nobody else online right now - faction members above still work, or add them once connected.",
 }
 
 --- Sustitución literal (sin patrones Lua) para evitar corrupción de %1, %2...

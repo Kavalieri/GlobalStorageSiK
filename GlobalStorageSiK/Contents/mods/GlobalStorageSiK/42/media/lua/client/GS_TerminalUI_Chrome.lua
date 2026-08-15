@@ -1421,6 +1421,29 @@ function GlobalStorageSiK.TerminalChrome.setupModalPanel(panel, onClose, pad)
 	GlobalStorageSiK.TerminalChrome.layoutModalChrome(panel, pad)
 end
 
+--- Ancho estandar para modales de edicion/confirmacion pequeños (fila de
+--- miembro, nodo, renombrar, etc.) - apaisado (mas ancho que alto), en vez
+--- de que cada ventana invente su propio ancho fijo distinto. La ALTURA
+--- nunca es un numero fijo adivinado: se calcula siempre desde el contenido
+--- real (wrapTextLines + suma de alturas reales de cada fila) y luego se
+--- centra con centerModal. Ver GS_TerminalUI_MemberEditor.lua como
+--- referencia de uso; migrar el resto de modales pequeños a este mismo
+--- estandar es trabajo pendiente, no se ha tocado en este cambio.
+GlobalStorageSiK.TerminalChrome.STANDARD_MODAL_W = 460
+
+--- Centra un panel modal ya dimensionado (llamar DESPUES de fijar su alto
+--- real por contenido, nunca antes) en el centro de la pantalla actual.
+---@param panel ISPanel|nil
+function GlobalStorageSiK.TerminalChrome.centerModal(panel)
+	if not panel then
+		return
+	end
+	local sw = getCore():getScreenWidth()
+	local sh = getCore():getScreenHeight()
+	panel:setX(math.floor((sw - panel.width) / 2))
+	panel:setY(math.floor((sh - panel.height) / 2))
+end
+
 --- Muestra modal encima del resto de UI (una sola vez al abrir).
 ---@param panel ISPanel|nil
 function GlobalStorageSiK.TerminalChrome.finalizeModalShow(panel)

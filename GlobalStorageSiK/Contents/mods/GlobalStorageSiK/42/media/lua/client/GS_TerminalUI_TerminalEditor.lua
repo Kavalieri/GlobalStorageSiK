@@ -210,6 +210,7 @@ function GS_TerminalEditorUI:buildLayout()
 
 	self:setHeight(y)
 	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
+	GlobalStorageSiK.TerminalChrome.centerModal(self)
 end
 
 --- Abre (o reemplaza) el editor de un terminal concreto.

@@ -422,7 +422,7 @@ function GlobalStorageSiK.FilterEditor.show(node, onAdded)
 	ui.onAdded = onAdded
 	ui:initialise()
 	ui:addToUIManager()
-	ui:setX(math.floor((getCore():getScreenWidth() - PANEL_W) / 2))
+	GlobalStorageSiK.TerminalChrome.centerModal(ui)
 	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
 	GlobalStorageSiK.FilterEditor.instance = ui
 end

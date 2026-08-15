@@ -2306,6 +2306,24 @@ local function onClientCommand(module, command, player, args)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserAlreadyExists") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
+	elseif command == "leaveNetwork" then
+		-- Abandonar la propia fila esta siempre permitido sin importar el
+		-- rol (member/admin/owner) - solo hace falta pertenecer a la red,
+		-- nunca requireAdminAccess. Si es el owner, GS_Permissions.leaveNetwork
+		-- dispara la misma sucesion automatica que al morir.
+		if not requireNetworkPermission(player, networkId) then
+			return
+		end
+		local myName = GlobalStorageSiK.Permissions.getCharacterName(player)
+		local ok, message = GlobalStorageSiK.Permissions.leaveNetwork(networkId, myName)
+		if ok then
+			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		end
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
+		if ok then
+			pushTerminalState(player, networkId, nil, searchQuery)
+		end
+
 	elseif command == "removePermissionUser" then
 		if not requireNetworkPermission(player, networkId) then
 			return

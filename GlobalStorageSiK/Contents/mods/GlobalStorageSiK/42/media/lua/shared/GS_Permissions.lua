@@ -576,6 +576,93 @@ function GlobalStorageSiK.Permissions.countBackupMembers(networkId)
 	return #(net.allowedUsers or {})
 end
 
+--- Promueve al primer admin (o si no hay, al primer miembro normal) como
+--- nuevo owner de UNA red concreta, o la deja sin dueño si no hay nadie con
+--- quien suceder. Extraido de handleOwnerDeath para poder reutilizarlo tanto
+--- en la sucesion por muerte (todas las redes de un personaje) como en un
+--- abandono voluntario de una sola red (leaveNetwork).
+---@param networkId string
+---@param net table
+---@param leavingCharacterName string
+local function promoteOrClearOwner(networkId, net, leavingCharacterName)
+	local promoted = nil
+	if net.adminUsers and #net.adminUsers > 0 then
+		promoted = net.adminUsers[1]
+	elseif net.allowedUsers and #net.allowedUsers > 0 then
+		promoted = net.allowedUsers[1]
+	end
+	if promoted and promoted ~= "" then
+		net.owner = promoted
+		net.ownerAccount = GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(promoted)
+		local promotedNorm = normalizeName(promoted)
+		if net.adminUsers then
+			for i = #net.adminUsers, 1, -1 do
+				if normalizeName(net.adminUsers[i]) == promotedNorm then
+					table.remove(net.adminUsers, i)
+				end
+			end
+		end
+		if net.allowedUsers then
+			for i = #net.allowedUsers, 1, -1 do
+				if normalizeName(net.allowedUsers[i]) == promotedNorm then
+					table.remove(net.allowedUsers, i)
+				end
+			end
+		end
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
+				networkId .. ": " .. leavingCharacterName .. " -> " .. promoted)
+		end
+	else
+		net.owner = ""
+		net.ownerAccount = nil
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
+				networkId .. ": " .. leavingCharacterName .. " -> (sin miembros, red sin dueño)")
+		end
+	end
+end
+
+--- Abandona voluntariamente UNA red concreta (a diferencia de
+--- handleOwnerDeath, que actua sobre TODAS las redes que poseia el
+--- personaje - aqui el jugador puede seguir siendo owner de otras redes
+--- suyas sin verse afectado). Si es el owner, sucede exactamente igual que
+--- al morir (promociona admin/miembro o deja la red sin dueño); si es
+--- admin/miembro normal, simplemente se quita de las listas.
+---@param networkId string
+---@param characterName string
+---@return boolean ok
+---@return string message
+function GlobalStorageSiK.Permissions.leaveNetwork(networkId, characterName)
+	characterName = normalizeName(characterName)
+	if characterName == "" then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local net = registry.networks and registry.networks[networkId]
+	if not net then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
+	end
+	if net.owner and normalizeName(net.owner) == characterName then
+		promoteOrClearOwner(networkId, net, characterName)
+		return true, GlobalStorageSiK.I18n.remote("IGUI_GS_LeftNetworkMsg")
+	end
+	local removedAdmin = false
+	if net.adminUsers then
+		for i = #net.adminUsers, 1, -1 do
+			if normalizeName(net.adminUsers[i]) == characterName then
+				table.remove(net.adminUsers, i)
+				removedAdmin = true
+			end
+		end
+	end
+	local removedUser = GlobalStorageSiK.Permissions.removeUser(networkId, characterName)
+	if not removedUser and not removedAdmin then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_UserNotFoundToRemoveMsg")
+	end
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_LeftNetworkMsg")
+end
+
 --- Sucesión de propiedad al morir un personaje: si era propietario de
 --- alguna red, promociona automáticamente al primer admin disponible (o, si
 --- no hay ningún admin, al primer miembro normal) para que la red nunca
@@ -597,42 +684,7 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadCharacterName)
 	end
 	for networkId, net in pairs(networks) do
 		if net.owner and net.owner ~= "" and normalizeName(net.owner) == deadCharacterName then
-			local promoted = nil
-			if net.adminUsers and #net.adminUsers > 0 then
-				promoted = net.adminUsers[1]
-			elseif net.allowedUsers and #net.allowedUsers > 0 then
-				promoted = net.allowedUsers[1]
-			end
-			if promoted and promoted ~= "" then
-				net.owner = promoted
-				net.ownerAccount = GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(promoted)
-				local promotedNorm = normalizeName(promoted)
-				if net.adminUsers then
-					for i = #net.adminUsers, 1, -1 do
-						if normalizeName(net.adminUsers[i]) == promotedNorm then
-							table.remove(net.adminUsers, i)
-						end
-					end
-				end
-				if net.allowedUsers then
-					for i = #net.allowedUsers, 1, -1 do
-						if normalizeName(net.allowedUsers[i]) == promotedNorm then
-							table.remove(net.allowedUsers, i)
-						end
-					end
-				end
-				if GlobalStorageSiK.Log then
-					GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
-						networkId .. ": " .. deadCharacterName .. " -> " .. promoted)
-				end
-			else
-				net.owner = ""
-				net.ownerAccount = nil
-				if GlobalStorageSiK.Log then
-					GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
-						networkId .. ": " .. deadCharacterName .. " -> (sin miembros, red sin dueño)")
-				end
-			end
+			promoteOrClearOwner(networkId, net, deadCharacterName)
 		end
 	end
 	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
