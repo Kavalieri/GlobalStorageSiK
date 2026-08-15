@@ -1,0 +1,6 @@
+version=1
+id=0
+title=GSSiK Addon - Rack [42.20+]
+description=GSSiK Addon - Rack [42.20+]
+tags=Build 42;Items;Multiplayer;Interface;QOL;Misc;Addons SiK
+visibility=private

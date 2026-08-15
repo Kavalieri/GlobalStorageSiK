@@ -1,0 +1,9 @@
+name=GSSiK Addon - Rack [42.20+]
+id=GSSiK_Addon_Rack
+description=Build 42.20+ v0.0.0.1 (preproduccion, no publicado). SiK Storage Rack: mueble colocable con compartimentos internos fijos (discos logicos) integrados en Global Storage. Ver Documentacion/GSSiK_Addon_Rack_Plan.md para el diseno completo. Requiere Global Storage SiK.
+poster=poster.png
+icon=icon.png
+author=SiK
+modversion=0.0.0.1
+versionMin=42.19.0
+require=\GlobalStorageSiK
