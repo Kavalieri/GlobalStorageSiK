@@ -16,6 +16,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_TabConfig = "Setup",
 	IGUI_GS_TabNodes = "Containers",
 	IGUI_GS_TabCraft = "Craft",
+	IGUI_GS_TabBuilder = "Build",
 	IGUI_GS_TabWarehouse = "Warehouse",
 	IGUI_GS_TabAddons = "Addons",
 	IGUI_GS_AddonsSectionTitle = "Network addons",

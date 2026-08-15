@@ -88,11 +88,27 @@ local function checkPendingCookCraftStarts()
 				return entry.self.logic and entry.self.logic:getRecipeData() and entry.self.logic:getRecipeData():getAllInputItems()
 			end)
 			local restore = GlobalStorageSiK.CraftSession.narrowContainersForAction(entry.self, okFreshItems and freshItems or nil, ADDON_ID)
+			-- DIAGNOSTICO (2026-08-16): mismo patron confirmado en el bloque
+			-- Neat de GSSiK_Addon_Craft_NetworkCraft.lua - PJCK_CraftActionPanel:
+			-- startHandcraft empieza con "if self.logic:isCraftActionInProgress()
+			-- then return end", asi que si esta en true al reanudar diferido
+			-- desde el tick, la llamada no hace nada y nunca dispara
+			-- onHandcraftActionComplete/Cancelled. Logueamos el estado real
+			-- antes/despues para confirmarlo con datos, ver tambien CLAUDE.md
+			-- del addon (regla 13, pendiente de verificar en partida real).
+			local okGuard, inProgress = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"cookAttempt RESUME operationId=%s preCheck isCraftActionInProgress=%s",
+				tostring(entry.operationId), tostring(okGuard and inProgress)))
 			local okCall, errCall = pcall(originalCookStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalCookStartHandcraft ERROR: " .. tostring(errCall))
 			end
+			local okGuardAfter, inProgressAfter = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"cookAttempt RESUME operationId=%s postCall isCraftActionInProgress=%s",
+				tostring(entry.operationId), tostring(okGuardAfter and inProgressAfter)))
 			restore()
 		end
 	end

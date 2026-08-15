@@ -409,17 +409,30 @@ local function checkPendingNeatCraftStarts()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
-			-- pcall (2026-08-13, diagnostico): igual que en checkPendingCraftStarts
-			-- - sospecha principal de por que Neat se queda mudo (sin END/RESULT)
-			-- tras esperar confirmacion del servidor: originalNeatStartHandcraft
-			-- puede no tolerar bien ser llamado diferido desde el tick en vez de
-			-- sincrono desde onCraftButtonClick, y sin esto un error ahi se perdia
-			-- en silencio sin dejar ningun rastro.
+			-- DIAGNOSTICO (2026-08-16, confirmado con datos reales del servidor
+			-- de pruebas: RESUME siempre llega pero END nunca, sin error de
+			-- pcall): sospecha principal es que originalNeatStartHandcraft
+			-- empieza con "if self.logic:isCraftActionInProgress() then return
+			-- end" (mismo patron confirmado leyendo PJCK_CraftActionPanel de
+			-- Project_Cook) y ese guardia esta en true en el momento de la
+			-- reanudacion diferida por tick, asi que la llamada no hace NADA
+			-- (ni error, ni accion) - de ahi el silencio total. Logueamos el
+			-- estado exacto del guardia justo antes de llamar para confirmarlo
+			-- o descartarlo con datos, en vez de arreglar a ciegas.
+			local okGuard, inProgress = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			local okCanPerform, canPerform = pcall(function() return entry.self.logic and entry.self.logic:canPerformCurrentRecipe() end)
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"craftAttempt(neat) RESUME operationId=%s preCheck isCraftActionInProgress=%s canPerformCurrentRecipe=%s",
+				tostring(entry.operationId), tostring(okGuard and inProgress), tostring(okCanPerform and canPerform)))
 			local okCall, errCall = pcall(originalNeatStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalNeatStartHandcraft ERROR: " .. tostring(errCall))
 			end
+			local okGuardAfter, inProgressAfter = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"craftAttempt(neat) RESUME operationId=%s postCall isCraftActionInProgress=%s",
+				tostring(entry.operationId), tostring(okGuardAfter and inProgressAfter)))
 			activeOperationId = nil
 			restore()
 		end

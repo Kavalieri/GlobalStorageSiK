@@ -8,6 +8,7 @@
 	"IGUI_GS_TabConfig": "设置",
 	"IGUI_GS_TabNodes": "容器",
 	"IGUI_GS_TabCraft": "制作",
+	"IGUI_GS_TabBuilder": "建造",
 	"IGUI_GS_TabAddons": "扩展",
 	"IGUI_GS_AddonsSectionTitle": "网络扩展",
 	"IGUI_GS_AddonsIntro": "阅读扩展杂志，制作模块，然后在此安装。每个模块都绑定到这台终端。",

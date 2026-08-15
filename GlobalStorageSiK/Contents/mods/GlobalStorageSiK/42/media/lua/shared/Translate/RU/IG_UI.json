@@ -8,6 +8,7 @@
 	"IGUI_GS_TabConfig": "Настройка",
 	"IGUI_GS_TabNodes": "Контейнеры",
 	"IGUI_GS_TabCraft": "Крафт",
+	"IGUI_GS_TabBuilder": "Строительство",
 	"IGUI_GS_TabAddons": "Дополнения",
 	"IGUI_GS_AddonsSectionTitle": "Дополнения сети",
 	"IGUI_GS_AddonsIntro": "Прочитайте журнал дополнения, изготовьте модуль, затем установите его здесь. Каждый модуль привязан к этому терминалу.",

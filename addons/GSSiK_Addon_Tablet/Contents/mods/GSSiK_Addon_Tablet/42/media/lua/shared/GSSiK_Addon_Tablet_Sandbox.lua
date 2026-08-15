@@ -17,7 +17,7 @@ GSSiK_Addon_Tablet.Sandbox = {}
 --- Version del addon para mostrar en su propia pestaña del terminal - se
 --- sincroniza a mano con Contents/mods/GSSiK_Addon_Tablet/42/mod.info
 --- (modversion=) en cada release, mismo criterio que Core (GS_Config.MOD_VERSION).
-GSSiK_Addon_Tablet.VERSION = "0.0.2.12-dev1"
+GSSiK_Addon_Tablet.VERSION = "0.0.2.11"
 
 --- Rango inalámbrico tier 1 (Tableta base).
 ---@return number

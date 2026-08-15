@@ -8,6 +8,7 @@
 	"IGUI_GS_TabConfig": "Configuración",
 	"IGUI_GS_TabNodes": "Contenedores",
 	"IGUI_GS_TabCraft": "Craft",
+	"IGUI_GS_TabBuilder": "Construcción",
 	"IGUI_GS_TabAddons": "Addons",
 	"IGUI_GS_AddonsSectionTitle": "Addons de red",
 	"IGUI_GS_AddonsIntro": "Lee la revista del addon, craftea el módulo e instálalo aquí. Cada módulo queda ligado a este terminal.",

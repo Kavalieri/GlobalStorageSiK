@@ -8,6 +8,7 @@
 	"IGUI_GS_TabConfig": "Setup",
 	"IGUI_GS_TabNodes": "Containers",
 	"IGUI_GS_TabCraft": "Craft",
+	"IGUI_GS_TabBuilder": "Build",
 	"IGUI_GS_TabAddons": "Addons",
 	"IGUI_GS_AddonsSectionTitle": "Network addons",
 	"IGUI_GS_AddonsIntro": "Read the addon magazine, craft the module, then install it here. Each module binds to this terminal.",

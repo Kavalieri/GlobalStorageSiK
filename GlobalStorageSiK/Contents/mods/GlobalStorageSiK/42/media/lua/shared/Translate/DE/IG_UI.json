@@ -8,6 +8,7 @@
 	"IGUI_GS_TabConfig": "Einrichtung",
 	"IGUI_GS_TabNodes": "Behälter",
 	"IGUI_GS_TabCraft": "Herstellen",
+	"IGUI_GS_TabBuilder": "Bauen",
 	"IGUI_GS_TabAddons": "Erweiterungen",
 	"IGUI_GS_AddonsSectionTitle": "Netzwerkerweiterungen",
 	"IGUI_GS_AddonsIntro": "Lies das Erweiterungsmagazin, stelle das Modul her und installiere es hier. Jedes Modul ist an dieses Terminal gebunden.",
