@@ -192,7 +192,15 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 	-- mas simple y sin sorpresas de "se me olvido que lo tenia activado".
 	local sendActive = GlobalStorageSiK.CraftSession.sendResultToNetwork == true
 	local sendLabel = sendActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
-	local sendBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, sendLabel, scroll, function()
+	-- BUG REAL (crash en juego, 2026-08-17): "local sendBtn = f(function()
+	-- sendBtn... end)" NO funciona en Lua - dentro del closure, sendBtn
+	-- todavia no es la variable local que se esta declarando (esa
+	-- asignacion no "existe" hasta que termina toda la expresion), asi que
+	-- resolvia a una sendBtn GLOBAL inexistente (nil) -> "attempted index
+	-- of non-table" al pulsar. Forward-declarar la local ANTES del closure
+	-- arregla la captura (el closure ve la misma celda, rellenada despues).
+	local sendBtn
+	sendBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, sendLabel, scroll, function()
 		local nowActive = not (GlobalStorageSiK.CraftSession.sendResultToNetwork == true)
 		GlobalStorageSiK.CraftSession.sendResultToNetwork = nowActive
 		sendBtn._gsNeatLabel = nowActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
