@@ -373,20 +373,20 @@ end
 function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharacterName, keepFormerOwner)
 	toCharacterName = normalizeName(toCharacterName)
 	if toCharacterName == "" then
-		return false, "Nombre de personaje vacío"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
 	local fromCharacter = GlobalStorageSiK.Permissions.getCharacterName(player)
 	if toCharacterName == fromCharacter then
-		return false, "Ya eres el propietario"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermAlreadyOwnerMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	local net = registry.networks[networkId]
 	if not net then
-		return false, "Red no encontrada"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
 	if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-		return false, "Solo el propietario puede transferir la red"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOnlyOwnerTransferMsg")
 	end
 	local former = net.owner or fromCharacter
 	net.owner = toCharacterName
@@ -401,7 +401,7 @@ function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharact
 			end
 		end
 	end
-	return true, "Propiedad transferida a " .. toCharacterName
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipTransferredMsg", toCharacterName)
 end
 
 --- Indica si el jugador es propietario de la red.
@@ -506,7 +506,7 @@ end
 function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 	local faction = GlobalStorageSiK.Permissions.getPlayerFaction(player)
 	if not faction then
-		return false, "No perteneces a una facción"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermNoFaction")
 	end
 	local added = 0
 	local seen = {}
@@ -559,9 +559,9 @@ function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 	end
 
 	if added == 0 then
-		return false, "No se añadió ningún miembro (¿nadie conectado?)"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedNone")
 	end
-	return true, string.format("%d personajes añadidos", added)
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedMsg", added)
 end
 
 --- Cuenta miembros de respaldo (admins + usuarios normales) de una red, sin

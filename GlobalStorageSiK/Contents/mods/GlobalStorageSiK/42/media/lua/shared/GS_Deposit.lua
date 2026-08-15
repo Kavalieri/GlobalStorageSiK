@@ -417,7 +417,10 @@ end
 ---@return string
 function GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
 	summary = summary or {}
-	local T = GlobalStorageSiK.I18n.text
+	-- Solo se llama desde codigo servidor (GS_Server.lua, depositItems) para
+	-- construir el mensaje de un actionResult - I18n.remote (no .text) para
+	-- que cada cliente lo resuelva en su propio idioma, ver GS_I18n.lua.
+	local T = GlobalStorageSiK.I18n.remote
 	if summary.reason == "remote_disabled" then
 		return T("IGUI_GS_DepositFailRemoteDisabled")
 	end

@@ -110,6 +110,11 @@ local function onServerCommand(module, command, args)
 	end
 
 	if command == "actionResult" then
+		-- El servidor envía la clave (+ args) en vez del texto ya resuelto,
+		-- para que cada cliente lo traduzca a SU propio idioma en vez de
+		-- heredar el idioma configurado en el proceso del servidor - ver
+		-- GlobalStorageSiK.I18n.remote / resolveRemote en GS_I18n.lua.
+		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
 		local continuing = false
 		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.onActionResult then
 			continuing = GlobalStorageSiK.TransferQueue.onActionResult(args) == true
@@ -120,7 +125,7 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.WithdrawClient.clearPending()
 		end
 		if not continuing then
-			showMessage(args and args.message or "Listo", args and args.ok == false)
+			showMessage(resolvedMessage or "Listo", args and args.ok == false)
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
 			-- Cualquier deposito/retiro cambia cantidades en red: invalida la
@@ -128,8 +133,8 @@ local function onServerCommand(module, command, args)
 			-- de antes de la transferencia.
 			GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
 		end
-		GlobalStorageSiK.Debug.log("Client", "actionResult", args and args.message or "")
-		GlobalStorageSiK.Debug.halo(GlobalStorageSiK.NetClient.getPlayer(), args and args.message or "")
+		GlobalStorageSiK.Debug.log("Client", "actionResult", resolvedMessage or "")
+		GlobalStorageSiK.Debug.halo(GlobalStorageSiK.NetClient.getPlayer(), resolvedMessage or "")
 		local player = GlobalStorageSiK.NetClient.getPlayer()
 		if player and player.getInventory then
 			local inv = player:getInventory()
@@ -141,7 +146,7 @@ local function onServerCommand(module, command, args)
 			ISInventoryPage.dirtyUI()
 		end
 		if args and not args.ok then
-			GlobalStorageSiK.Log.debug("Client", "actionResult failed", args.message)
+			GlobalStorageSiK.Log.debug("Client", "actionResult failed", resolvedMessage)
 		end
 		if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance then
 			local player = GlobalStorageSiK.NetClient.getPlayer()
@@ -180,7 +185,7 @@ local function onServerCommand(module, command, args)
 				GlobalStorageSiK.TerminalPlacement.offerAfterTerminalOutput(player, {})
 			end
 		end
-		if args and args.ok and args.message == "Contenedor actualizado" then
+		if args and args.ok and args.containerUpdated then
 			local node = nil
 			local ui = GlobalStorageSiK.TerminalNodeEditor and GlobalStorageSiK.TerminalNodeEditor.instance
 			if ui and ui.node and (not args.nodeId or ui.node.id == args.nodeId) then
@@ -303,7 +308,7 @@ local function onServerCommand(module, command, args)
 				end)
 				if not ok then
 					GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-					showMessage("Global Storage: error actualizando terminal")
+					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"))
 				end
 			end
 		elseif explicitOpen then
@@ -313,7 +318,7 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Log.info("Client", "terminalState", "open items=" .. tostring(itemCount))
 			if not GlobalStorageSiK.TerminalUI or type(GlobalStorageSiK.TerminalUI.show) ~= "function" then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show no disponible")
-				showMessage("Global Storage: error abriendo terminal")
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
 				return
 			end
 			local ok, err = pcall(function()
@@ -321,7 +326,7 @@ local function onServerCommand(module, command, args)
 			end)
 			if not ok then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-				showMessage("Global Storage: error abriendo terminal")
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
 			elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.pendingInitialTab then
 				-- Ver terminalRegistered mas arriba: tras instalar un terminal
 				-- con exito, la ventana debe abrir directamente en Red > Nodos
@@ -538,7 +543,7 @@ local function onServerCommand(module, command, args)
 		for _ in pairs(GlobalStorageSiK.Client.lastItemIndex) do
 			count = count + 1
 		end
-		showMessage("Tipos en red: " .. tostring(count))
+		showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ItemTypes", count))
 	end
 end
 

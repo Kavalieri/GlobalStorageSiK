@@ -55,9 +55,9 @@ local function finishJob(networkId, job, reason)
 	if reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
 		msg = GlobalStorageSiK.Redistribute.formatSummaryMessage(summary)
 	elseif job.moved == 0 and job.failed == 0 then
-		msg = "Todo ya esta en el contenedor adecuado"
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeNothingToSort")
 	else
-		msg = string.format("Reordenacion completa: %d movidos, %d fallos", job.moved, job.failed)
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeCompleteMsg", job.moved, job.failed)
 	end
 	local ok = reason ~= "remote_disabled" and reason ~= "no_power" and reason ~= "no_player"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo

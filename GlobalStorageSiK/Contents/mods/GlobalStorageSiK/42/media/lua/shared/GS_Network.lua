@@ -278,16 +278,16 @@ end
 function GlobalStorageSiK.Network.renameDisplayName(networkId, ownerUsername, newName)
 	newName = newName and string.gsub(newName, "^%s*(.-)%s*$", "%1") or ""
 	if #newName < 2 or #newName > 32 then
-		return false, "Nombre entre 2 y 32 caracteres"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNameLengthMsg")
 	end
 	if not newName:match("^[%w%s%-%_%.]+$") then
-		return false, "Caracteres no validos en el nombre"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNameInvalidCharsMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local net = registry.networks[networkId]
 	if not net then
-		return false, "Red no encontrada"
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
 	-- La comprobacion de propietario ya la hace el llamador (GS_Server.lua,
 	-- via Permissions.isOwnerPlayer) ANTES de invocar esta funcion. Los

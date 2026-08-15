@@ -445,6 +445,29 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NetActiveSession = "Active session",
 	IGUI_GS_BlockedTerminalUnlinked = "This terminal is not linked to a network. Use Install GS Terminal or the Network tab to create or link one.",
 	IGUI_GS_NetworkCreated = "New network created: {1}",
+	IGUI_GS_AccessTerminalUnlinked = "Terminal not linked to a network",
+	IGUI_GS_AccessTabletOutOfRange = "Tablet out of range",
+	IGUI_GS_AccessTabletAddonRequired = "Install the tablet addon on the terminal",
+	IGUI_GS_ZoneCreatedMsg = "Zone created: {1}",
+	IGUI_GS_ContainerMarkedMsg = "Container marked",
+	IGUI_GS_ContainerUnmarkedMsg = "Container unmarked",
+	IGUI_GS_ContainerNotInNetworkMsg = "Not in the network",
+	IGUI_GS_ZoneRescannedMsg = "Zone rescanned: +{1} new, {2} offline, {3} out of range",
+	IGUI_GS_RedistributeNothingToSort = "Everything is already in the right container",
+	IGUI_GS_RedistributeCompleteMsg = "Sort complete: {1} moved, {2} failed",
+	IGUI_GS_FactionMembersAddedNone = "No members added (nobody online?)",
+	IGUI_GS_FactionMembersAddedMsg = "{1} members added",
+	IGUI_GS_ClientTerminalUpdateError = "Global Storage: error updating terminal",
+	IGUI_GS_ClientTerminalOpenError = "Global Storage: error opening terminal",
+	IGUI_GS_NetworkNameLengthMsg = "Name must be between 2 and 32 characters",
+	IGUI_GS_NetworkNameInvalidCharsMsg = "Invalid characters in the name",
+	IGUI_GS_NetworkNotFoundMsg = "Network not found",
+	IGUI_GS_PermCharacterNameEmptyMsg = "Character name is empty",
+	IGUI_GS_PermAlreadyOwnerMsg = "You are already the owner",
+	IGUI_GS_PermOnlyOwnerTransferMsg = "Only the owner can transfer the network",
+	IGUI_GS_PermOwnershipTransferredMsg = "Ownership transferred to {1}",
+	IGUI_GS_ZoneSourceStructure = "Structure",
+	IGUI_GS_PermAddOnlineHint = "Nobody else online right now - faction members above still work, or add them once connected.",
 }
 
 --- Sustitución literal (sin patrones Lua) para evitar corrupción de %1, %2...
@@ -516,6 +539,32 @@ function GlobalStorageSiK.I18n.text(key, ...)
 		return template
 	end
 	return GlobalStorageSiK.I18n.formatTemplate(template, ...)
+end
+
+--- Empaqueta una clave (+ args) para resolver en el idioma de quien LEE el
+--- valor, no de quien lo genera. Usar solo para mensajes que el servidor
+--- envía a un cliente via gsSendServerCommand (p.ej. actionResult.message):
+--- getText()/I18n.text() siempre resuelve con el idioma del PROCESO que
+--- llama, así que un string ya resuelto en el servidor sale en el idioma
+--- del propio servidor para TODOS los clientes, sea cual sea el suyo.
+--- GS_Client.lua debe resolver esto con GlobalStorageSiK.I18n.resolveRemote
+--- al recibirlo, nunca reenviar el resultado de esta función tal cual.
+---@param key string
+---@return table
+function GlobalStorageSiK.I18n.remote(key, ...)
+	return { __gsI18nKey = key, __gsI18nArgs = { ... } }
+end
+
+--- Resuelve (en el idioma de ESTE proceso) un valor que puede venir ya como
+--- string plano (call sites aún no migrados) o como tabla generada por
+--- GlobalStorageSiK.I18n.remote(). Seguro de llamar con nil.
+---@param value table|string|nil
+---@return string|nil
+function GlobalStorageSiK.I18n.resolveRemote(value)
+	if type(value) == "table" and value.__gsI18nKey then
+		return GlobalStorageSiK.I18n.text(value.__gsI18nKey, unpack(value.__gsI18nArgs or {}))
+	end
+	return value
 end
 
 --- Humaniza un identificador interno (sprite / tipo sin traducción).

@@ -613,7 +613,7 @@ local function addZone(zone)
 
 	if count >= maxZones then
 
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_ZoneLimitReached")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneLimitReached")
 
 	end
 
@@ -628,7 +628,7 @@ local function addZone(zone)
 
 	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 
-	return true, "Zona creada: " .. zone.name
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneCreatedMsg", zone.name)
 
 end
 
@@ -646,7 +646,7 @@ local function registerContainer(entry, networkId)
 
 	if not entry or not entry.id then
 
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_InvalidEntry")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidEntry")
 
 	end
 
@@ -670,7 +670,7 @@ local function registerContainer(entry, networkId)
 
 		if existing.id == entry.id then
 
-			return false, GlobalStorageSiK.I18n.text("IGUI_GS_AlreadyMarked")
+			return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AlreadyMarked")
 
 		end
 
@@ -680,7 +680,7 @@ local function registerContainer(entry, networkId)
 
 	if #containers >= GlobalStorageSiK.Config.MAX_CONTAINERS_PER_NETWORK then
 
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_ContainerLimitReached")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerLimitReached")
 
 	end
 
@@ -690,7 +690,7 @@ local function registerContainer(entry, networkId)
 
 	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 
-	return true, "Contenedor marcado"
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerMarkedMsg")
 
 end
 
@@ -728,7 +728,7 @@ local function unregisterContainer(containerId, networkId)
 
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 
-			return true, "Contenedor desmarcado"
+			return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerUnmarkedMsg")
 
 		end
 
@@ -736,7 +736,7 @@ local function unregisterContainer(containerId, networkId)
 
 
 
-	return false, "No estaba en la red"
+	return false, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotInNetworkMsg")
 
 end
 
@@ -745,11 +745,11 @@ end
 local playerCraftProbe = {}
 
 local ACCESS_MESSAGES = {
-	no_terminal = "Sin terminal cercano",
-	terminal_unlinked = "Terminal sin red vinculada",
-	tablet_out_of_range = "Tableta fuera de rango",
-	tablet_addon_required = "Instala el addon de tableta en el terminal",
-	no_player = GlobalStorageSiK.I18n.text("IGUI_GS_AccessInvalidPlayer"),
+	no_terminal = GlobalStorageSiK.I18n.remote("IGUI_GS_BlockedTitle"),
+	terminal_unlinked = GlobalStorageSiK.I18n.remote("IGUI_GS_AccessTerminalUnlinked"),
+	tablet_out_of_range = GlobalStorageSiK.I18n.remote("IGUI_GS_AccessTabletOutOfRange"),
+	tablet_addon_required = GlobalStorageSiK.I18n.remote("IGUI_GS_AccessTabletAddonRequired"),
+	no_player = GlobalStorageSiK.I18n.remote("IGUI_GS_AccessInvalidPlayer"),
 }
 
 local function sendTerminalBlocked(player, reason)
@@ -818,7 +818,7 @@ local function requireNetworkPermission(player, networkId)
 	if allowed then
 		return true
 	end
-	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoAccess") })
+	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
 	return false
 end
 
@@ -833,7 +833,7 @@ local function requireAdminAccess(player, networkId)
 	if GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return true
 	end
-	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_RequireAdminRole") })
+	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole") })
 	return false
 end
 
@@ -853,7 +853,7 @@ local function requireTerminalAccess(player, networkId)
 	if accessOk then
 		return true
 	end
-	local msg = ACCESS_MESSAGES[accessReason] or "Sin acceso al terminal"
+	local msg = ACCESS_MESSAGES[accessReason] or GlobalStorageSiK.I18n.remote("IGUI_GS_NoTerminalAccessMsg")
 	gsSendServerCommand(player, "actionResult", { ok = false, message = msg })
 	GlobalStorageSiK.TerminalAccess.clearSession(player)
 	return false
@@ -986,7 +986,7 @@ local function runLockedTransfer(player, networkId, op, fn)
 		end
 		gsSendServerCommand(player, "actionResult", {
 			ok = false,
-			message = GlobalStorageSiK.I18n.text("IGUI_GS_InternalTransferError"),
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError"),
 			reason = "transfer_error",
 			transferOp = op,
 		})
@@ -1230,7 +1230,7 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 	local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	if not allowed then
 		GlobalStorageSiK.Log.warn("Server", "openTerminal denied", "permissions:" .. tostring(reason))
-		gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoAccess") })
+		gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
 		return
 	end
 
@@ -1464,7 +1464,7 @@ local function onClientCommand(module, command, player, args)
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local node = registry.nodes and registry.nodes[args.nodeId]
 		if not node then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_ContainerNotFoundMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
 			return
 		end
 		local rows, source = resolveNodeContents(node, networkId)
@@ -1481,7 +1481,7 @@ local function onClientCommand(module, command, player, args)
 			if not args.desktopItemId then
 				gsSendServerCommand(player, "actionResult", {
 					ok = false,
-					message = GlobalStorageSiK.I18n.text("IGUI_GS_CraftDesktopFail"),
+					message = GlobalStorageSiK.I18n.remote("IGUI_GS_CraftDesktopFail"),
 					recipeId = args.recipeId,
 				})
 				return
@@ -1490,7 +1490,7 @@ local function onClientCommand(module, command, player, args)
 			if not desktopItem or not GlobalStorageSiK.TerminalAccess.isVanillaDesktopItem(desktopItem) then
 				gsSendServerCommand(player, "actionResult", {
 					ok = false,
-					message = GlobalStorageSiK.I18n.text("IGUI_GS_CraftDesktopFail"),
+					message = GlobalStorageSiK.I18n.remote("IGUI_GS_CraftDesktopFail"),
 					recipeId = args.recipeId,
 				})
 				return
@@ -1515,17 +1515,17 @@ local function onClientCommand(module, command, player, args)
 		local ok, reason = GlobalStorageSiK.PCAcquire.craft(player)
 		local msg
 		if ok then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_PCAcquireSuccess")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_PCAcquireSuccess")
 		elseif reason == "book" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_PCAcquireFailBook")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_PCAcquireFailBook")
 		elseif reason == "skill" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_AcquireFailSkill")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_AcquireFailSkill")
 		elseif reason == "tools" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_AcquireFailTools")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_AcquireFailTools")
 		elseif reason == "materials" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_PCAcquireFailMaterials")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_PCAcquireFailMaterials")
 		else
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_CraftFail")
 		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = msg })
 
@@ -1536,15 +1536,15 @@ local function onClientCommand(module, command, player, args)
 		local ok, reason = GlobalStorageSiK.ReaderAcquire.craft(player)
 		local msg
 		if ok then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ReaderAcquireSuccess")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ReaderAcquireSuccess")
 		elseif reason == "book" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ReaderAcquireFailBook")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ReaderAcquireFailBook")
 		elseif reason == "tools" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_AcquireFailTools")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_AcquireFailTools")
 		elseif reason == "materials" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ReaderAcquireFailMaterials")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ReaderAcquireFailMaterials")
 		else
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_CraftFail")
 		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = msg })
 
@@ -1556,15 +1556,15 @@ local function onClientCommand(module, command, player, args)
 		local ok, reason = GlobalStorageSiK.DiskProgramming.program(player, args.programId)
 		local msg
 		if ok then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ProgramDiskSuccess")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ProgramDiskSuccess")
 		elseif reason == "book" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ProgramDiskFailBook")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ProgramDiskFailBook")
 		elseif reason == "terminal" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ProgramDiskFailTerminal")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ProgramDiskFailTerminal")
 		elseif reason == "materials" then
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_ProgramDiskFailMaterials")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ProgramDiskFailMaterials")
 		else
-			msg = GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_CraftFail")
 		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = msg })
 
@@ -1732,7 +1732,7 @@ local function onClientCommand(module, command, player, args)
 					string.format("%d,%d,%d network=%s user=%s", x, y, z, tostring(nid), player:getUsername()))
 				pushTerminalState(player, nid, nil, searchQuery)
 			else
-				gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_MarkMainFailed", tostring(reason)) })
+				gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_MarkMainFailed", tostring(reason)) })
 			end
 		end
 
@@ -1825,12 +1825,12 @@ local function onClientCommand(module, command, player, args)
 			local msg
 			if ok then
 				if moved and moved > 0 and requested > 0 and moved < requested then
-					msg = GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawnPartial", tostring(moved), tostring(requested))
+					msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnPartial", tostring(moved), tostring(requested))
 				else
-					msg = GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawnCount", tostring(moved or 0))
+					msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(moved or 0))
 				end
 			else
-				msg = GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawErrorReason", tostring(reason or "?"))
+				msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "?"))
 			end
 
 			afterTransferSync(player, networkId, searchQuery)
@@ -1890,7 +1890,7 @@ local function onClientCommand(module, command, player, args)
 			afterTransferSync(player, networkId, searchQuery)
 			gsSendServerCommand(player, "actionResult", {
 				ok = ok,
-				message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_CraftClaimOk") or GlobalStorageSiK.I18n.text("IGUI_GS_CraftClaimFail"),
+				message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CraftClaimOk") or GlobalStorageSiK.I18n.remote("IGUI_GS_CraftClaimFail"),
 				craftClaim = { itemId = itemId, ok = ok },
 			})
 		end)
@@ -1901,15 +1901,15 @@ local function onClientCommand(module, command, player, args)
 		end
 		local zoneId = args.zoneId
 		if not zoneId or zoneId == "" then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_InvalidZone") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 			return
 		end
 		local summary = GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
 		if not summary then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_ZoneNotFoundMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg") })
 			return
 		end
-		local msg = string.format("Zona reescaneada: +%d nuevos, %d offline, %d fuera de rango", summary.added or 0, summary.offline or 0, summary.outOfRange or 0)
+		local msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneRescannedMsg", summary.added or 0, summary.offline or 0, summary.outOfRange or 0)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = msg })
 		pushTerminalState(player, networkId, summary, searchQuery)
 
@@ -1920,10 +1920,10 @@ local function onClientCommand(module, command, player, args)
 		-- Un solo click: RedistributeJob se relanza solo cada pocos segundos
 		-- hasta terminar toda la red (respetando MaxItemsPerBulkTick por lote).
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_RedistributeInProgress") })
+			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeInProgress") })
 		else
 			GlobalStorageSiK.RedistributeJob.start(player, networkId)
-			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_RedistributingNetwork") })
+			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributingNetwork") })
 		end
 
 	elseif command == "renameZone" then
@@ -1933,12 +1933,12 @@ local function onClientCommand(module, command, player, args)
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone or not args.name or args.name == "" then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_InvalidZone") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 			return
 		end
 		zone.name = args.name
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_ZoneRenamedMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneRenamedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "deleteZone" then
@@ -1948,17 +1948,17 @@ local function onClientCommand(module, command, player, args)
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_ZoneNotFoundMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg") })
 			return
 		end
 		local zoneName = zone.name or args.zoneId
 		local ok = GlobalStorageSiK.Zones.removeZone(args.zoneId)
 		if not ok then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_ZoneDeleteFailedMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeleteFailedMsg") })
 			return
 		end
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_ZoneDeletedMsg", zoneName) })
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "updateNode" then
@@ -1968,7 +1968,7 @@ local function onClientCommand(module, command, player, args)
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local node = registry.nodes and registry.nodes[args.nodeId]
 		if not node then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_ContainerNotFoundMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
 			return
 		end
 		if args.membership == "excluded" then
@@ -2063,7 +2063,8 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", {
 			ok = true,
-			message = GlobalStorageSiK.I18n.text("IGUI_GS_ContainerUpdatedMsg"),
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerUpdatedMsg"),
+			containerUpdated = true,
 			nodeId = args.nodeId,
 			displayName = node.displayName,
 		})
@@ -2081,7 +2082,7 @@ local function onClientCommand(module, command, player, args)
 
 		if not bounds then
 
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoRoom") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoRoom") })
 
 			return
 
@@ -2110,7 +2111,7 @@ local function onClientCommand(module, command, player, args)
 			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 			pushTerminalState(player, networkId, scan, searchQuery)
 		else
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_PriorityChangeFailedMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg") })
 		end
 
 	elseif command == "setZonePriority" then
@@ -2124,7 +2125,7 @@ local function onClientCommand(module, command, player, args)
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 			pushTerminalState(player, networkId, nil, searchQuery)
 		else
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_InvalidZone") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 		end
 
 	elseif command == "createZoneStructure" then
@@ -2133,10 +2134,10 @@ local function onClientCommand(module, command, player, args)
 		end
 		local bounds, zoneName, source = GlobalStorageSiK.Zones.boundsFromStructure(player)
 		if not bounds then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoBuildingOrSafehouse") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuildingOrSafehouse") })
 			return
 		end
-		local zone = GlobalStorageSiK.Zones.createZone(zoneName or "Estructura", source, bounds, networkId)
+		local zone = GlobalStorageSiK.Zones.createZone(zoneName or GlobalStorageSiK.I18n.text("IGUI_GS_ZoneSourceStructure"), source, bounds, networkId)
 		if source == GlobalStorageSiK.Zones.SOURCE.SAFEHOUSE and bounds.safehouseId then
 			zone.safehouseId = bounds.safehouseId
 		end
@@ -2153,10 +2154,10 @@ local function onClientCommand(module, command, player, args)
 		end
 		local bounds, buildingTitle = GlobalStorageSiK.Zones.boundsFromPlayerBuilding(player)
 		if not bounds then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoBuilding") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuilding") })
 			return
 		end
-		local zoneName = buildingTitle or "Edificio"
+		local zoneName = buildingTitle or GlobalStorageSiK.I18n.text("IGUI_GS_ZoneSourceBuilding")
 		local zone = GlobalStorageSiK.Zones.createZone(zoneName, GlobalStorageSiK.Zones.SOURCE.BUILDING, bounds, networkId)
 		local ok, message = addZone(zone)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
@@ -2171,7 +2172,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		if not GlobalStorageSiK.Sandbox.allowSafehouseImport() then
 
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_SafehouseImportDisabledMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_SafehouseImportDisabledMsg") })
 
 			return
 
@@ -2181,13 +2182,13 @@ local function onClientCommand(module, command, player, args)
 
 		if not bounds then
 
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoSafehouseMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoSafehouseMsg") })
 
 			return
 
 		end
 
-		local name = bounds.title or "Safehouse"
+		local name = bounds.title or GlobalStorageSiK.I18n.text("IGUI_GS_ZoneSourceSafehouse")
 
 		local zone = GlobalStorageSiK.Zones.createZone(name, GlobalStorageSiK.Zones.SOURCE.SAFEHOUSE, bounds, networkId)
 
@@ -2211,7 +2212,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local b = args.bounds
 		if not b or b.x1 == nil or b.y1 == nil or b.x2 == nil or b.y2 == nil then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_InvalidArea") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidArea") })
 			return
 		end
 		local bounds = {
@@ -2225,7 +2226,7 @@ local function onClientCommand(module, command, player, args)
 		local w = bounds.x2 - bounds.x1 + 1
 		local h = bounds.y2 - bounds.y1 + 1
 		if w < 1 or h < 1 or w > 200 or h > 200 then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_AreaSizeInvalid") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_AreaSizeInvalid") })
 			return
 		end
 		local zone = GlobalStorageSiK.Zones.createZone(GlobalStorageSiK.I18n.text("IGUI_GS_ZoneSourceSelection"), GlobalStorageSiK.Zones.SOURCE.SELECTION, bounds, networkId)
@@ -2239,12 +2240,12 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "probeCraft" then
 		local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
 		if not allowed then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoAccess") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
 			return
 		end
 		local accessOk, _, _, accessReason = GlobalStorageSiK.TerminalAccess.evaluate(player, networkId)
 		if not accessOk then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_NoTerminalAccessMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoTerminalAccessMsg") })
 			return
 		end
 		local okProbe, probe = pcall(GlobalStorageSiK.CraftCatalog.probe, player, networkId)
@@ -2254,7 +2255,7 @@ local function onClientCommand(module, command, player, args)
 		GlobalStorageSiK.Log.info("Server", "probeCraft",
 			string.format("total=%d player=%d network=%d terminal=%d",
 				probe.total or 0, probe.validPlayer or 0, probe.validNetwork or 0, probe.validTerminalTags or 0))
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_RecipeAnalysisDone") })
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RecipeAnalysisDone") })
 		pushTerminalState(player, networkId, nil, searchQuery, probe)
 
 	elseif command == "transferOwnership" then
@@ -2263,7 +2264,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local newOwner = args.newOwner and string.gsub(args.newOwner, "^%s*(.-)%s*$", "%1") or ""
 		if newOwner == "" then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_EmptyUsername") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_EmptyUsername") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Permissions.transferOwner(networkId, player, newOwner, args.keepFormerOwner == true)
@@ -2293,7 +2294,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Categories.add(networkId, args.name)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_CategoryAdded") or GlobalStorageSiK.I18n.text("IGUI_GS_CategoryDuplicate") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryDuplicate") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "addPermissionUser" then
@@ -2302,7 +2303,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Permissions.addUser(networkId, args.characterName or args.username)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_UserAdded") or GlobalStorageSiK.I18n.text("IGUI_GS_UserAlreadyExists") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserAlreadyExists") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "removePermissionUser" then
@@ -2320,11 +2321,11 @@ local function onClientCommand(module, command, player, args)
 			end
 		end
 		if targetIsAdmin and not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerRemoveAdminsMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRemoveAdminsMsg") })
 			return
 		end
 		if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_RequireAdminRole") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole") })
 			return
 		end
 		-- Limpiar también de adminUsers si era admin
@@ -2335,17 +2336,17 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Permissions.removeUser(networkId, target)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_UserRemovedMsg") or GlobalStorageSiK.I18n.text("IGUI_GS_UserNotFoundToRemoveMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserRemovedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserNotFoundToRemoveMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "setMemberRole" then
 		if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerChangeRolesMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerChangeRolesMsg") })
 			return
 		end
 		local ok = GlobalStorageSiK.Permissions.setUserRole(networkId, args.username or "", args.role or "member")
 		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_RoleUpdatedMsg") or GlobalStorageSiK.I18n.text("IGUI_GS_RoleUpdateFailedMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdatedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdateFailedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "setFactionOnly" then
@@ -2356,7 +2357,7 @@ local function onClientCommand(module, command, player, args)
 		GlobalStorageSiK.Permissions.ensure(registry, networkId)
 		registry.networks[networkId].factionOnly = args.enabled == true
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.text("IGUI_GS_PermissionsUpdatedMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PermissionsUpdatedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "renameNetwork" then
@@ -2364,7 +2365,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerRenameNetworkMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRenameNetworkMsg") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Network.renameDisplayName(networkId, player:getUsername(), args.name)
@@ -2379,7 +2380,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Permissions.addFaction(networkId, args.factionName)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_FactionAddedMsg") or GlobalStorageSiK.I18n.text("IGUI_GS_FactionAddFailedMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_FactionAddedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_FactionAddFailedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "removePermissionFaction" then
@@ -2388,7 +2389,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Permissions.removeFaction(networkId, args.factionName)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.text("IGUI_GS_FactionRemovedMsg") or GlobalStorageSiK.I18n.text("IGUI_GS_FactionNotFoundMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_FactionRemovedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_FactionNotFoundMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "installAddon" then
@@ -2397,7 +2398,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OpenTerminalInstallAddonsMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalInstallAddonsMsg") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Addons.install(player, networkId, anchor, args.addonId)
@@ -2412,7 +2413,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OpenTerminalRemoveAddonsMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalRemoveAddonsMsg") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, args.addonId)
@@ -2431,7 +2432,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OpenTerminalInstallReaderMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalInstallReaderMsg") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Addons.install(player, networkId, anchor, "Reader")
@@ -2447,7 +2448,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.text("IGUI_GS_OpenTerminalRemoveReaderMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalRemoveReaderMsg") })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, "Reader")
