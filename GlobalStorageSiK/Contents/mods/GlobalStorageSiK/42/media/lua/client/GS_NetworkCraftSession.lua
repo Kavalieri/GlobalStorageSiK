@@ -176,6 +176,17 @@ function GlobalStorageSiK.CraftSession.tableToArrayList(items)
 	return list
 end
 
+-- BUG REAL de ruido de log encontrado (reportado 2026-08-16, "el spam nos
+-- impide ver nada"): patchedGetContainers es un hook GENERICO llamado por el
+-- motor/UI constantemente (varias veces por tick mientras el panel de
+-- crafteo/construccion esta abierto, no solo al reclamar) - logueaba
+-- INCONDICIONALMENTE en cada llamada, inundando el log con miles de lineas
+-- identicas "base=10 conRed=26" y tapando las trazas realmente utiles
+-- (craftAttempt/sweepPendingReturns). Ahora solo loguea cuando los conteos
+-- CAMBIAN respecto a la ultima vez, que es la unica informacion que aporta
+-- esta linea de todas formas.
+local lastLoggedContainerCounts = { base = nil, merged = nil }
+
 --- Hook de contenedores para crafteo con inventario de red - GENERICO,
 --- siempre activo mientras hay sesion, sea cual sea el addon.
 ---@param character IsoPlayer|nil
@@ -194,7 +205,10 @@ local function patchedGetContainers(character)
 	end
 	local baseTable = arrayListToTable(base)
 	local merged = GlobalStorageSiK.CraftingBridge.mergeContainerLists(baseTable, session.networkId)
-	if GlobalStorageSiK.CraftSession._debugSinks and session.addonId and GlobalStorageSiK.CraftSession._debugSinks[session.addonId] then
+	if GlobalStorageSiK.CraftSession._debugSinks and session.addonId and GlobalStorageSiK.CraftSession._debugSinks[session.addonId]
+		and (lastLoggedContainerCounts.base ~= #baseTable or lastLoggedContainerCounts.merged ~= #merged) then
+		lastLoggedContainerCounts.base = #baseTable
+		lastLoggedContainerCounts.merged = #merged
 		sessionDebugLog("patchedGetContainers base=" .. tostring(#baseTable) .. " conRed=" .. tostring(#merged)
 			.. " networkId=" .. tostring(session.networkId))
 	end
@@ -217,34 +231,6 @@ function GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId)
 	for i = 1, #rows do
 		if rows[i].container == container then
 			return true
-		end
-	end
-	return false
-end
-
---- Indica si el jugador tiene una acción de crafteo/construcción en curso
---- (primer elemento de su cola de acciones temporizadas). Se usa para saber
---- cuándo es seguro devolver un ítem "prestado" (ver claimNetworkItem) a la
---- red sin cortar una acción en marcha.
----@param player IsoPlayer|nil
----@return boolean
-local function isCraftOrBuildActionActive(player)
-	if not player or not ISTimedActionQueue or not ISTimedActionQueue.getTimedActionQueue then
-		return false
-	end
-	local ok, queue = pcall(ISTimedActionQueue.getTimedActionQueue, player)
-	if not ok or not queue or not queue.queue then
-		return false
-	end
-	for i = 1, #queue.queue do
-		local action = queue.queue[i]
-		if action and instanceof then
-			local okType, isMatch = pcall(function()
-				return instanceof(action, "ISHandcraftAction") or instanceof(action, "ISBuildAction")
-			end)
-			if okType and isMatch then
-				return true
-			end
 		end
 	end
 	return false
@@ -275,6 +261,118 @@ local claimedItemIds = {}
 ---@return boolean
 function GlobalStorageSiK.CraftSession.isItemClaimed(itemId)
 	return itemId ~= nil and claimedItemIds[itemId] == true
+end
+
+--- operationId -> true para operaciones de crafteo/construccion cuyo evento
+--- de fin (onHandcraftActionComplete/Cancelled, o el equivalente de
+--- construccion) YA se disparo - CRITICO (reportado 2026-08-16, "posible
+--- dupeo, se devuelven objetos con los que todavia esta fabricando"): antes
+--- sweepPendingReturns decidia si devolver un item SOLO por tiempo
+--- transcurrido desde el reclamo (RETURN_GRACE_MS), sin saber si la accion
+--- de crafteo/construccion habia terminado de verdad. Confirmado con logs
+--- reales: el margen fijo vencia y devolvia el material AL ALMACEN SIETE
+--- SEGUNDOS ANTES de que craftAttempt RESULT/END llegara - exactamente el
+--- riesgo de dupe que se queria evitar (material fisico devuelto a la red
+--- mientras la receta aun podia estar consumiendolo). Ahora la devolucion
+--- se ata al evento REAL de fin de operacion (ver markOperationComplete,
+--- llamado desde cada addon en sus 4 manejadores onHandcraftActionComplete/
+--- Cancelled - vanilla y Neat - y el equivalente de Cook), no a un
+--- cronometro. Se limpia en endSession igual que claimedItemIds.
+local completedOperations = {}
+
+--- Enviar el RESULTADO del crafteo (y cualquier material sobrante) a la red
+--- por prioridad en vez de dejarlo en el inventario del jugador - pedido
+--- explicito (2026-08-17), preferencia SOLO de cliente (checkbox en la
+--- pestaña Craft, GSSiK_Addon_Craft_TerminalUI.lua). Las herramientas YA
+--- vuelven solas sin esto (sweepPendingReturns, mecanismo existente sin
+--- tocar) - esto es aparte, solo para lo NUEVO que aparece en el inventario
+--- tras crafteo. Compartido con Builder (misma infraestructura Core), pero
+--- en la practica no afecta a construccion: un build no añade ningun item
+--- nuevo al inventario (el objeto construido va directo al mundo), asi que
+--- el barrido de abajo no encuentra nada que mover en ese caso.
+GlobalStorageSiK.CraftSession.sendResultToNetwork = false
+
+-- operationId -> snapshot de IDs de item en el inventario principal del
+-- jugador ANTES de reclamar nada (ver claimRecipeItems) - solo se rellena
+-- si sendResultToNetwork esta activo al empezar la operacion, para no pagar
+-- el coste de escanear el inventario cuando el jugador no usa esto.
+local preClaimSnapshot = {}
+local preClaimNetworkId = {}
+local preClaimPlayerNum = {}
+
+--- Envia a la red cualquier item nuevo en el inventario del jugador que NO
+--- estuviera antes del claim (preClaimSnapshot) y que no sea un material/
+--- herramienta ya reclamado de la red (eso lo devuelve sweepPendingReturns
+--- por su cuenta, no hay que interferir) - en la practica, "nuevo" = el
+--- resultado del crafteo.
+---@param operationId string
+local function sweepCraftResultToNetwork(operationId)
+	local before = preClaimSnapshot[operationId]
+	local networkId = preClaimNetworkId[operationId]
+	local playerNum = preClaimPlayerNum[operationId]
+	preClaimSnapshot[operationId] = nil
+	preClaimNetworkId[operationId] = nil
+	preClaimPlayerNum[operationId] = nil
+	if not before or not networkId or not playerNum then
+		return
+	end
+	local player = getSpecificPlayer and getSpecificPlayer(playerNum) or nil
+	if not player then
+		return
+	end
+	local inv = player.getInventory and player:getInventory()
+	local items = inv and inv.getItems and inv:getItems()
+	if not items or not items.size then
+		return
+	end
+	local toDeposit = {}
+	for i = 0, items:size() - 1 do
+		local item = items:get(i)
+		if item and item.getID then
+			local id = item:getID()
+			if not before[id] and not GlobalStorageSiK.CraftSession.isItemClaimed(id) then
+				toDeposit[#toDeposit + 1] = item
+			end
+		end
+	end
+	if #toDeposit == 0 then
+		return
+	end
+	if GlobalStorageSiK.isAuthoritative() then
+		for i = 1, #toDeposit do
+			GlobalStorageSiK.Transfer.depositItem(player, toDeposit[i], networkId)
+		end
+	elseif GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
+		local ids = {}
+		for i = 1, #toDeposit do
+			ids[#ids + 1] = toDeposit[i]:getID()
+		end
+		-- En cliente MP puro, "depositItems" ejecuta en servidor el mismo
+		-- Transfer.depositItem por prioridad - mismo patron que
+		-- sweepPendingReturns usa para devolver herramientas.
+		GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = ids })
+	end
+end
+
+--- Marca una operacion de crafteo/construccion como terminada (completada O
+--- cancelada, ambas formas validas de "ya no se va a tocar mas este item") -
+--- llamado por cada addon desde sus manejadores de fin de accion. Necesario
+--- porque el Core no conoce las clases concretas de accion de cada addon
+--- (vanilla ISWidgetHandCraftControl, Neat NC_CraftActionPanel, Project_Cook
+--- PJCK_CraftActionPanel...) - solo conoce el operationId que el addon ya le
+--- paso al reclamar los items via claimRecipeItems/claimNetworkItem.
+---@param operationId string|nil
+function GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+	if not operationId then
+		return
+	end
+	completedOperations[operationId] = true
+	if preClaimSnapshot[operationId] then
+		-- Si se cancelo el crafteo, el diff no encuentra nada nuevo (no se
+		-- creo nada) y esto no hace nada - seguro llamarlo siempre que haya
+		-- snapshot, sin distinguir completado de cancelado.
+		sweepCraftResultToNetwork(operationId)
+	end
 end
 
 --- Mueve un ítem de un contenedor de red al inventario del jugador - API
@@ -328,6 +426,8 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				networkId = networkId,
 				playerNum = playerObj:getPlayerNum(),
 				fullType = fullType,
+				addedAt = getTimestampMs and getTimestampMs() or 0,
+				operationId = operationId,
 			}
 			return true
 		end
@@ -342,6 +442,8 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				networkId = networkId,
 				playerNum = playerObj:getPlayerNum(),
 				fullType = fullType,
+				addedAt = getTimestampMs and getTimestampMs() or 0,
+				operationId = operationId,
 			}
 		end
 		sessionDebugLog("claimNetworkItem OK (local, autoritativo) fullType=" .. fullType)
@@ -421,6 +523,23 @@ end
 ---@param batchCount number|nil
 ---@return table waitingIds, number waitingCount, number moved
 function GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, networkId, operationId, batchCount)
+	if operationId and player and GlobalStorageSiK.CraftSession.sendResultToNetwork then
+		local snap = {}
+		local inv = player.getInventory and player:getInventory()
+		local invItems = inv and inv.getItems and inv:getItems()
+		if invItems and invItems.size then
+			for i = 0, invItems:size() - 1 do
+				local it = invItems:get(i)
+				if it and it.getID then
+					snap[it:getID()] = true
+				end
+			end
+		end
+		preClaimSnapshot[operationId] = snap
+		preClaimNetworkId[operationId] = networkId
+		preClaimPlayerNum[operationId] = player.getPlayerNum and player:getPlayerNum() or nil
+	end
+
 	local waitingIds = {}
 	local waitingCount = 0
 	local moved = 0
@@ -512,7 +631,50 @@ end
 --- dejando la referencia vieja obsoleta. Ahora se indexa y localiza por
 --- itemId (GlobalStorageSiK.Deposit.findItemById, ya usado y probado para
 --- depositar por ID), inmune a que la referencia de objeto cambie.
+--- CAUSA REAL CONFIRMADA (2026-08-16, con logs reales con print() directo):
+--- sweepPendingReturns SI se ejecuta cada tick (esto ya se habia dudado y se
+--- descarto), pero corre en el MISMO tick en que se envia el claim - en ese
+--- instante el item todavia aparece fisicamente en el contenedor de RED
+--- desde el punto de vista del cliente (el servidor tarda ~300-400ms en
+--- confirmar el movimiento real, ver comentario de claimNetworkItem). La
+--- rama "no esta en el inventario principal" trataba eso IGUAL que "el
+--- jugador lo movio a otro sitio a proposito" y borraba la entrada de
+--- pendingReturns para siempre, ANTES de que el item terminara de llegar al
+--- inventario - de ahi que ninguna herramienta volviera nunca: se dejaba de
+--- rastrear en el primerisimo tick, sistematicamente, en el 100% de los
+--- casos.
+--- REGRESION 1 (build -dev5): el margen de gracia solo se aplicaba cuando
+--- el item AUN NO estaba en el inventario, dejando sin cubrir el caso
+--- simetrico (item ya en inventario, crafteo aun no encolado) - arreglado
+--- en -dev6 aplicando el margen SIEMPRE desde addedAt.
+--- REGRESION 2, la de fondo (reportada 2026-08-16, "posible dupeo, se
+--- devuelven objetos con los que todavia esta fabricando"): incluso con el
+--- fix de -dev6, un margen de tiempo FIJO (RETURN_GRACE_MS) sigue sin saber
+--- si el crafteo ya termino de verdad - solo mide "ha pasado tiempo desde
+--- el reclamo". Confirmado con logs reales: el margen vencia y el material
+--- se devolvia al almacen SIETE SEGUNDOS ANTES de que craftAttempt RESULT/
+--- END llegara - exactamente el riesgo de dupe que preocupaba (material
+--- fisico devuelto a la red mientras la receta aun podia estar
+--- consumiendolo/produciendo el resultado). FIX DEFINITIVO: la devolucion
+--- ya NO se basa en tiempo transcurrido, se ata al evento REAL de fin de
+--- operacion (ver markOperationComplete, llamado por cada addon desde sus
+--- manejadores onHandcraftActionComplete/Cancelled - vanilla, Neat y Cook).
+--- Mientras completedOperations[info.operationId] no sea true, el item
+--- NUNCA se devuelve, sin importar cuanto tiempo pase ni donde este. Se
+--- mantiene un RETURN_SAFETY_TIMEOUT_MS muy amplio solo como red de
+--- seguridad ante el caso patologico de que el evento de fin nunca llegue
+--- (p.ej. un addon de terceros con una API que no dispara ningun callback
+--- de fin reconocible) - no como mecanismo normal de devolucion.
+local RETURN_SAFETY_TIMEOUT_MS = 30000
+
+-- El print() incondicional "tick, pendientes=N" (una linea por CADA tick
+-- mientras hubiera algo pendiente, hasta 60/s) ya cumplio su proposito -
+-- confirmar con datos reales que la funcion SI se ejecuta cada tick - y se
+-- ha retirado (2026-08-16) por puro ruido de log una vez confirmado; los
+-- logs por-item de mas abajo (que disparan una sola vez cada uno, no cada
+-- tick) siguen siendo suficientes para depurar el resultado real.
 local function sweepPendingReturns()
+	local nowMs = getTimestampMs and getTimestampMs() or 0
 	for itemId, info in pairs(pendingReturns) do
 		local player = getSpecificPlayer and getSpecificPlayer(info.playerNum) or nil
 		if not player then
@@ -522,35 +684,70 @@ local function sweepPendingReturns()
 			if not item or not currentContainer then
 				-- No localizable en ningun contenedor accesible del jugador:
 				-- se consumio en la receta, nada que devolver.
-				sessionDebugLog("sweepPendingReturns itemId=" .. tostring(itemId)
+				print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
 					.. " no localizable (consumido) fullType=" .. tostring(info.fullType))
 				pendingReturns[itemId] = nil
-			elseif not isCraftOrBuildActionActive(player) then
-				if currentContainer == player:getInventory() then
+				-- BUG REAL encontrado (reportado 2026-08-16, "Neat SawLogs
+				-- nunca reclama la sierra, tarda mas y aun asi entrega el
+				-- objeto"): claimedItemIds nunca se limpiaba por item cuando
+				-- el sweep terminaba de resolverlo, asi que una herramienta
+				-- YA DEVUELTA a la red en un craft anterior seguia marcada
+				-- "ya reclamada" para siempre (solo se limpiaba entera en
+				-- endSession) - claimNetworkItem la ignoraba en el siguiente
+				-- craft pensando que ya estaba en el inventario, sin volver a
+				-- pedirle al servidor que la moviera de verdad. El siguiente
+				-- craft esperaba el timeout completo (4s, de ahi el retraso
+				-- extra notado) y terminaba aceptando la receta igualmente
+				-- porque HandcraftLogic la ve valida con la herramienta
+				-- todavia en el contenedor de red inyectado, sin necesitar
+				-- que este fisicamente en el inventario.
+				claimedItemIds[itemId] = nil
+			else
+				local operationDone = info.operationId and completedOperations[info.operationId] == true
+				local safetyExpired = info.addedAt and (nowMs - info.addedAt) >= RETURN_SAFETY_TIMEOUT_MS
+				if not operationDone and not safetyExpired then
+					if not info.loggedWaitingActive then
+						-- Se loguea UNA vez por item (no cada tick) en cuanto se
+						-- detecta el primer aplazamiento, no en cada iteracion.
+						info.loggedWaitingActive = true
+						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
+							.. " fullType=" .. tostring(info.fullType)
+							.. " aplazado (operationId=" .. tostring(info.operationId)
+							.. " todavia no ha terminado, se reintentara cuando llegue el evento de fin)")
+					end
+				elseif currentContainer == player:getInventory() then
+					if safetyExpired and not operationDone then
+						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
+							.. " operationId=" .. tostring(info.operationId)
+							.. " sin evento de fin tras " .. tostring(RETURN_SAFETY_TIMEOUT_MS)
+							.. "ms, devolviendo por red de seguridad")
+					end
 					if GlobalStorageSiK.isAuthoritative() then
 						local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, info.networkId)
-						sessionDebugLog("sweepPendingReturns devuelto=" .. tostring(ok)
+						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns devuelto=" .. tostring(ok)
 							.. " (local, autoritativo, deposito por prioridad) itemId=" .. tostring(itemId)
 							.. " fullType=" .. tostring(info.fullType) .. " reason=" .. tostring(reason))
 					elseif GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 						-- En cliente MP puro, "depositItems" ya ejecuta en
 						-- servidor el mismo Transfer.depositItem por prioridad.
 						GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = { itemId } })
-						sessionDebugLog("sweepPendingReturns -> depositItems enviado al servidor itemId=" .. tostring(itemId)
+						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns -> depositItems enviado al servidor itemId=" .. tostring(itemId)
 							.. " fullType=" .. tostring(info.fullType))
+					else
+						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns SIN VIA DE ENVIO itemId=" .. tostring(itemId)
+							.. " isAuthoritative=" .. tostring(GlobalStorageSiK.isAuthoritative())
+							.. " NetClient=" .. tostring(GlobalStorageSiK.NetClient ~= nil))
 					end
+					pendingReturns[itemId] = nil
+					-- Limpia claimedItemIds al devolverlo - ver comentario
+					-- arriba (rama "no localizable"), mismo motivo.
+					claimedItemIds[itemId] = nil
+				else
+					print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
+						.. " operacion terminada pero el item ya no esta en el inventario principal, se olvida sin depositar")
+					pendingReturns[itemId] = nil
+					claimedItemIds[itemId] = nil
 				end
-				pendingReturns[itemId] = nil
-			elseif not info.loggedWaitingActive then
-				-- DIAGNOSTICO (2026-08-13): antes esto era silencioso - no había
-				-- forma de distinguir "el item volverá en cuanto pares de
-				-- craftear" de "esto está roto". Se loguea UNA vez por item (no
-				-- cada tick, para no inundar el log) en cuanto se detecta el
-				-- primer aplazamiento por cola de crafteo/construcción activa.
-				info.loggedWaitingActive = true
-				sessionDebugLog("sweepPendingReturns itemId=" .. tostring(itemId)
-					.. " fullType=" .. tostring(info.fullType)
-					.. " aplazado (accion craft/build activa en cola, se reintentara en cuanto la cola quede vacia)")
 			end
 		end
 	end
@@ -974,8 +1171,12 @@ end
 --- practicamente gratis).
 ensureSweepTick = function()
 	if sweepTickInstalled or not Events or not Events.OnTick then
+		print("[GlobalStorageSiK:CraftDiag] ensureSweepTick NO INSTALADO (sweepTickInstalled="
+			.. tostring(sweepTickInstalled) .. " Events=" .. tostring(Events ~= nil)
+			.. " Events.OnTick=" .. tostring(Events and Events.OnTick ~= nil) .. ")")
 		return
 	end
+	print("[GlobalStorageSiK:CraftDiag] ensureSweepTick instalando handler de tick por primera vez")
 	Events.OnTick.Add(function()
 		sweepPendingReturns()
 		for addonId, fn in pairs(addonTickHandlers) do

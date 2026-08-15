@@ -312,11 +312,29 @@ function GlobalStorageSiK.Power.serializeConsumption(containerCount)
 	}
 end
 
+--- Indica si la sandbox tiene la electricidad de ciudad puesta en "Nunca"
+--- (Sandbox_ElecShut = 9, "Deshabilitado"/"Never"/"Mai" en las traducciones
+--- oficiales del juego - confirmado leyendo los ficheros de traduccion de
+--- PZ, no una suposicion). Pedido explicito de diseño (2026-08-16): un
+--- jugador que elige esta opcion esta diciendo "no quiero lidiar con
+--- electricidad en absoluto", asi que nuestra red debe respetarlo y no
+--- exigir cobertura de red real baldosa a baldosa en ese caso - la
+--- alternativa (seguir pidiendole generador/tendido real) iria en contra de
+--- la intencion explicita del jugador al elegir esa opcion.
+---@return boolean
+local function elecNeverShutsOff()
+	local ok, val = pcall(function() return SandboxVars and SandboxVars.ElecShut end)
+	return ok and val == 9
+end
+
 --- Indica si la red tiene energía suficiente para operar.
 ---@param networkId string|nil
 ---@return boolean
 function GlobalStorageSiK.Power.networkPowered(networkId)
 	if not GlobalStorageSiK.Sandbox.requiresPower() then
+		return true
+	end
+	if elecNeverShutsOff() then
 		return true
 	end
 

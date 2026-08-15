@@ -932,6 +932,12 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			end
 			ui[key] = nil
 		end
+		if ui.nodesPriorityInfoLbls and host then
+			for _, w in ipairs(ui.nodesPriorityInfoLbls) do
+				GlobalStorageSiK.TerminalScroll.disposeChild(host, w)
+			end
+		end
+		ui.nodesPriorityInfoLbls = nil
 		ui.collapsedZones = ui.collapsedZones or {}
 		ui.nodesSectionTitle = GlobalStorageSiK.TerminalChrome.createSectionLabel(pad, titleY, T("IGUI_GS_SectionNodes"))
 		ui.nodesSectionTitle._gsNetStatic = true
@@ -973,6 +979,23 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		end
 		ui.nodesEmbedBuilt = true
 		ui.nodesEmbedY = y
+		-- Bloque informativo inferior (pedido explicito): explica los 4
+		-- niveles de especificidad que usa GS_Router.matchSpecificity para
+		-- depositar/auto-ordenar, en el mismo texto plano que ya se usa para
+		-- explicarselo al jugador en el chat - evita que el sistema parezca
+		-- "aleatorio" cuando en realidad sigue un orden fijo y documentado.
+		local infoY = y + embedPanelHeight() + 8
+		ui.nodesPriorityInfoLbls = {}
+		local infoMaxW = innerW - pad * 2
+		for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_NodesPriorityHelp"), infoMaxW, UIFont.Small)) do
+			local lbl = ISLabel:new(pad, infoY, FONT_HGT_SMALL, line, 0.62, 0.66, 0.7, 1, UIFont.Small, true)
+			lbl:initialise()
+			lbl._gsNetStatic = true
+			GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
+			ui.nodesPriorityInfoLbls[#ui.nodesPriorityInfoLbls + 1] = lbl
+			infoY = infoY + FONT_HGT_SMALL + 2
+		end
+		ui.nodesPriorityInfoEndY = infoY
 	else
 		if ui.nodesSectionTitle then
 			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesSectionTitle, pad)
@@ -986,6 +1009,15 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		y = y + FONT_HGT_SMALL + 8
 		y = GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y)
 		ui.nodesEmbedY = y
+		if ui.nodesPriorityInfoLbls and #ui.nodesPriorityInfoLbls > 0 then
+			local infoY = y + embedPanelHeight() + 8
+			for _, lbl in ipairs(ui.nodesPriorityInfoLbls) do
+				GlobalStorageSiK.TerminalScroll.setContentX(scroll, lbl, pad)
+				GlobalStorageSiK.TerminalScroll.setContentY(scroll, lbl, infoY)
+				infoY = infoY + FONT_HGT_SMALL + 2
+			end
+			ui.nodesPriorityInfoEndY = infoY
+		end
 	end
 
 	local embedH = embedPanelHeight()
@@ -999,7 +1031,8 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			terminal.terminalState and terminal.terminalState.nodes or {},
 			terminal.terminalState and terminal.terminalState.categories or {}
 		)
-		return y + embedH + 12
+		local infoH = ui.nodesPriorityInfoLbls and (#ui.nodesPriorityInfoLbls * (FONT_HGT_SMALL + 2) + 8) or 0
+		return y + embedH + 12 + infoH
 	end
 	ui.nodesEmbedBuilt = false
 	return titleY + FONT_HGT_SMALL + 12

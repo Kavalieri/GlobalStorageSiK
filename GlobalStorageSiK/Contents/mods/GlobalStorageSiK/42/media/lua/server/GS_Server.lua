@@ -133,6 +133,13 @@ local debugEchoHookInstalled = false
 --- de paso de datos custom a traves de ISHandcraftAction.
 local lastOperationByPlayer = {}
 
+--- playerNum -> ultimo networkId conocido para el intento de crafteo en
+--- curso - mismo motivo que lastOperationByPlayer, para poder loguear el
+--- total de items en red DESPUES del crafteo (diagnostico de dupeo,
+--- 2026-08-16) sin tener que llevar el networkId a traves de la accion
+--- nativa de PZ.
+local lastNetworkIdByPlayer = {}
+
 local function installDebugEchoHook()
 	if debugEchoHookInstalled then
 		return
@@ -859,25 +866,45 @@ local function requireTerminalAccess(player, networkId)
 	return false
 end
 
---- Sugiere categoría dominante desde snapshot.
----@param snapshot table|nil
+--- Sugiere categoría dominante desde filas de contenido (rows, ya resueltas
+--- con GS_ItemSnapshot.toRows - mismo formato que collectMainFilters/
+--- collectSubFilters usan en el cliente).
+--- BUG REAL (2026-08-17, "Comida 2 con rules=Food no acepta nada, deuda
+--- tecnica en chips NUEVOS no antiguos"): esta funcion devolvia row.category
+--- SIN PROCESAR (la DisplayCategory cruda del ScriptItem, ej. "Food",
+--- "FoodSnack", "MaterialWeapon" segun el mod de categorias extendidas
+--- instalado) y el boton "Categoria sugerida -> Aplicar" del cliente
+--- (GS_TerminalUI_Config.lua:renderNodeContentsBlock) la guardaba TAL CUAL
+--- como entry.categories, sin el prefijo GS_ItemTaxonomy.EXT_GROUP_PREFIX
+--- que TODO el resto del sistema (matchSpecificity, collectMainFilters, el
+--- editor de 3 desplegables) usa para reconocer "esto es una familia de
+--- Nivel 1 completa, compara por groupLabel". El resultado: un chip que
+--- parece de Nivel 1 pero que matchSpecificity nunca reconoce como tal (cae
+--- al ultimo "else" que compara la clave cruda letra por letra), rechazando
+--- SIEMPRE. Fix: resolver cada fila con ItemTaxonomy.resolve() (misma fuente
+--- unica que collectMainFilters) y agrupar por tax.groupLabel, devolviendo
+--- la clave YA prefijada - exactamente lo que el editor moderno guardaria si
+--- el jugador hubiera elegido esa misma familia a mano.
+---@param rows table[]
 ---@return string|nil
-local function suggestCategoryFromSnapshot(snapshot)
+local function suggestCategoryFromSnapshot(rows)
 	local counts = {}
-	for _, row in pairs(snapshot or {}) do
-		local cat = row.category
-		if cat and cat ~= "" then
-			counts[cat] = (counts[cat] or 0) + (row.count or 1)
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	for _, row in ipairs(rows or {}) do
+		local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, row.fullType, row)
+		local label = ok and tax and tax.groupLabel
+		if label and label ~= "" then
+			counts[label] = (counts[label] or 0) + (row.count or 1)
 		end
 	end
 	local best, bestCount = nil, 0
-	for cat, total in pairs(counts) do
+	for label, total in pairs(counts) do
 		if total > bestCount then
-			best = cat
+			best = label
 			bestCount = total
 		end
 	end
-	return best
+	return best and (EXT .. best) or nil
 end
 
 --- Obtiene filas de inventario de un nodo (vivo o snapshot).
@@ -958,6 +985,31 @@ local function findNetworkItemById(networkId, itemId)
 	return nil, nil
 end
 
+--- Cuenta el total de items (sumando cantidades apiladas, ver getItems():
+--- size() ya usado igual en el resto del fichero) en todos los contenedores
+--- en vivo de una red - diagnostico pedido (2026-08-16, "posible dupeo, añade
+--- trazas de items antes y despues en el almacenamiento") para poder
+--- comparar a ojo el total ANTES de reclamar (craftAttemptStart) contra el
+--- total DESPUES de que la receta termine (craftAttempt RESULT) y confirmar
+--- que la diferencia es exactamente lo esperado (materiales consumidos
+--- menos, resultado craftado si se deposito) - nunca mas de lo esperado.
+---@param networkId string|nil
+---@return number
+local function countNetworkItems(networkId)
+	local total = 0
+	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	for i = 1, #live do
+		local container = live[i].container
+		if container and container.getItems then
+			local items = container:getItems()
+			if items and items.size then
+				total = total + items:size()
+			end
+		end
+	end
+	return total
+end
+
 --- Ejecuta una transferencia con bloqueo exclusivo por red.
 ---@param player IsoPlayer
 ---@param networkId string|nil
@@ -995,6 +1047,35 @@ local function runLockedTransfer(player, networkId, op, fn)
 	return true
 end
 
+--- Cuenta tipos por nodo VIVO (contenedor cargado) de una red, a partir de
+--- registry.nodes[id].itemSnapshot - ya refrescado por
+--- GlobalStorageSiK.Index.syncLiveSnapshots() justo antes en
+--- afterTransferSync(). Usado para que la columna "Tipos" del listado de
+--- nodos se actualice en el sync ligero tras depositar/retirar, sin esperar
+--- a un pushTerminalState completo (BUG REAL reportado 2026-08-16: "la lista
+--- de nodos no actualiza su cantidad de tipos distintos... retiré los items,
+--- debería poner 0 pero no actualiza si no cierro y abro o cambio de
+--- pestaña" - pushTerminalInventorySync solo mandaba agregados de red, nunca
+--- por-nodo, y el cliente (refreshFromState) no tocaba terminalState.nodes
+--- en absoluto en la rama inventorySync).
+---@param networkId string
+---@return table<string, number>
+local function buildLiveNodeTypeCounts(networkId)
+	local counts = {}
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	if not registry or not registry.nodes then
+		return counts
+	end
+	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	for i = 1, #live do
+		local entry = live[i].entry
+		if entry and entry.id and registry.nodes[entry.id] then
+			counts[entry.id] = countSnapshotTypes(registry.nodes[entry.id].itemSnapshot)
+		end
+	end
+	return counts
+end
+
 --- Refresca inventario del terminal a otros jugadores con acceso a la red.
 ---@param player IsoPlayer|nil
 ---@param networkId string|nil
@@ -1010,6 +1091,7 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 			searchQuery = searchQuery or "",
 			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 			itemTypeCount = countItemTypes(networkId),
+			nodeTypeCounts = buildLiveNodeTypeCounts(networkId),
 			capacity = GlobalStorageSiK.NetworkCapacity.serialize(
 				GlobalStorageSiK.NetworkCapacity.compute(networkId)
 			),
@@ -1076,6 +1158,22 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 	local probe = craftProbe
 	if not probe and player then
 		probe = playerCraftProbe[player:getUsername()]
+	end
+	-- BUG REAL encontrado (reportado 2026-08-16, "al editar un nodo/
+	-- contenedor desde su modal desaparecen las pestañas de addon"): decenas
+	-- de sitios de este fichero llaman pushTerminalState SIN pasar
+	-- terminalAnchor (ver mas abajo, el edit/rename/setPriority de
+	-- nodos/zonas y muchos mas). Sin anchor, installedAddons/
+	-- craftTabEnabled/buildTabEnabled quedan fuera del payload (ver mas
+	-- abajo) y el cliente interpreta su ausencia como "ocultar pestaña" -
+	-- exactamente el mismo bug ya confirmado y arreglado una vez para
+	-- GS_RedistributeJob.lua (pasando el anchor a mano en ESE fichero).
+	-- En vez de tocar cada uno de los ~30 sitios de este fichero que no lo
+	-- pasan, se resuelve aqui mismo con el mismo fallback ya usado alli
+	-- (GlobalStorageSiK.TerminalAccess.getSessionAnchor) - corrige todos los
+	-- sitios a la vez, de una vez por todas.
+	if not terminalAnchor and player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor then
+		terminalAnchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 	end
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player)
 	payload.openUi = openUi == true
@@ -1472,7 +1570,7 @@ local function onClientCommand(module, command, player, args)
 			nodeId = args.nodeId,
 			rows = rows,
 			source = source,
-			suggestedCategory = suggestCategoryFromSnapshot(node.itemSnapshot),
+			suggestedCategory = suggestCategoryFromSnapshot(rows),
 		})
 
 	elseif command == "craftTerminalRecipe" then
@@ -1855,10 +1953,16 @@ local function onClientCommand(module, command, player, args)
 		-- no valida acceso ni cambia nada, unicamente registra el operationId
 		-- de este intento para correlacionar craftClaimItem/CraftDiag.
 		lastOperationByPlayer[player:getPlayerNum()] = args.operationId
+		lastNetworkIdByPlayer[player:getPlayerNum()] = args.networkId
+		-- itemsRedAntes: diagnostico de dupeo (2026-08-16) - total de items en
+		-- TODOS los contenedores de la red ANTES de que empiece este intento
+		-- de crafteo, para comparar contra itemsRedDespues en craftAttempt
+		-- RESULT y confirmar que la diferencia es exactamente la esperada.
 		GlobalStorageSiK.Log.info("CraftDiag", string.format(
-			"craftAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s containersCliente=%s",
+			"craftAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s containersCliente=%s itemsRedAntes=%s",
 			tostring(args.operationId), tostring(args.addonId), tostring(args.recipe),
-			tostring(args.networkId), tostring(args.isCanBeDoneFromFloor), tostring(args.containersCliente)))
+			tostring(args.networkId), tostring(args.isCanBeDoneFromFloor), tostring(args.containersCliente),
+			tostring(countNetworkItems(args.networkId))))
 
 	elseif command == "craftClaimItem" then
 		-- Mueve al inventario del jugador, DE FORMA AUTORITATIVA EN SERVIDOR,
@@ -2396,9 +2500,24 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		local ok = GlobalStorageSiK.Permissions.addFaction(networkId, args.factionName)
+		-- BUG REAL encontrado (reportado 2026-08-16, "el permiso facción es
+		-- incorrecto, debería añadir a todos los miembros de forma
+		-- individual, el acceso nominal SI funciona"): esto llamaba a
+		-- GlobalStorageSiK.Permissions.addFaction, que guarda un permiso de
+		-- facción APARTE (net.allowedFactions) - un mecanismo distinto del
+		-- acceso individual (net.allowedUsers) ya confirmado como el unico
+		-- que de verdad funciona. Ademas tenia un bug propio: comparaba el
+		-- nombre de facción guardado (normalizado a minusculas por
+		-- addFaction) contra playerFaction:getName() SIN normalizar en
+		-- canAccess - "sik-gs" nunca era igual a "SiK-GS", asi que el acceso
+		-- por facción no concedia nada en la practica. En vez de arreglar
+		-- ese mecanismo, se sustituye por el que ya existia y SI funciona:
+		-- addAllFactionMembers expande la facción del jugador que pulsa
+		-- "Añadir" a un acceso individual (net.allowedUsers) por cada
+		-- miembro, mismo mecanismo ya confirmado.
+		local ok, message = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_FactionAddedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_FactionAddFailedMsg") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "removePermissionFaction" then
@@ -2590,9 +2709,11 @@ local function installCraftDiagnostics()
 		-- nativa, asi que se usa el ultimo conocido para este jugador; para
 		-- un jugador crafteando de uno en uno (caso normal) coincide siempre.
 		local operationId = "?"
+		local networkId = nil
 		local okPlayer, playerNum = pcall(function() return self.character and self.character:getPlayerNum() end)
 		if okPlayer and playerNum and lastOperationByPlayer[playerNum] then
 			operationId = lastOperationByPlayer[playerNum]
+			networkId = lastNetworkIdByPlayer[playerNum]
 		end
 		originalPerformRecipe(self)
 		local outCount = 0
@@ -2602,10 +2723,14 @@ local function installCraftDiagnostics()
 			return l
 		end)
 		if okOut and list then outCount = list:size() end
+		-- itemsRedDespues: comparar contra itemsRedAntes (craftAttempt START)
+		-- - la diferencia esperada es "materiales consumidos de la red" menos
+		-- (nunca mas), sin contar aun el resultado craftado (ese se deposita
+		-- despues, via sweepPendingReturns/checkbox de deposito, no aqui).
 		GlobalStorageSiK.Log.info("CraftDiag", string.format(
-			"craftAttempt RESULT operationId=%s recipe=%s containers=%s resultCreated=%s itemsCreados=%s",
+			"craftAttempt RESULT operationId=%s recipe=%s containers=%s resultCreated=%s itemsCreados=%s itemsRedDespues=%s",
 			tostring(operationId), tostring(recipeName), tostring(containersCount),
-			tostring(outCount > 0), tostring(outCount)))
+			tostring(outCount > 0), tostring(outCount), tostring(countNetworkItems(networkId))))
 	end
 end
 

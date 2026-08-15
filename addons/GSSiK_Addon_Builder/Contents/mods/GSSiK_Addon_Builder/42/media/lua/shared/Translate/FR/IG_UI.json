@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Graver disquette Builder"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Graver disquette Builder",
+	"IGUI_GS_TabBuilder": "Construction",
+	"IGUI_GS_AddonBuilderTitle": "Construction",
+	"IGUI_GS_AddonBuilderDesc": "Extension Construction : magazine requis (Électricité 5). Fabriquez et installez le module depuis l'onglet Extensions.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Ouvrir la construction du jeu",
+	"IGUI_GS_CraftOpenBuildNeat": "Ouvrir Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Ouvre l'interface de construction du jeu ; les conteneurs réseau sont ajoutés tant que vous avez accès au terminal."
 }

@@ -14,6 +14,39 @@ require "GS_NodeFilters"
 
 GlobalStorageSiK.Router = {}
 
+-- Cache de ItemTaxonomy.resolve() por fullType (dev22, eficiencia): sin esto,
+-- matchSpecificity recalculaba resolve() para el MISMO item hasta 2 veces por
+-- nodo (contexto vacio + contexto de fila) en pickDepositTarget, que ya
+-- itera todos los nodos vivos (tipicamente 10-20) para el mismo item - decenas
+-- de llamadas identicas por deposito. El resultado de resolve() depende solo
+-- del fullType (via ScriptItem, mismo para toda instancia de ese tipo) y de
+-- category/subCategory, que a su vez tambien salen del fullType (mismo
+-- ScriptItem) - no del item vivo concreto, asi que cachear por fullType es
+-- seguro y valido durante toda la vida del proceso (servidor o SP real),
+-- nunca queda obsoleto salvo que cambie el catalogo de items (solo con un
+-- cambio de mods, que ya requiere reiniciar el proceso).
+local _taxResolveCache = {}
+local function resolveCached(fullType, ctxKind, ctx)
+	if not fullType then
+		return nil
+	end
+	local key = fullType .. "|" .. ctxKind
+	local cached = _taxResolveCache[key]
+	if cached ~= nil then
+		if cached == false then
+			return nil
+		end
+		return cached
+	end
+	local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, ctx)
+	if not ok or not tax then
+		_taxResolveCache[key] = false
+		return nil
+	end
+	_taxResolveCache[key] = tax
+	return tax
+end
+
 local CATEGORY_ALIASES = {
 	Medical = "FirstAid",
 	FirstAid = "Medical",
@@ -207,6 +240,22 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	local subCategory = GlobalStorageSiK.Router.getItemSubCategory(item)
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	-- BUG REAL sospechado (2026-08-16, "comida perecedera configurada en
+	-- congelador con Nivel 2 (Comida > Perecedero, sin Nivel 3) nunca llega
+	-- ahi"): las dos llamadas a ItemTaxonomy.resolve() de mas abajo (reglas
+	-- Nivel 1 y Nivel 2) pasaban un contexto de fila VACIO ({}), mientras que
+	-- collectSubFilters/collectLeafFilters (que construyen las opciones del
+	-- desplegable en la UI y SI resuelven bien "Perecedero" para items de
+	-- comida, confirmado en logs reales) siempre pasan la fila completa
+	-- (row.category/row.subCategory ya resueltos server-side). resolve() solo
+	-- usa esos campos como FALLBACK si el lookup por scriptItem falla, pero
+	-- si esa categoria compuesta (ej. via Extended Categories) no es
+	-- recuperable desde el ScriptItem "en frio" que usa este camino, el
+	-- resultado puede divergir silenciosamente del que vio el jugador al
+	-- configurar el filtro. Se pasa aqui el mismo category/subCategory ya
+	-- calculado arriba (via el ITEM VIVO, no fallback vacio) para cerrar ese
+	-- hueco sin duplicar logica.
+	local rowContext = { category = category, subCategory = subCategory }
 	local bestTier = nil
 	for i = 1, #rules do
 		local rule = rules[i]
@@ -230,9 +279,18 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 				local wantSubGroup = string.lower(rest:sub(sepPos + 2))
 				local ftOk, fullType = pcall(function() return item:getFullType() end)
 				if ftOk then
-					local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
-					if ok and tax and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == wantGroup
-						and tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup then
+					-- dev22: probar resolve() con DOS contextos distintos (vacio y
+					-- con category/subCategory del item vivo), ambos cacheados por
+					-- fullType (ver resolveCached arriba) - antes se llamaba
+					-- resolve() sin cache, hasta 2 veces por nodo evaluado (10-20
+					-- nodos por deposito) para el MISMO item, puro trabajo repetido.
+					local taxEmpty = resolveCached(fullType, "empty", {})
+					local taxRow = resolveCached(fullType, "row", rowContext)
+					local function matches(tax)
+						return tax and tax.groupLabel and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == wantGroup
+							and tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup
+					end
+					if matches(taxEmpty) or matches(taxRow) then
 						bestTier = bestTier and math.min(bestTier, 2) or 2
 					end
 				end
@@ -243,8 +301,8 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 			local group = string.lower(rule:sub(#EXT + 1))
 			local ftOk, fullType = pcall(function() return item:getFullType() end)
 			if ftOk then
-				local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
-				if ok and tax and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == group then
+				local tax = resolveCached(fullType, "empty", {})
+				if tax and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == group then
 					bestTier = bestTier and math.min(bestTier, 3) or 3
 				end
 			end
@@ -265,16 +323,32 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 				else
 					local ftOk, fullType = pcall(function() return item:getFullType() end)
 					if ftOk then
-						local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
-						if ok and tax and tax.jewelrySlotKey == slotPart then
+						local tax = resolveCached(fullType, "row", rowContext)
+						if tax and tax.jewelrySlotKey == slotPart then
 							bestTier = 1
 						end
 					end
 				end
 			end
 		else
+			-- Regla de NIVEL 3 sin combo (hoja EC compuesta, ej. "Comida >
+			-- Perecedero > Carne" = clave cruda "FoodPerishableMeat" completa,
+			-- ver GS_ItemTaxonomy.collectLeafFilters "elseif tax.hyphenLeafLabel
+			-- then key = tax.mainCanon"). category (arriba, via
+			-- Router.getItemCategory del ITEM VIVO) deberia coincidir en crudo
+			-- con rule sin mas, pero por la misma cautela que Nivel 2 (dev22):
+			-- si el match directo falla, reintentar contra tax.mainCanon
+			-- resuelto via resolve() con rowContext antes de rendirse.
 			if categoryMatches(rule, category) then
 				bestTier = 1
+			else
+				local ftOk, fullType = pcall(function() return item:getFullType() end)
+				if ftOk then
+					local tax = resolveCached(fullType, "row", rowContext)
+					if tax and tax.mainCanon and categoryMatches(rule, tax.mainCanon) then
+						bestTier = 1
+					end
+				end
 			end
 		end
 	end
@@ -349,8 +423,29 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 	-- sin ninguna relacion con el.
 	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	-- DIAGNOSTICO TEMPORAL (2026-08-16, "los filtros no funcionan, comida
+	-- perecedera configurada para un congelador toma otro contenedor"):
+	-- estructuralmente esta funcion YA respeta el orden pedido (tiers 1-3,
+	-- match real por categoria, se comprueban SIEMPRE antes que el tier 4 de
+	-- afinidad "mismo item") - el bug real, si existe, esta probablemente en
+	-- que el contenedor configurado no se esta clasificando en tier 1-3 para
+	-- este item (fallo en matchSpecificity/ItemTaxonomy.resolve), no en el
+	-- orden de los tiers. print() incondicional (no gateado por DebugMode)
+	-- para ver de una vez, sin depender de activar la categoria "Router" del
+	-- sandbox, el tier real asignado a cada nodo y si tenia hueco - misma
+	-- disciplina de diagnostico ya usada con exito para el retorno de
+	-- herramientas de Craft. Quitar cuando se confirme la causa real.
+	-- CORREGIDO (2026-08-16): estos print() incondicionales corren en el
+	-- proceso del SERVIDOR y nunca pasaban por GlobalStorageSiK.Log._echoHook
+	-- (instalado en GS_Server.lua, reenvia al cliente con marca [SRV] todo lo
+	-- que pase por GlobalStorageSiK.Log.*) - por eso nunca aparecian en el log
+	-- que el cliente puede copiar, aunque SI se ejecutaban. Usando Log.warn
+	-- (incondicional, no gateado por DebugMode, igual que el print() original)
+	-- para que salga con [SRV] como el resto de trazas server->cliente.
+	local ft = item.getFullType and item:getFullType() or "?"
+	GlobalStorageSiK.Log.warn("RouterDiag", string.format("pickDepositTarget fullType=%s autoSort=%s liveNodes=%s",
+		tostring(ft), tostring(autoSort), tostring(#liveNodes)))
 	if debugOn then
-		local ft = item.getFullType and item:getFullType() or "?"
 		local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
 			and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
 		GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | fullType=" .. tostring(ft)
@@ -380,6 +475,10 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 			if tier then
 				table.insert(tiers[tier], live)
 			end
+			GlobalStorageSiK.Log.warn("RouterDiag", string.format("nodeId=%s displayName=%s rules=%s priority=%s tier=%s",
+				tostring(entry.id), tostring(entry.displayName or entry.name),
+				(entry.categories and #entry.categories > 0 and table.concat(entry.categories, ",") or "(sin restriccion)"),
+				tostring(entry.priority or 50), tostring(tier or "rechazado")))
 			if debugOn then
 				GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | nodeId=" .. tostring(entry.id)
 					.. " displayName=" .. tostring(entry.displayName or entry.name)
@@ -398,6 +497,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 					local live = sorted[i]
 					if GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
 						and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
+						GlobalStorageSiK.Log.warn("RouterDiag", "RESULT tier=4 afinidad mismo item -> nodeId="
+							.. tostring((live.entry or {}).id))
 						if debugOn then
 							GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | tier=4 afinidad mismo item -> nodeId="
 								.. tostring((live.entry or {}).id))
@@ -419,6 +520,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 							.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
 					end
 					if hasSpace then
+						GlobalStorageSiK.Log.warn("RouterDiag", string.format("RESULT tier=%s nodeId=%s (match por categoria)",
+							tostring(tierIdx), tostring((live.entry or {}).id)))
 						return live
 					end
 				end
@@ -426,36 +529,63 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 		end
 	end
 
-	if fullType then
+	-- BUG REAL confirmado con logs reales (2026-08-16, "los tablones van a
+	-- Cocina" con el almacen general lleno): estos dos fallbacks finales
+	-- iteraban TODOS los liveNodes sin comprobar si el nodo tenia categoria
+	-- configurada que RECHAZABA este item. Primer intento de fix (-dev17):
+	-- exigir matchSpecificity(entry, item) ~= nil aqui tambien - pero logs
+	-- reales de -dev22 (2026-08-16, ronda posterior) muestran Cocina
+	-- (rules=__extgroup__:Cocina) recibiendo Patatas fritas Y un Tablon
+	-- pese a aparecer "tier=rechazado" para esos mismos items en el barrido
+	-- normal de matchSpecificity segundos antes - la revalidacion aqui no es
+	-- de fiar (causa exacta no aislada). Se elimina por completo esa segunda
+	-- llamada: el ultimo recurso ahora SOLO acepta nodos SIN ninguna
+	-- categoria configurada, sin revalidacion. Mas estricto a proposito:
+	-- preferible que un deposito falle a que viole en silencio una
+	-- categoria configurada a mano.
+	--
+	-- dev24 (eficiencia, pedido explicito - evitar reescaneos redundantes):
+	-- "nodo sin ninguna categoria configurada" es EXACTAMENTE la definicion
+	-- de tier 4 en matchSpecificity, y con autoSort activo el bucle de
+	-- arriba (tierIdx=4, afinidad primero y barrido generico despues) YA
+	-- prueba exactamente ese mismo conjunto de nodos, en el mismo orden de
+	-- prioridad. Repetir aqui el mismo escaneo para el mismo resultado era
+	-- trabajo duplicado en el camino mas comun (autoSort=true, el valor por
+	-- defecto) - estos dos fallbacks ahora SOLO se ejecutan cuando autoSort
+	-- esta desactivado (la unica situacion en que el bucle de tiers de
+	-- arriba no llego a correr en absoluto).
+	if not autoSort then
+		local function nodeHasNoCategories(entry)
+			local rules = entry and entry.categories
+			return not rules or #rules == 0
+		end
+
+		if fullType then
+			for i = 1, #liveNodes do
+				local live = liveNodes[i]
+				if nodeHasNoCategories(live.entry)
+					and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
+					and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
+					GlobalStorageSiK.Log.warn("RouterDiag", "RESULT fallback final: afinidad mismo item SIN match de categoria en ningun tier -> nodeId="
+						.. tostring((live.entry or {}).id))
+					return live
+				end
+			end
+		end
+
+		if strictNoMatch then
+			return nil, "no_match"
+		end
+
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
-			if GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
-				and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
-				if debugOn then
-					GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | RESULT: afinidad mismo item sin match por categoria (nodeId="
-						.. tostring((live.entry or {}).id) .. ")")
-				end
+			if nodeHasNoCategories(live.entry) and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
 				return live
 			end
 		end
 	end
 
-	if strictNoMatch then
-		if debugOn then
-			GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | RESULT: sin categoria/afinidad, rechazado por sandbox RejectDepositIfNoMatch")
-		end
-		return nil, "no_match"
-	end
-
-	for i = 1, #liveNodes do
-		local live = liveNodes[i]
-		if GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
-			if debugOn then
-				GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | RESULT: sin match por categoria, cayendo al primer nodo con espacio (nodeId=" .. tostring((live.entry or {}).id) .. ")")
-			end
-			return live
-		end
-	end
+	GlobalStorageSiK.Log.warn("RouterDiag", "RESULT no_space: ningun nodo sin restriccion o compatible tenia hueco libre para fullType=" .. tostring(fullType))
 
 	return nil
 end

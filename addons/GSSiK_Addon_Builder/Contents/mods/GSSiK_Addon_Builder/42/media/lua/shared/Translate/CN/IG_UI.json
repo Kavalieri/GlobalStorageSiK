@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "写入Builder磁盘"
+	"IGUI_GS_ProgramBuilderDiskMenu": "写入Builder磁盘",
+	"IGUI_GS_TabBuilder": "建造",
+	"IGUI_GS_AddonBuilderTitle": "建造",
+	"IGUI_GS_AddonBuilderDesc": "建造扩展：需要杂志（电力5级）。在扩展标签页制作并安装模块。",
+	"IGUI_GS_CraftOpenBuildVanilla": "打开原版建造",
+	"IGUI_GS_CraftOpenBuildNeat": "打开 Neat 建造",
+	"IGUI_GS_BuildRemoteHint": "打开游戏原版建造界面；只要你有终端访问权限，网络容器就会被加入其中。"
 }

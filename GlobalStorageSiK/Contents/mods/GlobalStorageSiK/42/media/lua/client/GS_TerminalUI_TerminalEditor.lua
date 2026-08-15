@@ -16,6 +16,7 @@ require "ISUI/ISModalDialog"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalUI_Chrome"
+require "GS_TerminalUI_BlockedPanel"
 
 GlobalStorageSiK.TerminalTerminalEditor = {}
 GlobalStorageSiK.TerminalTerminalEditor.instance = nil
@@ -104,6 +105,16 @@ function GS_TerminalEditorUI:onSuspend()
 		gsnNetworkId = self.terminal and self.terminal.terminalState and self.terminal.terminalState.networkId,
 	})
 	self:closeAfterAction()
+end
+
+--- Muestra/oculta la cobertura de ESTE terminal concreto (pedido explicito
+--- 2026-08-17: antes "mostrar cobertura" marcaba todas las redes conocidas
+--- desde 2 sitios genericos - ahora es por terminal, desde su propio modal).
+function GS_TerminalEditorUI:onToggleCoverage()
+	local marking = GlobalStorageSiK.TerminalBlockedPanel.toggleSingleTerminalCoverage(self.row)
+	if self.coverageBtn then
+		self.coverageBtn._gsNeatLabel = marking and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
+	end
 end
 
 function GS_TerminalEditorUI:onDelete()
@@ -200,6 +211,16 @@ function GS_TerminalEditorUI:buildLayout()
 		self:addChild(self.suspendBtn)
 		y = y + BTN_H + LINE_GAP
 	end
+
+	local coverageLabel = GlobalStorageSiK.TerminalBlockedPanel._singleMarking
+		and GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow == row
+		and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
+	self.coverageBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		pad, y, textW, BTN_H, coverageLabel, self, function()
+			self:onToggleCoverage()
+		end)
+	self:addChild(self.coverageBtn)
+	y = y + BTN_H + LINE_GAP
 
 	self.deleteBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
 		pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorDeleteBtn"), self, function()

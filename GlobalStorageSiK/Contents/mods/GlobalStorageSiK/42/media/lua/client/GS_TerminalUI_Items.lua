@@ -974,11 +974,22 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 	end
 
 	items = items or {}
-	panel._lastItems = items
 	panel.itemsSortKey = panel.itemsSortKey or "displayName"
 	panel.itemsSortAsc = panel.itemsSortAsc ~= false
 	panel._selectedKeys = panel._selectedKeys or {}
 	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc)
+	-- BUG REAL (Shift+Click seleccionaba rango incorrecto/inconsistente,
+	-- reportado 2026-08-16): _lastItems se asignaba ANTES de ordenar, con la
+	-- referencia SIN ORDENAR - pero sortRows() copia a una tabla NUEVA y
+	-- distinta, que es la que de verdad se manda a la lista visual
+	-- (setDataSource mas abajo). Toda la logica de seleccion (findItemIndex,
+	-- selectRangeTo, bindItemRowIndex) buscaba posiciones en _lastItems, asi
+	-- que operaba sobre un orden DISTINTO al que el jugador veia en pantalla
+	-- - un indice de fila visual no correspondia al mismo indice en la lista
+	-- sin ordenar, dando rangos de Shift+Click aparentemente aleatorios
+	-- salvo que ambos ordenes coincidieran por casualidad. Fix: asignar
+	-- _lastItems DESPUES de ordenar, con la MISMA tabla que se muestra.
+	panel._lastItems = items
 
 	ensureColumnHeader(panel, terminal)
 	ensureItemScroll(panel, terminal)

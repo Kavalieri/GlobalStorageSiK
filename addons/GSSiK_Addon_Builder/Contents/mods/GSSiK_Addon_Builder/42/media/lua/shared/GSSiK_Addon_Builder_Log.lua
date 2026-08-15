@@ -14,10 +14,21 @@ GSSiK_Addon_Builder.Log = GSSiK_Addon_Builder.Log or {}
 
 local PREFIX = "[GSSiK_Addon_Builder:DEBUG] "
 
+--- Segundos transcurridos (con decimas) desde que arranco el proceso actual -
+--- la fecha no importa para depurar, pero medir cuanto tarda algo entre dos
+--- lineas de log si (pedido 2026-08-16).
+---@return string
+local function elapsedTag()
+	if not getTimestampMs then
+		return "?"
+	end
+	return string.format("%.1fs", getTimestampMs() / 1000)
+end
+
 ---@param message string
 function GSSiK_Addon_Builder.Log.debug(message)
 	if not GSSiK_Addon_Builder.Sandbox.isDebugMode() then
 		return
 	end
-	print(PREFIX .. tostring(message))
+	print("[" .. elapsedTag() .. "] " .. PREFIX .. tostring(message))
 end

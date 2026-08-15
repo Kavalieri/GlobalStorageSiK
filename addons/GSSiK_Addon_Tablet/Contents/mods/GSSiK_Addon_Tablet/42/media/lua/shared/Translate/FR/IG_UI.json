@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Graver disquette Tablet"
+	"IGUI_GS_ProgramTabletDiskMenu": "Graver disquette Tablet",
+	"IGUI_GS_AddonTabletTitle": "Antenne WiFi GS",
+	"IGUI_GS_AddonTabletDesc": "Extension Tablette : magazine requis (Électricité 5). Installez le module sur ce terminal."
 }

@@ -285,6 +285,13 @@ local function patchedOnHandcraftActionComplete(self)
 			"craftAttempt END operationId=%s recipe=%s actionCompleted=true actionCancelled=false invAfter=%s",
 			tostring(self._gsOperationId), recipeName, invAfter))
 	end
+	-- Marca la operacion como terminada SIEMPRE, no solo con sesion activa -
+	-- sweepPendingReturns (Core) sigue corriendo aunque la sesion ya haya
+	-- terminado, y necesita saber que este operationId ya no se va a tocar
+	-- mas antes de devolver los items reclamados (ver GS_NetworkCraftSession.
+	-- lua, "posible dupeo" reportado 2026-08-16 por devolver material antes
+	-- de que la receta terminase de verdad).
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalOnHandcraftActionComplete(self)
 end
 
@@ -298,6 +305,7 @@ local function patchedOnHandcraftActionCancelled(self)
 			"craftAttempt END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalOnHandcraftActionCancelled(self)
 end
 
@@ -409,30 +417,28 @@ local function checkPendingNeatCraftStarts()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
-			-- DIAGNOSTICO (2026-08-16, confirmado con datos reales del servidor
-			-- de pruebas: RESUME siempre llega pero END nunca, sin error de
-			-- pcall): sospecha principal es que originalNeatStartHandcraft
-			-- empieza con "if self.logic:isCraftActionInProgress() then return
-			-- end" (mismo patron confirmado leyendo PJCK_CraftActionPanel de
-			-- Project_Cook) y ese guardia esta en true en el momento de la
-			-- reanudacion diferida por tick, asi que la llamada no hace NADA
-			-- (ni error, ni accion) - de ahi el silencio total. Logueamos el
-			-- estado exacto del guardia justo antes de llamar para confirmarlo
-			-- o descartarlo con datos, en vez de arreglar a ciegas.
-			local okGuard, inProgress = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			-- CONFIRMADO CON DATOS REALES (2026-08-16): isCraftActionInProgress
+			-- es SIEMPRE false aqui (hipotesis inicial descartada) - el guardia
+			-- real es canPerformCurrentRecipe(), tambien false, porque
+			-- HandcraftLogic cachea si la receta es realizable a partir del
+			-- estado de ANTES de que los items de red llegaran al inventario
+			-- (el round-trip al servidor). Nada en el flujo normal le pide que
+			-- recalcule ese cache tras el claim - por eso originalNeatStartHandcraft
+			-- no hacia nada, ni error ni accion. autoPopulateInputs() es la
+			-- funcion que el propio Project_Cook llama tras cada crafteo
+			-- (PJCK_CraftActionPanel:onHandcraftActionComplete) precisamente
+			-- para refrescar ese cache - forzarla aqui, justo antes de
+			-- reanudar, deberia dejar canPerformCurrentRecipe() en true.
+			pcall(function() entry.self.logic:autoPopulateInputs() end)
 			local okCanPerform, canPerform = pcall(function() return entry.self.logic and entry.self.logic:canPerformCurrentRecipe() end)
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
-				"craftAttempt(neat) RESUME operationId=%s preCheck isCraftActionInProgress=%s canPerformCurrentRecipe=%s",
-				tostring(entry.operationId), tostring(okGuard and inProgress), tostring(okCanPerform and canPerform)))
+				"craftAttempt(neat) RESUME operationId=%s tras autoPopulateInputs canPerformCurrentRecipe=%s",
+				tostring(entry.operationId), tostring(okCanPerform and canPerform)))
 			local okCall, errCall = pcall(originalNeatStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalNeatStartHandcraft ERROR: " .. tostring(errCall))
 			end
-			local okGuardAfter, inProgressAfter = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
-				"craftAttempt(neat) RESUME operationId=%s postCall isCraftActionInProgress=%s",
-				tostring(entry.operationId), tostring(okGuardAfter and inProgressAfter)))
 			activeOperationId = nil
 			restore()
 		end
@@ -452,6 +458,7 @@ local function patchedNeatOnHandcraftActionComplete(self)
 			"craftAttempt(neat) END operationId=%s recipe=%s actionCompleted=true actionCancelled=false invAfter=%s",
 			tostring(self._gsOperationId), recipeName, invAfter))
 	end
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalNeatOnHandcraftActionComplete(self)
 end
 
@@ -465,6 +472,7 @@ local function patchedNeatOnHandcraftActionCancelled(self)
 			"craftAttempt(neat) END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalNeatOnHandcraftActionCancelled(self)
 end
 

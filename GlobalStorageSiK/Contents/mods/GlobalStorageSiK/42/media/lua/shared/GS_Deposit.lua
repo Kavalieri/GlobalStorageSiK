@@ -265,7 +265,7 @@ end
 ---@param itemIds number[]
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
-	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil }
+	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil, remainingIds = {} }
 
 	if not player or not itemIds or #itemIds == 0 then
 		summary.reason = "invalid"
@@ -287,6 +287,26 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 	for i = 1, #itemIds do
 		if summary.moved >= maxPerTick then
 			summary.reason = "limit"
+			-- BUG REAL (2026-08-16, "si ya esta devuelto o no existe, por
+			-- que seguir iterando sobre ello tanto" - reportado con Project
+			-- Cook, lista de ~200 items del inventario de red completo):
+			-- GS_TransferQueue reenviaba la lista ORIGINAL COMPLETA en cada
+			-- reintento, asi que cada lote tenia que re-escanear desde el
+			-- principio TODOS los items ya resueltos (movidos o
+			-- ya-no-encontrados) en pasadas anteriores antes de llegar a los
+			-- de verdad pendientes - con maxPerTick pequeno y una lista
+			-- grande, hacian falta decenas/cientos de lotes para converger,
+			-- chocando contra MAX_BATCHES=200 sin terminar nunca de verdad
+			-- (visto en logs reales: la misma lista de ~200 IDs
+			-- reapareciendo desde el principio cada ~400ms, docenas de veces
+			-- seguidas). Fix: devolver aqui SOLO los itemIds que de verdad
+			-- faltan por procesar (los que ni siquiera se llegaron a mirar
+			-- por el corte de maxPerTick) para que el cliente
+			-- (GS_TransferQueue.onActionResult) reenvie unicamente eso, no
+			-- la lista completa otra vez.
+			for j = i, #itemIds do
+				summary.remainingIds[#summary.remainingIds + 1] = itemIds[j]
+			end
 			break
 		end
 
@@ -295,16 +315,15 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 			seenIds[itemId] = true
 			local item, container = GlobalStorageSiK.Deposit.findItemById(player, itemId)
 			if not item or not container then
-				-- "No encontrado" NO cuenta como fallo real: GS_TransferQueue
-				-- reenvia la lista COMPLETA de itemIds original en cada
-				-- reintento (cuando se alcanza MaxItemsPerBulkTick), asi que
-				-- los items YA depositados con exito en una pasada anterior
-				-- ya no estan en ningun contenedor alcanzable del jugador -
-				-- "no encontrado" en ese caso significa "ya se hizo", no un
-				-- error. Contarlo como "failed" inflaba el resumen mostrado
-				-- (ej. "5 depositados, 100 fallidos" con la transferencia
-				-- COMPLETA realizada con exito) sin que hubiera ningun
-				-- problema real. Se ignora en silencio.
+				-- "No encontrado" NO cuenta como fallo real: antes de este
+				-- fix, GS_TransferQueue reenviaba la lista COMPLETA de
+				-- itemIds original en cada reintento, asi que los items YA
+				-- depositados con exito en una pasada anterior ya no estaban
+				-- en ningun contenedor alcanzable del jugador - "no
+				-- encontrado" en ese caso significa "ya se hizo", no un
+				-- error. Ahora ya no se reenvian (ver remainingIds arriba),
+				-- pero se deja el log por si aparece un caso real de item
+				-- invalido. Se ignora en silencio para el resumen.
 				GlobalStorageSiK.Debug.log("Deposit", "depositByIds item not found (ya depositado o invalido)", tostring(itemId))
 			elseif GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
 				summary.skipped = summary.skipped + 1
@@ -327,6 +346,12 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 						if (reason == "no_space" or reason == "no_match") and not summary.reason then
 							summary.reason = reason
 						end
+						-- Fallo con motivo potencialmente transitorio (ej. sin
+						-- espacio ahora mismo, puede liberarse tras otros
+						-- depositos del mismo lote) - se mantiene en
+						-- remainingIds para reintentarlo, a diferencia de los
+						-- ya resueltos arriba que no vuelven a la lista.
+						summary.remainingIds[#summary.remainingIds + 1] = itemId
 						GlobalStorageSiK.Debug.log("Deposit", "depositByIds item failed", string.format(
 							"fullType=%s reason=%s movedSoFar=%d",
 							tostring(item.getFullType and item:getFullType() or "?"), tostring(reason), summary.moved

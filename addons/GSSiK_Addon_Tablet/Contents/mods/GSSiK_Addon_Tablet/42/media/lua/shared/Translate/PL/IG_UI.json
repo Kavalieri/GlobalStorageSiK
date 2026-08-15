@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Zapisz dyskietkę Tablet"
+	"IGUI_GS_ProgramTabletDiskMenu": "Zapisz dyskietkę Tablet",
+	"IGUI_GS_AddonTabletTitle": "Antena WiFi GS",
+	"IGUI_GS_AddonTabletDesc": "Dodatek Tablet: wymaga magazynu (Elektryczność 5). Zainstaluj moduł na tym terminalu."
 }

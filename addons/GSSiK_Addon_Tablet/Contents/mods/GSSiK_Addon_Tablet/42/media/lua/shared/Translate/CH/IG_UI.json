@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "写入Tablet磁盘"
+	"IGUI_GS_ProgramTabletDiskMenu": "写入Tablet磁盘",
+	"IGUI_GS_AddonTabletTitle": "GS WiFi 天线",
+	"IGUI_GS_AddonTabletDesc": "平板扩展：需要杂志（电力5级）。在此终端安装模块。"
 }

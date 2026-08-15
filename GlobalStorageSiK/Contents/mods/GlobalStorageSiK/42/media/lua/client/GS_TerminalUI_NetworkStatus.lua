@@ -185,11 +185,9 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	end)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.rescanBtn)
 	ry = ry + btnH + ROW_GAP
-	ui.redistributeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(rightX, ry, ACTION_BTN_MAX_W, btnH, T("IGUI_GS_Redistribute"), scroll, function()
-		if terminal.onRedistributeNetwork then terminal:onRedistributeNetwork() end
-	end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.redistributeBtn)
-	ry = ry + btnH + ROW_GAP
+	-- Boton "Auto-ordenar" MOVIDO (2026-08-17, pedido explicito) a la
+	-- pestaña Items/almacén, arriba a la derecha del título
+	-- (GS_TerminalUI.lua:buildItemsToolbar) - ya no vive aquí.
 
 	-- SOLO 2 distancias, unica fuente de verdad (GS_Sandbox), sin duplicar
 	-- "realidades": antes habia HASTA 3 lineas (uso/vinculo/deteccion) con
@@ -223,20 +221,11 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 		end
 	end
 
-	-- Control obvio en la interfaz de la Red (no en Zonas, a deprecar):
-	-- muestra/oculta en el mundo la cobertura visual de las redes propias -
-	-- zona de uso del terminal + anillo de vínculo (ver GS_WorldHighlight,
-	-- GS_TerminalBlockedPanel.toggleMarkKnownTerminals, que es el motor
-	-- compartido de resaltado; aquí solo se llama con terminal=nil porque
-	-- este tab no necesita reconstruir el panel de bloqueo).
+	-- Boton "mostrar cobertura" RETIRADO de aqui (2026-08-17, pedido
+	-- explicito): pasa a marcarse por terminal concreto desde su propio
+	-- modal (GS_TerminalUI_TerminalEditor.lua) - este visualizador generico
+	-- de "todas las redes conocidas" queda descartado por ahora.
 	local coverageBtnH = FONT_HGT_SMALL + 8
-	ui.coverageBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-		leftX, dy, math.min(260, rangeMaxW), coverageBtnH, "...", scroll, function()
-			GlobalStorageSiK.TerminalBlockedPanel.toggleMarkKnownTerminals(nil)
-		end
-	)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.coverageBtn)
-	dy = dy + coverageBtnH + ROW_GAP
 
 	-- "Conseguir PC" tambien disponible aqui (no solo en la ventana de
 	-- bloqueo): con terminal a mano igualmente puede faltar un ordenador
@@ -357,10 +346,6 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 	local display = name and name ~= "" and name or T("IGUI_GS_NetworkDefaultName")
 	setText(ui.networkNameLbl, display, 0.88, 0.9, 0.94, math.min((ui.colW or 200) - 90, 180))
 
-	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.coverageBtn) then
-		local marking = GlobalStorageSiK.TerminalBlockedPanel and GlobalStorageSiK.TerminalBlockedPanel._marking
-		ui.coverageBtn._gsNeatLabel = marking and T("IGUI_GS_UnmarkKnownTerminals") or T("IGUI_GS_MarkKnownTerminals")
-	end
 end
 
 --- Reposiciona columnas al redimensionar.
@@ -398,10 +383,6 @@ function GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
 	if ui.rescanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.rescanBtn, rightX)
 		GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.rescanBtn)
-	end
-	if ui.redistributeBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.redistributeBtn) then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.redistributeBtn, rightX)
-		GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.redistributeBtn)
 	end
 	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.networkNameLbl) then
 		local nameW = math.max(60, math.min(colW - 90, 180))

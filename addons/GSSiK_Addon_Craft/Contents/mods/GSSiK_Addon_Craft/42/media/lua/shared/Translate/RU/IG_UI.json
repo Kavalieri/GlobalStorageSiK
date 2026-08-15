@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Записать дискету Craft"
+	"IGUI_GS_ProgramCraftDiskMenu": "Записать дискету Craft",
+	"IGUI_GS_AddonCraftTitle": "Крафт",
+	"IGUI_GS_AddonCraftDesc": "Дополнение Крафт: требуется журнал (Электричество 5). Установите модуль на этот терминал.",
+	"IGUI_GS_SectionCraftRemote": "Крафт с сетевым инвентарём",
+	"IGUI_GS_CraftRemoteHint": "Открывает интерфейс крафта игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу.",
+	"IGUI_GS_CraftOpenVanilla": "Открыть крафт игры",
+	"IGUI_GS_CraftOpenNeat": "Открыть Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Открыть готовку",
+	"IGUI_GS_CraftSendResultOn": "Отправлять результат на склад: ВКЛ",
+	"IGUI_GS_CraftSendResultOff": "Отправлять результат на склад: ВЫКЛ",
+	"IGUI_GS_CraftSendResultHint": "Если ВКЛ, всё, что производит крафт (и оставшиеся материалы), отправляется в сетевой склад по приоритету вместо того, чтобы оставаться в вашем инвентаре. Инструменты в любом случае возвращаются автоматически."
 }

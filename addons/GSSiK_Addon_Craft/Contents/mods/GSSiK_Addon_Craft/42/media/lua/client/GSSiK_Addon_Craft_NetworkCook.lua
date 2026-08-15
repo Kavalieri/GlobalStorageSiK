@@ -88,27 +88,24 @@ local function checkPendingCookCraftStarts()
 				return entry.self.logic and entry.self.logic:getRecipeData() and entry.self.logic:getRecipeData():getAllInputItems()
 			end)
 			local restore = GlobalStorageSiK.CraftSession.narrowContainersForAction(entry.self, okFreshItems and freshItems or nil, ADDON_ID)
-			-- DIAGNOSTICO (2026-08-16): mismo patron confirmado en el bloque
-			-- Neat de GSSiK_Addon_Craft_NetworkCraft.lua - PJCK_CraftActionPanel:
-			-- startHandcraft empieza con "if self.logic:isCraftActionInProgress()
-			-- then return end", asi que si esta en true al reanudar diferido
-			-- desde el tick, la llamada no hace nada y nunca dispara
-			-- onHandcraftActionComplete/Cancelled. Logueamos el estado real
-			-- antes/despues para confirmarlo con datos, ver tambien CLAUDE.md
-			-- del addon (regla 13, pendiente de verificar en partida real).
-			local okGuard, inProgress = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
+			-- CONFIRMADO CON DATOS REALES (2026-08-16, ver bloque Neat en
+			-- GSSiK_Addon_Craft_NetworkCraft.lua): isCraftActionInProgress no
+			-- era el guardia real (siempre false). El guardia real es
+			-- canPerformCurrentRecipe(), que lee false justo aqui porque
+			-- HandcraftLogic cachea la validez de la receta desde ANTES del
+			-- claim de red. autoPopulateInputs() (la misma funcion que
+			-- PJCK_CraftActionPanel:onHandcraftActionComplete llama tras cada
+			-- crafteo) refresca ese cache - forzarla aqui antes de reanudar.
+			pcall(function() entry.self.logic:autoPopulateInputs() end)
+			local okCanPerform, canPerform = pcall(function() return entry.self.logic and entry.self.logic:canPerformCurrentRecipe() end)
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
-				"cookAttempt RESUME operationId=%s preCheck isCraftActionInProgress=%s",
-				tostring(entry.operationId), tostring(okGuard and inProgress)))
+				"cookAttempt RESUME operationId=%s tras autoPopulateInputs canPerformCurrentRecipe=%s",
+				tostring(entry.operationId), tostring(okCanPerform and canPerform)))
 			local okCall, errCall = pcall(originalCookStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalCookStartHandcraft ERROR: " .. tostring(errCall))
 			end
-			local okGuardAfter, inProgressAfter = pcall(function() return entry.self.logic and entry.self.logic:isCraftActionInProgress() end)
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
-				"cookAttempt RESUME operationId=%s postCall isCraftActionInProgress=%s",
-				tostring(entry.operationId), tostring(okGuardAfter and inProgressAfter)))
 			restore()
 		end
 	end
@@ -186,6 +183,7 @@ local function patchedCookOnHandcraftActionComplete(self, ...)
 			"cookAttempt END operationId=%s recipe=%s actionCompleted=true actionCancelled=false invAfter=%s",
 			tostring(self._gsOperationId), recipeName, invAfter))
 	end
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalCookOnHandcraftActionComplete(self, ...)
 end
 
@@ -199,6 +197,7 @@ local function patchedCookOnHandcraftActionCancelled(self, ...)
 			"cookAttempt END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
+	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
 	return originalCookOnHandcraftActionCancelled(self, ...)
 end
 

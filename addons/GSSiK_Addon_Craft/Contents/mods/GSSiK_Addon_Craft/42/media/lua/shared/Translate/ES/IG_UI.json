@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Grabar disco Craft"
+	"IGUI_GS_ProgramCraftDiskMenu": "Grabar disco Craft",
+	"IGUI_GS_AddonCraftTitle": "Craft",
+	"IGUI_GS_AddonCraftDesc": "Addon Craft: revista obligatoria (Electricidad 5). Instala el módulo en este terminal.",
+	"IGUI_GS_SectionCraftRemote": "Crafteo con inventario de red",
+	"IGUI_GS_CraftRemoteHint": "Abre el crafteo del juego; los contenedores de la red se añaden mientras tengas acceso al terminal.",
+	"IGUI_GS_CraftOpenVanilla": "Abrir crafteo del juego",
+	"IGUI_GS_CraftOpenNeat": "Abrir Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Abrir cocina",
+	"IGUI_GS_CraftSendResultOn": "Enviar resultado al almacén: SÍ",
+	"IGUI_GS_CraftSendResultOff": "Enviar resultado al almacén: NO",
+	"IGUI_GS_CraftSendResultHint": "Si está activado, lo que produzca el crafteo (y cualquier material sobrante) se envía al almacén de red por prioridad en vez de quedarse en tu inventario. Las herramientas ya vuelven solas de todos modos."
 }

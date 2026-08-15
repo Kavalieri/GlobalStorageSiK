@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Scrivi dischetto Builder"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Scrivi dischetto Builder",
+	"IGUI_GS_TabBuilder": "Costruzione",
+	"IGUI_GS_AddonBuilderTitle": "Costruzione",
+	"IGUI_GS_AddonBuilderDesc": "Espansione Costruzione: richiede il manuale (Elettricità 5). Crea e installa il modulo nella scheda Espansioni.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Apri costruzione del gioco",
+	"IGUI_GS_CraftOpenBuildNeat": "Apri Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Apre l'interfaccia di costruzione del gioco; i contenitori di rete vengono aggiunti finché hai accesso al terminale."
 }

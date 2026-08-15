@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Gravar disquete Builder"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Gravar disquete Builder",
+	"IGUI_GS_TabBuilder": "Construção",
+	"IGUI_GS_AddonBuilderTitle": "Construir",
+	"IGUI_GS_AddonBuilderDesc": "Complemento Construir: revista necessária (Eletricidade 5). Fabrique e instale o módulo na aba Complementos.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Abrir construção do jogo",
+	"IGUI_GS_CraftOpenBuildNeat": "Abrir Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Abre a interface de construção do jogo; contêineres de rede são adicionados enquanto você tiver acesso ao terminal."
 }

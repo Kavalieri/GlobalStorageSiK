@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Write Builder disk"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Write Builder disk",
+	"IGUI_GS_TabBuilder": "Build",
+	"IGUI_GS_AddonBuilderTitle": "Builder",
+	"IGUI_GS_AddonBuilderDesc": "Builder add-on: magazine required (Electricity 5). Craft and install module from Add-ons tab.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Open game building",
+	"IGUI_GS_CraftOpenBuildNeat": "Open Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Open the game building UI; network containers are added while you have terminal access."
 }

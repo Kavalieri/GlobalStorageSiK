@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Zapisz dyskietkę Builder"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Zapisz dyskietkę Builder",
+	"IGUI_GS_TabBuilder": "Budowanie",
+	"IGUI_GS_AddonBuilderTitle": "Budowanie",
+	"IGUI_GS_AddonBuilderDesc": "Dodatek Budowanie: wymaga magazynu (Elektryczność 5). Wytwórz i zainstaluj moduł w zakładce Dodatki.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Otwórz budowanie gry",
+	"IGUI_GS_CraftOpenBuildNeat": "Otwórz Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Otwiera interfejs budowania gry; pojemniki sieciowe są dodawane, dopóki masz dostęp do terminala."
 }

@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Zapisz dyskietkę Craft"
+	"IGUI_GS_ProgramCraftDiskMenu": "Zapisz dyskietkę Craft",
+	"IGUI_GS_AddonCraftTitle": "Wytwarzanie",
+	"IGUI_GS_AddonCraftDesc": "Dodatek Wytwarzanie: wymaga magazynu (Elektryczność 5). Zainstaluj moduł na tym terminalu.",
+	"IGUI_GS_SectionCraftRemote": "Wytwarzanie z ekwipunku sieciowego",
+	"IGUI_GS_CraftRemoteHint": "Otwiera interfejs wytwarzania gry; pojemniki sieciowe są dodawane, dopóki masz dostęp do terminala.",
+	"IGUI_GS_CraftOpenVanilla": "Otwórz wytwarzanie gry",
+	"IGUI_GS_CraftOpenNeat": "Otwórz Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Otwórz gotowanie",
+	"IGUI_GS_CraftSendResultOn": "Wyślij wynik do magazynu: WŁ",
+	"IGUI_GS_CraftSendResultOff": "Wyślij wynik do magazynu: WYŁ",
+	"IGUI_GS_CraftSendResultHint": "Gdy WŁ, wszystko co wytworzy wytwarzanie (oraz pozostałe materiały) jest wysyłane do magazynu sieciowego według priorytetu zamiast zostawać w twoim ekwipunku. Narzędzia i tak wracają automatycznie."
 }

@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Gravar disquete Craft"
+	"IGUI_GS_ProgramCraftDiskMenu": "Gravar disquete Craft",
+	"IGUI_GS_AddonCraftTitle": "Fabricar",
+	"IGUI_GS_AddonCraftDesc": "Complemento Fabricar: revista necessária (Eletricidade 5). Instale o módulo neste terminal.",
+	"IGUI_GS_SectionCraftRemote": "Fabricação com inventário de rede",
+	"IGUI_GS_CraftRemoteHint": "Abre a interface de fabricação do jogo; contêineres de rede são adicionados enquanto você tiver acesso ao terminal.",
+	"IGUI_GS_CraftOpenVanilla": "Abrir fabricação do jogo",
+	"IGUI_GS_CraftOpenNeat": "Abrir Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Abrir culinária",
+	"IGUI_GS_CraftSendResultOn": "Enviar resultado para o armazém: LIGADO",
+	"IGUI_GS_CraftSendResultOff": "Enviar resultado para o armazém: DESLIGADO",
+	"IGUI_GS_CraftSendResultHint": "Quando LIGADO, tudo que a fabricação produzir (e quaisquer materiais restantes) é enviado ao armazém de rede por prioridade em vez de ficar no seu inventário. As ferramentas já voltam automaticamente de qualquer forma."
 }

@@ -10,6 +10,21 @@ require "GS_NetClient"
 GlobalStorageSiK.TransferQueue = {}
 
 local BATCH_DELAY_MS = 400
+-- Red de seguridad (reportada 2026-08-16, "el log de item not found no
+-- puede estar en bucle sin fallar de forma informada o terminar de algun
+-- modo"): el reintento YA termina solo por diseno (onActionResult solo
+-- reprograma si summary.moved > 0, ver comentario de depositByIds en
+-- GS_Deposit.lua sobre por que "no encontrado" no es un fallo real).
+-- CORREGIDO (2026-08-16, bug real confirmado con Project Cook y ~200 items
+-- en la red: la lista ORIGINAL completa se reenviaba entera en cada
+-- reintento sin recortar los ya resueltos, asi que con maxPerTick pequeno
+-- hacian falta cientos de lotes para converger y el trabajo chocaba contra
+-- este limite sin terminar de verdad) - depositByIds ahora devuelve
+-- summary.remainingIds (solo lo pendiente de verdad) y scheduleRetry lo usa
+-- para recortar pendingJob.itemIds antes de cada reintento. MAX_BATCHES se
+-- mantiene como red de seguridad por si algun otro tipo de job (container/
+-- bulk, que no devuelven remainingIds) se queda enganchado de verdad.
+local MAX_BATCHES = 200
 local pendingJob = nil
 local nextRunMs = 0
 local tickInstalled = false
@@ -93,10 +108,23 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 	end
 
 	if summary.reason == "limit" and (summary.moved or 0) > 0 then
+		if batchCount + 1 >= MAX_BATCHES then
+			print(string.format(
+				"[GlobalStorageSiK:TransferQueue] ABORTADO tras %s lotes sin converger (moved=%s, tipo=%s) - deteniendo para no reintentar sin fin",
+				tostring(MAX_BATCHES), tostring(summary.moved), tostring(pendingJob.type)))
+			pendingJob = nil
+			return false
+		end
+		if pendingJob.type == "depositIds" and summary.remainingIds then
+			pendingJob.itemIds = summary.remainingIds
+		end
 		scheduleRetry(pendingJob)
 		return true
 	end
 
+	print(string.format("[GlobalStorageSiK:TransferQueue] trabajo terminado tras %s lotes (moved=%s skipped=%s failed=%s reason=%s)",
+		tostring(batchCount + 1), tostring(summary.moved or 0), tostring(summary.skipped or 0),
+		tostring(summary.failed or 0), tostring(summary.reason)))
 	pendingJob = nil
 	return false
 end

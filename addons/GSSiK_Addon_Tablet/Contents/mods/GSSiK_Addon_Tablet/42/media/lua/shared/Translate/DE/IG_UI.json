@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Tablet-Diskette beschreiben"
+	"IGUI_GS_ProgramTabletDiskMenu": "Tablet-Diskette beschreiben",
+	"IGUI_GS_AddonTabletTitle": "GS-WLAN-Antenne",
+	"IGUI_GS_AddonTabletDesc": "Tablet-Erweiterung: Magazin erforderlich (Elektrizität 5). Modul an diesem Terminal installieren."
 }

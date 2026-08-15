@@ -136,7 +136,11 @@ local function measureIntroHeight(panelWidth, state)
 	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)
 	local lh = FONT_HGT_SMALL + LINE_GAP
 	local hintLines = introApproachHintLines(panelWidth, state)
-	return INTRO_PAD + #lines * lh + 8 + #hintLines * lh + INTRO_PAD
+	-- Version del mod visible aqui (pedido 2026-08-15, ronda de pruebas
+	-- -devN del equipo): la pantalla de bloqueo es la que ven SIEMPRE al
+	-- entrar sin terminal a mano, asi confirman de un vistazo que build
+	-- cargo el juego sin tener que abrir consola ni preguntar por chat.
+	return INTRO_PAD + #lines * lh + 8 + #hintLines * lh + 8 + lh + INTRO_PAD
 end
 
 local function pushWrappedLines(out, text, maxWidth, r, g, b)
@@ -249,6 +253,9 @@ local function drawIntroBlock(panel)
 		panel:drawText(line, INTRO_PAD, y, pal.statusOk[1], pal.statusOk[2], pal.statusOk[3], 1, UIFont.Small)
 		y = y + lh
 	end
+	y = y + 8
+	local versionLine = "GlobalStorageSiK v" .. tostring(GlobalStorageSiK.Config.MOD_VERSION)
+	panel:drawText(versionLine, INTRO_PAD, y, 0.45, 0.47, 0.5, 1, UIFont.Small)
 end
 
 --- Estado del metodo nuevo de instalacion (lector+disquete) para el jugador
@@ -612,6 +619,36 @@ function GlobalStorageSiK.TerminalBlockedPanel.toggleMarkKnownTerminals(terminal
 	end
 end
 
+--- Muestra/oculta la cobertura de UN terminal concreto (fila x,y,z), pedido
+--- explicito (2026-08-17): antes "mostrar cobertura" marcaba TODAS las redes
+--- conocidas del jugador (toggleMarkKnownTerminals, arriba) desde 2 sitios
+--- genericos (ventana de bloqueo y pestaña Red) - se sustituye por esto,
+--- un boton POR TERMINAL en su propio modal de edicion
+--- (GS_TerminalUI_TerminalEditor.lua) que solo marca el radio de ESE
+--- terminal. Los otros 2 visualizadores quedan descartados por ahora (sin
+--- borrar el motor compartido de resaltado, solo sus puntos de entrada).
+---@param row table {x, y, z}
+---@return boolean marcandoAhora
+function GlobalStorageSiK.TerminalBlockedPanel.toggleSingleTerminalCoverage(row)
+	if GlobalStorageSiK.TerminalBlockedPanel._singleMarking then
+		GlobalStorageSiK.TerminalBlockedPanel._singleMarking = false
+		GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow = nil
+		GlobalStorageSiK.WorldHighlight.clearAll()
+		return false
+	end
+	GlobalStorageSiK.TerminalBlockedPanel._singleMarking = true
+	GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow = row
+	local cell = getCell and getCell() or nil
+	if cell and row and row.x then
+		local useRadius = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+		local linkRadius = math.min(GlobalStorageSiK.Sandbox.getTerminalLinkMaxDistance(), LINK_RING_MAX_RADIUS)
+		local x, y, z = math.floor(row.x), math.floor(row.y), math.floor(row.z or 0)
+		GlobalStorageSiK.WorldHighlight.markArea(cell, x, y, z, linkRadius, LINK_COLOR.r, LINK_COLOR.g, LINK_COLOR.b, false)
+		GlobalStorageSiK.WorldHighlight.markArea(cell, x, y, z, useRadius, USE_COLOR.r, USE_COLOR.g, USE_COLOR.b, true)
+	end
+	return true
+end
+
 ---@param terminal GS_TerminalUI
 function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	if not terminal or not terminal.blockedScroll then
@@ -662,24 +699,13 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 		end
 	end
 
-	local markBtnLabel = GlobalStorageSiK.TerminalBlockedPanel._marking
-		and T("IGUI_GS_UnmarkKnownTerminals") or T("IGUI_GS_MarkKnownTerminals")
-	-- (Etiquetas/leyenda en IGUI_GS_MarkKnownTerminals* - ahora describen
-	-- "cobertura de red", no una simple marca de posicion.)
-	local markBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-		CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, markBtnLabel, scroll, function()
-			GlobalStorageSiK.TerminalBlockedPanel.toggleMarkKnownTerminals(terminal)
-		end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, markBtn)
-	y = y + CRAFT_BTN_H + 2
-	local rangeHint = T("IGUI_GS_MarkKnownTerminalsHint", tostring(GlobalStorageSiK.Sandbox.getTerminalProximityRange()),
-		tostring(math.min(GlobalStorageSiK.Sandbox.getTerminalLinkMaxDistance(), 40)))
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(rangeHint, cardW - CONTENT_PAD, UIFont.Small)) do
-		local hintLbl = ISLabel:new(CONTENT_PAD, y, FONT_HGT_SMALL, line, 0.55, 0.58, 0.62, 1, UIFont.Small, true)
-		hintLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, hintLbl)
-		y = y + FONT_HGT_SMALL + LINE_GAP
-	end
+	-- Boton "mostrar cobertura" RETIRADO de aqui (2026-08-17, pedido
+	-- explicito): la cobertura ahora se marca por terminal concreto, desde
+	-- el modal de ese terminal (GS_TerminalUI_TerminalEditor.lua,
+	-- toggleSingleTerminalCoverage) - este visualizador generico "todas las
+	-- redes conocidas" queda descartado por ahora, sin borrar el motor
+	-- compartido de resaltado (toggleMarkKnownTerminals/redrawMarkers, mas
+	-- arriba en este fichero) por si se retoma mas adelante.
 	y = y + CARD_GAP
 
 	-- Visibilidad minima de "tus redes" sin tener terminal a mano - pide la

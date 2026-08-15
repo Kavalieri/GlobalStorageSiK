@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Scrivi dischetto Tablet"
+	"IGUI_GS_ProgramTabletDiskMenu": "Scrivi dischetto Tablet",
+	"IGUI_GS_AddonTabletTitle": "Antenna WiFi GS",
+	"IGUI_GS_AddonTabletDesc": "Espansione Tablet: richiede il manuale (Elettricità 5). Installa il modulo su questo terminale."
 }

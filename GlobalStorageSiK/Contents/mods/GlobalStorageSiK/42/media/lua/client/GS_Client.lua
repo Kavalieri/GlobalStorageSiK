@@ -121,11 +121,34 @@ local function onServerCommand(module, command, args)
 		end
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
-		elseif not continuing and GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.clearPending then
+		end
+		-- BUG REAL (2026-08-16, "no me deja encadenar retiros, no hay logs
+		-- de nada tras el primer bloqueo"): esto era un if/elseif, y como
+		-- GlobalStorageSiK.TerminalSync.onActionResult SIEMPRE existe, el
+		-- elseif de abajo (pensado para liberar WithdrawClient._pending
+		-- cuando TerminalSync no aplica) nunca se ejecutaba en la practica.
+		-- TerminalSync.onActionResult tambien libera _pending, pero solo si
+		-- args.transfer viene relleno (mira "not args or not args.transfer"
+		-- -> return temprano) - una respuesta de fallo de acceso al terminal
+		-- (requireTerminalAccess) NO incluye transfer, asi que _pending se
+		-- quedaba en true para siempre tras el primer fallo de acceso, y
+		-- WithdrawClient.sendWithdraw cortaba en silencio TODOS los retiros
+		-- siguientes sin ni siquiera contactar al servidor - de ahi que no
+		-- apareciera ningun log, ni de Router ni de Deposit ni de nada.
+		-- clearPending() es idempotente (poner false a false no hace nada),
+		-- asi que llamarla siempre aqui, incondicional, es seguro aunque
+		-- TerminalSync.onActionResult ya la haya llamado tambien.
+		if not continuing and GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.clearPending then
 			GlobalStorageSiK.WithdrawClient.clearPending()
 		end
 		if not continuing then
 			showMessage(resolvedMessage or "Listo", args and args.ok == false)
+		end
+		if args and args.jobType == "redistribute" then
+			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+			if ui and ui.onRedistributeFinished then
+				ui:onRedistributeFinished(args.ok == true)
+			end
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
 			-- Cualquier deposito/retiro cambia cantidades en red: invalida la

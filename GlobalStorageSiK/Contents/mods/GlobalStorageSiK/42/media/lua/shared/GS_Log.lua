@@ -15,6 +15,19 @@ GlobalStorageSiK.Log._echoHook = nil
 
 local PREFIX = "[GlobalStorageSiK"
 
+--- Segundos transcurridos (con decimas) desde que arrancó el proceso actual -
+--- la fecha no importa para depurar, pero medir cuánto tarda algo entre dos
+--- líneas de log sí (pedido 2026-08-16, tras varias rondas de logs reales
+--- donde localizar "cuanto paso entre X e Y" a mano era tedioso).
+--- getTimestampMs existe tanto en cliente como en servidor.
+---@return string
+local function elapsedTag()
+	if not getTimestampMs then
+		return "?"
+	end
+	return string.format("%.1fs", getTimestampMs() / 1000)
+end
+
 --- Mapa area de log (primer argumento de cada llamada Log.debug/Debug.log en
 --- todo el mod) -> categoria de sandbox (ver GS_Sandbox.debugCategoryEnabled).
 --- Un area sin entrada aqui NO se filtra por categoria (solo por DebugMode
@@ -51,7 +64,7 @@ local AREA_CATEGORY = {
 ---@param message string
 ---@param detail any|nil
 local function write(level, area, message, detail)
-	local line = PREFIX .. ":" .. tostring(level) .. ":" .. tostring(area) .. "] " .. tostring(message)
+	local line = "[" .. elapsedTag() .. "] " .. PREFIX .. ":" .. tostring(level) .. ":" .. tostring(area) .. "] " .. tostring(message)
 	if detail ~= nil then
 		line = line .. " | " .. tostring(detail)
 	end

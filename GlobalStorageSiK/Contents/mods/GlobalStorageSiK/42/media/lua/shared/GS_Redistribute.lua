@@ -17,23 +17,6 @@ require "GS_I18n"
 
 GlobalStorageSiK.Redistribute = {}
 
---- Indica si el nodo acepta cualquier categoría (sin reglas o solo *).
----@param entry table|nil
----@return boolean
-local function nodeIsAnyCategory(entry)
-	if not entry then
-		return true
-	end
-	local rules = entry.categories
-	if not rules or #rules == 0 then
-		return true
-	end
-	if #rules == 1 and rules[1] == "*" then
-		return true
-	end
-	return false
-end
-
 --- Construye tabla zoneId -> zone.priority (1 = zona principal) para la red.
 ---@param registry table
 ---@param networkId string
@@ -96,13 +79,18 @@ local function snapshotContainerItems(container)
 end
 
 --- Elige el MEJOR contenedor destino para un item, comparando TODOS los
---- candidatos validos (no el primero que encaje). Dos bolsas separadas:
---- "specific" (nodos cuya categoria/subcategoria acepta este item concreto)
---- y "catchAll" (nodos sin restriccion de categoria). Se usa "specific" si
---- hay al menos un candidato ahi (con hueco); si no, cae a "catchAll". El
---- propio nodo de origen se incluye en su bolsa correspondiente (con hueco
---- garantizado) para poder compararlo de tu a tu contra el resto: si ya es
---- el mejor, no se mueve nada.
+--- candidatos validos (no el primero que encaje). Usa la MISMA
+--- especificidad de 4 niveles que GS_Router.pickDepositTarget
+--- (matchSpecificity: 1=hoja exacta, 2=Nivel 2, 3=Nivel 1, 4=sin
+--- restriccion) en vez de una separacion propia "especifico vs cualquiera" -
+--- antes Auto-ordenar solo distinguia esas dos bolsas y trataba Nivel 1/2/3
+--- como un mismo grupo "especifico" sin desempate entre ellos, dando
+--- resultados distintos a un deposito manual del MISMO item con la MISMA
+--- configuracion de contenedores (pedido explicito: no debe haber diferencia
+--- entre ambos caminos, es la misma decision de enrutado). El propio nodo de
+--- origen se incluye en su tier correspondiente (con hueco garantizado) para
+--- poder compararlo de tu a tu contra el resto: si ya es el mejor, no se
+--- mueve nada.
 ---@param item InventoryItem
 ---@param fromLive table
 ---@param liveNodes table[]
@@ -114,52 +102,47 @@ local function pickRedistributeTarget(item, fromLive, liveNodes, character, zone
 		return nil
 	end
 
-	local specific, catchAll = {}, {}
+	local tiers = { {}, {}, {}, {} }
 	for i = 1, #liveNodes do
 		local live = liveNodes[i]
 		local isSelf = (live.container == fromLive.container)
 		local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
 		if hasSpace then
-			if nodeIsAnyCategory(live.entry) then
-				catchAll[#catchAll + 1] = live
-			elseif GlobalStorageSiK.Router.nodeAcceptsItem(live.entry, item) then
-				specific[#specific + 1] = live
+			local tier = GlobalStorageSiK.Router.matchSpecificity(live.entry or {}, item)
+			if tier then
+				tiers[tier][#tiers[tier] + 1] = live
 			end
 		end
 	end
 
-	-- Afinidad "mismo item, mismo contenedor" (misma regla que
-	-- GS_Router.pickDepositTarget para el arrastre/deposito manual - antes
-	-- Auto-ordenar tenia su propia logica sin afinidad, asi que un click
-	-- podia enviar TODOS los items sin categoria configurada al mismo
-	-- contenedor "cualquiera" solo por ser el primero en prioridad/zona).
-	-- Solo se aplica dentro de catchAll (nodos sin restriccion): una
-	-- categoria o filtro configurado a mano por el jugador sigue ganando
-	-- siempre, esto no lo pisa.
-	if #specific == 0 and #catchAll > 0 then
-		local fullType = item.getFullType and item:getFullType() or nil
-		if fullType then
-			for i = 1, #catchAll do
-				local live = catchAll[i]
-				if live.container ~= fromLive.container
-					and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) then
-					return live
+	for tierIdx = 1, 4 do
+		local pool = tiers[tierIdx]
+		if #pool > 0 then
+			if tierIdx == 4 then
+				-- Afinidad "mismo item, mismo contenedor": SOLO dentro de tier 4
+				-- (sin restriccion de categoria) - un contenedor con categoria/
+				-- filtro configurado a mano por el jugador (tiers 1-3) siempre
+				-- gana antes de mirar afinidad, igual que en pickDepositTarget.
+				local fullType = item.getFullType and item:getFullType() or nil
+				if fullType then
+					for i = 1, #pool do
+						local live = pool[i]
+						if live.container ~= fromLive.container
+							and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) then
+							return live
+						end
+					end
 				end
 			end
+			table.sort(pool, function(a, b) return candidateBetter(a, b, zonePriorityOf) end)
+			local best = pool[1]
+			if best.container == fromLive.container then
+				return nil
+			end
+			return best
 		end
 	end
-
-	local pool = (#specific > 0) and specific or catchAll
-	if #pool == 0 then
-		return nil
-	end
-
-	table.sort(pool, function(a, b) return candidateBetter(a, b, zonePriorityOf) end)
-	local best = pool[1]
-	if best.container == fromLive.container then
-		return nil
-	end
-	return best
+	return nil
 end
 
 --- Redistribuye ítems de la red según categorías de nodos.

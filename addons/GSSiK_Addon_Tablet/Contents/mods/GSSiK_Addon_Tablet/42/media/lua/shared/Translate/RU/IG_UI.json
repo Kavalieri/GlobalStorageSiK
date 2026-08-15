@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Записать дискету Tablet"
+	"IGUI_GS_ProgramTabletDiskMenu": "Записать дискету Tablet",
+	"IGUI_GS_AddonTabletTitle": "WiFi-антенна GS",
+	"IGUI_GS_AddonTabletDesc": "Дополнение Планшет: требуется журнал (Электричество 5). Установите модуль на этот терминал."
 }

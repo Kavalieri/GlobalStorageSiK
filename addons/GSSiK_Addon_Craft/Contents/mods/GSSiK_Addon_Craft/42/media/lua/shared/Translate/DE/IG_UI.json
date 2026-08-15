@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Craft-Diskette beschreiben"
+	"IGUI_GS_ProgramCraftDiskMenu": "Craft-Diskette beschreiben",
+	"IGUI_GS_AddonCraftTitle": "Herstellen",
+	"IGUI_GS_AddonCraftDesc": "Erweiterung Herstellen: Magazin erforderlich (Elektrizität 5). Modul an diesem Terminal installieren.",
+	"IGUI_GS_SectionCraftRemote": "Herstellung mit Netzwerkinventar",
+	"IGUI_GS_CraftRemoteHint": "Öffnet das normale Herstellungsmenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast.",
+	"IGUI_GS_CraftOpenVanilla": "Herstellung öffnen",
+	"IGUI_GS_CraftOpenNeat": "Neat Herstellung öffnen",
+	"IGUI_GS_CraftOpenCook": "Kochen öffnen",
+	"IGUI_GS_CraftSendResultOn": "Ergebnis ins Lager senden: AN",
+	"IGUI_GS_CraftSendResultOff": "Ergebnis ins Lager senden: AUS",
+	"IGUI_GS_CraftSendResultHint": "Wenn AN, wird alles, was das Herstellen produziert (und übrig gebliebene Materialien), per Priorität ins Netzwerklager gesendet, statt in deinem Inventar zu bleiben. Werkzeuge werden so oder so automatisch zurückgegeben."
 }

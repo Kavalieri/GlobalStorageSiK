@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Write Craft disk"
+	"IGUI_GS_ProgramCraftDiskMenu": "Write Craft disk",
+	"IGUI_GS_AddonCraftTitle": "Craft",
+	"IGUI_GS_AddonCraftDesc": "Craft add-on: magazine required (Electricity 5). Install module on this terminal.",
+	"IGUI_GS_SectionCraftRemote": "Network inventory crafting",
+	"IGUI_GS_CraftRemoteHint": "Open the game crafting UI; network containers are added while you have terminal access.",
+	"IGUI_GS_CraftOpenVanilla": "Open game crafting",
+	"IGUI_GS_CraftOpenNeat": "Open Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Open cooking",
+	"IGUI_GS_CraftSendResultOn": "Send result to storage: ON",
+	"IGUI_GS_CraftSendResultOff": "Send result to storage: OFF",
+	"IGUI_GS_CraftSendResultHint": "When ON, whatever the crafting produces (and any leftover materials) is sent to network storage by priority instead of staying in your inventory. Tools already return automatically either way."
 }

@@ -120,6 +120,19 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg)
 	if not itemIds or #itemIds == 0 then
 		return false
 	end
+	-- DIAGNOSTICO TEMPORAL (2026-08-16, "el mismo lote de ~200 items se
+	-- reenvia una y otra vez indefinidamente, incluso tras terminar un
+	-- trabajo con exito"): no se pudo confirmar aun por lectura de codigo
+	-- quien re-arma el trabajo completo repetidamente (candidatos
+	-- descartados por ahora: GS_TerminalDrop ya filtra items de contenedores
+	-- de red vía canDepositDraggedItems). print incondicional con traceback
+	-- para identificar la funcion/fichero que llama a sendDepositItems cada
+	-- vez que esto ocurra en el proximo test. Quitar cuando se confirme la
+	-- causa real.
+	GlobalStorageSiK.Log.warn("DepositClient", string.format("sendDepositItems | count=%s", tostring(#itemIds)))
+	if debug and debug.traceback then
+		print(debug.traceback("[GlobalStorageSiK:DepositDiag] sendDepositItems call stack", 2))
+	end
 	local player = GlobalStorageSiK.PlayerUtils and GlobalStorageSiK.PlayerUtils.resolve(playerArg)
 		or GlobalStorageSiK.NetClient.getPlayer()
 	showDepositPending(player)

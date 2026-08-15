@@ -1,3 +1,13 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Graver disquette Craft"
+	"IGUI_GS_ProgramCraftDiskMenu": "Graver disquette Craft",
+	"IGUI_GS_AddonCraftTitle": "Fabrication",
+	"IGUI_GS_AddonCraftDesc": "Extension Fabrication : magazine requis (Électricité 5). Installez le module sur ce terminal.",
+	"IGUI_GS_SectionCraftRemote": "Fabrication avec l'inventaire réseau",
+	"IGUI_GS_CraftRemoteHint": "Ouvre l'interface de fabrication du jeu ; les conteneurs réseau sont ajoutés tant que vous avez accès au terminal.",
+	"IGUI_GS_CraftOpenVanilla": "Ouvrir la fabrication du jeu",
+	"IGUI_GS_CraftOpenNeat": "Ouvrir Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Ouvrir la cuisine",
+	"IGUI_GS_CraftSendResultOn": "Envoyer le résultat au stockage : ACTIVÉ",
+	"IGUI_GS_CraftSendResultOff": "Envoyer le résultat au stockage : DÉSACTIVÉ",
+	"IGUI_GS_CraftSendResultHint": "Si activé, tout ce que produit la fabrication (et les matériaux restants) est envoyé au stockage réseau par priorité au lieu de rester dans votre inventaire. Les outils reviennent déjà automatiquement dans tous les cas."
 }

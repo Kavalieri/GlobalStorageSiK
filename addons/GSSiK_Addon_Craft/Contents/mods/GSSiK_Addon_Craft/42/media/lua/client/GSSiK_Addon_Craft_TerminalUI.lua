@@ -181,6 +181,28 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 		y = y + BTN_H + 6
 	end
 
+	y = y + BLOCK_GAP
+
+	-- Toggle "enviar resultado al almacen" (pedido explicito, 2026-08-17):
+	-- las herramientas/materiales sobrantes YA vuelven solos a la red
+	-- (sweepPendingReturns, mecanismo existente, sin tocar) - esto es SOLO
+	-- para el resultado nuevo del crafteo, que hoy se queda siempre en el
+	-- inventario. Preferencia solo de cliente, no persiste entre sesiones
+	-- (vuelve a "no" cada vez que se reabre el terminal) - a proposito,
+	-- mas simple y sin sorpresas de "se me olvido que lo tenia activado".
+	local sendActive = GlobalStorageSiK.CraftSession.sendResultToNetwork == true
+	local sendLabel = sendActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
+	local sendBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, sendLabel, scroll, function()
+		local nowActive = not (GlobalStorageSiK.CraftSession.sendResultToNetwork == true)
+		GlobalStorageSiK.CraftSession.sendResultToNetwork = nowActive
+		sendBtn._gsNeatLabel = nowActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
+		sendBtn._gsNeatActive = nowActive
+	end)
+	sendBtn._gsNeatActive = sendActive
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, sendBtn)
+	y = y + BTN_H + 6
+	y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_CraftSendResultHint"), cardW, 0.55, 0.58, 0.62)
+
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 	GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)

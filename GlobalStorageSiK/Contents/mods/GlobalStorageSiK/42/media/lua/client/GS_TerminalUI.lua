@@ -353,6 +353,17 @@ function GS_TerminalUI:buildItemsToolbar()
 	self.itemsTitleLbl = GlobalStorageSiK.TerminalSections.addTitleLabel(
 		self.itemsPanel, pad, y, "IGUI_GS_SectionItems"
 	)
+	-- Auto-ordenar: antes vivia solo en la pestaña Red (GS_TerminalUI_NetworkStatus.lua) -
+	-- movido aqui, arriba a la derecha de la pestaña Items/almacén (pedido
+	-- explicito), con tooltip explicando que hace. La barra de progreso/aviso
+	-- de fin pedidos junto con esta reubicacion quedan pendientes aparte (ver
+	-- pending-work.md) - de momento el boton sigue comportandose igual que
+	-- antes (dispara el job de reordenado, sin feedback visual de progreso).
+	self.autoSortBtn = createNeatButton(0, y, 120, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
+	self.itemsPanel:addChild(self.autoSortBtn)
+	if self.autoSortBtn.setTooltip then
+		self.autoSortBtn:setTooltip(T("IGUI_GS_RedistributeHint"))
+	end
 	y = y + FONT_HGT_SMALL + gap
 
 	local _wpal = GlobalStorageSiK.TerminalChrome.PALETTE
@@ -551,6 +562,11 @@ function GS_TerminalUI:calculateLayout()
 			x = pad, y = pad, width = contentW, bottom = innerH - pad, gap = gap,
 		}
 		col:place(self.itemsTitleLbl, FONT_HGT_SMALL)   -- título (solo x/y)
+		if self.autoSortBtn then
+			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(self.autoSortBtn)
+			self.autoSortBtn:setX(pad + contentW - self.autoSortBtn.width)
+			self.autoSortBtn:setY(pad)
+		end
 		col:label(self.itemsWeightLbl, FONT_HGT_SMALL)  -- peso (x/y/width)
 		col:label(self.depositDropHint, hintH)          -- hint (x/y/width)
 		col:row(rowH, {
@@ -727,6 +743,24 @@ function GS_TerminalUI:refreshFromState(state)
 		if state.capacity then
 			merged.capacity = state.capacity
 		end
+		-- BUG REAL (2026-08-16, "la lista de nodos no actualiza su cantidad de
+		-- tipos distintos en tiempo real... no actualiza si no cierro y abro o
+		-- cambio de pestaña"): esta rama inventorySync (sync ligero tras
+		-- depositar/retirar) nunca tocaba merged.nodes, asi que la columna
+		-- "Tipos" (node.itemTypeCount) se quedaba con el valor del ultimo
+		-- pushTerminalState completo. Parchea in-place por id contra el mapa
+		-- ligero nodeTypeCounts que ahora manda el servidor
+		-- (buildLiveNodeTypeCounts en GS_Server.lua), sin reenviar zones/nodes
+		-- completos.
+		if state.nodeTypeCounts and merged.nodes then
+			for i = 1, #merged.nodes do
+				local node = merged.nodes[i]
+				local c = node and state.nodeTypeCounts[node.id]
+				if c ~= nil then
+					node.itemTypeCount = c
+				end
+			end
+		end
 		if state.items then
 			local copy = {}
 			for i = 1, #state.items do
@@ -861,6 +895,13 @@ function GS_TerminalUI:onClose()
 			GlobalStorageSiK.WorldHighlight.clearAll()
 		end
 	end
+	if GlobalStorageSiK.TerminalBlockedPanel and GlobalStorageSiK.TerminalBlockedPanel._singleMarking then
+		GlobalStorageSiK.TerminalBlockedPanel._singleMarking = false
+		GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow = nil
+		if GlobalStorageSiK.WorldHighlight and GlobalStorageSiK.WorldHighlight.clearAll then
+			GlobalStorageSiK.WorldHighlight.clearAll()
+		end
+	end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
 	if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
@@ -920,10 +961,39 @@ function GS_TerminalUI:onRequestOpen()
 	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 end
 
+--- Semaforo de estado del boton Auto-ordenar (pedido explicito, mas simple
+--- que una barra de progreso real: el job del servidor no conoce su
+--- duracion total de antemano - ver GS_RedistributeJob.lua - asi que no hay
+--- % que calcular). Naranja mientras el job esta en curso, verde un momento
+--- al terminar con exito, vuelve a como estaba si falla o al reabrir el
+--- terminal (self.autoSortBtn se recrea desde cero cada vez).
+local AUTOSORT_COLOR_RUNNING = { r = 0.95, g = 0.7, b = 0.25 }
+local AUTOSORT_COLOR_DONE = { r = 0.4, g = 0.85, b = 0.45 }
+
 function GS_TerminalUI:onRedistributeNetwork()
+	if self.autoSortBtn then
+		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_RedistributeRunning")
+		self.autoSortBtn.textColor = AUTOSORT_COLOR_RUNNING
+	end
 	GlobalStorageSiK.NetClient.sendCommand("redistributeNetwork", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
+end
+
+--- Llamado desde GS_Client.lua al recibir el actionResult de fin de job
+--- (jobType="redistribute").
+---@param ok boolean
+function GS_TerminalUI:onRedistributeFinished(ok)
+	if not self.autoSortBtn then
+		return
+	end
+	if ok then
+		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_RedistributeDone")
+		self.autoSortBtn.textColor = AUTOSORT_COLOR_DONE
+	else
+		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
+		self.autoSortBtn.textColor = nil
+	end
 end
 
 --- Texto actual del buscador de ítems.
@@ -1343,4 +1413,76 @@ function GlobalStorageSiK.TerminalUI:onToggleFactionOnly()
 		enabled = not (perms.factionOnly == true),
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
+end
+
+-- ===========================================================================
+-- Escape cierra nuestro terminal cuando cierra la ventana de crafteo/
+-- construccion (vanilla o Neat) delante de el (pedido explicito en UX: "al
+-- cerrar el panel de crafteo/construccion con Escape, nuestro terminal se
+-- queda abierto por detras"). Nuestro terminal NO se oculta mientras esas
+-- ventanas estan abiertas (por diseno, ver GS_NetworkCraftSession.onTick -
+-- la sesion de red sigue viva independientemente de si la ventana esta
+-- tecnicamente abierta), asi que Escape solo actuaba sobre la ventana de
+-- crafteo/construccion, dejando la nuestra visible detras.
+--
+-- Implementacion deliberadamente NO invasiva: no se sobreescribe el manejo
+-- de Escape de ISHandcraftWindow/ISBuildWindow (vanilla o Neat, desconocido
+-- desde aqui) - solo se observa. Al pulsar Escape con nuestro terminal
+-- visible y una de esas ventanas abierta, se vigila un margen corto de
+-- ticks; si esa ventana se cierra de verdad en ese margen (la cerro Escape,
+-- no otra cosa), se cierra tambien nuestro terminal. Si no se cierra
+-- (Escape lo consumio un dialogo anidado, o no era esa ventana), no pasa
+-- nada - falla seguro, no interfiere con ningun otro flujo.
+-- ===========================================================================
+local _escCloseWatchPlayerNum = nil
+local _escCloseWatchTicks = 0
+local ESC_CLOSE_WATCH_MAX_TICKS = 15
+
+local function craftOrBuildWindowOpen(playerNum)
+	if not ISEntityUI or not ISEntityUI.IsWindowOpen then
+		return false
+	end
+	return ISEntityUI.IsWindowOpen(playerNum, "HandcraftWindow") ~= nil
+		or ISEntityUI.IsWindowOpen(playerNum, "BuildWindow") ~= nil
+end
+
+if Events and Events.OnKeyStartPressed then
+	Events.OnKeyStartPressed.Add(function(key)
+		if key ~= Keyboard.KEY_ESCAPE then
+			return
+		end
+		local ui = GlobalStorageSiK.TerminalUI.instance
+		if not ui or not ui.getIsVisible or not ui:isVisible() then
+			return
+		end
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+		if not player or not player.getPlayerNum then
+			return
+		end
+		local playerNum = player:getPlayerNum()
+		if craftOrBuildWindowOpen(playerNum) then
+			_escCloseWatchPlayerNum = playerNum
+			_escCloseWatchTicks = 0
+		end
+	end)
+end
+
+if Events and Events.OnTick then
+	Events.OnTick.Add(function()
+		if not _escCloseWatchPlayerNum then
+			return
+		end
+		_escCloseWatchTicks = _escCloseWatchTicks + 1
+		if not craftOrBuildWindowOpen(_escCloseWatchPlayerNum) then
+			local ui = GlobalStorageSiK.TerminalUI.instance
+			if ui and ui.onClose then
+				ui:onClose()
+			end
+			_escCloseWatchPlayerNum = nil
+			return
+		end
+		if _escCloseWatchTicks > ESC_CLOSE_WATCH_MAX_TICKS then
+			_escCloseWatchPlayerNum = nil
+		end
+	end)
 end

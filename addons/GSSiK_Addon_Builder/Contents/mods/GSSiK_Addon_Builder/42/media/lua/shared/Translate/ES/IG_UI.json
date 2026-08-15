@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Grabar disco Builder"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Grabar disco Builder",
+	"IGUI_GS_TabBuilder": "Construcción",
+	"IGUI_GS_AddonBuilderTitle": "Constructor",
+	"IGUI_GS_AddonBuilderDesc": "Addon Constructor: revista obligatoria (Electricidad 5). Craftea e instala el módulo en Addons.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Abrir construcción del juego",
+	"IGUI_GS_CraftOpenBuildNeat": "Abrir Neat Building",
+	"IGUI_GS_BuildRemoteHint": "Abre la construcción del juego; los contenedores de la red se añaden mientras tengas acceso al terminal."
 }

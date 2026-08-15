@@ -308,7 +308,15 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	end
 	local playerFaction = GlobalStorageSiK.Permissions.getPlayerFaction(player)
 	if playerFaction and playerFaction.getName then
-		local fname = playerFaction:getName()
+		-- BUG REAL encontrado (2026-08-16, mientras se investigaba por que
+		-- el permiso de "toda la facción" no daba acceso real): addFaction
+		-- guarda el nombre normalizado a minusculas (ver normalizeName), pero
+		-- aqui se comparaba contra playerFaction:getName() SIN normalizar -
+		-- "sik-gs" nunca coincidia con "SiK-GS". Este mecanismo ya no lo usa
+		-- la UI (sustituido por addAllFactionMembers, que expande a acceso
+		-- individual confirmado funcional), pero se deja corregido por si
+		-- algo mas lo sigue leyendo.
+		local fname = normalizeName(playerFaction:getName())
 		for i = 1, #(net.allowedFactions or {}) do
 			if net.allowedFactions[i] == fname then
 				return true

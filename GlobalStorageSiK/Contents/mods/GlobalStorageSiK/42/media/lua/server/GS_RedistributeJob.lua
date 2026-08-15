@@ -11,6 +11,7 @@
 
 require "GS_Redistribute"
 require "GS_PlayerUtils"
+require "GS_TerminalAccess"
 
 GlobalStorageSiK.RedistributeJob = {}
 
@@ -64,9 +65,24 @@ local function finishJob(networkId, job, reason)
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
 	-- interrumpia el juego. Por eso el mensaje de finalizacion nunca llegaba.
-	GlobalStorageSiK.Server.sendCommand(player, "actionResult", { ok = ok, message = msg })
+	-- jobType="redistribute" (2026-08-17, pedido explicito): marca de fin
+	-- para que el cliente pueda distinguir ESTE actionResult concreto del
+	-- resto (depositos/retiros normales) y actualizar el semaforo de estado
+	-- del boton Auto-ordenar en GS_TerminalUI.lua sin adivinar por el texto.
+	GlobalStorageSiK.Server.sendCommand(player, "actionResult", { ok = ok, message = msg, jobType = "redistribute" })
 	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
-		GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "")
+		-- BUG REAL encontrado (reportado 2026-08-16, "las pestañas de addon
+		-- desaparecen mientras el reordenado esta activo"): pushTerminalState
+		-- SOLO incluye installedAddons/craftTabEnabled/buildTabEnabled en el
+		-- payload si se le pasa terminalAnchor (ver GS_Server.lua) - sin el,
+		-- el cliente recibe un terminalState con esos campos ausentes y la
+		-- visibilidad de la pestaña se recalcula como "ocultar". Un job de
+		-- reordenado dura decenas de segundos y empuja este estado cada
+		-- ~2.5s (RETRY_DELAY_MS), asi que sin el anchor las pestañas
+		-- parpadeaban/desaparecian repetidamente durante todo el job.
+		local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
+			and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
 	end
 end
 
@@ -100,7 +116,12 @@ local function onTick()
 						-- Empuja el estado ya para que el jugador vea progreso en vivo.
 						job.nextRunMs = now + RETRY_DELAY_MS
 						if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
-							GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "")
+							-- Mismo motivo que en finishJob: sin terminalAnchor el
+							-- cliente pierde installedAddons/craftTabEnabled/
+							-- buildTabEnabled en cada empuje intermedio del job.
+							local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
+								and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+							GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
 						end
 					else
 						finishJob(networkId, job, summary.reason)

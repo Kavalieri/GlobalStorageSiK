@@ -1,3 +1,9 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Builder-Diskette beschreiben"
+	"IGUI_GS_ProgramBuilderDiskMenu": "Builder-Diskette beschreiben",
+	"IGUI_GS_TabBuilder": "Bauen",
+	"IGUI_GS_AddonBuilderTitle": "Bauen",
+	"IGUI_GS_AddonBuilderDesc": "Erweiterung Bauen: Magazin erforderlich (Elektrizität 5). Modul im Reiter Erweiterungen herstellen und installieren.",
+	"IGUI_GS_CraftOpenBuildVanilla": "Bauen öffnen",
+	"IGUI_GS_CraftOpenBuildNeat": "Neat Bauen öffnen",
+	"IGUI_GS_BuildRemoteHint": "Öffnet das normale Baumenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast."
 }

@@ -1,3 +1,5 @@
 {
-	"IGUI_GS_ProgramTabletDiskMenu": "Write Tablet disk"
+	"IGUI_GS_ProgramTabletDiskMenu": "Write Tablet disk",
+	"IGUI_GS_AddonTabletTitle": "GS WiFi Antenna",
+	"IGUI_GS_AddonTabletDesc": "Tablet add-on: magazine required (Electricity 5). Install module on this terminal."
 }
