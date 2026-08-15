@@ -68,6 +68,18 @@ function GlobalStorageSiK.CraftSession.getLastOpenError()
 	return lastOpenErrorReason
 end
 
+--- Permite a un addon reportar un fallo de apertura a través del mismo
+--- mecanismo que begin()/openHandcraft()/openBuild() ya usan, para ventanas
+--- que el addon abre por su cuenta (ej. GSSiK_Addon_Craft_NetworkCook.lua
+--- abriendo PJCK_CookingUI, que no pasa por openHandcraft porque Project_Cook
+--- rastrea su propia ventana, no vía ISEntityUI) - así el panel de estado ya
+--- existente (getLastOpenError) muestra el motivo sin que cada addon tenga
+--- que inventar su propio campo de error paralelo.
+---@param reason string|nil
+function GlobalStorageSiK.CraftSession.setLastOpenError(reason)
+	lastOpenErrorReason = reason
+end
+
 --- Envía un mensaje de debug al log PROPIO del addon activo (Craft/Builder,
 --- cada uno con su propio DebugMode de sandbox, independiente del de Core -
 --- ver GSSiK_Addon_Craft_Log.lua/GSSiK_Addon_Builder_Log.lua) en vez de
@@ -337,6 +349,149 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 		sessionDebugLog("claimNetworkItem FALLO (sin espacio/peso real) fullType=" .. fullType)
 	end
 	return ok
+end
+
+--- Recorta self.containers de un panel de crafteo (ISWidgetHandCraftControl,
+--- NC_CraftActionPanel, PJCK_CraftActionPanel de Project_Cook, o cualquier
+--- panel de un addon futuro con campo .logic de tipo HandcraftLogic) a:
+--- contenedores base (no de red) + SOLO los contenedores de red que de
+--- verdad tienen algo que la receta actual necesita ahora mismo - confirmado
+--- con datos reales (ver CLAUDE.md de GSSiK_Addon_Craft) que
+--- HandcraftLogic.performCurrentRecipe() en servidor devuelve
+--- itemsCreados=0 en cuanto self.containers incluye CUALQUIER contenedor
+--- inyectado de red, sea 1 o sean todos - limitación del motor, no cosa de
+--- un panel concreto. GENÉRICO: no conoce la clase concreta del panel, solo
+--- necesita panel.logic y panel.logic:getContainers()/setContainers()
+--- (API vanilla de HandcraftLogic, presente en cualquier panel construido
+--- sobre ella, sea vanilla, Neat Crafting o un mod de terceros como
+--- Project_Cook).
+---@param panel table objeto con campo .logic (HandcraftLogic)
+---@param items userdata|nil ArrayList de InventoryItem (getAllInputItems), puede ser nil
+---@param addonId string
+---@return function restore
+function GlobalStorageSiK.CraftSession.narrowContainersForAction(panel, items, addonId)
+	local okFull, fullList = pcall(function() return panel.logic:getContainers() end)
+	if not okFull or not fullList or not fullList.size then
+		return function() end
+	end
+	local sess = GlobalStorageSiK.CraftSession.getActiveSession(addonId)
+	local networkId = sess and sess.networkId
+	local neededNetwork = {}
+	local seen = {}
+	if items and items.size then
+		for i = 1, items:size() do
+			local ok, item = pcall(function() return items:get(i - 1) end)
+			local container = ok and item and item.getContainer and item:getContainer()
+			if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) and not seen[container] then
+				seen[container] = true
+				neededNetwork[#neededNetwork + 1] = container
+			end
+		end
+	end
+	local narrowed = {}
+	for i = 0, fullList:size() - 1 do
+		local c = fullList:get(i)
+		if not (c and GlobalStorageSiK.CraftSession.isNetworkContainer(c, networkId)) then
+			narrowed[#narrowed + 1] = c
+		end
+	end
+	for i = 1, #neededNetwork do
+		narrowed[#narrowed + 1] = neededNetwork[i]
+	end
+	local okSet = pcall(function() panel.logic:setContainers(GlobalStorageSiK.CraftSession.tableToArrayList(narrowed)) end)
+	sessionDebugLog(string.format("containersNarrow original=%d narrowed=%d aplicado=%s",
+		fullList:size(), #narrowed, tostring(okSet)))
+	return function()
+		pcall(function() panel.logic:setContainers(fullList) end)
+	end
+end
+
+--- Reclama de la red, para el jugador, todos los ingredientes/herramientas
+--- de la receta que estén en un contenedor de red - GENÉRICO, usado por
+--- vanilla/Neat Crafting/Project_Cook/cualquier panel basado en
+--- HandcraftLogic (ver narrowContainersForAction). Tiene en cuenta crafteo
+--- por lotes (batchCount>1): para cada tipo de ingrediente ya reclamado en
+--- la primera pasada, intenta reclamar unidades EXTRA de ese mismo tipo
+--- desde la red hasta cubrir el lote completo.
+---@param player IsoPlayer
+---@param logic userdata HandcraftLogic
+---@param items userdata ArrayList de InventoryItem (getAllInputItems)
+---@param networkId string|nil
+---@param operationId string
+---@param batchCount number|nil
+---@return table waitingIds, number waitingCount, number moved
+function GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, networkId, operationId, batchCount)
+	local waitingIds = {}
+	local waitingCount = 0
+	local moved = 0
+	local authoritative = GlobalStorageSiK.isAuthoritative()
+	local movedFullTypes = {}
+	local movedFullTypeCount = 0
+
+	local function claim(item, container)
+		if GlobalStorageSiK.CraftSession.claimNetworkItem(player, item, container, networkId, operationId) then
+			moved = moved + 1
+			if not authoritative and item.getID then
+				waitingIds[item:getID()] = true
+				waitingCount = waitingCount + 1
+			end
+			return true
+		end
+		return false
+	end
+
+	if items and items.size then
+		for i = 1, items:size() do
+			local item = items:get(i - 1)
+			if item then
+				local container = item.getContainer and item:getContainer()
+				if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
+					local fullType = item.getFullType and item:getFullType() or nil
+					if claim(item, container) and fullType then
+						if not movedFullTypes[fullType] then
+							movedFullTypeCount = movedFullTypeCount + 1
+						end
+						movedFullTypes[fullType] = (movedFullTypes[fullType] or 0) + 1
+					end
+				end
+			end
+		end
+	end
+
+	-- NUNCA next() aqui (Kahlua no lo soporta de forma fiable) - se usa el
+	-- contador propio movedFullTypeCount en vez de next(movedFullTypes) ~= nil
+	-- para saber si hay algo que escanear.
+	if batchCount and batchCount > 1 and movedFullTypeCount > 0 then
+		local okCon, containers = pcall(function() return logic:getContainers() end)
+		if okCon and containers and containers.size then
+			for fullType, haveCount in pairs(movedFullTypes) do
+				local need = batchCount - haveCount
+				local c = 0
+				while need > 0 and c < containers:size() do
+					local container = containers:get(c)
+					c = c + 1
+					if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
+						local okItems2, itemsInC = pcall(function() return container:getItems() end)
+						if okItems2 and itemsInC and itemsInC.size then
+							local j = 0
+							while need > 0 and j < itemsInC:size() do
+								local extraItem = itemsInC:get(j)
+								j = j + 1
+								if extraItem and extraItem.getFullType and extraItem:getFullType() == fullType
+									and not (extraItem.getID and GlobalStorageSiK.CraftSession.isItemClaimed(extraItem:getID())) then
+									if claim(extraItem, container) then
+										need = need - 1
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return waitingIds, waitingCount, moved
 end
 
 --- Barrido de préstamos pendientes (cada tick, tabla normalmente vacía o

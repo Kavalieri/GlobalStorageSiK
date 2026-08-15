@@ -62,6 +62,7 @@
 	"IGUI_GS_CraftRemoteHint": "Apre l'interfaccia di crafting del gioco; i contenitori di rete vengono aggiunti finché hai accesso al terminale.",
 	"IGUI_GS_CraftOpenVanilla": "Apri crafting del gioco",
 	"IGUI_GS_CraftOpenNeat": "Apri Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Apri cucina",
 	"IGUI_GS_CraftOpenBuildVanilla": "Apri costruzione del gioco",
 	"IGUI_GS_CraftOpenBuildNeat": "Apri Neat Building",
 	"IGUI_GS_BuildRemoteHint": "Apre l'interfaccia di costruzione del gioco; i contenitori di rete vengono aggiunti finché hai accesso al terminale.",

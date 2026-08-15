@@ -62,6 +62,7 @@
 	"IGUI_GS_CraftRemoteHint": "Öffnet das normale Herstellungsmenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast.",
 	"IGUI_GS_CraftOpenVanilla": "Herstellung öffnen",
 	"IGUI_GS_CraftOpenNeat": "Neat Herstellung öffnen",
+	"IGUI_GS_CraftOpenCook": "Kochen öffnen",
 	"IGUI_GS_CraftOpenBuildVanilla": "Bauen öffnen",
 	"IGUI_GS_CraftOpenBuildNeat": "Neat Bauen öffnen",
 	"IGUI_GS_BuildRemoteHint": "Öffnet das normale Baumenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast.",

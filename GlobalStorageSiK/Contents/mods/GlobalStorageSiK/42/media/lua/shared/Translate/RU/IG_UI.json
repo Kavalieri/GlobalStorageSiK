@@ -62,6 +62,7 @@
 	"IGUI_GS_CraftRemoteHint": "Открывает интерфейс крафта игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу.",
 	"IGUI_GS_CraftOpenVanilla": "Открыть крафт игры",
 	"IGUI_GS_CraftOpenNeat": "Открыть Neat Crafting",
+	"IGUI_GS_CraftOpenCook": "Открыть готовку",
 	"IGUI_GS_CraftOpenBuildVanilla": "Открыть строительство игры",
 	"IGUI_GS_CraftOpenBuildNeat": "Открыть Neat Building",
 	"IGUI_GS_BuildRemoteHint": "Открывает интерфейс строительства игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу.",

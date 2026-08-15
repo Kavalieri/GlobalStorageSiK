@@ -68,6 +68,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_CraftRemoteHint = "Open the game crafting UI; network containers are added while you have terminal access.",
 	IGUI_GS_CraftOpenVanilla = "Open game crafting",
 	IGUI_GS_CraftOpenNeat = "Open Neat Crafting",
+	IGUI_GS_CraftOpenCook = "Open cooking",
 	IGUI_GS_CraftOpenBuildVanilla = "Open game building",
 	IGUI_GS_CraftOpenBuildNeat = "Open Neat Building",
 	IGUI_GS_CraftSessionAccessLost = "Session closed: terminal access lost.",

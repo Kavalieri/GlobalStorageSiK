@@ -163,6 +163,21 @@ function GlobalStorageSiK.Libs.hasNeatBuilding()
 	return active
 end
 
+--- Indica si Project Cook (mod de cocina de terceros, addon opcional
+--- consumido por GSSiK_Addon_Craft) está activo en la partida.
+---@return boolean
+function GlobalStorageSiK.Libs.hasProjectCook()
+	if GlobalStorageSiK.Libs._projectCook ~= nil then
+		return GlobalStorageSiK.Libs._projectCook
+	end
+	local active = false
+	if getActivatedMods and getActivatedMods():contains("Project_Cook") then
+		active = true
+	end
+	GlobalStorageSiK.Libs._projectCook = active
+	return active
+end
+
 --- Resuelve apertura de crafteo según mods Neat instalados.
 ---@param mode string|nil "auto"|"vanilla"|"neat"
 ---@return function|nil

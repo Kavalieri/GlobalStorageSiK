@@ -152,6 +152,18 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 		y = y + BTN_H + 6
 	end
 
+	-- Solo visible con Project_Cook instalado - sin el mod no hay nada que
+	-- abrir, y un boton "no hace nada" es peor que no mostrarlo.
+	if GlobalStorageSiK.Libs.hasProjectCook() then
+		local cookBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenCook"), scroll, function()
+			if terminal and terminal.onOpenCook then
+				terminal:onOpenCook()
+			end
+		end)
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, cookBtn)
+		y = y + BTN_H + 6
+	end
+
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 	GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)

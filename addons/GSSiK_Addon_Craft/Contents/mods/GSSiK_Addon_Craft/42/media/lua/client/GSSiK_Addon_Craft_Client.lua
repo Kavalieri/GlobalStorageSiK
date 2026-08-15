@@ -9,6 +9,7 @@ require "GSSiK_Addon_Craft_Register"
 require "GS_NetworkCraftBridge"
 require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Craft_NetworkCraft"
+require "GSSiK_Addon_Craft_NetworkCook"
 require "GSSiK_Addon_Craft_TerminalUI"
 require "GSSiK_Addon_Craft_Sandbox"
 require "GSSiK_Addon_Craft_Log"
@@ -102,6 +103,43 @@ end
 
 function GS_TerminalUI:onOpenNeatCraft()
 	self:openNetworkCraft("neat")
+end
+
+--- Abre cocina (Project_Cook, mod externo opcional) con contenedores de red
+--- - misma sesion "Craft" que crafteo, distinto uiMode para diagnostico. Ver
+--- GSSiK_Addon_Craft_NetworkCook.lua: Project_Cook rastrea su propia
+--- ventana, no via ISEntityUI, así que no reutiliza CraftSession.openHandcraft.
+function GS_TerminalUI:onOpenCook()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
+	if not player or not GlobalStorageSiK.CraftSession then
+		return
+	end
+	local state = self.terminalState or {}
+	local knownInstalled = state.installedAddons and state.installedAddons["Craft"] ~= nil
+	local began, beginReason = GlobalStorageSiK.CraftSession.begin({
+		player = player,
+		networkId = state.networkId,
+		terminalAnchor = state.terminalAnchor,
+		accessMode = state.accessMode,
+		uiMode = "cook",
+		addonId = "Craft",
+		knownInstalled = knownInstalled,
+	})
+	GSSiK_Addon_Craft.Log.debug("onOpenCook networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
+		.. " reason=" .. tostring(beginReason))
+	if began then
+		local opened, openReason = GSSiK_Addon_Craft_NetworkCook.openCookUI(player)
+		GSSiK_Addon_Craft.Log.debug("openCookUI opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
+		if opened then
+			GlobalStorageSiK.CraftSession.setLastOpenError(nil)
+		else
+			GlobalStorageSiK.CraftSession.setLastOpenError(openReason)
+			GlobalStorageSiK.CraftSession.endSession(nil)
+		end
+	end
+	if self.craftPanel and GlobalStorageSiK.TerminalCraft then
+		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
+	end
 end
 
 function GS_TerminalUI:syncCraftTabVisibility()

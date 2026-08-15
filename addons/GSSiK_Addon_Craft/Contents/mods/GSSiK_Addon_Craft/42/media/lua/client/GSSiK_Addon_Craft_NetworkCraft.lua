@@ -20,6 +20,7 @@
 
 require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Craft_Log"
+require "GSSiK_Addon_Craft_NetworkCook"
 
 local ADDON_ID = "Craft"
 
@@ -59,40 +60,7 @@ local activeOperationId = nil
 ---@param items userdata|nil ArrayList de InventoryItem (getAllInputItems), puede ser nil
 ---@return function restore
 local function narrowContainersForAction(self, items)
-	local okFull, fullList = pcall(function() return self.logic:getContainers() end)
-	if not okFull or not fullList or not fullList.size then
-		return function() end
-	end
-	local sess = GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID)
-	local networkId = sess and sess.networkId
-	local neededNetwork = {}
-	local seen = {}
-	if items and items.size then
-		for i = 1, items:size() do
-			local ok, item = pcall(function() return items:get(i - 1) end)
-			local container = ok and item and item.getContainer and item:getContainer()
-			if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) and not seen[container] then
-				seen[container] = true
-				neededNetwork[#neededNetwork + 1] = container
-			end
-		end
-	end
-	local narrowed = {}
-	for i = 0, fullList:size() - 1 do
-		local c = fullList:get(i)
-		if not (c and GlobalStorageSiK.CraftSession.isNetworkContainer(c, networkId)) then
-			narrowed[#narrowed + 1] = c
-		end
-	end
-	for i = 1, #neededNetwork do
-		narrowed[#narrowed + 1] = neededNetwork[i]
-	end
-	local okSet = pcall(function() self.logic:setContainers(GlobalStorageSiK.CraftSession.tableToArrayList(narrowed)) end)
-	GlobalStorageSiK.CraftSession.debugLog(string.format("containersNarrow original=%d narrowed=%d aplicado=%s",
-		fullList:size(), #narrowed, tostring(okSet)))
-	return function()
-		pcall(function() self.logic:setContainers(fullList) end)
-	end
+	return GlobalStorageSiK.CraftSession.narrowContainersForAction(self, items, ADDON_ID)
 end
 
 --- Reclama de la red, para el jugador, todos los ingredientes/herramientas
@@ -116,77 +84,7 @@ end
 ---@param batchCount number|nil
 ---@return table waitingIds, number waitingCount, number moved
 local function claimNetworkCraftItems(player, logic, items, networkId, operationId, batchCount)
-	local waitingIds = {}
-	local waitingCount = 0
-	local moved = 0
-	local authoritative = GlobalStorageSiK.isAuthoritative()
-	local movedFullTypes = {}
-	local movedFullTypeCount = 0
-
-	local function claim(item, container)
-		if GlobalStorageSiK.CraftSession.claimNetworkItem(player, item, container, networkId, operationId) then
-			moved = moved + 1
-			if not authoritative and item.getID then
-				waitingIds[item:getID()] = true
-				waitingCount = waitingCount + 1
-			end
-			return true
-		end
-		return false
-	end
-
-	if items and items.size then
-		for i = 1, items:size() do
-			local item = items:get(i - 1)
-			if item then
-				local container = item.getContainer and item:getContainer()
-				if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
-					local fullType = item.getFullType and item:getFullType() or nil
-					if claim(item, container) and fullType then
-						if not movedFullTypes[fullType] then
-							movedFullTypeCount = movedFullTypeCount + 1
-						end
-						movedFullTypes[fullType] = (movedFullTypes[fullType] or 0) + 1
-					end
-				end
-			end
-		end
-	end
-
-	-- NUNCA next() aqui (Kahlua no lo soporta de forma fiable) - se usa el
-	-- contador propio movedFullTypeCount en vez de next(movedFullTypes) ~= nil
-	-- para saber si hay algo que escanear.
-	if batchCount and batchCount > 1 and movedFullTypeCount > 0 then
-		local okCon, containers = pcall(function() return logic:getContainers() end)
-		if okCon and containers and containers.size then
-			for fullType, haveCount in pairs(movedFullTypes) do
-				local need = batchCount - haveCount
-				local c = 0
-				while need > 0 and c < containers:size() do
-					local container = containers:get(c)
-					c = c + 1
-					if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
-						local okItems2, itemsInC = pcall(function() return container:getItems() end)
-						if okItems2 and itemsInC and itemsInC.size then
-							local j = 0
-							while need > 0 and j < itemsInC:size() do
-								local extraItem = itemsInC:get(j)
-								j = j + 1
-								if extraItem and extraItem.getFullType and extraItem:getFullType() == fullType
-									and not (extraItem.getID and GlobalStorageSiK.CraftSession.isItemClaimed(extraItem:getID())) then
-									if claim(extraItem, container) then
-										need = need - 1
-									end
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-
-	return waitingIds, waitingCount, moved
+	return GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, networkId, operationId, batchCount)
 end
 
 --- Lee la cantidad de lote pedida en la ventana vanilla (entryBox), 1 si no
@@ -592,6 +490,10 @@ local function installCraftHooks()
 		originalNeatOnHandcraftActionCancelled = NC_CraftActionPanel.onHandcraftActionCancelled
 		NC_CraftActionPanel.onHandcraftActionCancelled = patchedNeatOnHandcraftActionCancelled
 	end
+	-- Project Cook (mod externo, opcional) - ver GSSiK_Addon_Craft_NetworkCook.lua.
+	-- Se instala/desinstala siempre junto con el resto: una unica sesion
+	-- "Craft" cubre vanilla + Neat + Cook a la vez.
+	GSSiK_Addon_Craft_NetworkCook.install()
 end
 
 local function uninstallCraftHooks()
@@ -616,6 +518,7 @@ local function uninstallCraftHooks()
 	if originalNeatOnHandcraftActionCancelled then
 		NC_CraftActionPanel.onHandcraftActionCancelled = originalNeatOnHandcraftActionCancelled
 	end
+	GSSiK_Addon_Craft_NetworkCook.uninstall()
 end
 
 --- Manejador de tick registrado en Core - resuelve esperas de reclamo tanto
@@ -623,6 +526,7 @@ end
 local function craftTickHandler()
 	checkPendingCraftStarts()
 	checkPendingNeatCraftStarts()
+	GSSiK_Addon_Craft_NetworkCook.tick()
 end
 
 GlobalStorageSiK.CraftSession.registerAddonHooks(ADDON_ID, installCraftHooks, uninstallCraftHooks)

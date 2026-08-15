@@ -62,6 +62,7 @@
 	"IGUI_GS_CraftRemoteHint": "打开游戏原版制作界面；只要你有终端访问权限，网络容器就会被加入其中。",
 	"IGUI_GS_CraftOpenVanilla": "打开原版制作",
 	"IGUI_GS_CraftOpenNeat": "打开 Neat 制作",
+	"IGUI_GS_CraftOpenCook": "打开烹饪",
 	"IGUI_GS_CraftOpenBuildVanilla": "打开原版建造",
 	"IGUI_GS_CraftOpenBuildNeat": "打开 Neat 建造",
 	"IGUI_GS_BuildRemoteHint": "打开游戏原版建造界面；只要你有终端访问权限，网络容器就会被加入其中。",
