@@ -211,6 +211,31 @@ function GS_ZoneEditorUI:buildForm()
 	y = y + BTN_H + pad
 
 	self:setHeight(y)
+	self:repositionRelativeToTerminal()
+end
+
+--- Recalcula X/Y con la altura REAL ya fijada por buildLayout (nunca con la
+--- altura provisional pasada al construir) - relativo al terminal si esta
+--- disponible, si no centrado en pantalla, siempre clampeado para no salirse
+--- de los bordes. Antes se calculaba una sola vez con h=320 adivinado ANTES
+--- de construir el contenido y nunca se recolocaba, igual bug que tenia
+--- GS_TerminalUI_MemberEditor.lua/TerminalEditor.lua antes de corregirlo.
+function GS_ZoneEditorUI:repositionRelativeToTerminal()
+	local sw = getCore():getScreenWidth()
+	local sh = getCore():getScreenHeight()
+	local terminal = self.terminal
+	local x, y
+	if terminal and terminal.getX and terminal.getY and terminal.getWidth and terminal.getHeight then
+		x = terminal:getX() + (terminal:getWidth() - self.width) / 2
+		y = terminal:getY() + (terminal:getHeight() - self.height) / 2
+	else
+		x = (sw - self.width) / 2
+		y = (sh - self.height) / 2
+	end
+	x = math.floor(math.max(0, math.min(x, sw - self.width)))
+	y = math.floor(math.max(0, math.min(y, sh - self.height)))
+	self:setX(x)
+	self:setY(y)
 end
 
 function GS_ZoneEditorUI:confirmDelete()
@@ -242,21 +267,10 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
 	end
 	GlobalStorageSiK.TerminalZoneEditor.close()
 
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	local h = 320
-	local x, y
-	if terminal and terminal.getX and terminal.getY and terminal.getWidth and terminal.getHeight then
-		x = terminal:getX() + (terminal:getWidth() - PANEL_W) / 2
-		y = terminal:getY() + (terminal:getHeight() - h) / 2
-	else
-		x = (sw - PANEL_W) / 2
-		y = (sh - h) / 2
-	end
-	x = math.floor(math.max(0, math.min(x, sw - PANEL_W)))
-	y = math.floor(math.max(0, math.min(y, sh - h)))
-
-	local ui = GS_ZoneEditorUI:new(x, y, PANEL_W, h)
+	-- Posicion/alto provisionales - buildLayout() fija la altura real segun
+	-- el contenido y repositionRelativeToTerminal() recoloca con esa altura
+	-- ya definitiva, no con esta suposicion inicial.
+	local ui = GS_ZoneEditorUI:new(0, 0, PANEL_W, 100)
 	ui.terminal = terminal
 	ui.zone = zone
 	ui:initialise()
