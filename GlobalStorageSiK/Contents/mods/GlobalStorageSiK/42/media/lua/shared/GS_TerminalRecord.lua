@@ -26,6 +26,19 @@ function GlobalStorageSiK.TerminalRecord.generateId(network)
 	return string.format("%s_t%04d", nid, seq)
 end
 
+--- Numero de secuencia embebido en un id "net_tNNNN" (para reutilizarlo
+--- como nombre por defecto legible, "Terminal N", sin depender de la
+--- posicion en el array que puede tener huecos si se borraron terminales).
+---@param id string|nil
+---@return number|nil
+local function seqFromId(id)
+	if not id then
+		return nil
+	end
+	local digits = tostring(id):match("_t(%d+)$")
+	return digits and tonumber(digits) or nil
+end
+
 --- Normaliza entrada legacy {x,y,z} → registro completo.
 ---@param entry table|nil
 ---@param network table|nil
@@ -40,6 +53,15 @@ function GlobalStorageSiK.TerminalRecord.normalize(entry, network)
 	end
 	if not entry.status or entry.status == "" then
 		entry.status = GlobalStorageSiK.TerminalRecord.STATUS_ACTIVE
+	end
+	-- Guarda para terminales ya instalados antes de que create() empezara a
+	-- asignar nombre por defecto: rellena SOLO si sigue en blanco, nunca
+	-- pisa un nombre que el jugador ya haya puesto a mano.
+	if not entry.label or entry.label == "" then
+		local seq = seqFromId(entry.id)
+		if seq then
+			entry.label = GlobalStorageSiK.I18n.text("IGUI_GS_TerminalDefaultNameFmt", seq)
+		end
 	end
 	entry.x = math.floor(entry.x)
 	entry.y = math.floor(entry.y)
@@ -56,9 +78,16 @@ function GlobalStorageSiK.TerminalRecord.normalizeAll(network)
 	end
 	local changed = false
 	for i = 1, #network.terminals do
-		local before = network.terminals[i]
-		local after = GlobalStorageSiK.TerminalRecord.normalize(before, network)
-		if after and (not before.id or not before.status) then
+		local entry = network.terminals[i]
+		-- normalize() muta la MISMA tabla in-place, asi que hay que capturar
+		-- el estado ANTES de llamarla - comprobar los campos despues (bug
+		-- previo) siempre sale "ya estaba puesto" porque normalize acaba de
+		-- ponerlos.
+		local hadId = entry.id ~= nil and entry.id ~= ""
+		local hadStatus = entry.status ~= nil and entry.status ~= ""
+		local hadLabel = entry.label ~= nil and entry.label ~= ""
+		local after = GlobalStorageSiK.TerminalRecord.normalize(entry, network)
+		if after and (not hadId or not hadStatus or (not hadLabel and after.label)) then
 			changed = true
 		end
 	end
@@ -102,6 +131,15 @@ function GlobalStorageSiK.TerminalRecord.create(x, y, z, network)
 		placedAt = (getTimestampMs and getTimestampMs()) or 0,
 	}
 	entry.id = GlobalStorageSiK.TerminalRecord.generateId(network)
+	-- Nombre por defecto identificable ("Terminal N") en vez de dejarlo en
+	-- blanco hasta que el jugador lo renombre a mano - reutiliza el mismo
+	-- numero de secuencia que el id para que ambos coincidan. El jugador
+	-- puede renombrarlo despues con renameTerminalAt; eso simplemente
+	-- sobrescribe entry.label como ya hacia.
+	local seq = seqFromId(entry.id)
+	if seq then
+		entry.label = GlobalStorageSiK.I18n.text("IGUI_GS_TerminalDefaultNameFmt", seq)
+	end
 	return entry
 end
 

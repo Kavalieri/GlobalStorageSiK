@@ -610,6 +610,17 @@ function GlobalStorageSiK.TerminalRegistry.reconcileAllNetworks()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local changed = false
 	for nid, network in pairs(registry.networks) do
+		-- Guarda para terminales instalados antes de que existiera el
+		-- nombre por defecto ("Terminal N"): rellena SOLO las etiquetas que
+		-- siguen en blanco (nunca pisa un nombre puesto a mano). Corre en
+		-- cada carga de partida en vez de detras de un flag de migracion de
+		-- una sola vez, para que alcance tambien a mundos donde la
+		-- migracion antigua ya se ejecuto antes de que esto existiera.
+		if GlobalStorageSiK.TerminalRecord and GlobalStorageSiK.TerminalRecord.normalizeAll then
+			if GlobalStorageSiK.TerminalRecord.normalizeAll(network) then
+				changed = true
+			end
+		end
 		local anchor = GlobalStorageSiK.TerminalRegistry.getActiveAnchor(network)
 		if anchor then
 			local verified = GlobalStorageSiK.TerminalRegistry.squareHasTerminal(anchor.x, anchor.y, anchor.z or 0)
@@ -629,6 +640,9 @@ function GlobalStorageSiK.TerminalRegistry.reconcileAllNetworks()
 			network.relocation = { status = "needs_recovery" }
 			changed = true
 		end
+	end
+	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end
 	if changed and GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
 		GlobalStorageSiK.Debug.log("TerminalRegistry", "reconcileAll", "done")
