@@ -1,9 +1,9 @@
 name=GSSiK Addon - Craft [42.20+]
 id=GSSiK_Addon_Craft
-description=Build 42.20+ v0.0.2.17 (preproduccion). Craftea con toda tu red GS: impresora 3D instalable, incluye tambien recetas de cocina. Requiere Global Storage SiK + NeatUI_Framework.
+description=Build 42.20+ v0.0.2.18 (preproduccion). Craftea con toda tu red GS: impresora 3D instalable, vanilla y Neat Crafting. Si tienes el mod "Project Cook" instalado, tambien puedes cocinar con ingredientes de tu red. Requiere Global Storage SiK + NeatUI_Framework.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=0.0.2.17
+modversion=0.0.2.18
 versionMin=42.19.0
 require=\GlobalStorageSiK,\NeatUI_Framework
