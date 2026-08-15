@@ -508,6 +508,40 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.addBlockTitle:initialise()
 	addPermWidget(scroll, ui, ui.addBlockTitle)
 
+	-- Aviso: en MP/Host, si el grupo "Servidor" del combo esta vacio (nadie
+	-- conectado ahora mismo), explica por que sin que el jugador tenga que
+	-- deducirlo - unico caso real reportado de "no se puede añadir a nadie".
+	-- Nunca aparece en SP real (isMultiplayerActive() ya oculta toda la
+	-- pestaña en ese caso, ver shouldShowTab).
+	ui.addOnlineHintLbl = GlobalStorageSiK.TerminalChrome.createHintLabel(pad, y, T("IGUI_GS_PermAddOnlineHint"))
+	ui.addOnlineHintLbl:setVisible(false)
+	addPermWidget(scroll, ui, ui.addOnlineHintLbl)
+
+	-- Marco que guia el ojo hacia el picker+boton mientras no hay una
+	-- seleccion valida ("empieza aqui"), y hace un flash breve en verde al
+	-- pulsar Añadir con una seleccion valida (acuse de recibo visual, sin
+	-- texto adicional). Debe añadirse ANTES que el combo/boton para
+	-- renderizarse detras, mismo orden que TerminalChrome.createSectionCard.
+	ui.addPickHighlight = ISPanel:new(pad - 4, y - 2, comboW + ADD_W + ROW_GAP + 8, ENTRY_H + 4)
+	ui.addPickHighlight:initialise()
+	ui.addPickHighlight.drawBackground = false
+	ui.addPickHighlight.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	ui.addPickHighlight.prerender = function(self)
+		ISPanel.prerender(self)
+		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+		local now = getTimestampMs()
+		if ui._addPickFlashUntil and now < ui._addPickFlashUntil then
+			local c = ui._addPickFlashOk and pal.statusOk or pal.statusWarn
+			self:drawRectBorder(0, 0, self.width, self.height, 0.85, c[1], c[2], c[3])
+			return
+		end
+		ui._addPickFlashUntil = nil
+		if not resolveMemberPick(ui) then
+			self:drawRectBorder(0, 0, self.width, self.height, 0.45, pal.btnActive[1], pal.btnActive[2], pal.btnActive[3])
+		end
+	end
+	addPermWidget(scroll, ui, ui.addPickHighlight)
+
 	ui.memberPickCombo = ISComboBox:new(pad, y, comboW, ENTRY_H, scroll, nil)
 	ui.memberPickCombo:initialise()
 	GlobalStorageSiK.TerminalChrome.styleComboBox(ui.memberPickCombo)
@@ -516,8 +550,12 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 		local pick = resolveMemberPick(ui)
 		if not pick then
 			GlobalStorageSiK.TerminalPermissions.flashPickWarning(ui)
+			ui._addPickFlashOk = false
+			ui._addPickFlashUntil = getTimestampMs() + 900
 			return
 		end
+		ui._addPickFlashOk = true
+		ui._addPickFlashUntil = getTimestampMs() + 900
 		if pick.kind == "whole" then
 			terminal:onAddPermissionFaction(pick.value)
 		else
@@ -598,6 +636,16 @@ local function syncPermsData(scroll, terminal, ui, state)
 	if ui.addBlockTitle then ui.addBlockTitle:setVisible(isAdmin) end
 	if ui.memberPickCombo then ui.memberPickCombo:setVisible(isAdmin) end
 	if ui.addMemberBtn then ui.addMemberBtn:setVisible(isAdmin) end
+	if ui.addPickHighlight then ui.addPickHighlight:setVisible(isAdmin) end
+
+	-- Hint "nadie online" solo en MP/Host real y solo si el grupo Servidor
+	-- del picker esta vacio - en SP real isMultiplayerActive() ya oculta
+	-- toda la pestaña, asi que este bloque nunca aparece jugando solo.
+	if ui.addOnlineHintLbl then
+		local showOnlineHint = isAdmin and GlobalStorageSiK.isMultiplayerActive()
+			and #GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters() == 0
+		ui.addOnlineHintLbl:setVisible(showOnlineHint)
+	end
 
 	-- Avisos de sucesion: solo el owner necesita conocer el riesgo. El
 	-- backupCount solo cuenta personajes individuales (allowedUsers, que ya
@@ -683,9 +731,15 @@ local function layoutPermsBlock(scroll, ui, startY)
 		and ui.addBlockTitle.isVisible and ui.addBlockTitle:isVisible()
 	if addVisible then
 		col:place(ui.addBlockTitle, titleH)
+		if ui.addOnlineHintLbl and ui.addOnlineHintLbl.isVisible and ui.addOnlineHintLbl:isVisible() then
+			col:place(ui.addOnlineHintLbl, titleH)
+		end
 		local rowY = col.cursor
 		if ui.addMemberBtn then
 			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.addMemberBtn)
+		end
+		if ui.addPickHighlight then
+			col:_set(ui.addPickHighlight, pad - 4, rowY - 2, comboW + ADD_W + ROW_GAP + 8, ENTRY_H + 4)
 		end
 		col:_set(ui.memberPickCombo, pad, rowY, comboW, nil)
 		col:_set(ui.addMemberBtn, pad + comboW + ROW_GAP, rowY, nil, nil)
@@ -694,8 +748,10 @@ local function layoutPermsBlock(scroll, ui, startY)
 			col:_set(ui.addMemberWarnLbl, pad, col.cursor, rowW, nil)
 		end
 		col.cursor = col.cursor + titleH
-	elseif ui.addMemberWarnLbl then
-		ui.addMemberWarnLbl:setVisible(false)
+	else
+		if ui.addMemberWarnLbl then ui.addMemberWarnLbl:setVisible(false) end
+		if ui.addPickHighlight then ui.addPickHighlight:setVisible(false) end
+		if ui.addOnlineHintLbl then ui.addOnlineHintLbl:setVisible(false) end
 	end
 
 	ui.permEndY = col:y()
