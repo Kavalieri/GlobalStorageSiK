@@ -11,6 +11,7 @@ require "GS_Libs"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Chrome"
 require "GS_NetworkCraftSession"
+require "GSSiK_Addon_Builder_Sandbox"
 
 GlobalStorageSiK.TerminalBuilder = GlobalStorageSiK.TerminalBuilder or {}
 
@@ -60,6 +61,14 @@ function GlobalStorageSiK.TerminalBuilder.buildPanel(panel, terminal)
 	panel.drawBackground = false
 	panel.terminalRef = terminal
 	panel.builderScroll = GlobalStorageSiK.TerminalScroll.create(panel, terminal.padding or 8, 0, 280, 120)
+
+	-- Version del addon, esquina inferior derecha - fuera del scroll (nunca
+	-- se mueve con el contenido), discreta a propósito.
+	local verText = "v" .. tostring(GSSiK_Addon_Builder.VERSION or "?")
+	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	panel.versionLbl = ISLabel:new(0, 0, FONT_HGT_SMALL, verText, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.5, UIFont.Small, true)
+	panel.versionLbl:initialise()
+	panel:addChild(panel.versionLbl)
 end
 
 ---@param panel ISPanel
@@ -76,6 +85,13 @@ function GlobalStorageSiK.TerminalBuilder.layout(panel, innerW, innerH)
 	panel.builderScroll:setX(pad)
 	panel.builderScroll:setY(y)
 	GlobalStorageSiK.TerminalScroll.resize(panel.builderScroll, innerW - pad * 2, scrollH)
+
+	if panel.versionLbl then
+		local tw = getTextManager():MeasureStringX(UIFont.Small, panel.versionLbl.name or "")
+		panel.versionLbl:setX(math.max(pad, innerW - pad - tw))
+		panel.versionLbl:setY(innerH - FONT_HGT_SMALL - 2)
+		panel.versionLbl:bringToTop()
+	end
 end
 
 ---@param panel ISPanel

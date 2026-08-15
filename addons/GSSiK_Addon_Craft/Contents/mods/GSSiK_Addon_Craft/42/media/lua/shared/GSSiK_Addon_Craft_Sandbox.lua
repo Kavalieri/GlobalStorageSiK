@@ -8,6 +8,13 @@ GlobalStorageSiK = GlobalStorageSiK or {}
 GSSiK_Addon_Craft = GSSiK_Addon_Craft or {}
 GSSiK_Addon_Craft.Sandbox = {}
 
+--- Version del addon para mostrar en su propia pestaña del terminal - se
+--- sincroniza a mano con Contents/mods/GSSiK_Addon_Craft/42/mod.info
+--- (modversion=) en cada release, mismo criterio ya usado en Core con
+--- GS_Config.MOD_VERSION (ver CLAUDE.md raiz, regla 7bis: mod.info es la
+--- unica fuente de verdad de version, esto es solo un espejo para la UI).
+GSSiK_Addon_Craft.VERSION = "0.0.2.18"
+
 --- Peso loot periférico instalable (Craft).
 ---@return number
 function GSSiK_Addon_Craft.Sandbox.getLootPeripheralWeight()

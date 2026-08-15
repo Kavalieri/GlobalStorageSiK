@@ -1042,6 +1042,20 @@ function GlobalStorageSiK.TerminalChrome.renderHeader(panel)
 	local sepX = textX + titleW
 	panel:drawText(sep, sepX, titleY, 0.5, 0.55, 0.6, 1, font)
 	panel:drawText(netName, sepX + tm:MeasureStringX(font, sep), titleY, 0.72, 0.82, 0.92, 1, font)
+
+	-- Version del Core, discreta, junto al boton cerrar - casi inapreciable
+	-- a proposito (pedido explicito: no debe destacar, ocultar nada ni
+	-- desplazar el resto de la cabecera). Una sola fuente de verdad
+	-- (GS_Config.MOD_VERSION, ya sincronizada a mano con mod.info en cada
+	-- release, ver CLAUDE.md), no un numero duplicado aparte.
+	local verText = "v" .. tostring(GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION or "?")
+	local verFont = UIFont.Small
+	local verW = tm:MeasureStringX(verFont, verText)
+	local closeW = (panel.closeBtn and panel.closeBtn.width) or 24
+	local verX = panel.width - pad - closeW - 10 - verW
+	local verY = math.floor((panel.headerHeight - tm:getFontHeight(verFont)) / 2)
+	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	panel:drawText(verText, verX, verY, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.55, verFont)
 end
 
 --- Dibuja barra de estado inferior en pestaña Red.
