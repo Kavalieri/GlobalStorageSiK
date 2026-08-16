@@ -6,6 +6,7 @@
 ]]
 
 require "GS_I18n"
+require "GS_Log"
 
 require "ISUI/ISTextBox"
 
@@ -109,7 +110,7 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 	end)
 
 	if not ok then
-		print("[GlobalStorageSiK] QuantityPrompt.show error: " .. tostring(err))
+		GlobalStorageSiK.Log.error("QuantityPrompt", "show failed", err)
 		showInvalid(player)
 	end
 end

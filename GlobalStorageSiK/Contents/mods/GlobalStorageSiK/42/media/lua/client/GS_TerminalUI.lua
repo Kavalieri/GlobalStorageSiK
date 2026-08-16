@@ -353,18 +353,25 @@ function GS_TerminalUI:buildItemsToolbar()
 	self.itemsTitleLbl = GlobalStorageSiK.TerminalSections.addTitleLabel(
 		self.itemsPanel, pad, y, "IGUI_GS_SectionItems"
 	)
-	-- Auto-ordenar: antes vivia solo en la pestaña Red (GS_TerminalUI_NetworkStatus.lua) -
-	-- movido aqui, arriba a la derecha de la pestaña Items/almacén (pedido
-	-- explicito), con tooltip explicando que hace. La barra de progreso/aviso
-	-- de fin pedidos junto con esta reubicacion quedan pendientes aparte (ver
-	-- pending-work.md) - de momento el boton sigue comportandose igual que
-	-- antes (dispara el job de reordenado, sin feedback visual de progreso).
-	self.autoSortBtn = createNeatButton(0, y, 120, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
+	-- La accion conserva siempre la misma etiqueta. El estado y el resumen del
+	-- job viven en una fila separada para no truncar mensajes dentro del boton.
+	self.autoSortBtn = createNeatButton(0, y, 220, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
 	self.itemsPanel:addChild(self.autoSortBtn)
 	if self.autoSortBtn.setTooltip then
 		self.autoSortBtn:setTooltip(T("IGUI_GS_RedistributeHint"))
 	end
 	y = y + FONT_HGT_SMALL + gap
+
+	local statusH = FONT_HGT_SMALL + 6
+	self.autoSortStatusRow = GlobalStorageSiK.TerminalChrome.createStatusIndicatorRow(pad, y, 320, statusH)
+	self.autoSortStatusRow.drawBackground = true
+	self.autoSortStatusRow.backgroundColor = { r = 0.075, g = 0.075, b = 0.09, a = 0.8 }
+	self.autoSortStatusRow.borderColor = { r = 0.18, g = 0.18, b = 0.22, a = 0.9 }
+	GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow(
+		self.autoSortStatusRow, T("IGUI_GS_RedistributeIdle"), "muted", 320
+	)
+	self.itemsPanel:addChild(self.autoSortStatusRow)
+	y = y + statusH + gap
 
 	local _wpal = GlobalStorageSiK.TerminalChrome.PALETTE
 	self.itemsWeightLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_WeightUsage", "0.0", "0.0", "0"), _wpal.statusOk[1], _wpal.statusOk[2], _wpal.statusOk[3], 1, UIFont.Small, true)
@@ -539,6 +546,7 @@ function GS_TerminalUI:calculateLayout()
 		local rowH = FONT_HGT_SMALL + 8
 		local gap = 6
 		local hintH = FONT_HGT_SMALL * 2
+		local statusH = FONT_HGT_SMALL + 6
 		local contentW = innerW - pad * 2
 
 		-- Anchos de la fila de búsqueda (idénticos al cálculo previo).
@@ -567,6 +575,7 @@ function GS_TerminalUI:calculateLayout()
 			self.autoSortBtn:setX(pad + contentW - self.autoSortBtn.width)
 			self.autoSortBtn:setY(pad)
 		end
+		col:place(self.autoSortStatusRow, statusH)
 		col:label(self.itemsWeightLbl, FONT_HGT_SMALL)  -- peso (x/y/width)
 		col:label(self.depositDropHint, hintH)          -- hint (x/y/width)
 		col:row(rowH, {
@@ -961,39 +970,43 @@ function GS_TerminalUI:onRequestOpen()
 	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 end
 
---- Semaforo de estado del boton Auto-ordenar (pedido explicito, mas simple
---- que una barra de progreso real: el job del servidor no conoce su
---- duracion total de antemano - ver GS_RedistributeJob.lua - asi que no hay
---- % que calcular). Naranja mientras el job esta en curso, verde un momento
---- al terminar con exito, vuelve a como estaba si falla o al reabrir el
---- terminal (self.autoSortBtn se recrea desde cero cada vez).
-local AUTOSORT_COLOR_RUNNING = { r = 0.95, g = 0.7, b = 0.25 }
-local AUTOSORT_COLOR_DONE = { r = 0.4, g = 0.85, b = 0.45 }
+---@param running boolean
+---@param message string|nil
+---@param status string|nil
+function GS_TerminalUI:setRedistributeState(running, message, status)
+	self._autoSortRunning = running == true
+	if self.autoSortBtn then
+		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
+		self.autoSortBtn.textColor = nil
+		self.autoSortBtn:setEnable(not self._autoSortRunning)
+	end
+	GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow(
+		self.autoSortStatusRow,
+		message or (self._autoSortRunning and T("IGUI_GS_RedistributingNetwork") or T("IGUI_GS_RedistributeIdle")),
+		status or (self._autoSortRunning and "warn" or "muted"),
+		self.autoSortStatusRow and self.autoSortStatusRow.width or nil
+	)
+end
 
 function GS_TerminalUI:onRedistributeNetwork()
-	if self.autoSortBtn then
-		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_RedistributeRunning")
-		self.autoSortBtn.textColor = AUTOSORT_COLOR_RUNNING
-	end
+	if self._autoSortRunning then return end
+	self:setRedistributeState(true, T("IGUI_GS_RedistributingNetwork"), "warn")
 	GlobalStorageSiK.NetClient.sendCommand("redistributeNetwork", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
+---@param message string|nil
+function GS_TerminalUI:onRedistributeStarted(message)
+	self:setRedistributeState(true, message, "warn")
+end
+
 --- Llamado desde GS_Client.lua al recibir el actionResult de fin de job
 --- (jobType="redistribute").
 ---@param ok boolean
-function GS_TerminalUI:onRedistributeFinished(ok)
-	if not self.autoSortBtn then
-		return
-	end
-	if ok then
-		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_RedistributeDone")
-		self.autoSortBtn.textColor = AUTOSORT_COLOR_DONE
-	else
-		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
-		self.autoSortBtn.textColor = nil
-	end
+---@param message string|nil
+function GS_TerminalUI:onRedistributeFinished(ok, message)
+	self:setRedistributeState(false, message, ok and "ok" or "error")
 end
 
 --- Texto actual del buscador de ítems.

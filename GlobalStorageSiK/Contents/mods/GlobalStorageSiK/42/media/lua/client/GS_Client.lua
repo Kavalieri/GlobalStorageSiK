@@ -146,8 +146,12 @@ local function onServerCommand(module, command, args)
 		end
 		if args and args.jobType == "redistribute" then
 			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-			if ui and ui.onRedistributeFinished then
-				ui:onRedistributeFinished(args.ok == true)
+			if ui and args.jobState == "running" and ui.onRedistributeStarted then
+				ui:onRedistributeStarted(resolvedMessage)
+			elseif ui and ui.onRedistributeFinished then
+				-- Compatibilidad: una respuesta final de una version anterior del
+				-- servidor no llevaba jobState y se interpreta como finalizada.
+				ui:onRedistributeFinished(args.ok == true, resolvedMessage)
 			end
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
@@ -478,7 +482,7 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "debugEcho" then
 		if args and args.line and GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugMode() then
-			print("[SRV] " .. tostring(args.line))
+			GlobalStorageSiK.Log.debug("Network", "serverEcho", tostring(args.line))
 		end
 	elseif command == "networkList" then
 		if not GlobalStorageSiK.Client then

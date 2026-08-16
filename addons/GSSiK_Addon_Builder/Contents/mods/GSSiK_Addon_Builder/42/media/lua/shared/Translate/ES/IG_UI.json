@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Addon Constructor: revista obligatoria (Electricidad 5). Craftea e instala el módulo en Addons.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Abrir construcción del juego",
 	"IGUI_GS_CraftOpenBuildNeat": "Abrir Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Abre la construcción del juego; los contenedores de la red se añaden mientras tengas acceso al terminal."
+	"IGUI_GS_BuildRemoteHint": "Abre la construcción del juego; los contenedores de la red se añaden mientras tengas acceso al terminal.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "La construcción falló: {1}. Los objetos prestados volverán al almacén.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "los materiales no llegaron a tiempo",
+	"IGUI_GSSIK_BuilderFailCancelled": "acción cancelada",
+	"IGUI_GSSIK_BuilderFailStart": "el juego no pudo iniciar la acción",
+	"IGUI_GSSIK_BuilderFailInvalid": "la ubicación ya no es válida"
 }

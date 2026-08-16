@@ -20,7 +20,7 @@ GlobalStorageSiK.RedistributeJob = {}
 -- MaxItemsPerBulkTick ya acota el coste de cada lote individual.
 local RETRY_DELAY_MS = 2500
 
-local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped }
+local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped, watchers }
 local tickInstalled = false
 
 local function nowMs()
@@ -46,11 +46,6 @@ local function finishJob(networkId, job, reason)
 	GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. tostring(networkId) .. " reason=" .. tostring(reason)
 		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed))
 	jobs[networkId] = nil
-	local player = resolvePlayer(job.username)
-	if not player then
-		GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | jugador " .. tostring(job.username) .. " no resuelto, sin notificar")
-		return
-	end
 	local summary = { moved = job.moved, failed = job.failed, skipped = job.skipped, reason = reason }
 	local msg
 	if reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
@@ -60,29 +55,39 @@ local function finishJob(networkId, job, reason)
 	else
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeCompleteMsg", job.moved, job.failed)
 	end
-	local ok = reason ~= "remote_disabled" and reason ~= "no_power" and reason ~= "no_player"
+	local ok = reason ~= "remote_disabled" and reason ~= "no_power"
+		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
 	-- interrumpia el juego. Por eso el mensaje de finalizacion nunca llegaba.
 	-- jobType="redistribute" (2026-08-17, pedido explicito): marca de fin
 	-- para que el cliente pueda distinguir ESTE actionResult concreto del
-	-- resto (depositos/retiros normales) y actualizar el semaforo de estado
-	-- del boton Auto-ordenar en GS_TerminalUI.lua sin adivinar por el texto.
-	GlobalStorageSiK.Server.sendCommand(player, "actionResult", { ok = ok, message = msg, jobType = "redistribute" })
-	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
-		-- BUG REAL encontrado (reportado 2026-08-16, "las pestañas de addon
-		-- desaparecen mientras el reordenado esta activo"): pushTerminalState
-		-- SOLO incluye installedAddons/craftTabEnabled/buildTabEnabled en el
-		-- payload si se le pasa terminalAnchor (ver GS_Server.lua) - sin el,
-		-- el cliente recibe un terminalState con esos campos ausentes y la
-		-- visibilidad de la pestaña se recalcula como "ocultar". Un job de
-		-- reordenado dura decenas de segundos y empuja este estado cada
-		-- ~2.5s (RETRY_DELAY_MS), asi que sin el anchor las pestañas
-		-- parpadeaban/desaparecian repetidamente durante todo el job.
-		local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
-			and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
-		GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
+	-- resto (depositos/retiros normales), actualizar el panel de estado y
+	-- volver a habilitar Auto-ordenar sin adivinar por el texto.
+	local recipients = { [job.username] = true }
+	for username in pairs(job.watchers or {}) do
+		recipients[username] = true
+	end
+	for username in pairs(recipients) do
+		local player = resolvePlayer(username)
+		if player then
+			GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
+				ok = ok,
+				message = msg,
+				jobType = "redistribute",
+				jobState = "finished",
+			})
+			if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
+				-- terminalAnchor preserva las pestañas de addons en cada estado
+				-- enviado durante y al terminar el job.
+				local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
+					and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+				GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
+			end
+		else
+			GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | jugador " .. tostring(username) .. " no resuelto, sin notificar")
+		end
 	end
 end
 
@@ -163,9 +168,22 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		moved     = 0,
 		failed    = 0,
 		skipped   = 0,
+		watchers  = {},
 	}
 	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId) .. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled))
 	return true
+end
+
+--- Registra otro cliente interesado en el resultado de un job ya activo.
+---@param player IsoPlayer
+---@param networkId string
+function GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
+	local job = jobs[networkId]
+	if not job or not player then return end
+	local username = player:getUsername()
+	if username and username ~= job.username then
+		job.watchers[username] = true
+	end
 end
 
 --- Indica si hay un job de reordenacion activo para esa red.

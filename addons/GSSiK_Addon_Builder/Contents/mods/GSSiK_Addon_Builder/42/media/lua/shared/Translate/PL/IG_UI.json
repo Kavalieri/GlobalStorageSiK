@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Dodatek Budowanie: wymaga magazynu (Elektryczność 5). Wytwórz i zainstaluj moduł w zakładce Dodatki.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Otwórz budowanie gry",
 	"IGUI_GS_CraftOpenBuildNeat": "Otwórz Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Otwiera interfejs budowania gry; pojemniki sieciowe są dodawane, dopóki masz dostęp do terminala."
+	"IGUI_GS_BuildRemoteHint": "Otwiera interfejs budowania gry; pojemniki sieciowe są dodawane, dopóki masz dostęp do terminala.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "Budowanie nie powiodło się: {1}. Pożyczone przedmioty wrócą do magazynu.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "materiały nie dotarły na czas",
+	"IGUI_GSSIK_BuilderFailCancelled": "akcja anulowana",
+	"IGUI_GSSIK_BuilderFailStart": "gra nie mogła rozpocząć akcji",
+	"IGUI_GSSIK_BuilderFailInvalid": "miejsce nie jest już prawidłowe"
 }

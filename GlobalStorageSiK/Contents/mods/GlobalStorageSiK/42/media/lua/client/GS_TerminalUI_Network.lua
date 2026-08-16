@@ -16,6 +16,7 @@ require "GS_UIDebug"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Permissions"
 require "GS_TerminalUI_Chrome"
+require "GS_Log"
 require "GS_TerminalUI_NetworkStatus"
 require "GS_TerminalUI_NetworkList"
 require "GS_TerminalUI_NetworkTerminals"
@@ -350,7 +351,7 @@ function GlobalStorageSiK.TerminalNetwork.refreshActiveTab(terminal, state)
 		y = syncTabContent(scroll, ui, terminal, key, state, innerW)
 	end)
 	if not ok then
-		print("[GlobalStorageSiK] TerminalNetwork.refreshActiveTab(" .. key .. "): " .. tostring(err))
+		GlobalStorageSiK.Log.error("TerminalUI", "refreshActiveTab failed", "tab=" .. tostring(key) .. " error=" .. tostring(err))
 	end
 
 	local contentBottom = math.max((y or 8) + 16, 200)
@@ -394,7 +395,7 @@ function GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, state)
 				y = syncTabContent(scroll, ui, terminal, key, state, innerW)
 			end)
 			if not ok then
-				print("[GlobalStorageSiK] TerminalNetwork.refreshScroll(" .. key .. "): " .. tostring(err))
+				GlobalStorageSiK.Log.error("TerminalUI", "refreshScroll failed", "tab=" .. tostring(key) .. " error=" .. tostring(err))
 			end
 
 			local contentBottom = math.max((y or 8) + 16, 200)

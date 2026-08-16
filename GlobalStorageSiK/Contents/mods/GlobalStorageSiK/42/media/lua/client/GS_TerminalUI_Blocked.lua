@@ -6,6 +6,7 @@
 ]]
 
 require "GS_TerminalUI_BlockedPanel"
+require "GS_Log"
 
 GlobalStorageSiK.TerminalBlockedUI = {}
 GlobalStorageSiK.TerminalBlockedUI.instance = nil
@@ -47,7 +48,7 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 	end
 
 	if not GS_TerminalUI then
-		print("[GlobalStorageSiK] GS_TerminalUI class missing for blocked mode")
+		GlobalStorageSiK.Log.error("TerminalUI", "GS_TerminalUI class missing for blocked mode")
 		return
 	end
 

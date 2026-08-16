@@ -30,11 +30,22 @@
 ]]
 
 require "GS_NetworkCraftSession"
+require "GS_I18n"
 require "GSSiK_Addon_Craft_Log"
 
 GSSiK_Addon_Craft_NetworkCook = {}
 
 local ADDON_ID = "Craft"
+
+local function failCookOperation(operationId, player, reasonKey)
+	if not operationId then return end
+	GlobalStorageSiK.CraftSession.abortOperation(operationId)
+	local reason = GlobalStorageSiK.I18n.text(reasonKey)
+	local message = GlobalStorageSiK.I18n.text("IGUI_GSSIK_CraftOperationFailedReturned", reason)
+	if player and player.setHaloNote then
+		player:setHaloNote(message, 255, 120, 100, 450)
+	end
+end
 
 local originalCookStartHandcraft = nil
 local originalCookOnHandcraftActionComplete = nil
@@ -81,6 +92,13 @@ local function checkPendingCookCraftStarts()
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_COOK_TIMEOUT_MS
 		if allReady or timedOut then
 			table.remove(pendingCookCraftStarts, i)
+			if timedOut and not allReady then
+				GlobalStorageSiK.CraftSession.debugLog("cookAttempt ABORT operationId=" .. tostring(entry.operationId)
+					.. " waitResult=timeout actionStarted=false")
+				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
+				entry.self._gsOperationId = nil
+				return
+			end
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
 				"cookAttempt RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
@@ -101,10 +119,18 @@ local function checkPendingCookCraftStarts()
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
 				"cookAttempt RESUME operationId=%s tras autoPopulateInputs canPerformCurrentRecipe=%s",
 				tostring(entry.operationId), tostring(okCanPerform and canPerform)))
+			if not entry.force and okCanPerform and canPerform == false then
+				restore()
+				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
+				entry.self._gsOperationId = nil
+				return
+			end
 			local okCall, errCall = pcall(originalCookStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalCookStartHandcraft ERROR: " .. tostring(errCall))
+				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
+				entry.self._gsOperationId = nil
 			end
 			restore()
 		end
@@ -162,8 +188,22 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 			local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 			if okInv then invBefore = tostring(invSize) end
 			GlobalStorageSiK.CraftSession.debugLog("cookAttempt invBefore=" .. invBefore .. " operationId=" .. operationId)
-			originalCookStartHandcraft(self, force, craftTimes)
+			pcall(function() self.logic:autoPopulateInputs() end)
+			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
+			if not force and okCanPerform and canPerform == false then
+				restore()
+				failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailInvalid")
+				self._gsOperationId = nil
+				return
+			end
+			local okCall, errCall = pcall(originalCookStartHandcraft, self, force, craftTimes)
 			restore()
+			if not okCall then
+				GlobalStorageSiK.CraftSession.debugLog("cookAttempt START ERROR operationId=" .. tostring(operationId)
+					.. " error=" .. tostring(errCall))
+				failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
+				self._gsOperationId = nil
+			end
 			return
 		end
 	end
@@ -197,7 +237,8 @@ local function patchedCookOnHandcraftActionCancelled(self, ...)
 			"cookAttempt END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
-	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
+	failCookOperation(self._gsOperationId, self.player, "IGUI_GSSIK_CraftFailCancelled")
+	self._gsOperationId = nil
 	return originalCookOnHandcraftActionCancelled(self, ...)
 end
 

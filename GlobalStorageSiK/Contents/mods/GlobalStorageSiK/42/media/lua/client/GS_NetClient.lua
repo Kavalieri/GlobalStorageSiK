@@ -66,7 +66,7 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args)
 	end
 	local ok, err = pcall(sendClientCommand, player, GlobalStorageSiK.MOD_ID, command, args)
 	if not ok then
-		print("[GlobalStorageSiK] sendClientCommand failed: " .. tostring(err))
+		GlobalStorageSiK.Log.error("NetClient", "sendClientCommand failed", err)
 		return false
 	end
 	GlobalStorageSiK.Debug.halo(player, "CMD " .. tostring(command))

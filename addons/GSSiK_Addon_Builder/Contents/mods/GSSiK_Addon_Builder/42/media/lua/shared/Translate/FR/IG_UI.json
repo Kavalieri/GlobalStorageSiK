@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Extension Construction : magazine requis (Électricité 5). Fabriquez et installez le module depuis l'onglet Extensions.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Ouvrir la construction du jeu",
 	"IGUI_GS_CraftOpenBuildNeat": "Ouvrir Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Ouvre l'interface de construction du jeu ; les conteneurs réseau sont ajoutés tant que vous avez accès au terminal."
+	"IGUI_GS_BuildRemoteHint": "Ouvre l'interface de construction du jeu ; les conteneurs réseau sont ajoutés tant que vous avez accès au terminal.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "Échec de la construction : {1}. Les objets empruntés seront renvoyés au stockage.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "les matériaux ne sont pas arrivés à temps",
+	"IGUI_GSSIK_BuilderFailCancelled": "action annulée",
+	"IGUI_GSSIK_BuilderFailStart": "le jeu n’a pas pu démarrer l’action",
+	"IGUI_GSSIK_BuilderFailInvalid": "l’emplacement n’est plus valide"
 }

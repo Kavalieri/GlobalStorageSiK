@@ -644,7 +644,9 @@ function GS_NodeEditorUI:rebuildCategoryChips()
 	local CHIP_PAD = 3
 	local cy       = CHIP_PAD
 	local hostW    = host.width
-	local removeBtnW = 22
+	local removeText = T("IGUI_GS_Remove")
+	local removeBtnW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(removeText, UIFont.Small, 20, 52, 120)
+	local labelMaxW = math.max(20, hostW - removeBtnW - 12)
 
 	if #cats == 0 then
 		local emptyLbl = ISLabel:new(4, cy, FONT_HGT_SMALL, T("IGUI_GS_NodeNoCats"), 0.45, 0.48, 0.52, 1, UIFont.Small, true)
@@ -653,6 +655,7 @@ function GS_NodeEditorUI:rebuildCategoryChips()
 	else
 		for idx, cat in ipairs(cats) do
 			local label = categoryDisplayLabel(cat)
+			label = GlobalStorageSiK.TerminalChrome.truncateText(label, labelMaxW, UIFont.Small)
 			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, 0.85, 0.9, 0.95, 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
@@ -660,7 +663,7 @@ function GS_NodeEditorUI:rebuildCategoryChips()
 			local capturedIdx = idx
 			local removeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
 				hostW - removeBtnW - 2, cy, removeBtnW, CHIP_H,
-				T("IGUI_GS_NodeRemoveCatBtn"), host,
+				removeText, host,
 				function()
 					table.remove(self._editCategories, capturedIdx)
 					self:applyField("categories", self._editCategories)
@@ -668,7 +671,7 @@ function GS_NodeEditorUI:rebuildCategoryChips()
 				end
 			)
 			if removeBtn.setToolTipMap then
-				removeBtn:setToolTipMap({ toolTip = "Quitar esta categoria de la lista de aceptadas." })
+				removeBtn:setToolTipMap({ toolTip = removeText })
 			end
 			host:addChild(removeBtn)
 			cy = cy + CHIP_H + CHIP_PAD
@@ -692,7 +695,9 @@ function GS_NodeEditorUI:rebuildFilterChips()
 	local CHIP_PAD = 3
 	local cy       = CHIP_PAD
 	local hostW    = host.width
-	local removeBtnW = 22
+	local removeText = T("IGUI_GS_Remove")
+	local removeBtnW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(removeText, UIFont.Small, 20, 52, 120)
+	local labelMaxW = math.max(20, hostW - removeBtnW - 12)
 
 	if #filters == 0 then
 		local emptyLbl = ISLabel:new(4, cy, FONT_HGT_SMALL, T("IGUI_GS_NodeNoFilters"), 0.45, 0.48, 0.52, 1, UIFont.Small, true)
@@ -701,6 +706,7 @@ function GS_NodeEditorUI:rebuildFilterChips()
 	else
 		for idx, filter in ipairs(filters) do
 			local label = GlobalStorageSiK.NodeFilters.describe(filter)
+			label = GlobalStorageSiK.TerminalChrome.truncateText(label, labelMaxW, UIFont.Small)
 			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, 0.85, 0.9, 0.95, 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
@@ -708,7 +714,7 @@ function GS_NodeEditorUI:rebuildFilterChips()
 			local capturedIdx = idx
 			local removeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
 				hostW - removeBtnW - 2, cy, removeBtnW, CHIP_H,
-				T("IGUI_GS_NodeRemoveCatBtn"), host,
+				removeText, host,
 				function()
 					if not self.node then return end
 					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, removeFilterIndex = capturedIdx })
@@ -717,7 +723,7 @@ function GS_NodeEditorUI:rebuildFilterChips()
 				end
 			)
 			if removeBtn.setToolTipMap then
-				removeBtn:setToolTipMap({ toolTip = "Quitar este filtro." })
+				removeBtn:setToolTipMap({ toolTip = removeText })
 			end
 			host:addChild(removeBtn)
 			cy = cy + CHIP_H + CHIP_PAD

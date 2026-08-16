@@ -10,6 +10,7 @@ require "GS_Network"
 require "GS_TerminalAccess"
 require "GS_PlayerUtils"
 require "GS_UIDebug"
+require "GS_Log"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
 
@@ -62,7 +63,7 @@ local function applyTerminalState(ui, state)
 	local function runRefresh()
 		local ok, err = pcall(ui.refreshFromState, ui, state)
 		if not ok then
-			print("[GlobalStorageSiK] refreshFromState failed: " .. tostring(err))
+			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
 		end
 	end
 	if itemCount > DEFER_REFRESH_ITEM_COUNT and Events and Events.OnTick then
@@ -126,7 +127,7 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	end
 
 	if not GS_TerminalUI then
-		print("[GlobalStorageSiK] GS_TerminalUI class missing")
+		GlobalStorageSiK.Log.error("TerminalUI", "GS_TerminalUI class missing")
 		return
 	end
 

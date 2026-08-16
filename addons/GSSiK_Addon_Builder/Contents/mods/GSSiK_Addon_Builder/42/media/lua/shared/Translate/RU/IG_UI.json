@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Дополнение Строительство: требуется журнал (Электричество 5). Изготовьте и установите модуль во вкладке Дополнения.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Открыть строительство игры",
 	"IGUI_GS_CraftOpenBuildNeat": "Открыть Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Открывает интерфейс строительства игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу."
+	"IGUI_GS_BuildRemoteHint": "Открывает интерфейс строительства игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "Строительство не выполнено: {1}. Взятые предметы будут возвращены на склад.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "материалы не прибыли вовремя",
+	"IGUI_GSSIK_BuilderFailCancelled": "действие отменено",
+	"IGUI_GSSIK_BuilderFailStart": "игра не смогла запустить действие",
+	"IGUI_GSSIK_BuilderFailInvalid": "место больше недействительно"
 }

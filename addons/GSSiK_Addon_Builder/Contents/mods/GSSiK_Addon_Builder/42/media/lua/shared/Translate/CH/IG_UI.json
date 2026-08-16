@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "建造扩展：需要杂志（电力5级）。在扩展标签页制作并安装模块。",
 	"IGUI_GS_CraftOpenBuildVanilla": "打开原版建造",
 	"IGUI_GS_CraftOpenBuildNeat": "打开 Neat 建造",
-	"IGUI_GS_BuildRemoteHint": "打开游戏原版建造界面；只要你有终端访问权限，网络容器就会被加入其中。"
+	"IGUI_GS_BuildRemoteHint": "打开游戏原版建造界面；只要你有终端访问权限，网络容器就会被加入其中。",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "建造失敗：{1}。借用的物品將退回倉庫。",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "材料未及時送達",
+	"IGUI_GSSIK_BuilderFailCancelled": "操作已取消",
+	"IGUI_GSSIK_BuilderFailStart": "遊戲無法啟動該操作",
+	"IGUI_GSSIK_BuilderFailInvalid": "放置位置已失效"
 }

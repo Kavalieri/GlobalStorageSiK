@@ -16,6 +16,7 @@ require "GS_DepositSources"
 require "GS_TerminalWithdrawDrag"
 require "GS_WithdrawMenu"
 require "GS_QuantityPrompt"
+require "GS_Log"
 require "GS_ContextMenuUi"
 require "GS_ContainerTargets"
 require "GS_TerminalUI_Scroll"
@@ -531,7 +532,7 @@ local function openItemContextMenu(listPanel, terminal, data)
 	end)
 
 	if not ok then
-		print("[GlobalStorageSiK] openItemContextMenu error: " .. tostring(err))
+		GlobalStorageSiK.Log.error("TerminalUI", "openItemContextMenu failed", err)
 		if menuState and menuState.ui then
 			if menuState.wasVisible then
 				menuState.ui:setVisible(true)

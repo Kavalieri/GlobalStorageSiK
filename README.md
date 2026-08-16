@@ -1,5 +1,7 @@
 # GlobalStorageSiK
 
+Documentación para desarrolladores: [API de addons](docs/ADDON_API.md) · [diagnóstico y logs](docs/DEBUGGING.md)
+
 Mod de Project Zomboid (Build 42) que añade almacenamiento de red compartido entre contenedores/terminales.
 
 ## Estructura del repositorio

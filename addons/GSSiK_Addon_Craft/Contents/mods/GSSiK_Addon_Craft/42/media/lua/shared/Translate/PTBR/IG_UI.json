@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Abrir culinária",
 	"IGUI_GS_CraftSendResultOn": "Enviar resultado para o armazém: LIGADO",
 	"IGUI_GS_CraftSendResultOff": "Enviar resultado para o armazém: DESLIGADO",
-	"IGUI_GS_CraftSendResultHint": "Quando LIGADO, tudo que a fabricação produzir (e quaisquer materiais restantes) é enviado ao armazém de rede por prioridade em vez de ficar no seu inventário. As ferramentas já voltam automaticamente de qualquer forma."
+	"IGUI_GS_CraftSendResultHint": "Quando LIGADO, tudo que a fabricação produzir (e quaisquer materiais restantes) é enviado ao armazém de rede por prioridade em vez de ficar no seu inventário. As ferramentas já voltam automaticamente de qualquer forma.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "A fabricação falhou: {1}. Os itens emprestados retornarão ao armazenamento.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "os materiais não chegaram a tempo",
+	"IGUI_GSSIK_CraftFailCancelled": "ação cancelada",
+	"IGUI_GSSIK_CraftFailStart": "o jogo não conseguiu iniciar a ação",
+	"IGUI_GSSIK_CraftFailInvalid": "a receita não é mais válida"
 }

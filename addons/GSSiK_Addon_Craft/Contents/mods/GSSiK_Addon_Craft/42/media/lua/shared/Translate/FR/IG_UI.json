@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Ouvrir la cuisine",
 	"IGUI_GS_CraftSendResultOn": "Envoyer le résultat au stockage : ACTIVÉ",
 	"IGUI_GS_CraftSendResultOff": "Envoyer le résultat au stockage : DÉSACTIVÉ",
-	"IGUI_GS_CraftSendResultHint": "Si activé, tout ce que produit la fabrication (et les matériaux restants) est envoyé au stockage réseau par priorité au lieu de rester dans votre inventaire. Les outils reviennent déjà automatiquement dans tous les cas."
+	"IGUI_GS_CraftSendResultHint": "Si activé, tout ce que produit la fabrication (et les matériaux restants) est envoyé au stockage réseau par priorité au lieu de rester dans votre inventaire. Les outils reviennent déjà automatiquement dans tous les cas.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "Échec de la fabrication : {1}. Les objets empruntés seront renvoyés au stockage.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "les matériaux ne sont pas arrivés à temps",
+	"IGUI_GSSIK_CraftFailCancelled": "action annulée",
+	"IGUI_GSSIK_CraftFailStart": "le jeu n’a pas pu démarrer l’action",
+	"IGUI_GSSIK_CraftFailInvalid": "la recette n’est plus valide"
 }

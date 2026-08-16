@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Builder add-on: magazine required (Electricity 5). Craft and install module from Add-ons tab.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Open game building",
 	"IGUI_GS_CraftOpenBuildNeat": "Open Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Open the game building UI; network containers are added while you have terminal access."
+	"IGUI_GS_BuildRemoteHint": "Open the game building UI; network containers are added while you have terminal access.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "Building failed: {1}. Borrowed items will be returned to storage.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "materials did not arrive in time",
+	"IGUI_GSSIK_BuilderFailCancelled": "action cancelled",
+	"IGUI_GSSIK_BuilderFailStart": "the game could not start the action",
+	"IGUI_GSSIK_BuilderFailInvalid": "the placement is no longer valid"
 }

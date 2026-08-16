@@ -641,6 +641,7 @@
 	"IGUI_GS_RescanAll": "Reescanear todas las zonas",
 	"IGUI_GS_Redistribute": "Auto-ordenar",
 	"IGUI_GS_RedistributeHint": "Mueve ítems mal ubicados al contenedor de mayor prioridad de toda la red; el sobrante va a cajas «Cualquiera». Se ejecuta solo en segundo plano hasta terminar, basta un clic.",
+	"IGUI_GS_RedistributeIdle": "Listo para auto-ordenar",
 	"IGUI_GS_RedistributeRunning": "Ordenando...",
 	"IGUI_GS_RedistributeDone": "¡Listo!",
 	"IGUI_GS_ZonesCreateHint": "Los contenedores no tienen que estar junto al terminal; define zonas en el mapa:",

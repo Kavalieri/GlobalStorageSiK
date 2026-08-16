@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Open cooking",
 	"IGUI_GS_CraftSendResultOn": "Send result to storage: ON",
 	"IGUI_GS_CraftSendResultOff": "Send result to storage: OFF",
-	"IGUI_GS_CraftSendResultHint": "When ON, whatever the crafting produces (and any leftover materials) is sent to network storage by priority instead of staying in your inventory. Tools already return automatically either way."
+	"IGUI_GS_CraftSendResultHint": "When ON, whatever the crafting produces (and any leftover materials) is sent to network storage by priority instead of staying in your inventory. Tools already return automatically either way.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "Crafting failed: {1}. Borrowed items will be returned to storage.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "materials did not arrive in time",
+	"IGUI_GSSIK_CraftFailCancelled": "action cancelled",
+	"IGUI_GSSIK_CraftFailStart": "the game could not start the action",
+	"IGUI_GSSIK_CraftFailInvalid": "the recipe is no longer valid"
 }

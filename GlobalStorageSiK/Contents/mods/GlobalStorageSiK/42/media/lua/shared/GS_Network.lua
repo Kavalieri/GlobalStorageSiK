@@ -376,8 +376,8 @@ local function logLiveContainerMiss(nid, entry, obj, container)
 		tostring(entry.containerIndex), reason)
 	if GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
 		GlobalStorageSiK.Debug.log("Network", "getLiveContainers", line)
-	else
-		print("[GlobalStorageSiK] " .. line)
+	elseif GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("Network", "getLiveContainers", line)
 	end
 end
 
@@ -410,8 +410,8 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 				tostring(nid), #nodes, netContainersCount)
 			if GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
 				GlobalStorageSiK.Debug.log("Network", "getLiveContainers", line)
-			else
-				print("[GlobalStorageSiK] " .. line)
+			elseif GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.debug("Network", "getLiveContainers", line)
 			end
 		end
 		for _, node in ipairs(nodes) do

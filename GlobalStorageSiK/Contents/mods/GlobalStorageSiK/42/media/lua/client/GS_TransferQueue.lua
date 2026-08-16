@@ -6,6 +6,7 @@
 ]]
 
 require "GS_NetClient"
+require "GS_Log"
 
 GlobalStorageSiK.TransferQueue = {}
 
@@ -109,9 +110,9 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 
 	if summary.reason == "limit" and (summary.moved or 0) > 0 then
 		if batchCount + 1 >= MAX_BATCHES then
-			print(string.format(
-				"[GlobalStorageSiK:TransferQueue] ABORTADO tras %s lotes sin converger (moved=%s, tipo=%s) - deteniendo para no reintentar sin fin",
-				tostring(MAX_BATCHES), tostring(summary.moved), tostring(pendingJob.type)))
+			GlobalStorageSiK.Log.error("TransferQueue", "max batches reached",
+				"batches=" .. tostring(MAX_BATCHES) .. " moved=" .. tostring(summary.moved)
+					.. " type=" .. tostring(pendingJob.type))
 			pendingJob = nil
 			return false
 		end
@@ -122,9 +123,10 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 		return true
 	end
 
-	print(string.format("[GlobalStorageSiK:TransferQueue] trabajo terminado tras %s lotes (moved=%s skipped=%s failed=%s reason=%s)",
-		tostring(batchCount + 1), tostring(summary.moved or 0), tostring(summary.skipped or 0),
-		tostring(summary.failed or 0), tostring(summary.reason)))
+	GlobalStorageSiK.Log.debug("TransferQueue", "complete",
+		"batches=" .. tostring(batchCount + 1) .. " moved=" .. tostring(summary.moved or 0)
+			.. " skipped=" .. tostring(summary.skipped or 0) .. " failed=" .. tostring(summary.failed or 0)
+			.. " reason=" .. tostring(summary.reason))
 	pendingJob = nil
 	return false
 end

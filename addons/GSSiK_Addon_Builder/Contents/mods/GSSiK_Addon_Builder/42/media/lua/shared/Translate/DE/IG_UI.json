@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Erweiterung Bauen: Magazin erforderlich (Elektrizität 5). Modul im Reiter Erweiterungen herstellen und installieren.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Bauen öffnen",
 	"IGUI_GS_CraftOpenBuildNeat": "Neat Bauen öffnen",
-	"IGUI_GS_BuildRemoteHint": "Öffnet das normale Baumenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast."
+	"IGUI_GS_BuildRemoteHint": "Öffnet das normale Baumenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "Bauen fehlgeschlagen: {1}. Geliehene Gegenstände werden ins Lager zurückgebracht.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "Materialien kamen nicht rechtzeitig an",
+	"IGUI_GSSIK_BuilderFailCancelled": "Aktion abgebrochen",
+	"IGUI_GSSIK_BuilderFailStart": "das Spiel konnte die Aktion nicht starten",
+	"IGUI_GSSIK_BuilderFailInvalid": "die Platzierung ist nicht mehr gültig"
 }

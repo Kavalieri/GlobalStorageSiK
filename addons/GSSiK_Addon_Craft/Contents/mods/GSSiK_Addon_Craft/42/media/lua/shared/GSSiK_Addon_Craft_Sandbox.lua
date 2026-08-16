@@ -13,7 +13,7 @@ GSSiK_Addon_Craft.Sandbox = {}
 --- (modversion=) en cada release, mismo criterio ya usado en Core con
 --- GS_Config.MOD_VERSION (ver CLAUDE.md raiz, regla 7bis: mod.info es la
 --- unica fuente de verdad de version, esto es solo un espejo para la UI).
-GSSiK_Addon_Craft.VERSION = "1.0.0"
+GSSiK_Addon_Craft.VERSION = "1.0.1"
 
 --- Peso loot periférico instalable (Craft).
 ---@return number
@@ -57,4 +57,14 @@ end
 function GSSiK_Addon_Craft.Sandbox.isDebugMode()
 	local v = SandboxVars.GSSiK_Addon_Craft
 	return v and v.DebugMode == true
+end
+
+---@param category string
+---@return boolean
+function GSSiK_Addon_Craft.Sandbox.isDebugCategoryEnabled(category)
+	if not GSSiK_Addon_Craft.Sandbox.isDebugMode() then return false end
+	local v = SandboxVars.GSSiK_Addon_Craft
+	if category == "Operations" then return not v or v.DebugOperations ~= false end
+	if category == "Lifecycle" then return not v or v.DebugLifecycle ~= false end
+	return true
 end

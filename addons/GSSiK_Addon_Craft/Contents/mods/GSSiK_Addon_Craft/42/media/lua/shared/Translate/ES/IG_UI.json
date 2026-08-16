@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Abrir cocina",
 	"IGUI_GS_CraftSendResultOn": "Enviar resultado al almacén: SÍ",
 	"IGUI_GS_CraftSendResultOff": "Enviar resultado al almacén: NO",
-	"IGUI_GS_CraftSendResultHint": "Si está activado, lo que produzca el crafteo (y cualquier material sobrante) se envía al almacén de red por prioridad en vez de quedarse en tu inventario. Las herramientas ya vuelven solas de todos modos."
+	"IGUI_GS_CraftSendResultHint": "Si está activado, lo que produzca el crafteo (y cualquier material sobrante) se envía al almacén de red por prioridad en vez de quedarse en tu inventario. Las herramientas ya vuelven solas de todos modos.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "El crafteo falló: {1}. Los objetos prestados volverán al almacén.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "los materiales no llegaron a tiempo",
+	"IGUI_GSSIK_CraftFailCancelled": "acción cancelada",
+	"IGUI_GSSIK_CraftFailStart": "el juego no pudo iniciar la acción",
+	"IGUI_GSSIK_CraftFailInvalid": "la receta ya no es válida"
 }

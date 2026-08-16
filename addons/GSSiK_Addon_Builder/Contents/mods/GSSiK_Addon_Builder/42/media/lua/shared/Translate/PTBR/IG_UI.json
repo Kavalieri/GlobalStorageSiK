@@ -5,5 +5,10 @@
 	"IGUI_GS_AddonBuilderDesc": "Complemento Construir: revista necessária (Eletricidade 5). Fabrique e instale o módulo na aba Complementos.",
 	"IGUI_GS_CraftOpenBuildVanilla": "Abrir construção do jogo",
 	"IGUI_GS_CraftOpenBuildNeat": "Abrir Neat Building",
-	"IGUI_GS_BuildRemoteHint": "Abre a interface de construção do jogo; contêineres de rede são adicionados enquanto você tiver acesso ao terminal."
+	"IGUI_GS_BuildRemoteHint": "Abre a interface de construção do jogo; contêineres de rede são adicionados enquanto você tiver acesso ao terminal.",
+	"IGUI_GSSIK_BuilderOperationFailedReturned": "A construção falhou: {1}. Os itens emprestados retornarão ao armazenamento.",
+	"IGUI_GSSIK_BuilderFailClaimTimeout": "os materiais não chegaram a tempo",
+	"IGUI_GSSIK_BuilderFailCancelled": "ação cancelada",
+	"IGUI_GSSIK_BuilderFailStart": "o jogo não conseguiu iniciar a ação",
+	"IGUI_GSSIK_BuilderFailInvalid": "o local não é mais válido"
 }

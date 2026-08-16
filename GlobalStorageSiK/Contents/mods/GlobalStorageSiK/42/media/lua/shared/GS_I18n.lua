@@ -394,6 +394,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_RescanAllHint = "Detects new containers in every zone. Use per-zone Rescan for a single area.",
 	IGUI_GS_Redistribute = "Auto-sort",
 	IGUI_GS_RedistributeHint = "Moves misplaced items to the highest-priority matching container across the whole network; overflow goes to «Any» boxes. Runs automatically in the background until finished, one click is enough.",
+	IGUI_GS_RedistributeIdle = "Ready to auto-sort",
 	IGUI_GS_RedistributeRunning = "Sorting...",
 	IGUI_GS_RedistributeDone = "Done!",
 	IGUI_GS_ZonesCreateHint = "Stand inside the area you want to register, then pick a zone type:",

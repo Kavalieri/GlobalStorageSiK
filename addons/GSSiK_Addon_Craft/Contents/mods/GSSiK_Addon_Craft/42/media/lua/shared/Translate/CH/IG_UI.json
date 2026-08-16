@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "打开烹饪",
 	"IGUI_GS_CraftSendResultOn": "结果发送至仓库：开",
 	"IGUI_GS_CraftSendResultOff": "结果发送至仓库：关",
-	"IGUI_GS_CraftSendResultHint": "开启后，制作产出的物品（以及剩余材料）将按优先级发送到网络仓库，而不是留在你的物品栏中。工具无论如何都会自动归还。"
+	"IGUI_GS_CraftSendResultHint": "开启后，制作产出的物品（以及剩余材料）将按优先级发送到网络仓库，而不是留在你的物品栏中。工具无论如何都会自动归还。",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "製作失敗：{1}。借用的物品將退回倉庫。",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "材料未及時送達",
+	"IGUI_GSSIK_CraftFailCancelled": "操作已取消",
+	"IGUI_GSSIK_CraftFailStart": "遊戲無法啟動該操作",
+	"IGUI_GSSIK_CraftFailInvalid": "配方已失效"
 }

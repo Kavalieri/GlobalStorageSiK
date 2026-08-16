@@ -641,6 +641,7 @@
 	"IGUI_GS_RescanAll": "Rescan all zones",
 	"IGUI_GS_Redistribute": "Auto-sort",
 	"IGUI_GS_RedistributeHint": "Moves misplaced items to the highest-priority matching container across the whole network; overflow goes to «Any» boxes. Runs automatically in the background until finished, one click is enough.",
+	"IGUI_GS_RedistributeIdle": "Ready to auto-sort",
 	"IGUI_GS_RedistributeRunning": "Sorting...",
 	"IGUI_GS_RedistributeDone": "Done!",
 	"IGUI_GS_ZonesCreateHint": "Containers need not be near the terminal; define zones on the map:",

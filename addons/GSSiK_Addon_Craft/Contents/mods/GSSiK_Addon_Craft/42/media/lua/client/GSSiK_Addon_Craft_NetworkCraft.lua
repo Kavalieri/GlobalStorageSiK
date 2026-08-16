@@ -19,13 +19,24 @@
 ]]
 
 require "GS_NetworkCraftSession"
+require "GS_I18n"
 require "GSSiK_Addon_Craft_Log"
 require "GSSiK_Addon_Craft_NetworkCook"
 
 local ADDON_ID = "Craft"
 
+local function failCraftOperation(operationId, player, reasonKey)
+	if not operationId then return end
+	GlobalStorageSiK.CraftSession.abortOperation(operationId)
+	local reason = GlobalStorageSiK.I18n.text(reasonKey)
+	local message = GlobalStorageSiK.I18n.text("IGUI_GSSIK_CraftOperationFailedReturned", reason)
+	if player and player.setHaloNote then
+		player:setHaloNote(message, 255, 120, 100, 450)
+	end
+end
+
 GlobalStorageSiK.CraftSession.registerDebugSink(ADDON_ID, function(message)
-	GSSiK_Addon_Craft.Log.debug(message)
+	GSSiK_Addon_Craft.Log.debug("Operations", message)
 end)
 
 local originalTransferIfNeeded = nil
@@ -141,6 +152,13 @@ local function checkPendingCraftStarts()
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_CRAFT_TIMEOUT_MS
 		if allReady or timedOut then
 			table.remove(pendingCraftStarts, i)
+			if timedOut and not allReady then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt ABORT operationId=" .. tostring(entry.operationId)
+					.. " waitResult=timeout actionStarted=false")
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
+				entry.self._gsOperationId = nil
+				return
+			end
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
 				"craftAttempt RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
@@ -149,6 +167,15 @@ local function checkPendingCraftStarts()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
+			pcall(function() entry.self.logic:autoPopulateInputs() end)
+			local okCanPerform, canPerform = pcall(function() return entry.self.logic:canPerformCurrentRecipe() end)
+			if not entry.force and okCanPerform and canPerform == false then
+				activeOperationId = nil
+				restore()
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
+				entry.self._gsOperationId = nil
+				return
+			end
 			-- pcall (2026-08-13, diagnostico): si originalStartHandcraft revienta
 			-- al llamarlo DIFERIDO desde el tick (en vez de sincrono desde el
 			-- clic original), antes se perdia en silencio - ningun END/RESULT,
@@ -157,6 +184,8 @@ local function checkPendingCraftStarts()
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("craftAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalStartHandcraft ERROR: " .. tostring(errCall))
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
+				entry.self._gsOperationId = nil
 			end
 			activeOperationId = nil
 			restore()
@@ -225,9 +254,24 @@ local function patchedStartHandcraft(self, force)
 			if okInv then invBefore = tostring(invSize) end
 			GlobalStorageSiK.CraftSession.debugLog("craftAttempt invBefore=" .. invBefore .. " operationId=" .. operationId)
 			activeOperationId = operationId
-			originalStartHandcraft(self, force)
+			pcall(function() self.logic:autoPopulateInputs() end)
+			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
+			if not force and okCanPerform and canPerform == false then
+				activeOperationId = nil
+				restore()
+				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailInvalid")
+				self._gsOperationId = nil
+				return
+			end
+			local okCall, errCall = pcall(originalStartHandcraft, self, force)
 			activeOperationId = nil
 			restore()
+			if not okCall then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt START ERROR operationId=" .. tostring(operationId)
+					.. " error=" .. tostring(errCall))
+				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
+				self._gsOperationId = nil
+			end
 			return
 		end
 	end
@@ -305,7 +349,8 @@ local function patchedOnHandcraftActionCancelled(self)
 			"craftAttempt END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
-	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
+	failCraftOperation(self._gsOperationId, self.player, "IGUI_GSSIK_CraftFailCancelled")
+	self._gsOperationId = nil
 	return originalOnHandcraftActionCancelled(self)
 end
 
@@ -373,9 +418,24 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			if okInv then invBefore = tostring(invSize) end
 			GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) invBefore=" .. invBefore .. " operationId=" .. operationId)
 			activeOperationId = operationId
-			originalNeatStartHandcraft(self, force, craftTimes)
+			pcall(function() self.logic:autoPopulateInputs() end)
+			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
+			if not force and okCanPerform and canPerform == false then
+				activeOperationId = nil
+				restore()
+				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailInvalid")
+				self._gsOperationId = nil
+				return
+			end
+			local okCall, errCall = pcall(originalNeatStartHandcraft, self, force, craftTimes)
 			activeOperationId = nil
 			restore()
+			if not okCall then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) START ERROR operationId=" .. tostring(operationId)
+					.. " error=" .. tostring(errCall))
+				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
+				self._gsOperationId = nil
+			end
 			return
 		end
 	end
@@ -409,6 +469,13 @@ local function checkPendingNeatCraftStarts()
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_CRAFT_TIMEOUT_MS
 		if allReady or timedOut then
 			table.remove(pendingNeatCraftStarts, i)
+			if timedOut and not allReady then
+				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) ABORT operationId=" .. tostring(entry.operationId)
+					.. " waitResult=timeout actionStarted=false")
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
+				entry.self._gsOperationId = nil
+				return
+			end
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
 				"craftAttempt(neat) RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
@@ -434,10 +501,19 @@ local function checkPendingNeatCraftStarts()
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
 				"craftAttempt(neat) RESUME operationId=%s tras autoPopulateInputs canPerformCurrentRecipe=%s",
 				tostring(entry.operationId), tostring(okCanPerform and canPerform)))
+			if not entry.force and okCanPerform and canPerform == false then
+				activeOperationId = nil
+				restore()
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
+				entry.self._gsOperationId = nil
+				return
+			end
 			local okCall, errCall = pcall(originalNeatStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
 				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalNeatStartHandcraft ERROR: " .. tostring(errCall))
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
+				entry.self._gsOperationId = nil
 			end
 			activeOperationId = nil
 			restore()
@@ -472,7 +548,8 @@ local function patchedNeatOnHandcraftActionCancelled(self)
 			"craftAttempt(neat) END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
 			tostring(self._gsOperationId), recipeName))
 	end
-	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
+	failCraftOperation(self._gsOperationId, self.player, "IGUI_GSSIK_CraftFailCancelled")
+	self._gsOperationId = nil
 	return originalNeatOnHandcraftActionCancelled(self)
 end
 

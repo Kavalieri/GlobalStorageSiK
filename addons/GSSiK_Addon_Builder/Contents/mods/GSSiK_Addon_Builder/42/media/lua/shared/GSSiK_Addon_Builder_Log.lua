@@ -12,7 +12,7 @@ require "GSSiK_Addon_Builder_Sandbox"
 GSSiK_Addon_Builder = GSSiK_Addon_Builder or {}
 GSSiK_Addon_Builder.Log = GSSiK_Addon_Builder.Log or {}
 
-local PREFIX = "[GSSiK_Addon_Builder:DEBUG] "
+local PREFIX = "[GSSiK_Addon_Builder:DEBUG]"
 
 --- Segundos transcurridos (con decimas) desde que arranco el proceso actual -
 --- la fecha no importa para depurar, pero medir cuanto tarda algo entre dos
@@ -25,10 +25,15 @@ local function elapsedTag()
 	return string.format("%.1fs", getTimestampMs() / 1000)
 end
 
----@param message string
-function GSSiK_Addon_Builder.Log.debug(message)
-	if not GSSiK_Addon_Builder.Sandbox.isDebugMode() then
+---@param category string "Operations"|"Lifecycle"
+---@param message string|nil
+function GSSiK_Addon_Builder.Log.debug(category, message)
+	if message == nil then
+		message = category
+		category = "Lifecycle"
+	end
+	if not GSSiK_Addon_Builder.Sandbox.isDebugCategoryEnabled(category) then
 		return
 	end
-	print("[" .. elapsedTag() .. "] " .. PREFIX .. tostring(message))
+	print("[" .. elapsedTag() .. "] " .. PREFIX .. "[" .. tostring(category) .. "] " .. tostring(message))
 end

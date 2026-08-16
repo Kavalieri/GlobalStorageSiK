@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Apri cucina",
 	"IGUI_GS_CraftSendResultOn": "Invia il risultato al magazzino: ATTIVO",
 	"IGUI_GS_CraftSendResultOff": "Invia il risultato al magazzino: DISATTIVO",
-	"IGUI_GS_CraftSendResultHint": "Se attivo, tutto ciò che produce il crafting (e i materiali avanzati) viene inviato al magazzino di rete per priorità invece di restare nel tuo inventario. Gli attrezzi tornano già automaticamente in ogni caso."
+	"IGUI_GS_CraftSendResultHint": "Se attivo, tutto ciò che produce il crafting (e i materiali avanzati) viene inviato al magazzino di rete per priorità invece di restare nel tuo inventario. Gli attrezzi tornano già automaticamente in ogni caso.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "Creazione fallita: {1}. Gli oggetti presi in prestito torneranno nel deposito.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "i materiali non sono arrivati in tempo",
+	"IGUI_GSSIK_CraftFailCancelled": "azione annullata",
+	"IGUI_GSSIK_CraftFailStart": "il gioco non ha potuto avviare l’azione",
+	"IGUI_GSSIK_CraftFailInvalid": "la ricetta non è più valida"
 }

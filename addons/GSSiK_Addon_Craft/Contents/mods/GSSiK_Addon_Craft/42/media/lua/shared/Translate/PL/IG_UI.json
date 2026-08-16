@@ -9,5 +9,10 @@
 	"IGUI_GS_CraftOpenCook": "Otwórz gotowanie",
 	"IGUI_GS_CraftSendResultOn": "Wyślij wynik do magazynu: WŁ",
 	"IGUI_GS_CraftSendResultOff": "Wyślij wynik do magazynu: WYŁ",
-	"IGUI_GS_CraftSendResultHint": "Gdy WŁ, wszystko co wytworzy wytwarzanie (oraz pozostałe materiały) jest wysyłane do magazynu sieciowego według priorytetu zamiast zostawać w twoim ekwipunku. Narzędzia i tak wracają automatycznie."
+	"IGUI_GS_CraftSendResultHint": "Gdy WŁ, wszystko co wytworzy wytwarzanie (oraz pozostałe materiały) jest wysyłane do magazynu sieciowego według priorytetu zamiast zostawać w twoim ekwipunku. Narzędzia i tak wracają automatycznie.",
+	"IGUI_GSSIK_CraftOperationFailedReturned": "Wytwarzanie nie powiodło się: {1}. Pożyczone przedmioty wrócą do magazynu.",
+	"IGUI_GSSIK_CraftFailClaimTimeout": "materiały nie dotarły na czas",
+	"IGUI_GSSIK_CraftFailCancelled": "akcja anulowana",
+	"IGUI_GSSIK_CraftFailStart": "gra nie mogła rozpocząć akcji",
+	"IGUI_GSSIK_CraftFailInvalid": "receptura nie jest już prawidłowa"
 }

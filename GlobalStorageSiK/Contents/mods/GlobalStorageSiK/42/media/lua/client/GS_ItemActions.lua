@@ -16,6 +16,7 @@ require "GS_TransferMenu"
 require "GS_ContextMenu"
 require "GS_TerminalInstallReaderChoice"
 require "GS_KeyBinding"
+require "GS_Log"
 require "GS_InstallTerminalReader"
 require "GS_Config"
 require "GS_Sandbox"
@@ -311,7 +312,7 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 		end
 	end)
 	if not ok then
-		print("[GlobalStorageSiK] OnPreFillInventoryObjectContextMenu error: " .. tostring(err))
+		GlobalStorageSiK.Log.error("ItemActions", "OnPreFillInventoryObjectContextMenu", err)
 	end
 end
 

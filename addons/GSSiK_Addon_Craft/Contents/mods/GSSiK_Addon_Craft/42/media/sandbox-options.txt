@@ -48,6 +48,22 @@ option GSSiK_Addon_Craft.DebugMode
 	translation = GSSiK_Addon_Craft_DebugMode,
 }
 
+option GSSiK_Addon_Craft.DebugOperations
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Debug,
+	translation = GSSiK_Addon_Craft_DebugOperations,
+}
+
+option GSSiK_Addon_Craft.DebugLifecycle
+{
+	type = boolean,
+	default = true,
+	page = GSSiK_Addon_Craft_Debug,
+	translation = GSSiK_Addon_Craft_DebugLifecycle,
+}
+
 option GSSiK_Addon_Craft.LootInstallDiskWeight
 {
 	type = double,

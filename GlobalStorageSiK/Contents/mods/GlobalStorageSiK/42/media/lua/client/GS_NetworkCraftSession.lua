@@ -48,6 +48,7 @@ local hookInstalled = false
 local tickInstalled = false
 local tickCounter = 0
 local sweepTickInstalled = false
+local sweepTickUnavailableLogged = false
 local ensureSweepTick -- forward-declarada: installHook() la llama, se define mas abajo (tras sweepPendingReturns)
 
 --- Mismo intervalo que GS_TerminalAccessGuard.CHECK_TICKS - antes esta
@@ -375,6 +376,27 @@ function GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
 	end
 end
 
+--- Aborta una operacion de préstamo. El Core no decide qué constituye un
+--- fallo ni cómo comunicarlo: esas responsabilidades pertenecen al addon.
+--- Solo descarta el snapshot de resultado y conserva los préstamos hasta
+--- devolverlos, incluso si el ACK del servidor llega después del aborto.
+---@param operationId string|nil
+function GlobalStorageSiK.CraftSession.abortOperation(operationId)
+	if not operationId then
+		return
+	end
+	completedOperations[operationId] = true
+	preClaimSnapshot[operationId] = nil
+	preClaimNetworkId[operationId] = nil
+	preClaimPlayerNum[operationId] = nil
+	for _, info in pairs(pendingReturns) do
+		if info.operationId == operationId then
+			info.failedOperation = true
+		end
+	end
+	sessionDebugLog("operation ABORTED operationId=" .. tostring(operationId))
+end
+
 --- Mueve un ítem de un contenedor de red al inventario del jugador - API
 --- PÚBLICA (antes local, uso exclusivo de este fichero): cualquier addon
 --- que necesite pedir prestado un ítem de la red para una acción vanilla
@@ -428,6 +450,7 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				fullType = fullType,
 				addedAt = getTimestampMs and getTimestampMs() or 0,
 				operationId = operationId,
+				wasLocated = false,
 			}
 			return true
 		end
@@ -444,6 +467,7 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				fullType = fullType,
 				addedAt = getTimestampMs and getTimestampMs() or 0,
 				operationId = operationId,
+				wasLocated = true,
 			}
 		end
 		sessionDebugLog("claimNetworkItem OK (local, autoritativo) fullType=" .. fullType)
@@ -682,27 +706,26 @@ local function sweepPendingReturns()
 		else
 			local item, currentContainer = GlobalStorageSiK.Deposit.findItemById(player, itemId)
 			if not item or not currentContainer then
-				-- No localizable en ningun contenedor accesible del jugador:
-				-- se consumio en la receta, nada que devolver.
-				print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
-					.. " no localizable (consumido) fullType=" .. tostring(info.fullType))
-				pendingReturns[itemId] = nil
-				-- BUG REAL encontrado (reportado 2026-08-16, "Neat SawLogs
-				-- nunca reclama la sierra, tarda mas y aun asi entrega el
-				-- objeto"): claimedItemIds nunca se limpiaba por item cuando
-				-- el sweep terminaba de resolverlo, asi que una herramienta
-				-- YA DEVUELTA a la red en un craft anterior seguia marcada
-				-- "ya reclamada" para siempre (solo se limpiaba entera en
-				-- endSession) - claimNetworkItem la ignoraba en el siguiente
-				-- craft pensando que ya estaba en el inventario, sin volver a
-				-- pedirle al servidor que la moviera de verdad. El siguiente
-				-- craft esperaba el timeout completo (4s, de ahi el retraso
-				-- extra notado) y terminaba aceptando la receta igualmente
-				-- porque HandcraftLogic la ve valida con la herramienta
-				-- todavia en el contenedor de red inyectado, sin necesitar
-				-- que este fisicamente en el inventario.
-				claimedItemIds[itemId] = nil
+				local operationDone = info.operationId and completedOperations[info.operationId] == true
+				local safetyExpired = info.addedAt and (nowMs - info.addedAt) >= RETURN_SAFETY_TIMEOUT_MS
+				-- En cliente MP el item aun no es localizable mientras el servidor
+				-- procesa el claim. No confundir ese viaje con un consumo real.
+				if not info.wasLocated and not safetyExpired then
+					if not info.loggedWaitingArrival then
+						info.loggedWaitingArrival = true
+						sessionDebugLog("return waitArrival itemId=" .. tostring(itemId)
+							.. " esperando llegada del claim operationId=" .. tostring(info.operationId))
+					end
+				elseif not operationDone and not safetyExpired then
+					-- La accion sigue activa: no decidir aun si fue consumido.
+				else
+					sessionDebugLog("return resolvedMissing itemId=" .. tostring(itemId)
+						.. " no localizable (consumido o claim agotado) fullType=" .. tostring(info.fullType))
+					pendingReturns[itemId] = nil
+					claimedItemIds[itemId] = nil
+				end
 			else
+				info.wasLocated = true
 				local operationDone = info.operationId and completedOperations[info.operationId] == true
 				local safetyExpired = info.addedAt and (nowMs - info.addedAt) >= RETURN_SAFETY_TIMEOUT_MS
 				if not operationDone and not safetyExpired then
@@ -710,42 +733,37 @@ local function sweepPendingReturns()
 						-- Se loguea UNA vez por item (no cada tick) en cuanto se
 						-- detecta el primer aplazamiento, no en cada iteracion.
 						info.loggedWaitingActive = true
-						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
+						sessionDebugLog("return waitActive itemId=" .. tostring(itemId)
 							.. " fullType=" .. tostring(info.fullType)
 							.. " aplazado (operationId=" .. tostring(info.operationId)
 							.. " todavia no ha terminado, se reintentara cuando llegue el evento de fin)")
 					end
-				elseif currentContainer == player:getInventory() then
+				else
 					if safetyExpired and not operationDone then
-						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
+						sessionDebugLog("return safetyTimeout itemId=" .. tostring(itemId)
 							.. " operationId=" .. tostring(info.operationId)
 							.. " sin evento de fin tras " .. tostring(RETURN_SAFETY_TIMEOUT_MS)
 							.. "ms, devolviendo por red de seguridad")
 					end
 					if GlobalStorageSiK.isAuthoritative() then
 						local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, info.networkId)
-						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns devuelto=" .. tostring(ok)
+						sessionDebugLog("return local ok=" .. tostring(ok)
 							.. " (local, autoritativo, deposito por prioridad) itemId=" .. tostring(itemId)
 							.. " fullType=" .. tostring(info.fullType) .. " reason=" .. tostring(reason))
 					elseif GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 						-- En cliente MP puro, "depositItems" ya ejecuta en
 						-- servidor el mismo Transfer.depositItem por prioridad.
 						GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = { itemId } })
-						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns -> depositItems enviado al servidor itemId=" .. tostring(itemId)
+						sessionDebugLog("return remoteSent itemId=" .. tostring(itemId)
 							.. " fullType=" .. tostring(info.fullType))
 					else
-						print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns SIN VIA DE ENVIO itemId=" .. tostring(itemId)
+						sessionDebugLog("return noTransport itemId=" .. tostring(itemId)
 							.. " isAuthoritative=" .. tostring(GlobalStorageSiK.isAuthoritative())
 							.. " NetClient=" .. tostring(GlobalStorageSiK.NetClient ~= nil))
 					end
 					pendingReturns[itemId] = nil
 					-- Limpia claimedItemIds al devolverlo - ver comentario
 					-- arriba (rama "no localizable"), mismo motivo.
-					claimedItemIds[itemId] = nil
-				else
-					print("[GlobalStorageSiK:CraftDiag] sweepPendingReturns itemId=" .. tostring(itemId)
-						.. " operacion terminada pero el item ya no esta en el inventario principal, se olvida sin depositar")
-					pendingReturns[itemId] = nil
 					claimedItemIds[itemId] = nil
 				end
 			end
@@ -1170,13 +1188,18 @@ end
 --- vacías la inmensa mayoría del tiempo (pairs() sobre tabla vacía es
 --- practicamente gratis).
 ensureSweepTick = function()
-	if sweepTickInstalled or not Events or not Events.OnTick then
-		print("[GlobalStorageSiK:CraftDiag] ensureSweepTick NO INSTALADO (sweepTickInstalled="
-			.. tostring(sweepTickInstalled) .. " Events=" .. tostring(Events ~= nil)
-			.. " Events.OnTick=" .. tostring(Events and Events.OnTick ~= nil) .. ")")
+	if sweepTickInstalled then
 		return
 	end
-	print("[GlobalStorageSiK:CraftDiag] ensureSweepTick instalando handler de tick por primera vez")
+	if not Events or not Events.OnTick then
+		if not sweepTickUnavailableLogged then
+			sweepTickUnavailableLogged = true
+			sessionDebugLog("sweepTick unavailable Events=" .. tostring(Events ~= nil)
+				.. " Events.OnTick=" .. tostring(Events and Events.OnTick ~= nil))
+		end
+		return
+	end
+	sessionDebugLog("sweepTick installing")
 	Events.OnTick.Add(function()
 		sweepPendingReturns()
 		for addonId, fn in pairs(addonTickHandlers) do

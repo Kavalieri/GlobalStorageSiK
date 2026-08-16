@@ -2024,10 +2024,21 @@ local function onClientCommand(module, command, player, args)
 		-- Un solo click: RedistributeJob se relanza solo cada pocos segundos
 		-- hasta terminar toda la red (respetando MaxItemsPerBulkTick por lote).
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeInProgress") })
+			GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
+			gsSendServerCommand(player, "actionResult", {
+				ok = true,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeInProgress"),
+				jobType = "redistribute",
+				jobState = "running",
+			})
 		else
 			GlobalStorageSiK.RedistributeJob.start(player, networkId)
-			gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributingNetwork") })
+			gsSendServerCommand(player, "actionResult", {
+				ok = true,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributingNetwork"),
+				jobType = "redistribute",
+				jobState = "running",
+			})
 		end
 
 	elseif command == "renameZone" then
