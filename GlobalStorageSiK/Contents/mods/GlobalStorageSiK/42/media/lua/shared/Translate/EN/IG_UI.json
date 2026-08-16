@@ -91,7 +91,7 @@
 	"IGUI_GS_NoNodesYet": "No containers detected in zones.",
 	"IGUI_GS_ShowTerminalCoverage": "Show coverage",
 	"IGUI_GS_HideTerminalCoverage": "Hide coverage",
-	"IGUI_GS_NodesPriorityHelp": "How items pick a container: 1) exact custom filter or leaf category match, 2) subcategory match (e.g. Food > Perishable), 3) main category match (e.g. Food) with no better option, 4) unrestricted container. If no container matches, the item stays in your inventory instead of taking a wrong spot.",
+	"IGUI_GS_NodesPriorityHelp": "How items pick a container: 1) exact custom filter or leaf category, 2) subcategory (e.g. Food > Perishable), 3) main category (e.g. Food), 4) unrestricted container already holding that item, 5) any unrestricted container. If none has room, the item stays in your inventory.",
 	"IGUI_GS_NetworkId": "Network: {1}",
 	"IGUI_GS_Guide1": "1. Setup: create a zone (room or MP safehouse) and rescan.",
 	"IGUI_GS_Guide2": "2. Containers: rename each box and pick one category for auto-sort.",

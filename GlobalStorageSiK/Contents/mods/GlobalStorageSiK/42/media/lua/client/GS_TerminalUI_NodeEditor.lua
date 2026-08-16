@@ -251,15 +251,17 @@ local function categoryDisplayLabel(key)
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if key:sub(1, #EXT) == EXT then
-		-- Nivel 1 completo: el sufijo YA es el groupLabel real (case original).
-		return key:sub(#EXT + 1)
+		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
 	end
 	if key:sub(1, #SUB) == SUB then
-		-- Nivel 2 completo: "groupLabel::subGroupLabel", ambos ya en case original.
+		-- Nivel 2 completo: "groupKey::subGroupKey" canonicos.
 		local rest = key:sub(#SUB + 1)
 		local sepPos = rest:find("::", 1, true)
 		if sepPos then
-			return rest:sub(1, sepPos - 1) .. " - " .. rest:sub(sepPos + 2)
+			local groupKey = rest:sub(1, sepPos - 1)
+			local subKey = rest:sub(sepPos + 2)
+			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " - "
+				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subKey, groupKey)
 		end
 		return rest
 	end
@@ -446,7 +448,7 @@ function GS_NodeEditorUI:ensureForm()
 	local sugKey = self.node and GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.suggestCategoryForNode
 		and GlobalStorageSiK.ItemTaxonomy.suggestCategoryForNode(self.node) or nil
 	if sugKey and sugKey ~= "" then
-		local sugLabel = T("IGUI_GS_NodeSuggestedCat") .. " " .. GlobalStorageSiK.ItemTaxonomy.translateMainKey(sugKey)
+		local sugLabel = T("IGUI_GS_NodeSuggestedCat") .. " " .. categoryDisplayLabel(sugKey)
 		local sugLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, sugLabel, 0.35, 0.75, 0.45, 1, UIFont.Small, true)
 		sugLbl:initialise()
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, sugLbl)
@@ -930,7 +932,25 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 	-- Inicializar estado de edición al abrir un nodo nuevo
 	if not sameNode then
 		self._editCategories = {}
-		for i, cat in ipairs(node.categories or {}) do self._editCategories[i] = cat end
+		local migrated = false
+		local seen = {}
+		local catalog = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
+		for _, cat in ipairs(node.categories or {}) do
+			local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(cat, catalog)
+			if canonical ~= cat then migrated = true end
+			local sig = string.lower(canonical)
+			if not seen[sig] then
+				seen[sig] = true
+				self._editCategories[#self._editCategories + 1] = canonical
+			end
+		end
+		-- Migracion unica de reglas antiguas que guardaban textos traducidos.
+		-- Solo afecta a los prefijos virtuales de Nivel 1/2; las hojas exactas
+		-- y categoria::hueco de joyeria/ropa pasan intactas.
+		if migrated then
+			node.categories = self._editCategories
+			GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = self._editCategories })
+		end
 		self._editName     = node.displayName or node.name or ""
 		self._editNotes    = node.notes or ""
 		self._editPriority = node.priority or 50

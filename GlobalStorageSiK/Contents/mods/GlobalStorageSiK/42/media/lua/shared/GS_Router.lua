@@ -270,8 +270,9 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 			end
 		elseif rule:sub(1, #SUB) == SUB then
 			-- Regla de NIVEL 2 (subcategoria elegida sin bajar a Nivel 3, ej.
-			-- "Comida > Perecedero"): acepta cualquier item cuyo groupLabel Y
-			-- subGroupLabel coincidan (fuente unica, ver GS_ItemTaxonomy.resolve()).
+			-- "Food > FoodPerishable"): acepta cualquier item cuyas claves
+			-- canonicas groupKey Y subGroupKey coincidan. Las etiquetas traducidas
+			-- se aceptan solo como fallback legacy hasta migrar el nodo desde la UI.
 			local rest = rule:sub(#SUB + 1)
 			local sepPos = rest:find("::", 1, true)
 			if sepPos then
@@ -287,8 +288,12 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 					local taxEmpty = resolveCached(fullType, "empty", {})
 					local taxRow = resolveCached(fullType, "row", rowContext)
 					local function matches(tax)
-						return tax and tax.groupLabel and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == wantGroup
-							and tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup
+						if not tax then return false end
+						local groupMatches = tax.groupKey and string.lower(tax.groupKey) == wantGroup
+							or (tax.groupLabel and string.lower(tax.groupLabel) == wantGroup)
+						local subMatches = tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup
+							or (tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup)
+						return groupMatches and subMatches
 					end
 					if matches(taxEmpty) or matches(taxRow) then
 						bestTier = bestTier and math.min(bestTier, 2) or 2
@@ -297,12 +302,13 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 			end
 		elseif rule:sub(1, #EXT) == EXT then
 			-- Regla de NIVEL 1 (familia completa, ej. "Comida" sola): acepta
-			-- cualquier item cuyo groupLabel coincida, tenga o no Nivel 2/3.
+			-- cualquier item cuyo groupKey canonico coincida, tenga o no Nivel 2/3.
 			local group = string.lower(rule:sub(#EXT + 1))
 			local ftOk, fullType = pcall(function() return item:getFullType() end)
 			if ftOk then
 				local tax = resolveCached(fullType, "empty", {})
-				if tax and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == group then
+				if tax and ((tax.groupKey and string.lower(tax.groupKey) == group)
+					or (tax.groupLabel and string.lower(tax.groupLabel) == group)) then
 					bestTier = bestTier and math.min(bestTier, 3) or 3
 				end
 			end
@@ -409,42 +415,20 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 	-- envie automaticamente a ese mismo contenedor, en vez de elegir
 	-- cualquiera al azar"). Se aplica SOLO donde no hay configuracion
 	-- explicita del jugador que ya decida el destino (tier 4 = nodo sin
-	-- ninguna regla de categoria, y el fallback final sin match alguno) -
+	-- reglas que ya contiene el mismo fullType) -
 	-- una regla de categoria/filtro que el jugador SI configuro a mano
 	-- siempre gana, esto no la pisa.
 	local fullType = item.getFullType and item:getFullType() or nil
 
 	local autoSort = GlobalStorageSiK.Sandbox.autoSortEnabled()
-	-- Sandbox "rechazar si no hay match": desactiva SOLO los fallbacks que
-	-- ignoran categoria por completo (tier 4 sin afinidad y el catch-all
-	-- final "cualquier hueco libre"). Un match real por categoria (tiers
+	-- Sandbox "rechazar si no hay match": desactiva SOLO el tier 5 que
+	-- ignora categoria y afinidad ("cualquier hueco libre"). Un match real (tiers
 	-- 1-3) o por afinidad de mismo item SIGUE funcionando igual, esto no
 	-- los toca - solo evita que el item acabe "a lo loco" en un contenedor
 	-- sin ninguna relacion con el.
 	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
-	-- DIAGNOSTICO TEMPORAL (2026-08-16, "los filtros no funcionan, comida
-	-- perecedera configurada para un congelador toma otro contenedor"):
-	-- estructuralmente esta funcion YA respeta el orden pedido (tiers 1-3,
-	-- match real por categoria, se comprueban SIEMPRE antes que el tier 4 de
-	-- afinidad "mismo item") - el bug real, si existe, esta probablemente en
-	-- que el contenedor configurado no se esta clasificando en tier 1-3 para
-	-- este item (fallo en matchSpecificity/ItemTaxonomy.resolve), no en el
-	-- orden de los tiers. print() incondicional (no gateado por DebugMode)
-	-- para ver de una vez, sin depender de activar la categoria "Router" del
-	-- sandbox, el tier real asignado a cada nodo y si tenia hueco - misma
-	-- disciplina de diagnostico ya usada con exito para el retorno de
-	-- herramientas de Craft. Quitar cuando se confirme la causa real.
-	-- CORREGIDO (2026-08-16): estos print() incondicionales corren en el
-	-- proceso del SERVIDOR y nunca pasaban por GlobalStorageSiK.Log._echoHook
-	-- (instalado en GS_Server.lua, reenvia al cliente con marca [SRV] todo lo
-	-- que pase por GlobalStorageSiK.Log.*) - por eso nunca aparecian en el log
-	-- que el cliente puede copiar, aunque SI se ejecutaban. Usando Log.warn
-	-- (incondicional, no gateado por DebugMode, igual que el print() original)
-	-- para que salga con [SRV] como el resto de trazas server->cliente.
 	local ft = item.getFullType and item:getFullType() or "?"
-	GlobalStorageSiK.Log.warn("RouterDiag", string.format("pickDepositTarget fullType=%s autoSort=%s liveNodes=%s",
-		tostring(ft), tostring(autoSort), tostring(#liveNodes)))
 	if debugOn then
 		local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
 			and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
@@ -464,54 +448,40 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 		--
 		-- Especificidad de categoria PRIMERO, prioridad numerica solo como
 		-- desempate DENTRO del mismo nivel (ver comentario de matchSpecificity):
-		-- tier 1 = hoja exacta (Nivel 3), tier 2 = Nivel 2 (subcategoria sin
-		-- hoja), tier 3 = Nivel 1 (categoria sin mas detalle), tier 4 = nodo
-		-- sin restriccion. Se procesan los 4 tiers en orden.
-		local tiers = { {}, {}, {}, {} }
+		-- tier 1 = hoja/custom exacto, tier 2 = subcategoria, tier 3 = categoria,
+		-- tier 4 = nodo sin restriccion que YA contiene ese fullType, tier 5 =
+		-- nodo sin restriccion cualquiera. "Queda en inventario" es el resultado
+		-- terminal cuando ninguno tiene hueco, no un sexto destino.
+		local tiers = { {}, {}, {}, {}, {} }
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
 			local entry = live.entry or {}
-			local tier = GlobalStorageSiK.Router.matchSpecificity(entry, item)
-			if tier then
-				table.insert(tiers[tier], live)
+			local matchTier = GlobalStorageSiK.Router.matchSpecificity(entry, item)
+			local destinationTier = matchTier
+			if matchTier == 4 then
+				destinationTier = fullType and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) and 4 or 5
 			end
-			GlobalStorageSiK.Log.warn("RouterDiag", string.format("nodeId=%s displayName=%s rules=%s priority=%s tier=%s",
-				tostring(entry.id), tostring(entry.displayName or entry.name),
-				(entry.categories and #entry.categories > 0 and table.concat(entry.categories, ",") or "(sin restriccion)"),
-				tostring(entry.priority or 50), tostring(tier or "rechazado")))
+			if destinationTier then
+				table.insert(tiers[destinationTier], live)
+			end
 			if debugOn then
 				GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | nodeId=" .. tostring(entry.id)
 					.. " displayName=" .. tostring(entry.displayName or entry.name)
 					.. " rules=" .. (entry.categories and #entry.categories > 0 and table.concat(entry.categories, ",") or "(sin restriccion)")
 					.. " priority=" .. tostring(entry.priority or 50)
-					.. " tier=" .. tostring(tier or "rechazado"))
+					.. " tier=" .. tostring(destinationTier or "rechazado"))
 			end
 		end
-		for tierIdx = 1, 4 do
+		for tierIdx = 1, 5 do
 			local sorted = tiers[tierIdx]
 			table.sort(sorted, function(a, b)
 				return ((a.entry or {}).priority or 50) < ((b.entry or {}).priority or 50)
 			end)
-			if tierIdx == 4 and fullType then
-				for i = 1, #sorted do
-					local live = sorted[i]
-					if GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
-						and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
-						GlobalStorageSiK.Log.warn("RouterDiag", "RESULT tier=4 afinidad mismo item -> nodeId="
-							.. tostring((live.entry or {}).id))
-						if debugOn then
-							GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | tier=4 afinidad mismo item -> nodeId="
-								.. tostring((live.entry or {}).id))
-						end
-						return live
-					end
-				end
-			end
-			-- Tier 4 = sin restriccion de categoria: el barrido generico
+			-- Tier 5 = sin restriccion ni afinidad: el barrido generico
 			-- (ignora afinidad, solo mira hueco libre) es exactamente el "a
 			-- lo loco" que rejectDepositIfNoMatch debe evitar. Tiers 1-3 son
-			-- match real por categoria, se permiten siempre.
-			if tierIdx < 4 or not strictNoMatch then
+			-- match real y tier 4 es afinidad real; se permiten siempre.
+			if tierIdx < 5 or not strictNoMatch then
 				for i = 1, #sorted do
 					local live = sorted[i]
 					local hasSpace = GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
@@ -520,8 +490,12 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 							.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
 					end
 					if hasSpace then
-						GlobalStorageSiK.Log.warn("RouterDiag", string.format("RESULT tier=%s nodeId=%s (match por categoria)",
-							tostring(tierIdx), tostring((live.entry or {}).id)))
+						local reason = tierIdx <= 3 and "match por categoria"
+							or (tierIdx == 4 and "afinidad mismo item" or "contenedor sin restriccion")
+						if debugOn then
+							GlobalStorageSiK.Log.debug("Router", string.format("RESULT tier=%s nodeId=%s (%s)",
+								tostring(tierIdx), tostring((live.entry or {}).id), reason))
+						end
 						return live
 					end
 				end
@@ -546,8 +520,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 	--
 	-- dev24 (eficiencia, pedido explicito - evitar reescaneos redundantes):
 	-- "nodo sin ninguna categoria configurada" es EXACTAMENTE la definicion
-	-- de tier 4 en matchSpecificity, y con autoSort activo el bucle de
-	-- arriba (tierIdx=4, afinidad primero y barrido generico despues) YA
+	-- de los tiers 4/5 en pickDepositTarget, y con autoSort activo el bucle de
+	-- arriba YA
 	-- prueba exactamente ese mismo conjunto de nodos, en el mismo orden de
 	-- prioridad. Repetir aqui el mismo escaneo para el mismo resultado era
 	-- trabajo duplicado en el camino mas comun (autoSort=true, el valor por
@@ -566,8 +540,10 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 				if nodeHasNoCategories(live.entry)
 					and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
 					and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
-					GlobalStorageSiK.Log.warn("RouterDiag", "RESULT fallback final: afinidad mismo item SIN match de categoria en ningun tier -> nodeId="
-						.. tostring((live.entry or {}).id))
+					if debugOn then
+						GlobalStorageSiK.Log.debug("Router", "RESULT fallback final: afinidad mismo item -> nodeId="
+							.. tostring((live.entry or {}).id))
+					end
 					return live
 				end
 			end
@@ -585,7 +561,9 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 		end
 	end
 
-	GlobalStorageSiK.Log.warn("RouterDiag", "RESULT no_space: ningun nodo sin restriccion o compatible tenia hueco libre para fullType=" .. tostring(fullType))
+	if debugOn then
+		GlobalStorageSiK.Log.debug("Router", "RESULT no_space: ningun nodo compatible tenia hueco para fullType=" .. tostring(fullType))
+	end
 
 	return nil
 end

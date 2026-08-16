@@ -80,9 +80,10 @@ end
 
 --- Elige el MEJOR contenedor destino para un item, comparando TODOS los
 --- candidatos validos (no el primero que encaje). Usa la MISMA
---- especificidad de 4 niveles que GS_Router.pickDepositTarget
+--- especificidad de categorias que GS_Router.pickDepositTarget
 --- (matchSpecificity: 1=hoja exacta, 2=Nivel 2, 3=Nivel 1, 4=sin
---- restriccion) en vez de una separacion propia "especifico vs cualquiera" -
+--- restriccion), expandiendo el ultimo caso igual que Router: 4=sin
+--- restriccion con el mismo fullType, 5=sin restriccion cualquiera.
 --- antes Auto-ordenar solo distinguia esas dos bolsas y trataba Nivel 1/2/3
 --- como un mismo grupo "especifico" sin desempate entre ellos, dando
 --- resultados distintos a un deposito manual del MISMO item con la MISMA
@@ -102,38 +103,27 @@ local function pickRedistributeTarget(item, fromLive, liveNodes, character, zone
 		return nil
 	end
 
-	local tiers = { {}, {}, {}, {} }
+	local tiers = { {}, {}, {}, {}, {} }
+	local fullType = item.getFullType and item:getFullType() or nil
 	for i = 1, #liveNodes do
 		local live = liveNodes[i]
 		local isSelf = (live.container == fromLive.container)
 		local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
 		if hasSpace then
-			local tier = GlobalStorageSiK.Router.matchSpecificity(live.entry or {}, item)
-			if tier then
-				tiers[tier][#tiers[tier] + 1] = live
+			local matchTier = GlobalStorageSiK.Router.matchSpecificity(live.entry or {}, item)
+			local destinationTier = matchTier
+			if matchTier == 4 then
+				destinationTier = fullType and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) and 4 or 5
+			end
+			if destinationTier then
+				tiers[destinationTier][#tiers[destinationTier] + 1] = live
 			end
 		end
 	end
 
-	for tierIdx = 1, 4 do
+	for tierIdx = 1, 5 do
 		local pool = tiers[tierIdx]
 		if #pool > 0 then
-			if tierIdx == 4 then
-				-- Afinidad "mismo item, mismo contenedor": SOLO dentro de tier 4
-				-- (sin restriccion de categoria) - un contenedor con categoria/
-				-- filtro configurado a mano por el jugador (tiers 1-3) siempre
-				-- gana antes de mirar afinidad, igual que en pickDepositTarget.
-				local fullType = item.getFullType and item:getFullType() or nil
-				if fullType then
-					for i = 1, #pool do
-						local live = pool[i]
-						if live.container ~= fromLive.container
-							and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) then
-							return live
-						end
-					end
-				end
-			end
 			table.sort(pool, function(a, b) return candidateBetter(a, b, zonePriorityOf) end)
 			local best = pool[1]
 			if best.container == fromLive.container then

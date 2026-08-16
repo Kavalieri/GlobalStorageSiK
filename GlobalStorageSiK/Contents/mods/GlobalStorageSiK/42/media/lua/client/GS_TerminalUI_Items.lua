@@ -212,7 +212,7 @@ end
 function GlobalStorageSiK.TerminalItems.rowTaxonomy(row)
 	if not row then
 		return { mainKey = "", subKey = "", mainLabel = "", subLabel = "", fullLabel = "",
-			groupLabel = "", subGroupLabel = nil, leafLabel = nil }
+			groupKey = "", subGroupKey = nil, groupLabel = "", subGroupLabel = nil, leafLabel = nil }
 	end
 	return GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
 end
@@ -242,8 +242,8 @@ function GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, mainKey)
 	end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	if mainKey:sub(1, #EXT) == EXT then
-		-- Clave de familia (groupLabel, fuente unica - ver GS_ItemTaxonomy.lua
-		-- resolve()/collectMainFilters): se compara por tax.groupLabel, NO
+		-- Clave de familia canonica (groupKey, fuente unica - ver
+		-- GS_ItemTaxonomy.lua resolve()/collectMainFilters): se compara por clave, NO
 		-- solo por extGroupLabel, para incluir tambien los items "genericos"
 		-- de la misma familia que no tienen division cualificada (antes se
 		-- quedaban fuera del filtro sin que se notara, ya que rara vez se
@@ -252,7 +252,7 @@ function GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, mainKey)
 		local filtered = {}
 		for i = 1, #rows do
 			local tax = GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i])
-			if tax.groupLabel and tax.groupLabel ~= "" and string.lower(tax.groupLabel) == group then
+			if tax.groupKey and tax.groupKey ~= "" and string.lower(tax.groupKey) == group then
 				filtered[#filtered + 1] = rows[i]
 			end
 		end
@@ -281,7 +281,7 @@ end
 --- Filtra filas por Nivel 2 (subcategoría, ej. "Perecedero" - vacío = todas).
 --- Acepta CUALQUIER hoja de Nivel 3 dentro de ese subgrupo (fruta, queso,
 --- carne perecederos...), no solo coincidencia exacta - misma fuente unica
---- (tax.groupLabel/subGroupLabel) que usa GS_Router.lua al depositar.
+--- (tax.groupKey/subGroupKey) que usa GS_Router.lua al depositar.
 ---@param rows table[]
 ---@param subKey string|nil clave con prefijo SUBGROUP_PREFIX
 ---@return table[]
@@ -303,8 +303,8 @@ function GlobalStorageSiK.TerminalItems.filterBySubCategory(rows, subKey)
 	local filtered = {}
 	for i = 1, #rows do
 		local tax = GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i])
-		if tax.groupLabel and string.lower(tax.groupLabel) == wantGroup
-			and tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup then
+		if tax.groupKey and string.lower(tax.groupKey) == wantGroup
+			and tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup then
 			filtered[#filtered + 1] = rows[i]
 		end
 	end

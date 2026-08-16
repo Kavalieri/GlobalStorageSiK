@@ -133,6 +133,20 @@ end
 ---@param key string
 ---@return string
 local function categoryLabel(key)
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	if key:sub(1, #EXT) == EXT then
+		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
+	end
+	if key:sub(1, #SUB) == SUB then
+		local rest = key:sub(#SUB + 1)
+		local sep = rest:find("::", 1, true)
+		if sep then
+			local groupKey = rest:sub(1, sep - 1)
+			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " / "
+				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(rest:sub(sep + 2), groupKey)
+		end
+	end
 	if GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(key) then
 		return "  " .. GlobalStorageSiK.Subcategories.label(key)
 	end
@@ -459,7 +473,7 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 	if payload and payload.suggestedCategory and payload.suggestedCategory ~= "" then
 		local applyW = math.min(84, math.max(68, math.floor(innerW * 0.22)))
 		local rowY = y
-		local suggest = T("IGUI_GS_NodeSuggestCategory", payload.suggestedCategory)
+		local suggest = T("IGUI_GS_NodeSuggestCategory", categoryLabel(payload.suggestedCategory))
 		local labelMaxW = math.max(40, innerW - applyW - pad - 6)
 		local sugLbl = ISLabel:new(
 			pad, rowY + 2, FONT_HGT_SMALL,

@@ -882,7 +882,7 @@ end
 --- parece de Nivel 1 pero que matchSpecificity nunca reconoce como tal (cae
 --- al ultimo "else" que compara la clave cruda letra por letra), rechazando
 --- SIEMPRE. Fix: resolver cada fila con ItemTaxonomy.resolve() (misma fuente
---- unica que collectMainFilters) y agrupar por tax.groupLabel, devolviendo
+--- unica que collectMainFilters) y agrupar por tax.groupKey canonica, devolviendo
 --- la clave YA prefijada - exactamente lo que el editor moderno guardaria si
 --- el jugador hubiera elegido esa misma familia a mano.
 ---@param rows table[]
@@ -892,15 +892,15 @@ local function suggestCategoryFromSnapshot(rows)
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	for _, row in ipairs(rows or {}) do
 		local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, row.fullType, row)
-		local label = ok and tax and tax.groupLabel
-		if label and label ~= "" then
-			counts[label] = (counts[label] or 0) + (row.count or 1)
+		local groupKey = ok and tax and tax.groupKey
+		if groupKey and groupKey ~= "" then
+			counts[groupKey] = (counts[groupKey] or 0) + (row.count or 1)
 		end
 	end
 	local best, bestCount = nil, 0
-	for label, total in pairs(counts) do
+	for groupKey, total in pairs(counts) do
 		if total > bestCount then
-			best = label
+			best = groupKey
 			bestCount = total
 		end
 	end

@@ -144,17 +144,18 @@ local function fullCategoryLabel(key)
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if key:sub(1, #EXT) == EXT then
-		-- Clave de Nivel 1 completo (categoria madre sola, ver
-		-- GS_TerminalUI_NodeEditor.lua) - el sufijo YA es el groupLabel real
-		-- con su capitalizacion original (ver GS_ItemTaxonomy.collectMainFilters).
-		return key:sub(#EXT + 1)
+		-- El sufijo es una clave canonica; se traduce solo al pintar.
+		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
 	end
 	if key:sub(1, #SUB) == SUB then
-		-- Clave de Nivel 2 completo: "groupLabel::subGroupLabel", case original.
+		-- Clave de Nivel 2: "groupKey::subGroupKey", independiente del idioma.
 		local rest = key:sub(#SUB + 1)
 		local sepPos = rest:find("::", 1, true)
 		if sepPos then
-			return rest:sub(1, sepPos - 1) .. " / " .. rest:sub(sepPos + 2)
+			local groupKey = rest:sub(1, sepPos - 1)
+			local subKey = rest:sub(sepPos + 2)
+			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " / "
+				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subKey, groupKey)
 		end
 		return rest
 	end
@@ -750,6 +751,33 @@ function GlobalStorageSiK.TerminalNodes.refresh(nodesPanel, terminal, nodes, cat
 	local panel = nodesPanel.nodesListPanel
 	nodes = nodes or {}
 	categories = categories or {}
+	-- Migracion best-effort de las reglas v1 que persistian etiquetas del
+	-- idioma del cliente. Se ejecuta al recibir la lista de Nodos, no obliga a
+	-- abrir cada editor. El servidor conserva su validacion normal de permisos.
+	panel._canonicalMigrationSent = panel._canonicalMigrationSent or {}
+	local catalog = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
+	for i = 1, #nodes do
+		local node = nodes[i]
+		local migrated = {}
+		local changed = false
+		local seen = {}
+		for _, rule in ipairs(node.categories or {}) do
+			local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(rule, catalog)
+			if canonical ~= rule then changed = true end
+			local sig = string.lower(canonical)
+			if not seen[sig] then
+				seen[sig] = true
+				migrated[#migrated + 1] = canonical
+			end
+		end
+		if changed then
+			node.categories = migrated
+			if node.id and not panel._canonicalMigrationSent[node.id] then
+				panel._canonicalMigrationSent[node.id] = true
+				GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = migrated })
+			end
+		end
+	end
 	local zones = terminal and terminal.terminalState and terminal.terminalState.zones or {}
 	panel._lastNodes = nodes
 	panel._displayRows = buildGroupedDisplayRows(nodes, zones, panel._collapsedZones, panel.sortColumn, panel.sortDir)

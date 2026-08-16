@@ -91,7 +91,7 @@
 	"IGUI_GS_NoNodesYet": "Sin contenedores detectados en las zonas.",
 	"IGUI_GS_ShowTerminalCoverage": "Mostrar cobertura",
 	"IGUI_GS_HideTerminalCoverage": "Ocultar cobertura",
-	"IGUI_GS_NodesPriorityHelp": "Cómo elige un objeto su contenedor: 1) filtro personalizado o categoría exacta, 2) subcategoría (ej. Comida > Perecedero), 3) categoría principal (ej. Comida) si no hay nada mejor, 4) contenedor sin restricción. Si ninguno coincide, el objeto se queda en tu inventario en vez de ocupar un sitio equivocado.",
+	"IGUI_GS_NodesPriorityHelp": "Cómo elige un objeto su contenedor: 1) filtro personalizado o categoría exacta, 2) subcategoría (ej. Comida > Perecedero), 3) categoría principal (ej. Comida), 4) contenedor sin restricción que ya tenga ese objeto, 5) cualquier contenedor sin restricción. Si ninguno tiene espacio, el objeto se queda en tu inventario.",
 	"IGUI_GS_NetworkId": "Red: {1}",
 	"IGUI_GS_Guide1": "1. Configuración: crea zona (habitación o safehouse MP) y reescanea.",
 	"IGUI_GS_Guide2": "2. Contenedores: renombra cada caja y elige una categoría para auto-ordenar.",
