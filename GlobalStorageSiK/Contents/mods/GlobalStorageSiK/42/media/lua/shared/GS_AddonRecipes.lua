@@ -15,7 +15,7 @@ GlobalStorageSiK.AddonRecipes = GlobalStorageSiK.AddonRecipes or {}
 
 ---@param fullType string|nil
 ---@return string
-local function displayNameForType(fullType)
+function GlobalStorageSiK.AddonRecipes.displayNameForType(fullType)
 	if not fullType then
 		return "?"
 	end
@@ -25,6 +25,8 @@ local function displayNameForType(fullType)
 	end
 	return fullType
 end
+
+local displayNameForType = GlobalStorageSiK.AddonRecipes.displayNameForType
 
 ---@param player IsoPlayer|nil
 ---@param fullType string|nil

@@ -38,6 +38,34 @@ local PANEL_W = 640
 
 GS_AddonManageUI = ISPanel:derive("GS_AddonManageUI")
 
+---@param fullType string|nil
+---@return string
+local function itemDisplayName(fullType)
+	return GlobalStorageSiK.AddonRecipes.displayNameForType(fullType)
+end
+
+--- Nombre de todos los perifericos que satisfacen el requisito. Normalmente
+--- solo hay uno; Tablet registra tres tiers compatibles y la UI debe mostrar
+--- los tres objetos reales en vez de describirlos como un periferico generico.
+---@param def table
+---@return string
+local function moduleRequirementText(def)
+	local names = {}
+	local seen = {}
+	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+	for i = 1, #moduleTypes do
+		local fullType = moduleTypes[i]
+		if fullType and fullType ~= "" and not seen[fullType] then
+			seen[fullType] = true
+			table.insert(names, itemDisplayName(fullType))
+		end
+	end
+	if #names == 0 then
+		return itemDisplayName(def.itemType)
+	end
+	return table.concat(names, " / ")
+end
+
 --- Firma corta del estado actual, para no reconstruir si no cambio nada
 --- (mismo motivo que GS_ReaderAcquireUI/GS_PCAcquireUI: evita que la
 --- ventana "salte" con cada tick de refresco si nada cambio de verdad).
@@ -317,13 +345,13 @@ function GS_AddonManageUI:buildLayout()
 		local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, cardTop, textW, 10)
 		self:addChild(card)
 		y = y + 8
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, T("IGUI_GS_AddonReqModule"), hasModule)
+		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, moduleRequirementText(def), hasModule)
 		y = y + 6
 		if def.installDiskItem and def.installDiskItem ~= "" then
-			y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.installDiskItem, T("IGUI_GS_AddonReqDisk"), hasDisk)
+			y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.installDiskItem, itemDisplayName(def.installDiskItem), hasDisk)
 			y = y + 6
 		end
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.magazineType, T("IGUI_GS_AddonReqMagazine"), hasMagazine)
+		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.magazineType, itemDisplayName(def.magazineType), hasMagazine)
 		y = y + 8
 		GlobalStorageSiK.TerminalChrome.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
 		y = y + 10
