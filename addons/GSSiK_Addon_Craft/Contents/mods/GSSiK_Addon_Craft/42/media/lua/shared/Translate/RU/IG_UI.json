@@ -15,5 +15,6 @@
 	"IGUI_GSSIK_CraftFailCancelled": "действие отменено",
 	"IGUI_GSSIK_CraftFailStart": "игра не смогла запустить действие",
 	"IGUI_GSSIK_CraftFailInvalid": "рецепт больше недействителен",
-	"IGUI_GSSIK_CraftFailBatchMaterials": "недостаточно материалов для указанного количества"
+	"IGUI_GSSIK_CraftFailBatchMaterials": "недостаточно материалов для указанного количества",
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core устарел; обновите Core перед пакетным крафтом"
 }

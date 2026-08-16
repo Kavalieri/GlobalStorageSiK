@@ -21,6 +21,7 @@
 require "GS_NetworkCraftSession"
 require "GS_I18n"
 require "GSSiK_Addon_Craft_Log"
+require "GSSiK_Addon_Craft_ClaimCompat"
 require "GSSiK_Addon_Craft_BatchState"
 require "GSSiK_Addon_Craft_NetworkCook"
 
@@ -96,9 +97,10 @@ end
 ---@param networkId string|nil
 ---@param operationId string
 ---@param batchCount number|nil
----@return table waitingIds, number waitingCount, number moved, number batchShortfall
+---@return table waitingIds, number waitingCount, number moved, number batchShortfall, boolean batchContractSupported
 local function claimNetworkCraftItems(player, logic, items, networkId, operationId, batchCount)
-	return GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, networkId, operationId, batchCount)
+	return GSSiK_Addon_Craft.claimRecipeItemsCompat(
+		player, logic, items, networkId, operationId, batchCount)
 end
 
 --- Lee la cantidad de lote pedida en la ventana vanilla (entryBox), 1 si no
@@ -239,7 +241,7 @@ local function patchedStartHandcraft(self, force)
 			local batchCount = readVanillaBatchCount(self)
 			BatchState.begin(self, operationId, batchCount)
 			if okItems and items and items.size then
-				local waitingIds, waitingCount, moved, batchShortfall = claimNetworkCraftItems(
+				local waitingIds, waitingCount, moved, batchShortfall, batchContractSupported = claimNetworkCraftItems(
 					self.player, self.logic, items, sess.networkId, operationId, batchCount)
 				GlobalStorageSiK.CraftSession.debugLog(string.format(
 					"craftAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
@@ -248,7 +250,8 @@ local function patchedStartHandcraft(self, force)
 				if batchShortfall > 0 then
 					GlobalStorageSiK.CraftSession.debugLog("craftAttempt ABORT operationId=" .. operationId
 						.. " batchShortfall=" .. tostring(batchShortfall))
-					failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailBatchMaterials")
+					failCraftOperation(operationId, self.player, batchContractSupported
+						and "IGUI_GSSIK_CraftFailBatchMaterials" or "IGUI_GSSIK_CraftFailCoreUpdate")
 					BatchState.clear(self)
 					return
 				end
@@ -457,7 +460,7 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			if okItems and items and items.size then
 				local batchCount = tonumber(craftTimes) or 1
 				BatchState.begin(self, operationId, batchCount)
-				local waitingIds, waitingCount, moved, batchShortfall = claimNetworkCraftItems(
+				local waitingIds, waitingCount, moved, batchShortfall, batchContractSupported = claimNetworkCraftItems(
 					self.player, self.logic, items, sess.networkId, operationId, batchCount)
 				GlobalStorageSiK.CraftSession.debugLog(string.format(
 					"craftAttempt(neat) START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
@@ -466,7 +469,8 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 				if batchShortfall > 0 then
 					GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) ABORT operationId=" .. operationId
 						.. " batchShortfall=" .. tostring(batchShortfall))
-					failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailBatchMaterials")
+					failCraftOperation(operationId, self.player, batchContractSupported
+						and "IGUI_GSSIK_CraftFailBatchMaterials" or "IGUI_GSSIK_CraftFailCoreUpdate")
 					BatchState.clear(self)
 					return
 				end

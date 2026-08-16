@@ -32,6 +32,7 @@
 require "GS_NetworkCraftSession"
 require "GS_I18n"
 require "GSSiK_Addon_Craft_Log"
+require "GSSiK_Addon_Craft_ClaimCompat"
 require "GSSiK_Addon_Craft_BatchState"
 
 local BatchState = GSSiK_Addon_Craft.BatchState
@@ -170,7 +171,7 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 			if okItems and items and items.size then
 				local batchCount = tonumber(craftTimes) or 1
 				BatchState.begin(self, operationId, batchCount)
-				local waitingIds, waitingCount, moved, batchShortfall = GlobalStorageSiK.CraftSession.claimRecipeItems(
+				local waitingIds, waitingCount, moved, batchShortfall, batchContractSupported = GSSiK_Addon_Craft.claimRecipeItemsCompat(
 					self.player, self.logic, items, sess.networkId, operationId, batchCount)
 				GlobalStorageSiK.CraftSession.debugLog(string.format(
 					"cookAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
@@ -179,7 +180,8 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 				if batchShortfall > 0 then
 					GlobalStorageSiK.CraftSession.debugLog("cookAttempt ABORT operationId=" .. operationId
 						.. " batchShortfall=" .. tostring(batchShortfall))
-					failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailBatchMaterials")
+					failCookOperation(operationId, self.player, batchContractSupported
+						and "IGUI_GSSIK_CraftFailBatchMaterials" or "IGUI_GSSIK_CraftFailCoreUpdate")
 					BatchState.clear(self)
 					return
 				end

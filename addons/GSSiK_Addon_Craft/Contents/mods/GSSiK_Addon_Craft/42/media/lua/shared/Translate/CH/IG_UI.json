@@ -15,5 +15,6 @@
 	"IGUI_GSSIK_CraftFailCancelled": "操作已取消",
 	"IGUI_GSSIK_CraftFailStart": "遊戲無法啟動該操作",
 	"IGUI_GSSIK_CraftFailInvalid": "配方已失效",
-	"IGUI_GSSIK_CraftFailBatchMaterials": "材料不足，無法完成所要求的批量製作"
+	"IGUI_GSSIK_CraftFailBatchMaterials": "材料不足，無法完成所要求的批量製作",
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core 版本過舊；批量製作前請更新 Core"
 }

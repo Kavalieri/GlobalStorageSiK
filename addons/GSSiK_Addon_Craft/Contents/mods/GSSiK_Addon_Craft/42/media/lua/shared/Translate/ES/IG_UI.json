@@ -15,5 +15,6 @@
 	"IGUI_GSSIK_CraftFailCancelled": "acción cancelada",
 	"IGUI_GSSIK_CraftFailStart": "el juego no pudo iniciar la acción",
 	"IGUI_GSSIK_CraftFailInvalid": "la receta ya no es válida",
-	"IGUI_GSSIK_CraftFailBatchMaterials": "no hay materiales suficientes para el lote solicitado"
+	"IGUI_GSSIK_CraftFailBatchMaterials": "no hay materiales suficientes para el lote solicitado",
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core está desactualizado; actualiza Core antes de fabricar lotes"
 }
