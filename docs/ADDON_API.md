@@ -73,12 +73,12 @@ Genera un ID por intento y úsalo en todas las trazas:
 
 ```lua
 local operationId = GlobalStorageSiK.CraftSession.newOperationId("Example")
-local waitingIds, waitingCount, claimed =
+local waitingIds, waitingCount, claimed, batchShortfall =
     GlobalStorageSiK.CraftSession.claimRecipeItems(
         player, logic, selectedInputs, networkId, operationId, batchCount)
 ```
 
-Para un objeto individual usa `claimNetworkItem(player, item, sourceContainer, networkId, operationId)`. `isNetworkContainer` e `isItemClaimed` evitan reclamos incorrectos o duplicados. En MP, espera a que cada `itemId` aparezca realmente en el inventario antes de iniciar la acción.
+Para un objeto individual usa `claimNetworkItem(player, item, sourceContainer, networkId, operationId)`. `isNetworkContainer` e `isItemClaimed` evitan reclamos incorrectos o duplicados. Si una segunda acción encolada reutiliza una herramienta ya prestada y ahora visible como local, `retainClaimedItem(itemId, operationId)` añade esa operación al mismo lease sin mover ni duplicar el objeto; la herramienta solo vuelve cuando terminan todas las operaciones asociadas. `claimRecipeItems` adopta automáticamente esos inputs compartidos. En MP, espera a que cada `itemId` aparezca realmente en el inventario antes de iniciar la acción.
 
 Al finalizar:
 
@@ -91,7 +91,22 @@ El addon decide cuándo ocurrió un fallo y cómo explicarlo al jugador. `abortO
 
 `narrowContainersForAction(panel, items, addonId)` devuelve una función `restore()`. Llámala siempre, incluso tras error. `tableToArrayList(items)` facilita construir listas Java para APIs vanilla.
 
+Si una llamada vanilla vuelve a consultar `ISInventoryPaneContextMenu.getContainers` justo antes de serializar una acción, usa la suspensión acotada:
+
+```lua
+local ok, result = GlobalStorageSiK.CraftSession.withContainerInjectionSuspended(
+    originalVanillaMethod, action)
+```
+
+La función restaura la inyección incluso si la llamada falla y admite anidamiento. El addon sigue siendo responsable de decidir en qué punto de su flujo resulta necesario aislar contenedores físicos.
+
 La inyección de contenedores sirve para selección y visualización. Si el motor no puede consumir de contenedores remotos, el addon debe reclamar los objetos y ejecutar la acción con contenedores locales; esa política no pertenece al Core.
+
+`claimRecipeItems(..., batchCount)` amplía los consumibles seleccionados para todas las unidades del lote. La clasificación usa `CraftRecipeData:getAllNotKeepInputItems()`; `getAllPutBackInputItems()` no identifica herramientas y no debe usarse para ese fin. Los objetos `keep` no se multiplican. Cada `InventoryItem`/`itemId` asignado por `CraftRecipeData` o encontrado en los contenedores cuenta como una sola entrada consumible: `InventoryItem:getCount()` no representa capacidad disponible para este contrato y no debe usarse para reducir el número de IDs requeridos (por ejemplo, tres objetos `Base.Nails` no cubren por sí solos los nueve clavos de un lote de tres recetas que consume tres por unidad). El cuarto retorno, `batchShortfall`, indica cuántas entradas adicionales no pudieron reclamarse; si es mayor que cero, el addon debe abortar, explicar el fallo y no iniciar una receta parcial. El consumidor debe conservar la cantidad solicitada cuando difiera la llamada vanilla hasta recibir los ACK.
+
+El Core no controla el ciclo de vida concreto del panel ni sus refrescos entre unidades. Si un addon encola varias acciones que comparten el mismo `HandcraftLogic`, debe mantener el aislamiento de contenedores físicos durante todo el lote: un refresco intermedio que vuelva a inyectar contenedores virtuales puede hacer que una acción emita el callback de completado sin crear resultado. El addon llama `markOperationComplete(operationId)` solo después de la última unidad real y conserva en su propio código cualquier adaptación específica de Vanilla, Neat u otra interfaz.
+
+Los comandos automáticos `depositItems` incluyen `origin` y, cuando existe, `operationId`. Valores actuales emitidos: `operation_result_deposit`, `operation_complete_return` y `operation_abort_return`. Los depósitos iniciados por el jugador usan `player` o `player_queue`. El servidor valida esos valores, los refleja en `actionResult.transfer` y escribe un único resumen `Deposit`, de modo que un addon o una revisión de logs no confunda una devolución automática con una transferencia manual. Una operación sin callback solo genera `return stuckActive`: el Core no devuelve préstamos por tiempo porque un lote legítimo puede durar varios minutos.
 
 ### Diagnóstico
 
@@ -102,6 +117,33 @@ end)
 ```
 
 `debugLog(message)` enruta la traza al logger del addon activo. Nunca uses `print()` directo. Consulta [DEBUGGING.md](DEBUGGING.md).
+
+## Acceso a contenedores por zona
+
+Los permisos se conceden a zonas y se aplican a todos los contenedores que
+pertenecen a ellas. Un addon no debe interpretar ni copiar la tabla persistente
+de restricciones. Para comprobar una zona usa:
+
+```lua
+local allowed = GlobalStorageSiK.Permissions.canAccessZone(player, networkId, zoneId)
+```
+
+Para trabajar con la salida de `Network.getLiveContainers`, usa el filtro
+neutral del Core:
+
+```lua
+local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+live = GlobalStorageSiK.Permissions.filterLiveContainers(player, networkId, live)
+```
+
+`CraftingBridge.collectNetworkContainers(networkId, player)` y
+`mergeContainerLists(base, networkId, player)` ya aplican el mismo contrato
+cuando se proporciona el jugador. La validación cliente solo mejora la UI: el
+proceso autoritativo vuelve a filtrar depósitos, retiradas y reclamos por ID.
+
+La ausencia de una excepción significa acceso permitido. Por ello los miembros
+existentes y las zonas creadas en el futuro empiezan habilitados. Owner, admins
+de red y staff del servidor tienen acceso total.
 
 ## Compatibilidad y autoridad
 

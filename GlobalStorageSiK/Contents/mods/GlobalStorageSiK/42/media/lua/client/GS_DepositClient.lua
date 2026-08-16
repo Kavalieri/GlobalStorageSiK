@@ -133,6 +133,7 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg)
 	end
 	return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 		itemIds = itemIds,
+		origin = "player",
 	})
 end
 
@@ -151,6 +152,7 @@ function GlobalStorageSiK.DepositClient.sendDepositPartial(playerArg, referenceI
 		mode = "partial",
 		referenceItemId = refId,
 		count = math.floor(count),
+		origin = "player",
 	})
 end
 
@@ -170,6 +172,7 @@ function GlobalStorageSiK.DepositClient.sendDepositContainer(playerArg, referenc
 	return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 		mode = "container",
 		referenceItemId = refId,
+		origin = "player",
 	})
 end
 

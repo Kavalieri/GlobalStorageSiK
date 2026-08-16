@@ -91,49 +91,60 @@ local function finishJob(networkId, job, reason)
 	end
 end
 
---- Ejecuta un lote para cada job cuyo turno haya llegado.
+--- Ejecuta como maximo UN lote global por tick. Con muchas redes activas,
+--- ejecutar todos los jobs vencidos dentro del mismo OnTick sumaba sus
+--- presupuestos y podia volver a bloquear el servidor aunque cada red
+--- individual estuviera limitada. El job procesado aplaza su siguiente turno,
+--- por lo que los demas vencidos quedan elegibles en los ticks siguientes.
 local function onTick()
 	local now = nowMs()
-	for networkId, job in pairs(jobs) do
-		if now >= job.nextRunMs then
-			local player = resolvePlayer(job.username)
-			if not player then
-				GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | jugador " .. tostring(job.username) .. " no resuelto, job cancelado en silencio")
-				jobs[networkId] = nil
-			else
-				local ok, summary = pcall(GlobalStorageSiK.Redistribute.redistributeNetwork, player, networkId)
-				if ok then
-					GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
-						.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped) .. " reason=" .. tostring(summary.reason))
-				end
-				if not ok then
-					-- Sin este pcall, un error aqui dejaba el job colgado para
-					-- siempre en silencio: nunca se volvia a intentar y nunca
-					-- se avisaba al jugador (el boton "no hacia nada").
-					GlobalStorageSiK.Log.error("RedistributeJob", "onTick failed: " .. tostring(summary))
-					finishJob(networkId, job, "error")
-				else
-					job.moved   = job.moved   + (summary.moved   or 0)
-					job.failed  = job.failed  + (summary.failed  or 0)
-					job.skipped = job.skipped + (summary.skipped or 0)
-					if summary.reason == "limit" then
-						-- Queda mas trabajo: siguiente lote dentro de RETRY_DELAY_MS.
-						-- Empuja el estado ya para que el jugador vea progreso en vivo.
-						job.nextRunMs = now + RETRY_DELAY_MS
-						if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
-							-- Mismo motivo que en finishJob: sin terminalAnchor el
-							-- cliente pierde installedAddons/craftTabEnabled/
-							-- buildTabEnabled en cada empuje intermedio del job.
-							local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
-								and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
-							GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
-						end
-					else
-						finishJob(networkId, job, summary.reason)
-					end
-				end
-			end
+	local networkId = nil
+	local job = nil
+	for candidateId, candidate in pairs(jobs) do
+		if now >= candidate.nextRunMs then
+			networkId = candidateId
+			job = candidate
+			break
 		end
+	end
+	if not job then
+		return
+	end
+
+	local player = resolvePlayer(job.username)
+	if not player then
+		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | jugador " .. tostring(job.username) .. " no resuelto, job cancelado en silencio")
+		jobs[networkId] = nil
+		return
+	end
+
+	local ok, summary = pcall(GlobalStorageSiK.Redistribute.redistributeNetwork, player, networkId)
+	if ok then
+		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
+			.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped) .. " reason=" .. tostring(summary.reason))
+	end
+	if not ok then
+		-- Sin este pcall, un error aqui dejaba el job colgado para siempre
+		-- en silencio: nunca se volvia a intentar ni se avisaba al jugador.
+		GlobalStorageSiK.Log.error("RedistributeJob", "onTick failed: " .. tostring(summary))
+		finishJob(networkId, job, "error")
+		return
+	end
+
+	job.moved   = job.moved   + (summary.moved   or 0)
+	job.failed  = job.failed  + (summary.failed  or 0)
+	job.skipped = job.skipped + (summary.skipped or 0)
+	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
+		and GlobalStorageSiK.Server.markInventoryDirty then
+		GlobalStorageSiK.Server.markInventoryDirty(networkId)
+	end
+	if summary.reason == "limit" then
+		-- No se envia un terminalState completo en cada paso intermedio. El
+		-- boton ya indica que el job sigue activo y el estado final refresca la
+		-- UI; esto evita otro payload grande repetido durante redes masivas.
+		job.nextRunMs = now + RETRY_DELAY_MS
+	else
+		finishJob(networkId, job, summary.reason)
 	end
 end
 

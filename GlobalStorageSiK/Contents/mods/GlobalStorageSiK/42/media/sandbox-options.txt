@@ -335,9 +335,9 @@ option GlobalStorageSiK.RespectEquippedItems
 option GlobalStorageSiK.MaxItemsPerBulkTick
 {
 	type = integer,
-	default = 50,
-	min = 10,
-	max = 200,
+	default = 10,
+	min = 1,
+	max = 10,
 	page = GlobalStorageSiK_Items,
 	translation = GlobalStorageSiK_MaxItemsPerBulkTick,
 }

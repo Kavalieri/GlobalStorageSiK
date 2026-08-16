@@ -14,5 +14,6 @@
 	"IGUI_GSSIK_CraftFailClaimTimeout": "材料未及時送達",
 	"IGUI_GSSIK_CraftFailCancelled": "操作已取消",
 	"IGUI_GSSIK_CraftFailStart": "遊戲無法啟動該操作",
-	"IGUI_GSSIK_CraftFailInvalid": "配方已失效"
+	"IGUI_GSSIK_CraftFailInvalid": "配方已失效",
+	"IGUI_GSSIK_CraftFailBatchMaterials": "材料不足，無法完成所要求的批量製作"
 }

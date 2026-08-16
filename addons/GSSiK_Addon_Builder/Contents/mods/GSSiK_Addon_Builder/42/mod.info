@@ -1,9 +1,9 @@
 name=GSSiK Addon - Builder [42.20+]
 id=GSSiK_Addon_Builder
-description=Build 42.20+ v1.0.1. Construye con toda tu red GS: Pizarra Digital GS instalable, usa el menu de construccion vanilla o Neat Building. Requiere Global Storage SiK + NeatUI_Framework.
+description=Build 42.20+ v1.0.2. Construye con toda tu red GS: Pizarra Digital GS instalable, usa el menu de construccion vanilla o Neat Building. Requiere Global Storage SiK + NeatUI_Framework.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.0.1
+modversion=1.0.2
 versionMin=42.19.0
 require=\GlobalStorageSiK,\NeatUI_Framework

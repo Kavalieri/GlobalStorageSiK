@@ -32,6 +32,7 @@ GlobalStorageSiK.CraftSession.registerDebugSink(ADDON_ID, function(message)
 end)
 
 local originalTryBuild = nil
+local originalBuildActionStart = nil
 local originalBuildActionPerform = nil
 local originalBuildActionStop = nil
 local originalBuildActionForceComplete = nil
@@ -39,6 +40,155 @@ local originalBuildActionForceStop = nil
 local originalBuildActionForceCancel = nil
 local pendingBuildStarts = {}
 local PENDING_BUILD_TIMEOUT_MS = 10000
+local pendingBuildVerifications = {}
+local BUILD_VERIFY_TIMEOUT_MS = 3000
+
+local function addSpriteName(names, seen, value)
+	if type(value) == "string" and value ~= "" and not seen[value] then
+		seen[value] = true
+		names[#names + 1] = value
+	end
+end
+
+local function addSpriteObjectName(names, seen, sprite)
+	if not sprite then return end
+	if type(sprite) == "string" then
+		addSpriteName(names, seen, sprite)
+		return
+	end
+	-- Algunos cursores guardan números/flags en campos llamados `sprite`.
+	-- Invocar `:getName()` sobre ellos genera una traza Java aun dentro de
+	-- pcall. Solo consultar objetos que expongan realmente ese método.
+	local spriteType = type(sprite)
+	if spriteType ~= "userdata" and spriteType ~= "table" then return end
+	local getName = sprite.getName
+	if type(getName) ~= "function" then return end
+	local ok, name = pcall(getName, sprite)
+	if ok then addSpriteName(names, seen, name) end
+end
+
+--- Reune todas las variantes que una construccion puede exponer. Algunas
+--- clases guardan el sprite elegido en la accion y otras en el cursor copiado.
+local function collectExpectedSprites(action)
+	local names, seen = {}, {}
+	addSpriteName(names, seen, action and action.spriteName)
+	local item = action and action.item or nil
+	if item then
+		for _, field in ipairs({ "spriteName", "sprite", "nSprite", "northSprite",
+			"southSprite", "eastSprite", "westSprite" }) do
+			addSpriteObjectName(names, seen, item[field])
+		end
+		for _, method in ipairs({ "getSprite", "getNorthSprite" }) do
+			if item[method] then
+				local ok, value = pcall(function() return item[method](item) end)
+				if ok then addSpriteObjectName(names, seen, value) end
+			end
+		end
+	end
+	table.sort(names)
+	return names
+end
+
+local function addIsoObjectSprites(object, names, seen)
+	if not object then return end
+	if object.getSpriteName then
+		local ok, value = pcall(function() return object:getSpriteName() end)
+		if ok then addSpriteName(names, seen, value) end
+	end
+	if object.getSprite then
+		local ok, value = pcall(function() return object:getSprite() end)
+		if ok then addSpriteObjectName(names, seen, value) end
+	end
+	if object.getOverlaySprite then
+		local ok, value = pcall(function() return object:getOverlaySprite() end)
+		if ok then addSpriteObjectName(names, seen, value) end
+	end
+	if object.getAttachedAnimSprite then
+		local ok, attached = pcall(function() return object:getAttachedAnimSprite() end)
+		if ok and attached and attached.size then
+			for i = 0, attached:size() - 1 do
+				local instance = attached:get(i)
+				if instance then
+					local okField, parentField = pcall(function() return instance.parentSprite end)
+					if okField then addSpriteObjectName(names, seen, parentField) end
+					if instance.getParentSprite then
+						local okParent, parent = pcall(function() return instance:getParentSprite() end)
+						if okParent then addSpriteObjectName(names, seen, parent) end
+					end
+				end
+			end
+		end
+	end
+end
+
+--- Snapshot de todos los objetos y sprites del destino. getObjects y
+--- getSpecialObjects pueden solaparse; el set de userdata evita contarlos dos
+--- veces. El incremento de objetos es fallback para construcciones cuyo sprite
+--- final difiere del cursor (multi-sprite/mods externos).
+local function collectSquareState(x, y, z)
+	local state = { objectCount = 0, spriteNames = {}, spriteSet = {}, spriteCounts = {} }
+	local square = getCell and getCell():getGridSquare(x, y, z) or nil
+	if not square then return state end
+	local seenObjects = {}
+	for _, getter in ipairs({ "getObjects", "getSpecialObjects" }) do
+		if square[getter] then
+			local ok, objects = pcall(function() return square[getter](square) end)
+			if ok and objects and objects.size then
+				for i = 0, objects:size() - 1 do
+					local object = objects:get(i)
+					if object and not seenObjects[object] then
+						seenObjects[object] = true
+						state.objectCount = state.objectCount + 1
+						local objectNames, objectSeen = {}, {}
+						addIsoObjectSprites(object, objectNames, objectSeen)
+						for j = 1, #objectNames do
+							local name = objectNames[j]
+							state.spriteCounts[name] = (state.spriteCounts[name] or 0) + 1
+							addSpriteName(state.spriteNames, state.spriteSet, name)
+						end
+					end
+				end
+			end
+		end
+	end
+	table.sort(state.spriteNames)
+	return state
+end
+
+--- Quita cualquier verificacion pendiente de una accion ya resuelta.
+---@param action table|nil ISBuildAction
+local function cancelBuildVerification(action)
+	if not action then return end
+	for i = #pendingBuildVerifications, 1, -1 do
+		if pendingBuildVerifications[i].action == action then
+			table.remove(pendingBuildVerifications, i)
+		end
+	end
+	action._gsBuilderAwaitingVerify = nil
+end
+
+--- Conserva los datos del objetivo antes de que ISBaseTimedAction limpie la
+--- accion. forceComplete y perform pueden dispararse en frames distintos.
+---@param action table|nil ISBuildAction
+local function queueBuildVerification(action)
+	if not action or action._gsBuilderOperationResolved or action._gsBuilderAwaitingVerify
+		or not action._gsBuilderOperationId then
+		return
+	end
+	action._gsBuilderAwaitingVerify = true
+	local verify = action._gsBuilderVerifyState or {}
+	pendingBuildVerifications[#pendingBuildVerifications + 1] = {
+		action = action,
+		operationId = action._gsBuilderOperationId,
+		x = verify.x or action.x,
+		y = verify.y or action.y,
+		z = verify.z or action.z,
+		expectedSprites = verify.expectedSprites or collectExpectedSprites(action),
+		beforeObjectCount = tonumber(verify.beforeObjectCount) or 0,
+		beforeSpriteCounts = verify.beforeSpriteCounts or {},
+		startedAt = getTimestampMs and getTimestampMs() or 0,
+	}
+end
 
 --- playerNum -> ultimo operationId de construccion reclamado - mismo patron
 --- que lastOperationByPlayer en GS_Server.lua (Core), necesario porque
@@ -61,6 +211,7 @@ local lastOperationByPlayer = {}
 ---@param source string "perform"|"stop" - de donde se llamo, para el diagnostico
 local function markBuildOperationComplete(action, source)
 	if action and action._gsBuilderOperationResolved then return end
+	cancelBuildVerification(action)
 	local ok, playerNum = pcall(function()
 		local char = action.character or action.player
 		return char and char.getPlayerNum and char:getPlayerNum()
@@ -110,12 +261,53 @@ end
 local function patchedBuildActionPerform(self)
 	local ok, result = pcall(originalBuildActionPerform, self)
 	if ok then
-		markBuildOperationComplete(self, "perform")
+		-- En cliente MP perform solo limpia la accion tras la respuesta del
+		-- servidor. Confirmar el objeto replicado antes de declarar exito y
+		-- devolver herramientas; forceComplete puede haber creado ya la entrada.
+		queueBuildVerification(self)
 	else
 		markBuildOperationComplete(self, "forceStop")
 		GlobalStorageSiK.CraftSession.debugLog("buildAttempt PERFORM ERROR: " .. tostring(result))
 	end
 	return ok and result or nil
+end
+
+--- Vanilla vuelve a ejecutar ISInventoryPaneContextMenu.getContainers() en
+--- ISBuildAction:start y asigna el resultado a self.item.containers justo
+--- antes de createBuildAction(). Con una sesión GS activa eso reinyectaba la
+--- red y deshacía el aislamiento preparado en startInventoryBuild. El
+--- servidor recibía una BuildLogic con contenedores virtuales y su
+--- performCurrentRecipe() terminaba sin crear el objeto. Builder decide
+--- cuándo suspender; Core solo aporta la primitiva neutral y acotada.
+local function patchedBuildActionStart(self)
+	if not self._gsBuilderOperationId then
+		local character = self.character or self.player
+		local playerNum = character and character.getPlayerNum and character:getPlayerNum() or nil
+		self._gsBuilderOperationId = playerNum and lastOperationByPlayer[playerNum] or nil
+	end
+	if not self._gsBuilderOperationId then
+		return originalBuildActionStart(self)
+	end
+	if not self._gsBuilderVerifyState then
+		local before = collectSquareState(self.x, self.y, self.z)
+		self._gsBuilderVerifyState = {
+			x = self.x, y = self.y, z = self.z,
+			expectedSprites = collectExpectedSprites(self),
+			beforeObjectCount = before.objectCount,
+			beforeSpriteCounts = before.spriteCounts,
+		}
+	end
+	local ok, result = GlobalStorageSiK.CraftSession.withContainerInjectionSuspended(
+		originalBuildActionStart, self)
+	if not ok then
+		GlobalStorageSiK.CraftSession.debugLog("buildAttempt ACTION START ERROR operationId="
+			.. tostring(self._gsBuilderOperationId) .. " error=" .. tostring(result))
+		markBuildOperationComplete(self, "forceStop")
+		return nil
+	end
+	GlobalStorageSiK.CraftSession.debugLog("buildAttempt ACTION START operationId="
+		.. tostring(self._gsBuilderOperationId) .. " containers=physicalOnly")
+	return result
 end
 
 ---@param self table ISBuildAction
@@ -126,7 +318,10 @@ end
 
 local function patchedBuildActionForceComplete(self)
 	local result = originalBuildActionForceComplete(self)
-	markBuildOperationComplete(self, "forceComplete")
+	-- En cliente MP forceComplete solo confirma el fin de la transacción. El
+	-- servidor puede haber rechazado el consumo y aun así cerrar la barra.
+	-- Esperar a que el objeto construido se replique antes de declarar éxito.
+	queueBuildVerification(self)
 	return result
 end
 
@@ -263,7 +458,7 @@ end
 --- de Craft, cola propia porque el punto de reanudación es distinto
 --- (originalTryBuild, no originalStartHandcraft).
 local function checkPendingBuildStarts()
-	if #pendingBuildStarts == 0 then
+	if #pendingBuildStarts == 0 and #pendingBuildVerifications == 0 then
 		return
 	end
 	local nowMs = getTimestampMs and getTimestampMs() or 0
@@ -302,6 +497,45 @@ local function checkPendingBuildStarts()
 				and lastOperationByPlayer[entry.player:getPlayerNum()] == entry.operationId then
 				lastOperationByPlayer[entry.player:getPlayerNum()] = nil
 			end
+		end
+	end
+	for i = #pendingBuildVerifications, 1, -1 do
+		local entry = pendingBuildVerifications[i]
+		local action = entry.action
+		if not action or action._gsBuilderOperationResolved then
+			table.remove(pendingBuildVerifications, i)
+		else
+		local current = collectSquareState(entry.x, entry.y, entry.z)
+		local foundSprite = nil
+		for j = 1, #(entry.expectedSprites or {}) do
+			local expected = entry.expectedSprites[j]
+			if (current.spriteCounts[expected] or 0) > ((entry.beforeSpriteCounts or {})[expected] or 0) then
+				foundSprite = expected
+				break
+			end
+		end
+		local found = foundSprite ~= nil or current.objectCount > (entry.beforeObjectCount or 0)
+		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > BUILD_VERIFY_TIMEOUT_MS
+		if found or timedOut then
+			table.remove(pendingBuildVerifications, i)
+			action._gsBuilderAwaitingVerify = nil
+			-- El operationId almacenado es la fuente estable; vanilla puede haber
+			-- limpiado otros campos de la accion entre forceComplete y perform.
+			action._gsBuilderOperationId = entry.operationId
+			if found then
+				GlobalStorageSiK.CraftSession.debugLog("buildAttempt VERIFIED operationId="
+					.. tostring(entry.operationId) .. " matchedSprite=" .. tostring(foundSprite)
+					.. " objects=" .. tostring(entry.beforeObjectCount) .. "->" .. tostring(current.objectCount))
+				markBuildOperationComplete(action, "perform")
+			else
+				GlobalStorageSiK.CraftSession.debugLog("buildAttempt VERIFY FAILED operationId="
+					.. tostring(entry.operationId) .. " expectedSprites="
+					.. table.concat(entry.expectedSprites or {}, ",") .. " actualSprites="
+					.. table.concat(current.spriteNames, ",") .. " objects="
+					.. tostring(entry.beforeObjectCount) .. "->" .. tostring(current.objectCount))
+				markBuildOperationComplete(action, "forceStop")
+			end
+		end
 		end
 	end
 end
@@ -366,6 +600,10 @@ local function installBuilderHooks()
 		originalTryBuild = ISBuildingObject.tryBuild
 		ISBuildingObject.tryBuild = patchedTryBuild
 	end
+	if ISBuildAction and ISBuildAction.start then
+		originalBuildActionStart = ISBuildAction.start
+		ISBuildAction.start = patchedBuildActionStart
+	end
 	if ISBuildAction and ISBuildAction.perform then
 		originalBuildActionPerform = ISBuildAction.perform
 		ISBuildAction.perform = patchedBuildActionPerform
@@ -388,6 +626,7 @@ local function installBuilderHooks()
 	end
 	-- Resumen unico de instalacion, visible solo con Lifecycle habilitado.
 	GSSiK_Addon_Builder.Log.debug("Lifecycle", "hooks installed tryBuild=" .. tostring(originalTryBuild ~= nil)
+		.. " ISBuildAction.start=" .. tostring(originalBuildActionStart ~= nil)
 		.. " ISBuildAction.perform=" .. tostring(originalBuildActionPerform ~= nil)
 		.. " ISBuildAction.stop=" .. tostring(originalBuildActionStop ~= nil))
 end
@@ -396,6 +635,10 @@ local function uninstallBuilderHooks()
 	if originalTryBuild then
 		ISBuildingObject.tryBuild = originalTryBuild
 		originalTryBuild = nil
+	end
+	if originalBuildActionStart then
+		ISBuildAction.start = originalBuildActionStart
+		originalBuildActionStart = nil
 	end
 	if originalBuildActionPerform then
 		ISBuildAction.perform = originalBuildActionPerform

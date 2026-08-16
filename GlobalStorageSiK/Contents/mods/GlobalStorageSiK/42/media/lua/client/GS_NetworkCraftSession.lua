@@ -50,6 +50,7 @@ local tickCounter = 0
 local sweepTickInstalled = false
 local sweepTickUnavailableLogged = false
 local ensureSweepTick -- forward-declarada: installHook() la llama, se define mas abajo (tras sweepPendingReturns)
+local containerInjectionSuspendDepth = 0
 
 --- Mismo intervalo que GS_TerminalAccessGuard.CHECK_TICKS - antes esta
 --- sesion revalidaba CADA tick, sin histeresis (ver validateAccess), lo que
@@ -194,6 +195,9 @@ local lastLoggedContainerCounts = { base = nil, merged = nil }
 ---@return userdata|nil
 local function patchedGetContainers(character)
 	local base = originalGetContainers(character)
+	if containerInjectionSuspendDepth > 0 then
+		return base
+	end
 	if not session or not session.active then
 		return base
 	end
@@ -205,7 +209,7 @@ local function patchedGetContainers(character)
 		return base
 	end
 	local baseTable = arrayListToTable(base)
-	local merged = GlobalStorageSiK.CraftingBridge.mergeContainerLists(baseTable, session.networkId)
+	local merged = GlobalStorageSiK.CraftingBridge.mergeContainerLists(baseTable, session.networkId, character)
 	if GlobalStorageSiK.CraftSession._debugSinks and session.addonId and GlobalStorageSiK.CraftSession._debugSinks[session.addonId]
 		and (lastLoggedContainerCounts.base ~= #baseTable or lastLoggedContainerCounts.merged ~= #merged) then
 		lastLoggedContainerCounts.base = #baseTable
@@ -214,6 +218,28 @@ local function patchedGetContainers(character)
 			.. " networkId=" .. tostring(session.networkId))
 	end
 	return GlobalStorageSiK.CraftSession.tableToArrayList(merged)
+end
+
+--- Ejecuta una llamada sin que patchedGetContainers añada contenedores de
+--- red. Es una primitiva neutral para cualquier addon que necesite dejar que
+--- vanilla serialice una acción usando exclusivamente sus contenedores
+--- físicos. El contador permite anidamiento y siempre se restaura aunque la
+--- llamada falle.
+---@param fn function
+---@param ... any
+---@return boolean ok
+---@return any result
+function GlobalStorageSiK.CraftSession.withContainerInjectionSuspended(fn, ...)
+	if type(fn) ~= "function" then
+		return false, "invalid_callback"
+	end
+	containerInjectionSuspendDepth = containerInjectionSuspendDepth + 1
+	-- Kahlua/Lua 5.1 no expone table.unpack. El contrato publico de esta
+	-- primitiva solo necesita el primer resultado del callback, igual que
+	-- pcall: `ok, resultOrError`.
+	local ok, result = pcall(fn, ...)
+	containerInjectionSuspendDepth = math.max(0, containerInjectionSuspendDepth - 1)
+	return ok, result
 end
 
 --- Indica si un contenedor pertenece a la red activa (mismos contenedores
@@ -243,6 +269,25 @@ end
 --- cuanto termina la acción, o se olvidan si la receta ya los consumió.
 local pendingReturns = {}
 
+--- Asocia una operacion adicional a un item ya prestado. Es necesario cuando
+--- vanilla/Neat encolan varias construcciones: la siguiente accion puede
+--- reutilizar la misma herramienta que la anterior aun tiene en inventario.
+--- El item solo podra volver a la red cuando TODAS sus operaciones terminen.
+---@param info table
+---@param operationId string|nil
+local function addOperationLease(info, operationId)
+	if not info or not operationId then
+		return
+	end
+	info.operationIds = info.operationIds or {}
+	if info.operationId then
+		info.operationIds[info.operationId] = true
+	end
+	info.operationIds[operationId] = true
+	info.loggedWaitingActive = nil
+	info.addedAt = getTimestampMs and getTimestampMs() or info.addedAt
+end
+
 --- itemId -> true para ítems cuyo reclamo YA se envió al servidor en esta
 --- sesión - BUG REAL encontrado (reportado 2026-08-13, "Dupe item ID"/
 --- "container already has id" en servidor, itemsCreados=0 pese a que el
@@ -262,6 +307,20 @@ local claimedItemIds = {}
 ---@return boolean
 function GlobalStorageSiK.CraftSession.isItemClaimed(itemId)
 	return itemId ~= nil and claimedItemIds[itemId] == true
+end
+
+--- Retiene para otra operacion un item ya reclamado. No mueve ni duplica el
+--- objeto; solo amplía el lease neutral que controla su devolución.
+---@param itemId number|nil
+---@param operationId string|nil
+---@return boolean retained
+function GlobalStorageSiK.CraftSession.retainClaimedItem(itemId, operationId)
+	local info = itemId and pendingReturns[itemId] or nil
+	if not info or claimedItemIds[itemId] ~= true then
+		return false
+	end
+	addOperationLease(info, operationId)
+	return true
 end
 
 --- operationId -> true para operaciones de crafteo/construccion cuyo evento
@@ -351,7 +410,11 @@ local function sweepCraftResultToNetwork(operationId)
 		-- En cliente MP puro, "depositItems" ejecuta en servidor el mismo
 		-- Transfer.depositItem por prioridad - mismo patron que
 		-- sweepPendingReturns usa para devolver herramientas.
-		GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = ids })
+		GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+			itemIds = ids,
+			origin = "operation_result_deposit",
+			operationId = operationId,
+		})
 	end
 end
 
@@ -376,6 +439,25 @@ function GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
 	end
 end
 
+--- Un préstamo compartido solo está libre cuando finalizaron todas las
+--- operaciones que lo adoptaron. El fallback mantiene compatibilidad con
+--- entradas creadas antes de introducir operationIds.
+---@param info table
+---@return boolean
+local function areItemOperationsComplete(info)
+	if info.operationIds then
+		local hasOperations = false
+		for operationId in pairs(info.operationIds) do
+			hasOperations = true
+			if completedOperations[operationId] ~= true then
+				return false
+			end
+		end
+		return hasOperations
+	end
+	return info.operationId ~= nil and completedOperations[info.operationId] == true
+end
+
 --- Aborta una operacion de préstamo. El Core no decide qué constituye un
 --- fallo ni cómo comunicarlo: esas responsabilidades pertenecen al addon.
 --- Solo descarta el snapshot de resultado y conserva los préstamos hasta
@@ -390,7 +472,8 @@ function GlobalStorageSiK.CraftSession.abortOperation(operationId)
 	preClaimNetworkId[operationId] = nil
 	preClaimPlayerNum[operationId] = nil
 	for _, info in pairs(pendingReturns) do
-		if info.operationId == operationId then
+		if info.operationId == operationId
+			or (info.operationIds and info.operationIds[operationId] == true) then
 			info.failedOperation = true
 		end
 	end
@@ -432,6 +515,7 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 			-- Ya reclamado en esta sesion (ver comentario de claimedItemIds) -
 			-- no reenviar, el item ya deberia estar en el inventario del
 			-- jugador o en camino; reenviar corrompe el item en servidor.
+			addOperationLease(pendingReturns[itemId], operationId)
 			sessionDebugLog("claimNetworkItem -> itemId=" .. tostring(itemId)
 				.. " YA reclamado antes, se ignora para evitar duplicado")
 			return true
@@ -450,6 +534,7 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				fullType = fullType,
 				addedAt = getTimestampMs and getTimestampMs() or 0,
 				operationId = operationId,
+				operationIds = operationId and { [operationId] = true } or {},
 				wasLocated = false,
 			}
 			return true
@@ -467,6 +552,7 @@ function GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, sourceC
 				fullType = fullType,
 				addedAt = getTimestampMs and getTimestampMs() or 0,
 				operationId = operationId,
+				operationIds = operationId and { [operationId] = true } or {},
 				wasLocated = true,
 			}
 		end
@@ -545,7 +631,7 @@ end
 ---@param networkId string|nil
 ---@param operationId string
 ---@param batchCount number|nil
----@return table waitingIds, number waitingCount, number moved
+---@return table waitingIds, number waitingCount, number moved, number batchShortfall
 function GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, networkId, operationId, batchCount)
 	if operationId and player and GlobalStorageSiK.CraftSession.sendResultToNetwork then
 		local snap = {}
@@ -567,9 +653,49 @@ function GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, ne
 	local waitingIds = {}
 	local waitingCount = 0
 	local moved = 0
+	local batchShortfall = 0
 	local authoritative = GlobalStorageSiK.isAuthoritative()
-	local movedFullTypes = {}
-	local movedFullTypeCount = 0
+	local selectedConsumableCounts = {}
+	local selectedConsumableTypeCount = 0
+	local selectedInputIds = {}
+	local consumableIds = {}
+	local keepIds = {}
+	local hasConsumableMetadata = false
+	local useKeepFallback = false
+	local recipeData = logic and logic.getRecipeData and logic:getRecipeData() or nil
+	-- `getAllPutBackInputItems()` NO significa "keep/tool": incluye inputs
+	-- cuya politica devuelve su contenedor y, en B42, puede contener también
+	-- consumibles normales. La separación autoritativa que usa HandcraftLogic
+	-- es getAllNotKeepInputItems()/getAllKeepInputItems(). Confundir ambas APIs
+	-- hacía que un lote de 2 detectara cero consumibles extra.
+	local notKeepItems = nil
+	if recipeData and recipeData.getAllNotKeepInputItems then
+		local ok, result = pcall(function() return recipeData:getAllNotKeepInputItems() end)
+		if ok and result and result.size then
+			notKeepItems = result
+			hasConsumableMetadata = true
+		end
+	end
+	if notKeepItems then
+		for i = 0, notKeepItems:size() - 1 do
+			local item = notKeepItems:get(i)
+			if item and item.getID then
+				consumableIds[item:getID()] = true
+			end
+		end
+	elseif recipeData and recipeData.getAllKeepInputItems then
+		local ok, keepItems = pcall(function() return recipeData:getAllKeepInputItems() end)
+		if ok and keepItems and keepItems.size then
+			useKeepFallback = true
+			hasConsumableMetadata = true
+			for i = 0, keepItems:size() - 1 do
+				local item = keepItems:get(i)
+				if item and item.getID then
+					keepIds[item:getID()] = true
+				end
+			end
+		end
+	end
 
 	local function claim(item, container)
 		if GlobalStorageSiK.CraftSession.claimNetworkItem(player, item, container, networkId, operationId) then
@@ -587,54 +713,122 @@ function GlobalStorageSiK.CraftSession.claimRecipeItems(player, logic, items, ne
 		for i = 1, items:size() do
 			local item = items:get(i - 1)
 			if item then
+				local fullType = item.getFullType and item:getFullType() or nil
+				local itemId = item.getID and item:getID() or nil
+				if itemId then
+					selectedInputIds[itemId] = true
+					-- Una herramienta reclamada por una construccion anterior puede
+					-- aparecer ahora como input local. Adoptarla evita que la primera
+					-- operacion la devuelva mientras esta segunda aun la usa.
+					GlobalStorageSiK.CraftSession.retainClaimedItem(itemId, operationId)
+				end
+				local isConsumable = itemId and consumableIds[itemId] == true
+				if useKeepFallback then
+					isConsumable = itemId ~= nil and keepIds[itemId] ~= true
+				end
+				if fullType and isConsumable then
+					if not selectedConsumableCounts[fullType] then
+						selectedConsumableTypeCount = selectedConsumableTypeCount + 1
+					end
+					selectedConsumableCounts[fullType] = (selectedConsumableCounts[fullType] or 0) + 1
+				end
 				local container = item.getContainer and item:getContainer()
 				if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
-					local fullType = item.getFullType and item:getFullType() or nil
-					if claim(item, container) and fullType then
-						if not movedFullTypes[fullType] then
-							movedFullTypeCount = movedFullTypeCount + 1
-						end
-						movedFullTypes[fullType] = (movedFullTypes[fullType] or 0) + 1
-					end
+					claim(item, container)
 				end
 			end
 		end
 	end
 
-	-- NUNCA next() aqui (Kahlua no lo soporta de forma fiable) - se usa el
-	-- contador propio movedFullTypeCount en vez de next(movedFullTypes) ~= nil
-	-- para saber si hay algo que escanear.
-	if batchCount and batchCount > 1 and movedFullTypeCount > 0 then
+	-- NUNCA next() aqui (Kahlua no lo soporta de forma fiable): el contador
+	-- propio indica si hay consumibles seleccionados que ampliar para el lote.
+	if batchCount and batchCount > 1 and not hasConsumableMetadata then
+		batchShortfall = batchCount - 1
+		sessionDebugLog("batchPlan operationId=" .. tostring(operationId)
+			.. " sin metadata keep/notKeep; se abortara de forma segura")
+	elseif batchCount and batchCount > 1 and selectedConsumableTypeCount > 0 then
 		local okCon, containers = pcall(function() return logic:getContainers() end)
-		if okCon and containers and containers.size then
-			for fullType, haveCount in pairs(movedFullTypes) do
-				local need = batchCount - haveCount
+		local planParts = {}
+		for fullType, perCraftCount in pairs(selectedConsumableCounts) do
+			local need = (batchCount - 1) * perCraftCount
+			local requiredExtra = need
+			local claimedExtra = 0
+			local localExtra = 0
+			-- CraftRecipeData ya entrega exactamente las instancias asignadas a
+			-- la primera receta. InventoryItem:getCount() NO es capacidad extra:
+			-- en el caso real de Base.Nails devolvía 3 por cada clavo seleccionado
+			-- y hacía creer que tres IDs cubrían las nueve unidades de un lote 3.
+			-- Cada itemId candidato cubre una única entrada consumible.
+			local usedSelectedSurplus = 0
+			if okCon and containers and containers.size then
+				-- La primera receta ya está representada por `items`. Para cada
+				-- unidad adicional hay que reclamar TODOS los consumibles de ese
+				-- tipo seleccionados para una receta, no solo "batch - movidos".
+				-- Ejemplo real: una receta usa 4 clavos; lote 2 necesita 4 clavos
+				-- extra. La fórmula anterior daba 2-4 y no reclamaba ninguno.
+				-- Primero snapshot de candidatos: en SP/host claim() mueve el ítem
+				-- y mutaría la lista Java que estamos recorriendo, pudiendo saltarse
+				-- el siguiente. En MP remoto todavía no se mueve localmente, pero se
+				-- usa el mismo camino determinista.
+				local candidates = {}
+				local candidateIds = {}
 				local c = 0
-				while need > 0 and c < containers:size() do
+				while c < containers:size() do
 					local container = containers:get(c)
 					c = c + 1
-					if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId) then
+					if container then
+						local isNetwork = GlobalStorageSiK.CraftSession.isNetworkContainer(container, networkId)
 						local okItems2, itemsInC = pcall(function() return container:getItems() end)
 						if okItems2 and itemsInC and itemsInC.size then
-							local j = 0
-							while need > 0 and j < itemsInC:size() do
+							for j = 0, itemsInC:size() - 1 do
 								local extraItem = itemsInC:get(j)
-								j = j + 1
+								local extraId = extraItem and extraItem.getID and extraItem:getID() or nil
 								if extraItem and extraItem.getFullType and extraItem:getFullType() == fullType
-									and not (extraItem.getID and GlobalStorageSiK.CraftSession.isItemClaimed(extraItem:getID())) then
-									if claim(extraItem, container) then
-										need = need - 1
-									end
+									and extraId and not selectedInputIds[extraId]
+									and not candidateIds[extraId]
+									and not GlobalStorageSiK.CraftSession.isItemClaimed(extraId) then
+									candidateIds[extraId] = true
+									candidates[#candidates + 1] = {
+										item = extraItem,
+										container = container,
+										isNetwork = isNetwork,
+									}
 								end
 							end
 						end
 					end
 				end
+				for i = 1, #candidates do
+					if need <= 0 then break end
+					local candidate = candidates[i]
+					local units = 1
+					if candidate.isNetwork then
+						if claim(candidate.item, candidate.container) then
+							claimedExtra = claimedExtra + units
+							need = need - units
+						end
+					else
+						-- Ya está en un contenedor físico que la acción vanilla puede
+						-- consumir; cuenta para el lote pero no es un préstamo de red.
+						localExtra = localExtra + units
+						need = need - units
+					end
+				end
 			end
+			batchShortfall = batchShortfall + need
+			planParts[#planParts + 1] = tostring(fullType) .. ":" .. tostring(perCraftCount)
+				.. "->extra" .. tostring(requiredExtra - need)
+				.. "(selected" .. tostring(usedSelectedSurplus)
+				.. ",red" .. tostring(claimedExtra) .. ",local" .. tostring(localExtra) .. ")"
+				.. (need > 0 and ("/faltan" .. tostring(need)) or "")
 		end
+		table.sort(planParts)
+		sessionDebugLog("batchPlan operationId=" .. tostring(operationId)
+			.. " batchCount=" .. tostring(batchCount)
+			.. " consumibles=" .. table.concat(planParts, ","))
 	end
 
-	return waitingIds, waitingCount, moved
+	return waitingIds, waitingCount, moved, batchShortfall
 end
 
 --- Barrido de préstamos pendientes (cada tick, tabla normalmente vacía o
@@ -685,11 +879,11 @@ end
 --- manejadores onHandcraftActionComplete/Cancelled - vanilla, Neat y Cook).
 --- Mientras completedOperations[info.operationId] no sea true, el item
 --- NUNCA se devuelve, sin importar cuanto tiempo pase ni donde este. Se
---- mantiene un RETURN_SAFETY_TIMEOUT_MS muy amplio solo como red de
---- seguridad ante el caso patologico de que el evento de fin nunca llegue
---- (p.ej. un addon de terceros con una API que no dispara ningun callback
---- de fin reconocible) - no como mecanismo normal de devolucion.
-local RETURN_SAFETY_TIMEOUT_MS = 30000
+--- Un cronometro tampoco es una red de seguridad valida para lotes largos:
+--- 10 unidades pueden tardar bastante mas de 30 segundos. Si falta el evento
+--- se avisa una sola vez, pero NO se transfiere nada automaticamente; el addon
+--- debe completar o abortar explicitamente la operacion.
+local RETURN_STUCK_WARN_MS = 300000
 
 -- El print() incondicional "tick, pendientes=N" (una linea por CADA tick
 -- mientras hubiera algo pendiente, hasta 60/s) ya cumplio su proposito -
@@ -699,6 +893,7 @@ local RETURN_SAFETY_TIMEOUT_MS = 30000
 -- tick) siguen siendo suficientes para depurar el resultado real.
 local function sweepPendingReturns()
 	local nowMs = getTimestampMs and getTimestampMs() or 0
+	local remoteBatches = {}
 	for itemId, info in pairs(pendingReturns) do
 		local player = getSpecificPlayer and getSpecificPlayer(info.playerNum) or nil
 		if not player then
@@ -706,18 +901,23 @@ local function sweepPendingReturns()
 		else
 			local item, currentContainer = GlobalStorageSiK.Deposit.findItemById(player, itemId)
 			if not item or not currentContainer then
-				local operationDone = info.operationId and completedOperations[info.operationId] == true
-				local safetyExpired = info.addedAt and (nowMs - info.addedAt) >= RETURN_SAFETY_TIMEOUT_MS
+				local operationDone = areItemOperationsComplete(info)
 				-- En cliente MP el item aun no es localizable mientras el servidor
 				-- procesa el claim. No confundir ese viaje con un consumo real.
-				if not info.wasLocated and not safetyExpired then
+				if not operationDone then
 					if not info.loggedWaitingArrival then
 						info.loggedWaitingArrival = true
 						sessionDebugLog("return waitArrival itemId=" .. tostring(itemId)
 							.. " esperando llegada del claim operationId=" .. tostring(info.operationId))
 					end
-				elseif not operationDone and not safetyExpired then
-					-- La accion sigue activa: no decidir aun si fue consumido.
+					if not info.loggedStuckWarning and info.addedAt
+						and (nowMs - info.addedAt) >= RETURN_STUCK_WARN_MS then
+						info.loggedStuckWarning = true
+						sessionDebugLog("return stuckActive itemId=" .. tostring(itemId)
+							.. " operationId=" .. tostring(info.operationId)
+							.. " sin evento de fin tras " .. tostring(RETURN_STUCK_WARN_MS)
+							.. "ms; se conserva, no se devuelve por tiempo")
+					end
 				else
 					sessionDebugLog("return resolvedMissing itemId=" .. tostring(itemId)
 						.. " no localizable (consumido o claim agotado) fullType=" .. tostring(info.fullType))
@@ -726,9 +926,8 @@ local function sweepPendingReturns()
 				end
 			else
 				info.wasLocated = true
-				local operationDone = info.operationId and completedOperations[info.operationId] == true
-				local safetyExpired = info.addedAt and (nowMs - info.addedAt) >= RETURN_SAFETY_TIMEOUT_MS
-				if not operationDone and not safetyExpired then
+				local operationDone = areItemOperationsComplete(info)
+				if not operationDone then
 					if not info.loggedWaitingActive then
 						-- Se loguea UNA vez por item (no cada tick) en cuanto se
 						-- detecta el primer aplazamiento, no en cada iteracion.
@@ -738,24 +937,45 @@ local function sweepPendingReturns()
 							.. " aplazado (operationId=" .. tostring(info.operationId)
 							.. " todavia no ha terminado, se reintentara cuando llegue el evento de fin)")
 					end
-				else
-					if safetyExpired and not operationDone then
-						sessionDebugLog("return safetyTimeout itemId=" .. tostring(itemId)
+					if not info.loggedStuckWarning and info.addedAt
+						and (nowMs - info.addedAt) >= RETURN_STUCK_WARN_MS then
+						info.loggedStuckWarning = true
+						sessionDebugLog("return stuckActive itemId=" .. tostring(itemId)
 							.. " operationId=" .. tostring(info.operationId)
-							.. " sin evento de fin tras " .. tostring(RETURN_SAFETY_TIMEOUT_MS)
-							.. "ms, devolviendo por red de seguridad")
+							.. " sin evento de fin tras " .. tostring(RETURN_STUCK_WARN_MS)
+							.. "ms; se conserva, no se devuelve por tiempo")
+					end
+				else
+					local returnOrigin
+					if info.failedOperation then
+						returnOrigin = "operation_abort_return"
+					else
+						returnOrigin = "operation_complete_return"
 					end
 					if GlobalStorageSiK.isAuthoritative() then
 						local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, info.networkId)
 						sessionDebugLog("return local ok=" .. tostring(ok)
 							.. " (local, autoritativo, deposito por prioridad) itemId=" .. tostring(itemId)
-							.. " fullType=" .. tostring(info.fullType) .. " reason=" .. tostring(reason))
+							.. " fullType=" .. tostring(info.fullType)
+							.. " origin=" .. tostring(returnOrigin)
+							.. " operationId=" .. tostring(info.operationId)
+							.. " reason=" .. tostring(reason))
 					elseif GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-						-- En cliente MP puro, "depositItems" ya ejecuta en
-						-- servidor el mismo Transfer.depositItem por prioridad.
-						GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = { itemId } })
-						sessionDebugLog("return remoteSent itemId=" .. tostring(itemId)
-							.. " fullType=" .. tostring(info.fullType))
+						-- Agrupar además por operación/origen: mezclar un aborto con
+						-- un final correcto haría ambiguo el diagnóstico.
+						local batchKey = tostring(info.networkId or "") .. "|"
+							.. tostring(info.operationId or "") .. "|" .. returnOrigin
+						local batch = remoteBatches[batchKey]
+						if not batch then
+							batch = {
+								networkId = info.networkId,
+								operationId = info.operationId,
+								origin = returnOrigin,
+								itemIds = {},
+							}
+							remoteBatches[batchKey] = batch
+						end
+						batch.itemIds[#batch.itemIds + 1] = itemId
 					else
 						sessionDebugLog("return noTransport itemId=" .. tostring(itemId)
 							.. " isAuthoritative=" .. tostring(GlobalStorageSiK.isAuthoritative())
@@ -768,6 +988,18 @@ local function sweepPendingReturns()
 				end
 			end
 		end
+	end
+	for _, batch in pairs(remoteBatches) do
+		GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+			itemIds = batch.itemIds,
+			networkId = batch.networkId,
+			origin = batch.origin,
+			operationId = batch.operationId,
+		})
+		sessionDebugLog("return remoteBatchSent count=" .. tostring(#batch.itemIds)
+			.. " networkId=" .. tostring(batch.networkId)
+			.. " origin=" .. tostring(batch.origin)
+			.. " operationId=" .. tostring(batch.operationId))
 	end
 end
 
@@ -1009,8 +1241,8 @@ function GlobalStorageSiK.CraftSession.getStatus(addonId)
 	if not session or (addonId and session.addonId ~= addonId) then
 		return { active = false, lastEndReason = lastEndReason }
 	end
-	local containers = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(session.networkId) or {}
-	local liveCount, totalCount = GlobalStorageSiK.CraftingBridge.getContainerAvailability(session.networkId)
+	local containers = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(session.networkId, player) or {}
+	local liveCount, totalCount = GlobalStorageSiK.CraftingBridge.getContainerAvailability(session.networkId, player)
 	return {
 		active = true,
 		networkId = session.networkId,

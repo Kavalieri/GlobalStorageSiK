@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Rispetta oggetti equipaggiati",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Vestiti indossati, armi impugnate e borse portate non vengono mai spostati da 'Deposita tutto'. Consigliato ON.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Oggetti per tick (deposito in blocco)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Quanti oggetti vengono elaborati per tick di gioco durante un'operazione 'Deposita tutto' in blocco. Valori piu bassi riducono il lag sui server affollati; valori piu alti velocizzano l'operazione.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Numero massimo di oggetti elaborati per richiesta in blocco. Le richieste sono distanziate per permettere ad altri giocatori e reti di lavorare tra i lotti. Valori bassi migliorano l'equità sui server affollati; il massimo di sicurezza è 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Richiedi manuali GS per craftare",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "I giocatori devono leggere le riviste manuale GS prima di vedere e craftare ogni oggetto GS, come funzionano i libri di abilita vanilla. Disattiva per sbloccare subito tutte le ricette GS.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Richiedi banco da lavoro",

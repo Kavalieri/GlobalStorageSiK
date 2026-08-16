@@ -53,7 +53,7 @@ end
 function GlobalStorageSiK.CraftCatalog.collectProbeContainers(player, networkId, includeNetwork)
 	local list = GlobalStorageSiK.CraftCatalog.collectPlayerContainers(player)
 	if includeNetwork then
-		return GlobalStorageSiK.CraftingBridge.mergeContainerLists(list, networkId)
+		return GlobalStorageSiK.CraftingBridge.mergeContainerLists(list, networkId, player)
 	end
 	return list
 end
@@ -211,7 +211,7 @@ function GlobalStorageSiK.CraftCatalog.collectProbeContainersArrayList(player, n
 	end
 
 	if includeNetwork and networkId then
-		local networkOnes = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId)
+		local networkOnes = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId, player)
 		for i = 1, #networkOnes do
 			addUnique(networkOnes[i])
 		end

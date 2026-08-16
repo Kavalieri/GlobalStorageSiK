@@ -104,5 +104,5 @@ function GlobalStorageSiK.TransferLock.withNetworkLock(networkId, player, op, fn
 	if not callOk then
 		error(results[2])
 	end
-	return table.unpack(results, 2)
+	return unpack(results, 2)
 end

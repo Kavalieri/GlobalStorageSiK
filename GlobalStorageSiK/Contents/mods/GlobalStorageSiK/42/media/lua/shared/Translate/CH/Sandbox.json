@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "保护已装备物品",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "已穿戴的衣物、手持武器和携带的挎包永远不会被“全部存入”移动。建议开启。",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "批量存入每帧物品数",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "批量“全部存入”操作中每个游戏帧处理的物品数量。数值越低越能减少繁忙服务器的卡顿；数值越高操作越快。",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "每次批量请求最多处理的物品数。请求会分批间隔执行，让其他玩家和网络也能继续工作。较低数值可提高繁忙服务器的公平性；安全上限为 10。",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "制作需要 GS 说明书",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "玩家必须先阅读 GS 说明书杂志才能看到并制作对应的 GS 物品，与原版技能书的运作方式相同。关闭后立即解锁所有 GS 配方。",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "需要工作台",

@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respeitar itens equipados",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Roupas vestidas, armas empunhadas e bolsas carregadas nunca são movidas por 'Guardar tudo'. Recomendado LIGADO.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Itens por tick (depósito em massa)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Quantos itens são processados por tick do jogo durante uma operação 'Guardar tudo' em massa. Valores mais baixos reduzem lag em servidores movimentados; valores mais altos aceleram a operação.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Máximo de itens processados por solicitação em massa. As solicitações são espaçadas para que outros jogadores e redes possam trabalhar entre os lotes. Valores baixos melhoram a distribuição em servidores ocupados; o máximo de segurança é 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Exigir manuais GS para fabricar",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Jogadores devem ler as revistas manuais GS antes de ver e fabricar cada item GS, assim como os livros de habilidade padrão funcionam. Desligue para desbloquear todas as receitas GS imediatamente.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Exigir bancada",

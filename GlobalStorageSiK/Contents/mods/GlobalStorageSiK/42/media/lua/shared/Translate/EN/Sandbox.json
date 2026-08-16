@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respect equipped items",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Worn clothing, held weapons and carried bags are never moved by 'Store all'. Recommended ON.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Items per tick (bulk deposit)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "How many items are processed per game tick during a bulk 'Store all' operation. Lower values reduce server lag on busy servers; higher values speed up the operation.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Maximum items processed per bulk request. Requests are spaced so other players and networks can run between batches. Lower values improve fairness on busy servers; the safety maximum is 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Require GS manuals to craft",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Players must read GS manual magazines before seeing and crafting each GS item, mirroring how vanilla skill books work. Turn OFF to unlock all GS recipes immediately.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Require workbench",

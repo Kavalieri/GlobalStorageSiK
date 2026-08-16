@@ -28,6 +28,8 @@ require "GS_Index"
 
 require "GS_TransferLock"
 
+require "GS_Permissions"
+
 
 
 GlobalStorageSiK.Transfer = {}
@@ -80,7 +82,7 @@ end
 
 ---@return number
 
-function GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType)
+function GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, player)
 
 	if not fullType or fullType == "" then
 
@@ -90,7 +92,8 @@ function GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType)
 
 	local total = 0
 
-	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 
 	for i = 1, #live do
 
@@ -253,7 +256,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	end
 
-	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 
 	local moved = 0
 
@@ -423,7 +427,8 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
 
 
 
-	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 
 	local target, targetReason = GlobalStorageSiK.Router.pickDepositTarget(item, live, character)
 
@@ -491,7 +496,7 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local available = GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType)
+	local available = GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, player)
 
 	if available <= 0 then
 

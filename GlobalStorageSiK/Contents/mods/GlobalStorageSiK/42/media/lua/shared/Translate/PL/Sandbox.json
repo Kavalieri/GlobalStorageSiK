@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Szanuj założone przedmioty",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Noszone ubrania, trzymana broń i noszone torby nigdy nie są przenoszone przez 'Zdeponuj wszystko'. Zalecane WŁ.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Przedmioty na tick (depozyt masowy)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Ile przedmiotów jest przetwarzanych na tick gry podczas masowej operacji 'Zdeponuj wszystko'. Niższe wartości zmniejszają lag serwera na ruchliwych serwerach; wyższe wartości przyspieszają operację.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Maksymalna liczba przedmiotów przetwarzanych w jednym żądaniu zbiorczym. Żądania są rozłożone w czasie, aby inni gracze i sieci mogli działać między partiami. Niższe wartości poprawiają sprawiedliwy podział zasobów na obciążonych serwerach; bezpieczne maksimum to 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Wymagaj instrukcji GS do wytwarzania",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Gracze muszą przeczytać magazyny instrukcji GS zanim zobaczą i wytworzą każdy przedmiot GS, podobnie jak działają standardowe książki umiejętności. Wyłącz, aby natychmiast odblokować wszystkie receptury GS.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Wymagaj warsztatu",

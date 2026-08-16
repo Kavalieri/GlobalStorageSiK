@@ -14,5 +14,6 @@
 	"IGUI_GSSIK_CraftFailClaimTimeout": "materials did not arrive in time",
 	"IGUI_GSSIK_CraftFailCancelled": "action cancelled",
 	"IGUI_GSSIK_CraftFailStart": "the game could not start the action",
-	"IGUI_GSSIK_CraftFailInvalid": "the recipe is no longer valid"
+	"IGUI_GSSIK_CraftFailInvalid": "the recipe is no longer valid",
+	"IGUI_GSSIK_CraftFailBatchMaterials": "there are not enough materials for the requested batch"
 }

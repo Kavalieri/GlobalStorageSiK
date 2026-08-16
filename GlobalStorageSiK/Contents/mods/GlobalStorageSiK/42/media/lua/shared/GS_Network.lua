@@ -381,6 +381,8 @@ local function logLiveContainerMiss(nid, entry, obj, container)
 	end
 end
 
+local lastLiveContainerSourceSignature = {}
+
 function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
@@ -405,13 +407,17 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 		-- resuelva o no despues algun contenedor.
 		if GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugMode and GlobalStorageSiK.Sandbox.debugMode() then
 			local netContainersCount = registry.networks[nid] and registry.networks[nid].containers and #registry.networks[nid].containers or 0
-			local line = string.format(
-				"getLiveContainers SOURCES nid=%s activeNodes=%d networkContainers=%d",
-				tostring(nid), #nodes, netContainersCount)
-			if GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
-				GlobalStorageSiK.Debug.log("Network", "getLiveContainers", line)
-			elseif GlobalStorageSiK.Log then
-				GlobalStorageSiK.Log.debug("Network", "getLiveContainers", line)
+			local signature = tostring(#nodes) .. ":" .. tostring(netContainersCount)
+			if lastLiveContainerSourceSignature[nid] ~= signature then
+				lastLiveContainerSourceSignature[nid] = signature
+				local line = string.format(
+					"getLiveContainers SOURCES nid=%s activeNodes=%d networkContainers=%d",
+					tostring(nid), #nodes, netContainersCount)
+				if GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
+					GlobalStorageSiK.Debug.log("Network", "getLiveContainers", line)
+				elseif GlobalStorageSiK.Log then
+					GlobalStorageSiK.Log.debug("Network", "getLiveContainers", line)
+				end
 			end
 		end
 		for _, node in ipairs(nodes) do

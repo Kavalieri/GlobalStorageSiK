@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respecter les objets équipés",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Les vêtements portés, armes tenues et sacs transportés ne sont jamais déplacés par 'Tout stocker'. Recommandé ACTIVÉ.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Objets par tick (dépôt en masse)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Combien d'objets sont traités par tick de jeu pendant une opération 'Tout stocker' en masse. Des valeurs plus basses réduisent le lag serveur sur les serveurs chargés ; des valeurs plus hautes accélèrent l'opération.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Nombre maximal d'objets traités par requête groupée. Les requêtes sont espacées afin que les autres joueurs et réseaux puissent travailler entre les lots. Des valeurs basses améliorent l'équité sur les serveurs chargés ; le maximum de sécurité est 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Manuels GS requis pour fabriquer",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Les joueurs doivent lire les magazines manuels GS avant de voir et fabriquer chaque objet GS, à l'image des livres de compétence du jeu. Désactivez pour débloquer immédiatement toutes les recettes GS.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Établi requis",

@@ -75,33 +75,100 @@ function GlobalStorageSiK.TerminalPermissions.shouldShowTab()
 	return GlobalStorageSiK.isMultiplayerActive()
 end
 
---- Recopila nombres de personajes conectados.
----@return string[]
-function GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters()
-	local names = {}
-	local seen = {}
-	if getActivePlayers then
-		local ok, players = pcall(getActivePlayers)
-		if ok and players and players.size then
-			for i = 0, players:size() - 1 do
-				local p = players:get(i)
-				if p then
-					local charName = GlobalStorageSiK.Permissions.getCharacterName(p)
-					if charName ~= "" and not seen[charName] then
-						seen[charName] = true
-						names[#names + 1] = charName
-					end
-				end
-			end
-		end
-	end
-	table.sort(names)
-	return names
+local function memberIdentityKey(value)
+	value = tostring(value or "")
+	value = string.gsub(value, "^%s*(.-)%s*$", "%1")
+	return string.lower(value)
 end
 
---- Opciones del desplegable de facción (miembros + toda la facción).
+--- Construye índices desde memberEntries, que es la lista autoritativa ya
+--- serializada por el servidor. Los IDs evitan colisiones entre personajes
+--- con el mismo nombre; los nombres solo son fallback para permisos legacy y
+--- miembros offline que todavía no tienen characterId.
+---@param perms table|nil
+---@return table ids, table legacyNames, table allNames
+local function buildExistingMemberLookup(perms)
+	local ids = {}
+	local legacyNames = {}
+	local allNames = {}
+	local entries = (perms and perms.memberEntries) or nil
+	if entries then
+		for i = 1, #entries do
+			local entry = entries[i]
+			local id = entry and tostring(entry.id or "") or ""
+			local name = memberIdentityKey(entry and entry.name)
+			if id ~= "" then ids[id] = true end
+			if name ~= "" then
+				allNames[name] = true
+				if id == "" or entry.legacy == true then legacyNames[name] = true end
+			end
+		end
+		return ids, legacyNames, allNames
+	end
+
+	-- Compatibilidad con un servidor anterior durante un despliegue escalonado.
+	local ownerId = perms and tostring(perms.ownerCharacterId or "") or ""
+	local ownerName = memberIdentityKey(perms and perms.owner)
+	if ownerId ~= "" then ids[ownerId] = true end
+	if ownerName ~= "" then
+		allNames[ownerName] = true
+		if ownerId == "" then legacyNames[ownerName] = true end
+	end
+	for i = 1, #((perms and perms.allowedUsers) or {}) do
+		local name = memberIdentityKey(perms.allowedUsers[i])
+		if name ~= "" then
+			allNames[name] = true
+			legacyNames[name] = true
+		end
+	end
+	return ids, legacyNames, allNames
+end
+
+local function isExistingMember(entry, ids, legacyNames, allNames)
+	local id = entry and tostring(entry.id or "") or ""
+	local name = memberIdentityKey(entry and entry.name)
+	local username = memberIdentityKey(entry and entry.username)
+	if id ~= "" then
+		return ids[id] == true or legacyNames[name] == true or legacyNames[username] == true
+	end
+	return allNames[name] == true or allNames[username] == true
+end
+
+--- El cliente remoto solo conoce sus jugadores locales; el roster completo
+--- debe venir del servidor dentro de permissions.onlineCharacters.
+---@param perms table|nil
+---@return table[] { id, name, label }
+function GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters(perms)
+	local rows = {}
+	local nameCounts = {}
+	local ids, legacyNames, allNames = buildExistingMemberLookup(perms)
+	for i = 1, #((perms and perms.onlineCharacters) or {}) do
+		local entry = perms.onlineCharacters[i]
+		if entry and entry.id and entry.id ~= "" and entry.name and entry.name ~= ""
+			and not isExistingMember(entry, ids, legacyNames, allNames) then
+			nameCounts[entry.name] = (nameCounts[entry.name] or 0) + 1
+			rows[#rows + 1] = {
+				id = entry.id,
+				name = entry.name,
+				username = entry.username or "",
+			}
+		end
+	end
+	for i = 1, #rows do
+		local entry = rows[i]
+		entry.label = entry.name
+		if (nameCounts[entry.name] or 0) > 1 then
+			entry.label = entry.name .. " [" .. string.sub(entry.id, -6) .. "]"
+		end
+	end
+	return rows
+end
+
+--- Opciones del desplegable de facción (miembros online/offline + toda la
+--- facción). El roster viene del servidor, que usa Faction:getPlayers(); el
+--- cliente no deriva permisos de su lista local.
 ---@return table[] { kind, value, label }
-function GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions()
+function GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions(perms)
 	local options = {}
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
 	if not player then
@@ -115,51 +182,40 @@ function GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions()
 	if fname == "" then
 		return options
 	end
-	options[#options + 1] = {
-		kind = "whole",
-		value = fname,
-		label = T("IGUI_GS_PermPickWholeFaction", fname),
-	}
-	local seen = {}
-	local function addMember(charName)
-		charName = charName and string.gsub(charName, "^%s*(.-)%s*$", "%1") or ""
-		if charName == "" or seen[charName] then
-			return
-		end
-		seen[charName] = true
-		options[#options + 1] = {
-			kind = "member",
-			value = charName,
-			label = T("IGUI_GS_PermPickFactionMember", charName),
-		}
-	end
-	if faction.getPlayers then
-		local ok, players = pcall(function()
-			return faction:getPlayers()
-		end)
-		if ok and players then
-			if players.size then
-				for i = 0, players:size() - 1 do
-					local uname = players:get(i)
-					addMember(GlobalStorageSiK.Permissions.resolveCharacterName(uname))
-				end
-			elseif type(players) == "table" then
-				for i = 1, #players do
-					addMember(GlobalStorageSiK.Permissions.resolveCharacterName(players[i]))
-				end
+	local ids, legacyNames, allNames = buildExistingMemberLookup(perms)
+	local factionMembers = (perms and perms.factionMembers) or nil
+	if not factionMembers then
+		-- Compatibilidad con un servidor Core anterior durante un despliegue
+		-- escalonado: solo podrá mostrar conectados, como antes.
+		factionMembers = {}
+		for i = 1, #((perms and perms.onlineCharacters) or {}) do
+			local entry = perms.onlineCharacters[i]
+			if entry and entry.sameFaction then
+				factionMembers[#factionMembers + 1] = entry
 			end
 		end
 	end
-	if getActivePlayers then
-		local ok, players = pcall(getActivePlayers)
-		if ok and players and players.size then
-			for i = 0, players:size() - 1 do
-				local p = players:get(i)
-				if p and p.getUsername and GlobalStorageSiK.Permissions.sameFaction(p:getUsername(), player:getUsername()) then
-					addMember(GlobalStorageSiK.Permissions.getCharacterName(p))
-				end
-			end
+	for i = 1, #factionMembers do
+		local entry = factionMembers[i]
+		if entry and entry.name and entry.name ~= ""
+			and not isExistingMember(entry, ids, legacyNames, allNames) then
+			options[#options + 1] = {
+				kind = "member",
+				value = entry.name,
+				characterId = entry.id or "",
+				factionUsername = entry.username or "",
+				label = T("IGUI_GS_PermPickFactionMember", entry.name),
+			}
 		end
+	end
+	-- "Toda la faccion" solo tiene sentido si queda al menos un miembro por
+	-- añadir. Se inserta al principio para conservar el orden visual anterior.
+	if #options > 0 then
+		table.insert(options, 1, {
+			kind = "whole",
+			value = fname,
+			label = T("IGUI_GS_PermPickWholeFaction", fname),
+		})
 	end
 	return options
 end
@@ -208,6 +264,19 @@ end
 local function buildMemberRows(perms)
 	perms = perms or {}
 	local rows = {}
+	if perms.memberEntries and #perms.memberEntries > 0 then
+		for i = 1, #perms.memberEntries do
+			local entry = perms.memberEntries[i]
+			rows[#rows + 1] = {
+				kind = entry.role == "member" and "user" or entry.role,
+				name = entry.name,
+				characterId = entry.id or "",
+				legacy = entry.legacy == true,
+				deniedZoneIds = entry.deniedZoneIds or {},
+			}
+		end
+		return rows
+	end
 	local owner = perms.owner
 	local adminSet = {}
 	for i = 1, #(perms.adminUsers or {}) do
@@ -357,7 +426,8 @@ function GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 	ui.memberPickCombo:addOption(T("IGUI_GS_PickMember"))
 
 	-- Grupo: facción del jugador
-	local factionOptions = GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions()
+	local perms = ui._permStateRef and ui._permStateRef.permissions or {}
+	local factionOptions = GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions(perms)
 	if #factionOptions > 0 then
 		ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "header" }
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupFaction") .. " ]")
@@ -373,15 +443,19 @@ function GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 	-- debajo del titulo, que en ventanas estrechas se salia del panel) -
 	-- nunca aparece en SP real (isMultiplayerActive() ya oculta toda la
 	-- pestaña en ese caso).
-	local serverNames = GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters()
-	if #serverNames > 0 then
+	local serverCharacters = GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters(perms)
+	if #serverCharacters > 0 then
 		ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "header" }
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupServer") .. " ]")
-		for i = 1, #serverNames do
-			ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "player", value = serverNames[i], label = serverNames[i] }
-			ui.memberPickCombo:addOption("  " .. serverNames[i])
+		for i = 1, #serverCharacters do
+			local entry = serverCharacters[i]
+			ui._memberPickMeta[#ui._memberPickMeta + 1] = {
+				kind = "player", value = entry.name, characterId = entry.id, label = entry.label,
+			}
+			ui.memberPickCombo:addOption("  " .. entry.label)
 		end
-	elseif GlobalStorageSiK.isMultiplayerActive() then
+	elseif GlobalStorageSiK.isMultiplayerActive()
+		and #((perms and perms.onlineCharacters) or {}) == 0 then
 		ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "header" }
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupServerEmpty") .. " ]")
 	end
@@ -538,7 +612,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 		if pick.kind == "whole" then
 			terminal:onAddPermissionFaction(pick.value)
 		else
-			terminal:onAddPermissionUser(pick.value)
+			terminal:onAddPermissionUser(pick.value, pick.characterId, pick.factionUsername)
 		end
 	end)
 	addPermWidget(scroll, ui, ui.addMemberBtn)
@@ -590,6 +664,14 @@ local function permListFingerprint(perms)
 	end
 	for i = 1, #(perms.allowedFactions or {}) do
 		parts[#parts + 1] = "f:" .. perms.allowedFactions[i]
+	end
+	for i = 1, #(perms.memberEntries or {}) do
+		local member = perms.memberEntries[i]
+		parts[#parts + 1] = "m:" .. tostring(member.id or "") .. ":" .. tostring(member.role or "")
+		for j = 1, #(member.deniedZoneIds or {}) do
+			parts[#parts + 1] = "z:" .. tostring(member.id or member.name or "")
+				.. ":" .. tostring(member.deniedZoneIds[j])
+		end
 	end
 	return table.concat(parts, "|")
 end

@@ -14,5 +14,6 @@
 	"IGUI_GSSIK_CraftFailClaimTimeout": "materiały nie dotarły na czas",
 	"IGUI_GSSIK_CraftFailCancelled": "akcja anulowana",
 	"IGUI_GSSIK_CraftFailStart": "gra nie mogła rozpocząć akcji",
-	"IGUI_GSSIK_CraftFailInvalid": "receptura nie jest już prawidłowa"
+	"IGUI_GSSIK_CraftFailInvalid": "receptura nie jest już prawidłowa",
+	"IGUI_GSSIK_CraftFailBatchMaterials": "brakuje materiałów do wykonania żądanej liczby sztuk"
 }

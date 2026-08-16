@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respetar ítems equipados",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "La ropa, armas y mochilas que el personaje lleva puestas nunca se mueven con 'Guardar todo'. Recomendado activo.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Ítems por tick en depósito masivo",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Cuántos ítems se procesan por tick de juego durante una operación de 'Guardar todo'. Valores bajos reducen el lag en servidores con muchos jugadores; valores altos aceleran la operación.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Máximo de ítems procesados por petición masiva. Las peticiones se espacian para que otros jugadores y redes trabajen entre lotes. Los valores bajos mejoran la equidad en servidores ocupados; el máximo de seguridad es 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "Exigir manuales GS para craftear",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Los jugadores deben leer las revistas de manuales GS antes de ver y craftear los ítems del mod, igual que las revistas vanilla. Desactivar desbloquea todas las recetas GS desde el principio.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Exigir mesa de trabajo",

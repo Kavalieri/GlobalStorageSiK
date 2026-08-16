@@ -24,6 +24,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISComboBox"
 require "ISUI/ISModalDialog"
+require "ISUI/ISScrollingListBox"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
@@ -116,13 +117,56 @@ function GS_MemberEditorUI:onApplyRole()
 	local idx = self.roleCombo.selected or 1
 	local role = self._roleOptions and self._roleOptions[idx]
 	if not role then return end
-	self.terminal:onSetMemberRole(self.data.name, role)
+	self.terminal:onSetMemberRole(self.data.name, role, self.data.characterId)
 	self:closeAfterAction()
+end
+
+function GS_MemberEditorUI:setAllZonesAllowed(allowed)
+	if not self.zoneList then return end
+	for i = 1, #self.zoneList.items do
+		local row = self.zoneList.items[i]
+		if row and row.item then row.item.allowed = allowed == true end
+	end
+end
+
+function GS_MemberEditorUI:onSaveZoneAccess()
+	if not self.zoneList or not self.terminal or not self.data then return end
+	local denied = {}
+	for i = 1, #self.zoneList.items do
+		local row = self.zoneList.items[i]
+		if row and row.item and row.item.allowed ~= true then
+			denied[#denied + 1] = row.item.zoneId
+		end
+	end
+	self.terminal:onSetMemberZoneAccess(
+		self.data.name, self.data.characterId, denied)
+	self:closeAfterAction()
+end
+
+local function drawZoneAccessRow(list, y, item, alt)
+	if not item.height then item.height = list.itemheight end
+	if item.height <= 0 then return y + item.height end
+	if list.selected == item.index then
+		list:drawSelection(0, y, list:getWidth(), item.height - 1)
+	elseif list.mouseoverselected == item.index and list:isMouseOver() and not list:isMouseOverScrollBar() then
+		list:drawMouseOverHighlight(0, y, list:getWidth(), item.height - 1)
+	end
+	local box = math.min(18, item.height - 8)
+	local boxY = y + math.floor((item.height - box) / 2)
+	list:drawRectBorder(6, boxY, box, box, 1, 0.55, 0.58, 0.62)
+	if item.item and item.item.allowed == true then
+		list:drawRect(9, boxY + 3, box - 6, box - 6, 0.9, 0.2, 0.75, 0.35)
+		list:drawText("X", 10, boxY - 1, 0.95, 0.98, 0.95, 1, UIFont.Small)
+	end
+	local label = item.text or "?"
+	list:drawText(label, 6 + box + 8, y + math.floor((item.height - FONT_HGT_SMALL) / 2),
+		0.88, 0.9, 0.94, 1, UIFont.Small)
+	return y + item.height
 end
 
 function GS_MemberEditorUI:onTransferOwnership(keepFormer)
 	if not self.terminal or not self.data then return end
-	self.terminal:onTransferOwnership(self.data.name, keepFormer == true)
+	self.terminal:onTransferOwnership(self.data.name, keepFormer == true, self.data.characterId)
 	self:closeAfterAction()
 end
 
@@ -133,7 +177,7 @@ function GS_MemberEditorUI:onRemoveAccess()
 		if data.kind == "faction" and self.terminal.onRemovePermissionFaction then
 			self.terminal:onRemovePermissionFaction(data.name)
 		elseif self.terminal.onRemovePermissionUser then
-			self.terminal:onRemovePermissionUser(data.name)
+			self.terminal:onRemovePermissionUser(data.name, data.characterId)
 		end
 		self:closeAfterAction()
 	end
@@ -199,6 +243,83 @@ function GS_MemberEditorUI:buildLayout()
 	if self.isSelf then
 		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberEditorSelfNote"), 0.6, 0.63, 0.66)
 		y = y + LINE_GAP
+	end
+
+	-- Las restricciones se editan sobre zonas (y por tanto sobre todos sus
+	-- contenedores), nunca por objeto. Solo un owner/admin puede cambiarlas y
+	-- solo se aplican a miembros normales; admins y owner tienen acceso total.
+	local canManageZones = isAdminViewer and data.kind == "user"
+	if canManageZones then
+		local zoneTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_MemberZoneAccessTitle"),
+			0.88, 0.9, 0.94, 1, UIFont.Small, true)
+		zoneTitle:initialise()
+		self:addChild(zoneTitle)
+		y = y + FONT_HGT_SMALL + 3
+		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberZoneAccessHint"), 0.6, 0.64, 0.68)
+		y = y + 4
+
+		local zones = (self.terminal.terminalState and self.terminal.terminalState.zones) or {}
+		local sortedZones = {}
+		for i = 1, #zones do sortedZones[#sortedZones + 1] = zones[i] end
+		table.sort(sortedZones, function(a, b)
+			return tostring(a.name or a.id or "") < tostring(b.name or b.id or "")
+		end)
+		if #sortedZones == 0 then
+			y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_NoZonesYet"), 0.55, 0.58, 0.6)
+			y = y + LINE_GAP
+		else
+			local denied = {}
+			for i = 1, #(data.deniedZoneIds or {}) do denied[tostring(data.deniedZoneIds[i])] = true end
+			local rowH = FONT_HGT_SMALL + 10
+			local listH = math.min(#sortedZones, 6) * rowH + 2
+			self.zoneList = ISScrollingListBox:new(pad, y, textW, listH)
+			self.zoneList:initialise()
+			self.zoneList:instantiate()
+			self.zoneList.itemheight = rowH
+			self.zoneList.selected = 0
+			self.zoneList.drawBorder = true
+			self.zoneList.doDrawItem = drawZoneAccessRow
+			self.zoneList.onMouseDown = function(list, x, mouseY)
+				local rowIndex = list:rowAt(x, mouseY)
+				if rowIndex >= 1 and rowIndex <= #list.items then
+					list.selected = rowIndex
+					local row = list.items[rowIndex]
+					if row and row.item then row.item.allowed = row.item.allowed ~= true end
+				end
+				return true
+			end
+			for i = 1, #sortedZones do
+				local zone = sortedZones[i]
+				local label = tostring(zone.name or zone.id or "?")
+				if zone.nodeCount ~= nil then label = label .. " (" .. tostring(zone.nodeCount) .. ")" end
+				self.zoneList:addItem(label, {
+					zoneId = tostring(zone.id),
+					allowed = denied[tostring(zone.id)] ~= true,
+				})
+			end
+			self:addChild(self.zoneList)
+			y = y + listH + 5
+
+			local halfW = math.floor((textW - 6) / 2)
+			self.selectAllZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+				pad, y, halfW, BTN_H, T("IGUI_GS_MemberZoneSelectAll"), self, function()
+					self:setAllZonesAllowed(true)
+				end)
+			self:addChild(self.selectAllZonesBtn)
+			self.deselectAllZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+				pad + halfW + 6, y, textW - halfW - 6, BTN_H,
+				T("IGUI_GS_MemberZoneDeselectAll"), self, function()
+					self:setAllZonesAllowed(false)
+				end)
+			self:addChild(self.deselectAllZonesBtn)
+			y = y + BTN_H + 5
+			self.saveZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+				pad, y, textW, BTN_H, T("IGUI_GS_MemberZoneSave"), self, function()
+					self:onSaveZoneAccess()
+				end)
+			self:addChild(self.saveZonesBtn)
+			y = y + BTN_H + LINE_GAP + 8
+		end
 	end
 
 	-- ── Cambio de rol (solo owner, sobre usuarios que no sean el propio
@@ -273,7 +394,7 @@ function GS_MemberEditorUI:buildLayout()
 		y = y + BTN_H + LINE_GAP
 	end
 
-	if not canChangeRole and not canTransfer and not canRemove and not canLeave then
+	if not canManageZones and not canChangeRole and not canTransfer and not canRemove and not canLeave then
 		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberEditorNoActions"), 0.55, 0.58, 0.6)
 		y = y + LINE_GAP
 	end
@@ -295,7 +416,10 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 	end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
 	local myName = player and GlobalStorageSiK.Permissions.getCharacterName(player) or ""
-	local isSelf = data.kind ~= "faction" and data.name == myName
+	local myId = player and GlobalStorageSiK.Permissions.getCharacterId(player) or ""
+	local isSelf = data.kind ~= "faction"
+		and ((data.characterId and data.characterId ~= "" and data.characterId == myId)
+			or ((not data.characterId or data.characterId == "") and data.name == myName))
 
 	-- Posicion/alto provisionales - buildLayout() recalcula el alto real
 	-- segun el contenido (numero de lineas envueltas, botones visibles) y

@@ -11,6 +11,7 @@ require "GS_Zones"
 require "GS_ItemSnapshot"
 require "GS_ZoneRefresh"
 require "GS_ItemTaxonomy"
+require "GS_Permissions"
 
 GlobalStorageSiK.Index = {}
 
@@ -70,14 +71,16 @@ end
 
 --- Construye índice serializable para el cliente.
 ---@param networkId string|nil
+---@param player IsoPlayer|nil limita el indice a sus zonas autorizadas
 ---@return table rows Lista ordenada { fullType, displayName, category, count, nodeId }
-function GlobalStorageSiK.Index.buildRows(networkId)
+function GlobalStorageSiK.Index.buildRows(networkId, player)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
 	local byType = {}
 	local liveIds = {}
 
-	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 	for i = 1, #live do
 		local liveEntry = live[i]
 		local nodeId = liveEntry.entry and liveEntry.entry.id or ("node_" .. i)
@@ -87,7 +90,8 @@ function GlobalStorageSiK.Index.buildRows(networkId)
 
 	for _, node in pairs(registry.nodes or {}) do
 		local zone = registry.zones and registry.zones[node.zoneId]
-		if zone and zone.networkId == networkId and node.membership ~= "excluded" and node.enabled ~= false and node.offline ~= true then
+		if zone and zone.networkId == networkId and node.membership ~= "excluded" and node.enabled ~= false and node.offline ~= true
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
 			if not liveIds[node.id] then
 				mergeNodeSnapshot(byType, node)
 			end
@@ -100,7 +104,9 @@ end
 --- Actualiza itemSnapshot de nodos con contenedores vivos (servidor tras transferencias).
 ---@param networkId string|nil
 function GlobalStorageSiK.Index.syncLiveSnapshots(networkId)
-	if not isServer or not isServer() then
+	-- En SP real la autoridad vive en este proceso aunque isServer() sea
+	-- false. El mismo contrato se usa para dedicado y host.
+	if not GlobalStorageSiK.isAuthoritative() then
 		return
 	end
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()

@@ -64,11 +64,15 @@ local function dispatchJob(job)
 		return
 	end
 	if job.type == "depositIds" then
-		GlobalStorageSiK.NetClient.sendCommand("depositItems", { itemIds = job.itemIds or {} })
+		GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+			itemIds = job.itemIds or {},
+			origin = "player_queue",
+		})
 	elseif job.type == "container" then
 		GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			mode = "container",
 			referenceItemId = job.referenceItemId,
+			origin = "player_queue",
 		})
 	elseif job.type == "bulk" then
 		GlobalStorageSiK.NetClient.sendCommand("bulkDeposit", { sourceIndex = job.sourceIndex or 1 })

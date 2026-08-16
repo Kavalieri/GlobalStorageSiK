@@ -7,13 +7,15 @@
 
 require "GS_Network"
 require "GS_AddonRegistry"
+require "GS_Permissions"
 
 GlobalStorageSiK.CraftingBridge = GlobalStorageSiK.CraftingBridge or {}
 
 ---@param networkId string|nil
 ---@return table[]
-function GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId)
-	local rows = GlobalStorageSiK.Network.getLiveContainers(networkId)
+function GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId, player)
+	local rows = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 	local containers = {}
 	for i = 1, #rows do
 		if rows[i].container then
@@ -33,8 +35,8 @@ end
 --- no cambia que contenedores se inyectan.
 ---@param networkId string|nil
 ---@return number liveCount, number totalCount
-function GlobalStorageSiK.CraftingBridge.getContainerAvailability(networkId)
-	local liveCount = #GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId)
+function GlobalStorageSiK.CraftingBridge.getContainerAvailability(networkId, player)
+	local liveCount = #GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId, player)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local nid = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
@@ -46,7 +48,7 @@ end
 ---@param base table
 ---@param networkId string|nil
 ---@return table
-function GlobalStorageSiK.CraftingBridge.mergeContainerLists(base, networkId)
+function GlobalStorageSiK.CraftingBridge.mergeContainerLists(base, networkId, player)
 	local merged = {}
 	for i = 1, #(base or {}) do
 		merged[#merged + 1] = base[i]
@@ -54,7 +56,7 @@ function GlobalStorageSiK.CraftingBridge.mergeContainerLists(base, networkId)
 	if not GlobalStorageSiK.AddonRegistry.isModActive("Craft") then
 		return merged
 	end
-	local extras = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId)
+	local extras = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId, player)
 	for i = 1, #extras do
 		merged[#merged + 1] = extras[i]
 	end

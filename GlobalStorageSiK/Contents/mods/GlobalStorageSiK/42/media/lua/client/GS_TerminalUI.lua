@@ -912,6 +912,14 @@ function GS_TerminalUI:onClose()
 		end
 	end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
+	-- El servidor mantiene una lista explicita de clientes que estan mirando
+	-- cada terminal para no difundirles indices completos solo por tener acceso
+	-- a la red. Notificar el cierre antes de borrar la sesion local.
+	if player and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
+		GlobalStorageSiK.NetClient.sendCommand("closeTerminal", {
+			networkId = self.terminalState and self.terminalState.networkId or nil,
+		})
+	end
 	if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 	end
@@ -1245,9 +1253,10 @@ function GS_TerminalUI:onRequestNodeContents(nodeId)
 	GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { nodeId = nodeId })
 end
 
-function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer)
+function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer, characterId)
 	GlobalStorageSiK.NetClient.sendCommand("transferOwnership", {
 		newOwner = newOwner,
+		characterId = characterId or "",
 		keepFormerOwner = keepFormer == true,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1351,10 +1360,12 @@ function GS_TerminalUI:onAddCategory(name)
 	})
 end
 
-function GS_TerminalUI:onAddPermissionUser(characterName)
+function GS_TerminalUI:onAddPermissionUser(characterName, characterId, factionUsername)
 	GlobalStorageSiK.NetClient.sendCommand("addPermissionUser", {
 		characterName = characterName or "",
 		username = characterName or "",
+		characterId = characterId or "",
+		factionUsername = factionUsername or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
@@ -1405,17 +1416,28 @@ function GS_TerminalUI:onLeaveNetwork()
 	})
 end
 
-function GS_TerminalUI:onRemovePermissionUser(username)
+function GS_TerminalUI:onRemovePermissionUser(username, characterId)
 	GlobalStorageSiK.NetClient.sendCommand("removePermissionUser", {
 		username = username or "",
+		characterId = characterId or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
-function GS_TerminalUI:onSetMemberRole(username, role)
+function GS_TerminalUI:onSetMemberRole(username, role, characterId)
 	GlobalStorageSiK.NetClient.sendCommand("setMemberRole", {
 		username = username or "",
+		characterId = characterId or "",
 		role = role or "member",
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
+function GS_TerminalUI:onSetMemberZoneAccess(username, characterId, deniedZoneIds)
+	GlobalStorageSiK.NetClient.sendCommand("setMemberZoneAccess", {
+		username = username or "",
+		characterId = characterId or "",
+		deniedZoneIds = deniedZoneIds or {},
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end

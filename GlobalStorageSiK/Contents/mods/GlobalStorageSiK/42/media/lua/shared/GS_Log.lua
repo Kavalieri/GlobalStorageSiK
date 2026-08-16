@@ -45,6 +45,7 @@ local AREA_CATEGORY = {
 	Access = "TerminalAccess",
 	TerminalManifest = "TerminalAccess",
 	TerminalRegistry = "TerminalAccess",
+	Permissions = "TerminalAccess",
 	CraftUtils = "Craft",
 	RecipeTuning = "Craft",
 	ItemNetworkTooltip = "Tooltip",
@@ -140,5 +141,5 @@ function GlobalStorageSiK.Log.pcall(area, fn, ...)
 	if not ok then
 		GlobalStorageSiK.Log.error(area, results[2])
 	end
-	return ok, table.unpack(results, 2)
+	return ok, unpack(results, 2)
 end

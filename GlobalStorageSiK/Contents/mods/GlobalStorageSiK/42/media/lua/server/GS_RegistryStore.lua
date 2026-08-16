@@ -24,7 +24,10 @@ end
 
 --- Escribe catálogo de redes/terminales en INI (servidor / SP host).
 function GlobalStorageSiK.RegistryStore.saveNow()
-	if not isServer or not isServer() or not getFileWriter then
+	-- El catalogo se escribe desde cualquier proceso autoritativo. En una
+	-- partida Solo isServer() es false, aunque este mismo proceso posee el
+	-- registro y debe persistirlo igual que un host o un dedicado.
+	if not GlobalStorageSiK.isAuthoritative() or not getFileWriter then
 		return
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -46,7 +49,27 @@ function GlobalStorageSiK.RegistryStore.saveNow()
 		writeLine(writer, "[network:" .. tostring(networkId) .. "]")
 		writeLine(writer, "name=" .. tostring(net.name or ""))
 		writeLine(writer, "owner=" .. tostring(net.owner or ""))
+		writeLine(writer, "ownerCharacterId=" .. tostring(net.ownerCharacterId or ""))
 		writeLine(writer, "ownerAccount=" .. tostring(net.ownerAccount or ""))
+		local permissionIndex = 0
+		for characterId, record in pairs(net.characterPermissions or {}) do
+			permissionIndex = permissionIndex + 1
+			writeLine(writer, string.format("permission_%d=%s,%s,%s",
+				permissionIndex, tostring(characterId), tostring(record.role or "member"),
+				tostring(record.name or "")))
+		end
+		writeLine(writer, "permissionCount=" .. tostring(permissionIndex))
+		local zoneDenialCount = 0
+		for memberKey, denied in pairs(net.memberZoneDenials or {}) do
+			for zoneId, value in pairs(denied or {}) do
+				if value == true then
+					zoneDenialCount = zoneDenialCount + 1
+					writeLine(writer, string.format("zoneDenial_%d=%s,%s",
+						zoneDenialCount, tostring(memberKey), tostring(zoneId)))
+				end
+			end
+		end
+		writeLine(writer, "zoneDenialCount=" .. tostring(zoneDenialCount))
 		if net.relocation and net.relocation.status then
 			writeLine(writer, "relocation=" .. tostring(net.relocation.status))
 		end

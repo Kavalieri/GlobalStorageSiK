@@ -32,6 +32,9 @@
 require "GS_NetworkCraftSession"
 require "GS_I18n"
 require "GSSiK_Addon_Craft_Log"
+require "GSSiK_Addon_Craft_BatchState"
+
+local BatchState = GSSiK_Addon_Craft.BatchState
 
 GSSiK_Addon_Craft_NetworkCook = {}
 
@@ -96,7 +99,7 @@ local function checkPendingCookCraftStarts()
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt ABORT operationId=" .. tostring(entry.operationId)
 					.. " waitResult=timeout actionStarted=false")
 				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
-				entry.self._gsOperationId = nil
+				BatchState.clear(entry.self)
 				return
 			end
 			GlobalStorageSiK.CraftSession.debugLog(string.format(
@@ -122,7 +125,7 @@ local function checkPendingCookCraftStarts()
 			if not entry.force and okCanPerform and canPerform == false then
 				restore()
 				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
-				entry.self._gsOperationId = nil
+				BatchState.clear(entry.self)
 				return
 			end
 			local okCall, errCall = pcall(originalCookStartHandcraft, entry.self, entry.force, entry.craftTimes)
@@ -130,7 +133,7 @@ local function checkPendingCookCraftStarts()
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalCookStartHandcraft ERROR: " .. tostring(errCall))
 				failCookOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
-				entry.self._gsOperationId = nil
+				BatchState.clear(entry.self)
 			end
 			restore()
 		end
@@ -166,12 +169,20 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 			end
 			if okItems and items and items.size then
 				local batchCount = tonumber(craftTimes) or 1
-				local waitingIds, waitingCount, moved = GlobalStorageSiK.CraftSession.claimRecipeItems(
+				BatchState.begin(self, operationId, batchCount)
+				local waitingIds, waitingCount, moved, batchShortfall = GlobalStorageSiK.CraftSession.claimRecipeItems(
 					self.player, self.logic, items, sess.networkId, operationId, batchCount)
 				GlobalStorageSiK.CraftSession.debugLog(string.format(
 					"cookAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
 					operationId, ADDON_ID, recipeName, tostring(sess.networkId),
 					tostring(floorOk), items:size(), moved, batchCount, containersCount))
+				if batchShortfall > 0 then
+					GlobalStorageSiK.CraftSession.debugLog("cookAttempt ABORT operationId=" .. operationId
+						.. " batchShortfall=" .. tostring(batchShortfall))
+					failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailBatchMaterials")
+					BatchState.clear(self)
+					return
+				end
 				if waitingCount > 0 then
 					table.insert(pendingCookCraftStarts, {
 						self = self, force = force, craftTimes = craftTimes,
@@ -193,7 +204,7 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 			if not force and okCanPerform and canPerform == false then
 				restore()
 				failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailInvalid")
-				self._gsOperationId = nil
+				BatchState.clear(self)
 				return
 			end
 			local okCall, errCall = pcall(originalCookStartHandcraft, self, force, craftTimes)
@@ -202,7 +213,7 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 				GlobalStorageSiK.CraftSession.debugLog("cookAttempt START ERROR operationId=" .. tostring(operationId)
 					.. " error=" .. tostring(errCall))
 				failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
-				self._gsOperationId = nil
+				BatchState.clear(self)
 			end
 			return
 		end
@@ -212,33 +223,44 @@ end
 
 ---@param self table PJCK_CraftActionPanel
 local function patchedCookOnHandcraftActionComplete(self, ...)
-	if GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	local operationId, completed, expected, final = BatchState.completeUnit(self)
+	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
 		local invAfter = "?"
 		local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 		if okInv then invAfter = tostring(invSize) end
-		GlobalStorageSiK.CraftSession.debugLog(string.format(
-			"cookAttempt END operationId=%s recipe=%s actionCompleted=true actionCancelled=false invAfter=%s",
-			tostring(self._gsOperationId), recipeName, invAfter))
+		if final then
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"cookAttempt END operationId=%s recipe=%s units=%d/%d actionCompleted=true actionCancelled=false invAfter=%s",
+				tostring(operationId), recipeName, completed, expected, invAfter))
+		else
+			GlobalStorageSiK.CraftSession.debugLog(string.format(
+				"cookAttempt PROGRESS operationId=%s recipe=%s units=%d/%d",
+				tostring(operationId), recipeName, completed, expected))
+		end
 	end
-	GlobalStorageSiK.CraftSession.markOperationComplete(self._gsOperationId)
+	if final then
+		GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+	end
 	return originalCookOnHandcraftActionComplete(self, ...)
 end
 
 ---@param self table PJCK_CraftActionPanel
 local function patchedCookOnHandcraftActionCancelled(self, ...)
-	if GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	local operationId, completed, expected = BatchState.cancel(self)
+	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
 		GlobalStorageSiK.CraftSession.debugLog(string.format(
-			"cookAttempt END operationId=%s recipe=%s actionCompleted=false actionCancelled=true",
-			tostring(self._gsOperationId), recipeName))
+			"cookAttempt END operationId=%s recipe=%s units=%d/%d actionCompleted=false actionCancelled=true",
+			tostring(operationId), recipeName, completed, expected))
 	end
-	failCookOperation(self._gsOperationId, self.player, "IGUI_GSSIK_CraftFailCancelled")
-	self._gsOperationId = nil
+	if operationId then
+		failCookOperation(operationId, self.player, "IGUI_GSSIK_CraftFailCancelled")
+	end
 	return originalCookOnHandcraftActionCancelled(self, ...)
 end
 

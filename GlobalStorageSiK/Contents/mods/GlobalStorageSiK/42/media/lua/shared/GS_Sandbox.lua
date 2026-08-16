@@ -227,10 +227,14 @@ function GlobalStorageSiK.Sandbox.bulkDepositEnabled()
 	return SandboxVars.GlobalStorageSiK.BulkDepositEnabled ~= false
 end
 
---- Obtiene el límite de ítems por tick en operaciones bulk.
+--- Obtiene el presupuesto de items de una sola peticion masiva. El cliente
+--- deja 400 ms entre peticiones, de modo que un maximo pequeno cede tiempo al
+--- resto del servidor y permite intercalar trabajos de redes independientes.
 ---@return number
 function GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
-	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.MaxItemsPerBulkTick or 50
+	local configured = SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.MaxItemsPerBulkTick or 10
+	configured = math.floor(tonumber(configured) or 10)
+	return math.max(1, math.min(configured, 10))
 end
 
 --- Indica si se deben respetar los ítems favoritos.

@@ -14,5 +14,6 @@
 	"IGUI_GSSIK_CraftFailClaimTimeout": "материалы не прибыли вовремя",
 	"IGUI_GSSIK_CraftFailCancelled": "действие отменено",
 	"IGUI_GSSIK_CraftFailStart": "игра не смогла запустить действие",
-	"IGUI_GSSIK_CraftFailInvalid": "рецепт больше недействителен"
+	"IGUI_GSSIK_CraftFailInvalid": "рецепт больше недействителен",
+	"IGUI_GSSIK_CraftFailBatchMaterials": "недостаточно материалов для указанного количества"
 }

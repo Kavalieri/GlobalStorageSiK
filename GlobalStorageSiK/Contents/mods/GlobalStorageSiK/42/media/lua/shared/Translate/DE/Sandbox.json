@@ -82,7 +82,7 @@
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Angelegte Gegenstände respektieren",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems_tooltip": "Getragene Kleidung, gehaltene Waffen und getragene Taschen werden von 'Alles einlagern' nie bewegt. Empfohlen AN.",
 	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick": "Gegenstände pro Tick (Masseneinlagerung)",
-	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Wie viele Gegenstände pro Spiel Tick bei einer Massen 'Alles einlagern' Aktion verarbeitet werden. Niedrigere Werte reduzieren Serverlag auf belebten Servern, höhere Werte beschleunigen den Vorgang.",
+	"Sandbox_GlobalStorageSiK_MaxItemsPerBulkTick_tooltip": "Maximale Anzahl von Gegenständen pro Massenanfrage. Die Anfragen werden zeitlich verteilt, damit andere Spieler und Netzwerke zwischen den Stapeln arbeiten können. Niedrigere Werte verbessern die Fairness auf ausgelasteten Servern; das Sicherheitsmaximum ist 10.",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks": "GS Anleitungen für Herstellung erforderlich",
 	"Sandbox_GlobalStorageSiK_RequireRecipeBooks_tooltip": "Spieler müssen GS Anleitungsmagazine lesen, bevor sie jeden GS Gegenstand sehen und herstellen können, ähnlich wie normale Fertigkeitsbücher funktionieren. AUS schaltet alle GS Rezepte sofort frei.",
 	"Sandbox_GlobalStorageSiK_RequireWorkbench": "Werkbank erforderlich",
