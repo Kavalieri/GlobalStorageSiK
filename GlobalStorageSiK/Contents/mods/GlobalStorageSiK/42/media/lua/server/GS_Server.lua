@@ -484,6 +484,8 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		permissions = GlobalStorageSiK.Permissions.serialize(networkId, player),
 
+		redistributeActive = GlobalStorageSiK.RedistributeJob.isActive(networkId),
+
 		craftProbe = craftProbe,
 
 		capacity = GlobalStorageSiK.NetworkCapacity.serialize(
@@ -926,22 +928,29 @@ end
 --- Comprueba permisos de red; envía actionResult si falla.
 ---@param player IsoPlayer
 ---@param networkId string
+---@param resultMeta table|nil Campos opcionales para correlacionar el rechazo.
 ---@return boolean
-local function requireNetworkPermission(player, networkId)
+local function requireNetworkPermission(player, networkId, resultMeta)
 	local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
 	if allowed then
 		return true
 	end
-	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess"),
+		jobType = resultMeta and resultMeta.jobType or nil,
+		jobState = resultMeta and resultMeta.jobState or nil,
+	})
 	return false
 end
 
 --- Comprueba que el jugador tiene rol admin o superior; envía actionResult si falla.
 ---@param player IsoPlayer
 ---@param networkId string
+---@param resultMeta table|nil Campos opcionales para correlacionar el rechazo.
 ---@return boolean
-local function requireAdminAccess(player, networkId)
-	if not requireNetworkPermission(player, networkId) then
+local function requireAdminAccess(player, networkId, resultMeta)
+	if not requireNetworkPermission(player, networkId, resultMeta) then
 		return false
 	end
 	if GlobalStorageSiK.Permissions.isServerStaff(player) then
@@ -952,7 +961,26 @@ local function requireAdminAccess(player, networkId)
 	if GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return true
 	end
-	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole") })
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole"),
+		jobType = resultMeta and resultMeta.jobType or nil,
+		jobState = resultMeta and resultMeta.jobState or nil,
+	})
+	return false
+end
+
+--- Mantiene estable el contrato de nodos/zonas que Auto Sort capturó. No
+--- bloquea depósitos ni retiros: solo cambios estructurales que alterarían los
+--- candidatos o sus reglas a mitad del job.
+local function requireNetworkConfigIdle(player, networkId)
+	if not GlobalStorageSiK.RedistributeJob.isActive(networkId) then return true end
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeConfigLocked"),
+		jobType = "redistribute",
+		jobState = "running",
+	})
 	return false
 end
 
@@ -1205,6 +1233,7 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 			items = rows,
 			searchQuery = searchQuery or "",
 			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			redistributeActive = GlobalStorageSiK.RedistributeJob.isActive(networkId),
 			itemTypeCount = #rows,
 			nodeTypeCounts = buildLiveNodeTypeCounts(networkId, player),
 			capacity = GlobalStorageSiK.NetworkCapacity.serialize(
@@ -1242,6 +1271,23 @@ local function pushTerminalStateToNetworkWatchers(actor, networkId, searchQuery)
 		end
 	end)
 	return pushed
+end
+
+--- Avisa con un payload mínimo a quienes ya tienen abierta esa red y los
+--- registra para progreso/final. Evita reconstruir/enviar el catálogo completo
+--- solo para comunicar el bloqueo temporal de configuración.
+local function notifyRedistributeStartedToWatchers(actor, networkId)
+	forEachOnlinePlayer(function(player)
+		if player ~= actor and isTerminalWatcher(player, networkId) then
+			GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
+			gsSendServerCommand(player, "actionResult", {
+				ok = true,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeConfigLocked"),
+				jobType = "redistribute",
+				jobState = "running",
+			})
+		end
+	end)
 end
 
 -- Forward-declarada aqui (asignada mas abajo, justo tras definir
@@ -1289,6 +1335,9 @@ end
 ---@param terminalAnchor table|nil { x, y, z } terminal usado en el servidor
 ---@param meta table|nil { openSeq = number }
 local function pushTerminalState(player, networkId, scanSummary, searchQuery, craftProbe, openUi, accessMode, terminalAnchor, meta)
+	if player and GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+		GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
+	end
 	if player and craftProbe then
 		playerCraftProbe[player:getUsername()] = craftProbe
 	end
@@ -1536,7 +1585,8 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 
 	local scanSummary = { added = 0, updated = 0, offline = 0, zones = 0 }
 
-	if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen() then
+	if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen()
+		and not GlobalStorageSiK.RedistributeJob.isActive(networkId) then
 		scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 	end
 
@@ -1716,7 +1766,8 @@ local function onClientCommand(module, command, player, args)
 			end
 			setTerminalWatcher(player, networkId)
 			local scanSummary = { added = 0, updated = 0, offline = 0, zones = 0 }
-			if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen() then
+			if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen()
+				and not GlobalStorageSiK.RedistributeJob.isActive(networkId) then
 				scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 			end
 			pushTerminalState(
@@ -1729,6 +1780,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		pushTerminalState(player, networkId, scanSummary, searchQuery, nil, false, nil, anchor)
@@ -2220,6 +2272,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local zoneId = args.zoneId
 		if not zoneId or zoneId == "" then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
@@ -2235,11 +2288,14 @@ local function onClientCommand(module, command, player, args)
 		pushTerminalState(player, networkId, summary, searchQuery)
 
 	elseif command == "redistributeNetwork" then
-		if not requireAdminAccess(player, networkId) then
+		if not requireAdminAccess(player, networkId, {
+			jobType = "redistribute",
+			jobState = "finished",
+		}) then
 			return
 		end
-		-- Un solo click: RedistributeJob se relanza solo cada pocos segundos
-		-- hasta terminar toda la red (respetando MaxItemsPerBulkTick por lote).
+		-- Un solo clic: el job conserva captura/cursor y ejecuta pasos acotados
+		-- hasta terminar, sin volver a escanear toda la red en cada tick.
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
 			GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
 			gsSendServerCommand(player, "actionResult", {
@@ -2250,6 +2306,7 @@ local function onClientCommand(module, command, player, args)
 			})
 		else
 			GlobalStorageSiK.RedistributeJob.start(player, networkId)
+			notifyRedistributeStartedToWatchers(player, networkId)
 			gsSendServerCommand(player, "actionResult", {
 				ok = true,
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributingNetwork"),
@@ -2262,6 +2319,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone or not args.name or args.name == "" then
@@ -2277,6 +2335,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone then
@@ -2297,6 +2356,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local node = registry.nodes and registry.nodes[args.nodeId]
 		if not node then
@@ -2410,6 +2470,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local bounds = boundsFromPlayerRoom(player)
 
 		if not bounds then
@@ -2438,6 +2499,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local ok = GlobalStorageSiK.Zones.moveZonePriority(networkId, args.zoneId, args.direction)
 		if ok then
 			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
@@ -2452,6 +2514,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local ok = GlobalStorageSiK.Zones.setPriority(networkId, args.zoneId, args.priority)
 		if ok then
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
@@ -2464,6 +2527,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local bounds, zoneName, source = GlobalStorageSiK.Zones.boundsFromStructure(player)
 		if not bounds then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuildingOrSafehouse") })
@@ -2484,6 +2548,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local bounds, buildingTitle = GlobalStorageSiK.Zones.boundsFromPlayerBuilding(player)
 		if not bounds then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuilding") })
@@ -2502,6 +2567,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		if not GlobalStorageSiK.Sandbox.allowSafehouseImport() then
 
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_SafehouseImportDisabledMsg") })
@@ -2542,6 +2608,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local b = args.bounds
 		if not b or b.x1 == nil or b.y1 == nil or b.x2 == nil or b.y2 == nil then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidArea") })
@@ -2635,6 +2702,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
+		if not requireNetworkConfigIdle(player, networkId) then return end
 		local ok = GlobalStorageSiK.Categories.add(networkId, args.name)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryDuplicate") })
@@ -2646,6 +2714,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local target = GlobalStorageSiK.Permissions.findOnlineCharacter(args.characterId or "")
 		local ok = false
+		local failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_UserAlreadyExists")
 		local permissionSource = "legacy_name"
 		if target then
 			permissionSource = "online_character"
@@ -2657,6 +2726,12 @@ local function onClientCommand(module, command, player, args)
 			-- canAccess lo vinculará al ID del personaje al conectarse.
 			ok = GlobalStorageSiK.Permissions.addFactionUsername(
 				networkId, player, string.sub(tostring(args.factionUsername), 1, 64))
+		elseif args.characterId and args.characterId ~= "" then
+			-- Un selector moderno nunca degrada un ID caducado o manipulado a una
+			-- coincidencia por nombre. El roster debe refrescarse y elegirse de
+			-- nuevo; así dos nombres Unicode iguales no pueden cruzar permisos.
+			permissionSource = "invalid_character_id"
+			failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermSelectionStale")
 		elseif not args.characterId or args.characterId == "" then
 			-- Compatibilidad con clientes anteriores durante la transición.
 			ok = GlobalStorageSiK.Permissions.addUser(networkId, args.characterName or args.username)
@@ -2672,7 +2747,7 @@ local function onClientCommand(module, command, player, args)
 				.. " characterId=" .. loggedCharacterId
 				.. " ok=" .. tostring(ok))
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserAlreadyExists") })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or failureMessage })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "leaveNetwork" then
@@ -2900,13 +2975,19 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "registerContainer" then
 
-		local ok, message = registerContainer(args.entry, args.networkId)
+		local targetNetworkId = args.networkId or networkId
+		if not requireNetworkConfigIdle(player, targetNetworkId) then return end
+
+		local ok, message = registerContainer(args.entry, targetNetworkId)
 
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 
 	elseif command == "unregisterContainer" then
 
-		local ok, message = unregisterContainer(args.containerId, args.networkId)
+		local targetNetworkId = args.networkId or networkId
+		if not requireNetworkConfigIdle(player, targetNetworkId) then return end
+
+		local ok, message = unregisterContainer(args.containerId, targetNetworkId)
 
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 

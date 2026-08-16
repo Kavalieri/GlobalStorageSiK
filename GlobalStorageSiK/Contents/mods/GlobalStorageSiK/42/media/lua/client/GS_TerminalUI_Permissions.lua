@@ -81,6 +81,24 @@ local function memberIdentityKey(value)
 	return string.lower(value)
 end
 
+local function trimDisplay(value)
+	return (tostring(value or ""):gsub("^%s*(.-)%s*$", "%1"))
+end
+
+--- Etiqueta humana separada de la identidad operativa. displayName sigue el
+--- roster vanilla y conserva Unicode; username ayuda a distinguir homónimos.
+local function memberDisplayLabel(entry)
+	local displayName = trimDisplay(entry and entry.displayName)
+	local username = trimDisplay(entry and entry.username)
+	local characterName = trimDisplay(entry and entry.name)
+	local primary = displayName ~= "" and displayName
+		or (username ~= "" and username or characterName)
+	if username ~= "" and memberIdentityKey(username) ~= memberIdentityKey(primary) then
+		return primary .. " [" .. username .. "]"
+	end
+	return primary
+end
+
 --- Construye índices desde memberEntries, que es la lista autoritativa ya
 --- serializada por el servidor. Los IDs evitan colisiones entre personajes
 --- con el mismo nombre; los nombres solo son fallback para permisos legacy y
@@ -124,12 +142,35 @@ local function buildExistingMemberLookup(perms)
 	return ids, legacyNames, allNames
 end
 
-local function isExistingMember(entry, ids, legacyNames, allNames)
+local function countRosterIdentityKeys(entries)
+	local counts = {}
+	for i = 1, #(entries or {}) do
+		local entry = entries[i]
+		local perEntry = {}
+		for _, value in ipairs({ entry and entry.name, entry and entry.username }) do
+			local key = memberIdentityKey(value)
+			if key ~= "" and not perEntry[key] then
+				perEntry[key] = true
+				counts[key] = (counts[key] or 0) + 1
+			end
+		end
+	end
+	return counts
+end
+
+local function isExistingMember(entry, ids, legacyNames, allNames, rosterCounts)
 	local id = entry and tostring(entry.id or "") or ""
 	local name = memberIdentityKey(entry and entry.name)
 	local username = memberIdentityKey(entry and entry.username)
 	if id ~= "" then
-		return ids[id] == true or legacyNames[name] == true or legacyNames[username] == true
+		if ids[id] == true then return true end
+		-- Un permiso legacy por nombre solo identifica a una persona si ese
+		-- valor es único en el roster. Si varios personajes comparten el nombre
+		-- (caso observado con nombres chinos mal representados por SurvivorDesc),
+		-- deben seguir apareciendo para poder vincular explícitamente su ID.
+		local uniqueLegacyName = legacyNames[name] == true and (rosterCounts[name] or 0) <= 1
+		local uniqueLegacyUsername = legacyNames[username] == true and (rosterCounts[username] or 0) <= 1
+		return uniqueLegacyName or uniqueLegacyUsername
 	end
 	return allNames[name] == true or allNames[username] == true
 end
@@ -140,25 +181,30 @@ end
 ---@return table[] { id, name, label }
 function GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters(perms)
 	local rows = {}
-	local nameCounts = {}
+	local labelCounts = {}
 	local ids, legacyNames, allNames = buildExistingMemberLookup(perms)
-	for i = 1, #((perms and perms.onlineCharacters) or {}) do
-		local entry = perms.onlineCharacters[i]
+	local onlineCharacters = (perms and perms.onlineCharacters) or {}
+	local rosterCounts = countRosterIdentityKeys(onlineCharacters)
+	for i = 1, #onlineCharacters do
+		local entry = onlineCharacters[i]
 		if entry and entry.id and entry.id ~= "" and entry.name and entry.name ~= ""
-			and not isExistingMember(entry, ids, legacyNames, allNames) then
-			nameCounts[entry.name] = (nameCounts[entry.name] or 0) + 1
+			and not isExistingMember(entry, ids, legacyNames, allNames, rosterCounts) then
+			local label = memberDisplayLabel(entry)
+			local labelKey = memberIdentityKey(label)
+			labelCounts[labelKey] = (labelCounts[labelKey] or 0) + 1
 			rows[#rows + 1] = {
 				id = entry.id,
 				name = entry.name,
+				displayName = entry.displayName or "",
 				username = entry.username or "",
+				label = label,
 			}
 		end
 	end
 	for i = 1, #rows do
 		local entry = rows[i]
-		entry.label = entry.name
-		if (nameCounts[entry.name] or 0) > 1 then
-			entry.label = entry.name .. " [" .. string.sub(entry.id, -6) .. "]"
+		if (labelCounts[memberIdentityKey(entry.label)] or 0) > 1 then
+			entry.label = entry.label .. " [" .. string.sub(entry.id, -6) .. "]"
 		end
 	end
 	return rows
@@ -195,16 +241,17 @@ function GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions(perms)
 			end
 		end
 	end
+	local rosterCounts = countRosterIdentityKeys(factionMembers)
 	for i = 1, #factionMembers do
 		local entry = factionMembers[i]
 		if entry and entry.name and entry.name ~= ""
-			and not isExistingMember(entry, ids, legacyNames, allNames) then
+			and not isExistingMember(entry, ids, legacyNames, allNames, rosterCounts) then
 			options[#options + 1] = {
 				kind = "member",
 				value = entry.name,
 				characterId = entry.id or "",
 				factionUsername = entry.username or "",
-				label = T("IGUI_GS_PermPickFactionMember", entry.name),
+				label = T("IGUI_GS_PermPickFactionMember", memberDisplayLabel(entry)),
 			}
 		end
 	end
@@ -270,6 +317,7 @@ local function buildMemberRows(perms)
 			rows[#rows + 1] = {
 				kind = entry.role == "member" and "user" or entry.role,
 				name = entry.name,
+				displayName = memberDisplayLabel(entry),
 				characterId = entry.id or "",
 				legacy = entry.legacy == true,
 				deniedZoneIds = entry.deniedZoneIds or {},
@@ -342,7 +390,7 @@ local function createMemberRow(host, terminal, ui)
 		local nameMaxW = math.max(40, self.width - COL_NAME_X - 4)
 		self:drawText(truncate(memberRoleLabel(data.kind), COL_ROLE_W), COL_ROLE_X, yMid,
 			rr, rg, rb, 1, UIFont.Small)
-		self:drawText(truncate(data.name or "?", nameMaxW), COL_NAME_X, yMid,
+		self:drawText(truncate(data.displayName or data.name or "?", nameMaxW), COL_NAME_X, yMid,
 			pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 	end
 	row.onMouseDown = function(self, x, y)

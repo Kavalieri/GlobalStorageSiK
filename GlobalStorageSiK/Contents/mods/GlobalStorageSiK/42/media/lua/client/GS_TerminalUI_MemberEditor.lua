@@ -186,7 +186,8 @@ function GS_MemberEditorUI:onRemoveAccess()
 			doRemove()
 		end
 	end
-	local modal = ISModalDialog:new(0, 0, 400, 180, T("IGUI_GS_PermRemoveConfirm", data.name or "?"), true, nil, onResult, nil)
+	local modal = ISModalDialog:new(0, 0, 400, 180,
+		T("IGUI_GS_PermRemoveConfirm", data.displayName or data.name or "?"), true, nil, onResult, nil)
 	modal:initialise()
 	modal:addToUIManager()
 	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
@@ -231,7 +232,7 @@ function GS_MemberEditorUI:buildLayout()
 	self:addChild(title)
 	y = y + FONT_HGT_MEDIUM + LINE_GAP
 
-	local nameLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, data.name or "?", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
+	local nameLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, data.displayName or data.name or "?", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
 	nameLbl:initialise()
 	self:addChild(nameLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -355,7 +356,7 @@ function GS_MemberEditorUI:buildLayout()
 	local canTransfer = isOwnerViewer and not self.isSelf and data.kind == "user"
 	if canTransfer then
 		self.transferBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorTransferBtn", data.name or "?"), self, function()
+			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorTransferBtn", data.displayName or data.name or "?"), self, function()
 				self:onTransferOwnership(true)
 			end)
 		self:addChild(self.transferBtn)

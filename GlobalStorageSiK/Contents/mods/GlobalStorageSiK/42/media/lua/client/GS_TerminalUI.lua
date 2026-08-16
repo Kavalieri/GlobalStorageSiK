@@ -746,6 +746,9 @@ function GS_TerminalUI:refreshFromState(state)
 		if state.inventoryRevision then
 			merged.inventoryRevision = state.inventoryRevision
 		end
+		if state.redistributeActive ~= nil then
+			merged.redistributeActive = state.redistributeActive == true
+		end
 		if state.itemTypeCount then
 			merged.itemTypeCount = state.itemTypeCount
 		end
@@ -811,6 +814,11 @@ function GS_TerminalUI:refreshFromState(state)
 		state.items = copy
 	end
 	self.terminalState = state or prev
+	if self.terminalState.redistributeActive == true then
+		self:setRedistributeState(true, T("IGUI_GS_RedistributeConfigLocked"), "warn")
+	elseif self._autoSortRunning then
+		self:setRedistributeState(false, T("IGUI_GS_RedistributeIdle"), "muted")
+	end
 	if state and state.accessMode then
 		self.terminalState.accessMode = state.accessMode
 	elseif state and not state.openUi and prev.accessMode then
@@ -936,28 +944,34 @@ function GS_TerminalUI:onClose()
 end
 
 function GS_TerminalUI:onCreateStructureZone()
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("createZoneStructure", {})
 end
 
 function GS_TerminalUI:onCreateRoomZone()
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("createZoneRoom", {})
 end
 
 function GS_TerminalUI:onCreateSafehouseZone()
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("createZoneSafehouse", {})
 end
 
 function GS_TerminalUI:onCreateSelectionZone()
+	if not self:canEditNetworkConfig(true) then return end
 	if GlobalStorageSiK.ZonePicker then
 		GlobalStorageSiK.ZonePicker.start(self)
 	end
 end
 
 function GS_TerminalUI:onCreateBuildingZone()
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("createZoneBuilding", {})
 end
 
 function GS_TerminalUI:onRescanZone(zoneId)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("rescanZone", {
 		zoneId = zoneId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
@@ -965,6 +979,7 @@ function GS_TerminalUI:onRescanZone(zoneId)
 end
 
 function GS_TerminalUI:onRescanNetwork()
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("rescanNetwork", {
 		searchQuery = self:getSearchQuery(),
 	})
@@ -982,7 +997,11 @@ end
 ---@param message string|nil
 ---@param status string|nil
 function GS_TerminalUI:setRedistributeState(running, message, status)
+	local stateChanged = self._autoSortRunning ~= (running == true)
 	self._autoSortRunning = running == true
+	if self.terminalState then
+		self.terminalState.redistributeActive = self._autoSortRunning
+	end
 	if self.autoSortBtn then
 		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
 		self.autoSortBtn.textColor = nil
@@ -994,6 +1013,24 @@ function GS_TerminalUI:setRedistributeState(running, message, status)
 		status or (self._autoSortRunning and "warn" or "muted"),
 		self.autoSortStatusRow and self.autoSortStatusRow.width or nil
 	)
+	if stateChanged and self.activeTabKey == "network" and GlobalStorageSiK.TerminalNetwork then
+		GlobalStorageSiK.TerminalNetwork.refreshActiveTab(self, self.terminalState)
+	end
+end
+
+--- La autoridad real vive en servidor; este gate evita abrir editores que el
+--- servidor tendría que rechazar mientras la captura de Auto Sort está activa.
+function GS_TerminalUI:canEditNetworkConfig(showWarning)
+	local locked = self._autoSortRunning == true
+		or (self.terminalState and self.terminalState.redistributeActive == true)
+	if locked and showWarning then
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+			and GlobalStorageSiK.NetClient.getPlayer() or nil
+		if player and player.setHaloNote then
+			player:setHaloNote(T("IGUI_GS_RedistributeConfigLocked"), 255, 190, 70, 420)
+		end
+	end
+	return not locked
 end
 
 function GS_TerminalUI:onRedistributeNetwork()
@@ -1203,6 +1240,7 @@ function GS_TerminalUI:onWithdrawRow(row, amount, targetKey)
 end
 
 function GS_TerminalUI:onMoveZonePriority(zoneId, direction)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("moveZonePriority", {
 		zoneId = zoneId,
 		direction = direction,
@@ -1211,6 +1249,7 @@ function GS_TerminalUI:onMoveZonePriority(zoneId, direction)
 end
 
 function GS_TerminalUI:onSetZonePriority(zoneId, priority)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("setZonePriority", {
 		zoneId = zoneId,
 		priority = priority,
@@ -1219,6 +1258,7 @@ function GS_TerminalUI:onSetZonePriority(zoneId, priority)
 end
 
 function GS_TerminalUI:onRenameZone(zoneId, name)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("renameZone", {
 		zoneId = zoneId,
 		name = name,
@@ -1227,6 +1267,7 @@ function GS_TerminalUI:onRenameZone(zoneId, name)
 end
 
 function GS_TerminalUI:onDeleteZone(zoneId)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("deleteZone", {
 		zoneId = zoneId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
@@ -1234,6 +1275,7 @@ function GS_TerminalUI:onDeleteZone(zoneId)
 end
 
 function GS_TerminalUI:onUpdateNode(nodeId, displayName, category, enabled, membership)
+	if not self:canEditNetworkConfig(true) then return end
 	local payload = {
 		nodeId = nodeId,
 		displayName = displayName,
@@ -1354,6 +1396,7 @@ function GS_TerminalUI:onCraftModRecipe(recipeId)
 end
 
 function GS_TerminalUI:onAddCategory(name)
+	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("addCategory", {
 		name = name or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",

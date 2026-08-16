@@ -17,6 +17,26 @@ require "GS_I18n"
 
 GlobalStorageSiK.Redistribute = {}
 
+-- Presupuesto por paso del job. MaxItemsPerBulkTick limita MOVIMIENTOS en
+-- depósitos normales, pero Auto Sort también debe limitar ítems INSPECCIONADOS:
+-- una red ya ordenada podía recorrer miles de ítems contra todos los nodos en
+-- un único tick porque moved seguía en cero. Dos movimientos por paso reducen
+-- además los pares remove/add que el servidor debe replicar a los clientes.
+local MAX_INDEX_ITEMS_PER_STEP = 50
+local MAX_MOVE_ITEMS_PER_STEP = 25
+local MAX_MOVES_PER_STEP = 2
+local MAX_STEP_MS = 5
+
+local function nowMs()
+	return getTimestampMs and getTimestampMs() or 0
+end
+
+local function timeBudgetExceeded(startedAt, inspected)
+	if inspected <= 0 or startedAt <= 0 then return false end
+	local current = nowMs()
+	return current > 0 and current - startedAt >= MAX_STEP_MS
+end
+
 --- Construye tabla zoneId -> zone.priority (1 = zona principal) para la red.
 ---@param registry table
 ---@param networkId string
@@ -57,25 +77,25 @@ local function candidateBetter(a, b, zonePriorityOf)
 	return false
 end
 
---- Copia ítems de un contenedor a una tabla (evita mutar durante iteración).
----@param container ItemContainer
----@return InventoryItem[]
-local function snapshotContainerItems(container)
-	local list = {}
-	if not container or not container.getItems then
-		return list
+--- Cachea el tier por fullType+nodo solo si el nodo no tiene filtros
+--- personalizados. Categorías/subcategorías dependen del tipo de script y son
+--- estables; nombre/peso/tag pueden depender de la instancia y se reevalúan.
+local function cachedMatchTier(session, nodeIndex, item, fullType)
+	local live = session.liveNodes[nodeIndex]
+	local entry = live and live.entry or {}
+	if (entry.filters and #entry.filters > 0) or not fullType then
+		return GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	end
-	local items = container:getItems()
-	if not items or not items.size then
-		return list
+	local byNode = session.matchTiersByType[fullType]
+	if not byNode then
+		byNode = {}
+		session.matchTiersByType[fullType] = byNode
 	end
-	for i = 0, items:size() - 1 do
-		local item = items:get(i)
-		if item then
-			list[#list + 1] = item
-		end
-	end
-	return list
+	local cached = byNode[nodeIndex]
+	if cached ~= nil then return cached ~= false and cached or nil end
+	local tier = GlobalStorageSiK.Router.matchSpecificity(entry, item)
+	byNode[nodeIndex] = tier or false
+	return tier
 end
 
 --- Elige el MEJOR contenedor destino para un item, comparando TODOS los
@@ -93,111 +113,221 @@ end
 --- poder compararlo de tu a tu contra el resto: si ya es el mejor, no se
 --- mueve nada.
 ---@param item InventoryItem
----@param fromLive table
----@param liveNodes table[]
+---@param fromIndex number
+---@param session table
 ---@param character IsoPlayer|nil
----@param zonePriorityOf table<string, number>
----@return table|nil
-local function pickRedistributeTarget(item, fromLive, liveNodes, character, zonePriorityOf)
+---@return table|nil live
+---@return number|nil liveIndex
+local function pickRedistributeTarget(item, fromIndex, session, character)
+	local liveNodes = session and session.liveNodes
+	local fromLive = liveNodes and liveNodes[fromIndex]
 	if not item or not fromLive or not liveNodes then
-		return nil
+		return nil, nil
 	end
 
-	local tiers = { {}, {}, {}, {}, {} }
+	local bestByTier = {}
 	local fullType = item.getFullType and item:getFullType() or nil
 	for i = 1, #liveNodes do
 		local live = liveNodes[i]
-		local isSelf = (live.container == fromLive.container)
-		local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
-		if hasSpace then
-			local matchTier = GlobalStorageSiK.Router.matchSpecificity(live.entry or {}, item)
-			local destinationTier = matchTier
-			if matchTier == 4 then
-				destinationTier = fullType and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) and 4 or 5
-			end
-			if destinationTier then
-				tiers[destinationTier][#tiers[destinationTier] + 1] = live
-			end
-		end
-	end
-
-	for tierIdx = 1, 5 do
-		local pool = tiers[tierIdx]
-		if #pool > 0 then
-			table.sort(pool, function(a, b) return candidateBetter(a, b, zonePriorityOf) end)
-			local best = pool[1]
-			if best.container == fromLive.container then
-				return nil
-			end
-			return best
-		end
-	end
-	return nil
-end
-
---- Redistribuye ítems de la red según categorías de nodos.
----@param player IsoPlayer
----@param networkId string|nil
----@return table summary
-function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId)
-	local summary = { moved = 0, failed = 0, skipped = 0, reason = nil }
-	if not player then
-		summary.reason = "no_player"
-		return summary
-	end
-	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
-		summary.reason = "remote_disabled"
-		return summary
-	end
-	if not GlobalStorageSiK.Power.networkPowered(networkId) then
-		summary.reason = "no_power"
-		return summary
-	end
-
-	local liveNodes = GlobalStorageSiK.Network.getLiveContainers(networkId)
-	if #liveNodes == 0 then
-		summary.reason = "no_nodes"
-		return summary
-	end
-
-	local registry = GlobalStorageSiK.Zones.getRegistry()
-	local zonePriorityOf = buildZonePriorityLookup(registry, networkId)
-	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
-
-	for i = 1, #liveNodes do
-		if summary.moved >= maxPerTick then
-			summary.reason = "limit"
-			break
-		end
-		local fromLive = liveNodes[i]
-		local container = fromLive.container
-		if not container then
-			summary.skipped = summary.skipped + 1
-		else
-			local items = snapshotContainerItems(container)
-			for j = 1, #items do
-				if summary.moved >= maxPerTick then
-					summary.reason = "limit"
-					break
+		local matchTier = cachedMatchTier(session, i, item, fullType)
+		if matchTier then
+			local isSelf = (live.container == fromLive.container)
+			local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
+			if hasSpace then
+				local destinationTier = matchTier
+				if matchTier == 4 then
+					local counts = session.typeCountsByNode[i] or {}
+					destinationTier = fullType and (counts[fullType] or 0) > 0 and 4 or 5
 				end
-				local item = items[j]
-				if item and container:contains(item) then
-					local target = pickRedistributeTarget(item, fromLive, liveNodes, player, zonePriorityOf)
-					if target and target.container and target.container ~= container then
-						if GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player) then
-							summary.moved = summary.moved + 1
-						else
-							summary.failed = summary.failed + 1
-						end
-					else
-						summary.skipped = summary.skipped + 1
+				if destinationTier then
+					local current = bestByTier[destinationTier]
+					if not current or candidateBetter(live, current.live, session.zonePriorityOf) then
+						bestByTier[destinationTier] = { live = live, index = i }
 					end
 				end
 			end
 		end
 	end
 
-	return summary
+	for tierIdx = 1, 5 do
+		local best = bestByTier[tierIdx]
+		if best then
+			if best.live.container == fromLive.container then
+				return nil, nil
+			end
+			return best.live, best.index
+		end
+	end
+	return nil, nil
+end
+
+local function updateTypeCount(session, nodeIndex, fullType, delta)
+	if not fullType or fullType == "" then return end
+	local counts = session.typeCountsByNode[nodeIndex]
+	if not counts then
+		counts = {}
+		session.typeCountsByNode[nodeIndex] = counts
+	end
+	counts[fullType] = math.max(0, (counts[fullType] or 0) + delta)
+end
+
+---@param player IsoPlayer
+---@param networkId string
+---@return table|nil session
+---@return table summary
+local function beginSession(player, networkId)
+	local summary = { moved = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil }
+	if not player then summary.reason = "no_player"; return nil, summary end
+	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
+		summary.reason = "remote_disabled"; return nil, summary
+	end
+	if not GlobalStorageSiK.Power.networkPowered(networkId) then
+		summary.reason = "no_power"; return nil, summary
+	end
+	local liveNodes = GlobalStorageSiK.Network.getLiveContainers(networkId)
+	if #liveNodes == 0 then summary.reason = "no_nodes"; return nil, summary end
+
+	local total = 0
+	for i = 1, #liveNodes do
+		local container = liveNodes[i].container
+		local items = container and container.getItems and container:getItems() or nil
+		if items and items.size then total = total + items:size() end
+	end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	return {
+		networkId = networkId,
+		liveNodes = liveNodes,
+		zonePriorityOf = buildZonePriorityLookup(registry, networkId),
+		phase = "index",
+		nodeIndex = 1,
+		itemIndex = 0,
+		itemRefsByNode = {},
+		typeCountsByNode = {},
+		matchTiersByType = {},
+		indexed = 0,
+		processed = 0,
+		total = total,
+	}, summary
+end
+
+local function stepIndex(session, startedAt)
+	local inspected = 0
+	while session.nodeIndex <= #session.liveNodes
+		and inspected < MAX_INDEX_ITEMS_PER_STEP
+		and not timeBudgetExceeded(startedAt, inspected) do
+		local nodeIndex = session.nodeIndex
+		local live = session.liveNodes[nodeIndex]
+		local container = live and live.container
+		local items = container and container.getItems and container:getItems() or nil
+		local size = items and items.size and items:size() or 0
+		if session.itemIndex >= size then
+			session.nodeIndex = nodeIndex + 1
+			session.itemIndex = 0
+		else
+			local item = items:get(session.itemIndex)
+			session.itemIndex = session.itemIndex + 1
+			inspected = inspected + 1
+			session.indexed = session.indexed + 1
+			if item then
+				session.itemRefsByNode[nodeIndex] = session.itemRefsByNode[nodeIndex] or {}
+				local refs = session.itemRefsByNode[nodeIndex]
+				refs[#refs + 1] = item
+				local fullType = item.getFullType and item:getFullType() or nil
+				updateTypeCount(session, nodeIndex, fullType, 1)
+			end
+		end
+	end
+	if session.nodeIndex > #session.liveNodes then
+		session.phase = "move"
+		session.nodeIndex = 1
+		session.itemIndex = 1
+	end
+	return inspected
+end
+
+local function stepMoves(session, player, summary, startedAt)
+	local inspected = 0
+	local configured = tonumber(GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()) or MAX_MOVES_PER_STEP
+	-- Una opción dañada o antigua con 0 no puede dejar el cursor vivo para
+	-- siempre. El techo local continúa prevaleciendo aunque Sandbox sea mayor.
+	local maxMoves = math.max(1, math.min(configured, MAX_MOVES_PER_STEP))
+	while session.nodeIndex <= #session.liveNodes
+		and inspected < MAX_MOVE_ITEMS_PER_STEP
+		and summary.moved < maxMoves
+		and not timeBudgetExceeded(startedAt, inspected) do
+		local nodeIndex = session.nodeIndex
+		local refs = session.itemRefsByNode[nodeIndex] or {}
+		if session.itemIndex > #refs then
+			session.nodeIndex = nodeIndex + 1
+			session.itemIndex = 1
+		else
+			local item = refs[session.itemIndex]
+			session.itemIndex = session.itemIndex + 1
+			inspected = inspected + 1
+			session.processed = session.processed + 1
+			local fromLive = session.liveNodes[nodeIndex]
+			local container = fromLive and fromLive.container
+			local fullType = item and item.getFullType and item:getFullType() or nil
+			if item and container and container:contains(item) then
+				local target, targetIndex = pickRedistributeTarget(item, nodeIndex, session, player)
+				if target and target.container and target.container ~= container then
+					if GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player) then
+						summary.moved = summary.moved + 1
+						updateTypeCount(session, nodeIndex, fullType, -1)
+						updateTypeCount(session, targetIndex, fullType, 1)
+					else
+						summary.failed = summary.failed + 1
+					end
+				else
+					summary.skipped = summary.skipped + 1
+				end
+			else
+				-- El mundo puede cambiar mientras el job cede tiempo a otros procesos.
+				-- La referencia deja de procesarse y la caché se corrige sin perseguirla.
+				summary.skipped = summary.skipped + 1
+				updateTypeCount(session, nodeIndex, fullType, -1)
+			end
+		end
+	end
+	return inspected
+end
+
+--- Redistribuye una porción acotada de la red y conserva el cursor/cachés en
+--- session. El job servidor debe devolver la misma session en la llamada
+--- siguiente; así ninguna llamada vuelve a escanear la red desde el principio.
+---@param player IsoPlayer
+---@param networkId string|nil
+---@param session table|nil
+---@return table summary
+---@return table|nil session
+function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session)
+	local summary = { moved = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil }
+	if session and session.networkId ~= networkId then session = nil end
+	if not session then
+		local initial
+		session, initial = beginSession(player, networkId)
+		if not session then return initial, nil end
+	end
+	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
+		summary.reason = "remote_disabled"; return summary, session
+	end
+	if not GlobalStorageSiK.Power.networkPowered(networkId) then
+		summary.reason = "no_power"; return summary, session
+	end
+
+	local startedAt = nowMs()
+	if session.phase == "index" then
+		stepIndex(session, startedAt)
+	else
+		stepMoves(session, player, summary, startedAt)
+	end
+	summary.phase = session.phase
+	summary.checked = session.phase == "index" and session.indexed or session.processed
+	summary.total = session.total
+	if session.phase == "index" or session.nodeIndex <= #session.liveNodes then
+		summary.reason = "limit"
+	end
+	return summary, session
 end
 
 --- Mensaje legible del resumen de redistribución.

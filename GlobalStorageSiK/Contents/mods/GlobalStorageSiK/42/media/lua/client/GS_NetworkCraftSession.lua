@@ -41,6 +41,11 @@ require "GS_Transfer"
 
 GlobalStorageSiK.CraftSession = GlobalStorageSiK.CraftSession or {}
 
+-- Contrato 2 añade el cuarto retorno numérico batchShortfall a
+-- claimRecipeItems. Los addons se publican por separado y pueden consultar
+-- esta señal para tolerar una actualización escalonada de Workshop.
+GlobalStorageSiK.CraftSession.CLAIM_RECIPE_CONTRACT_VERSION = 2
+
 local session = nil
 local lastEndReason = nil
 local originalGetContainers = nil

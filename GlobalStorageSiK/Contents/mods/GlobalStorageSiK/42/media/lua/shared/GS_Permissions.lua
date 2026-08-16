@@ -29,6 +29,15 @@ local function normalizeName(name)
 	return (tostring(name):lower():gsub("^%s*(.-)%s*$", "%1"))
 end
 
+--- Limpia espacios sin alterar mayúsculas ni bytes UTF-8. Los nombres de
+--- presentación no son identidad y nunca deben pasar por normalizeName().
+---@param value any
+---@return string
+local function displayText(value)
+	if value == nil then return "" end
+	return (tostring(value):gsub("^%s*(.-)%s*$", "%1"))
+end
+
 --- Clave estable para las restricciones de zona. Los miembros ya vinculados
 --- usan el ID persistente del personaje; los permisos nominales/offline usan
 --- una clave legacy que se migra al ID en cuanto el personaje se conecta.
@@ -84,6 +93,27 @@ function GlobalStorageSiK.Permissions.getCharacterName(player)
 	return ""
 end
 
+--- Nombre que vanilla muestra para el jugador en listas multijugador. En B42
+--- getDisplayName conserva nombres Steam/servidor Unicode que pueden no estar
+--- disponibles correctamente en el SurvivorDesc remoto. Es solo presentación:
+--- permisos, ownership y restricciones siguen vinculados al characterId.
+---@param player IsoPlayer|nil
+---@return string
+function GlobalStorageSiK.Permissions.getPlayerDisplayName(player)
+	if not player then return "" end
+	if player.getDisplayName then
+		local ok, value = pcall(function() return player:getDisplayName() end)
+		value = ok and displayText(value) or ""
+		if value ~= "" then return value end
+	end
+	if player.getUsername then
+		local ok, value = pcall(function() return player:getUsername() end)
+		value = ok and displayText(value) or ""
+		if value ~= "" then return value end
+	end
+	return displayText(GlobalStorageSiK.Permissions.getCharacterName(player))
+end
+
 --- Identidad persistente del PERSONAJE, separada del nombre de cuenta Steam.
 --- SurvivorDesc.ID cambia al crear otro personaje y se conserva con el
 --- personaje guardado. El fallback por nombre solo mantiene compatibilidad
@@ -123,6 +153,8 @@ local function bindCharacter(net, player, role)
 	net.characterPermissions = net.characterPermissions or {}
 	local record = net.characterPermissions[characterId] or {}
 	record.name = GlobalStorageSiK.Permissions.getCharacterName(player)
+	record.displayName = GlobalStorageSiK.Permissions.getPlayerDisplayName(player)
+	record.username = player.getUsername and displayText(player:getUsername()) or ""
 	record.role = role or record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER
 	net.characterPermissions[characterId] = record
 	-- Un miembro de faccion puede haberse añadido estando desconectado. Mover
@@ -578,7 +610,7 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	end
 	local characterRecord = net.characterPermissions and net.characterPermissions[characterId]
 	if characterRecord then
-		characterRecord.name = characterName
+		bindCharacter(net, player, characterRecord.role)
 		return true
 	end
 	for i = 1, #(net.allowedUsers or {}) do
@@ -648,6 +680,7 @@ local function collectOnlineCharacterRecords(requestingPlayer)
 				result[#result + 1] = {
 					id = id,
 					name = GlobalStorageSiK.Permissions.getCharacterName(player),
+					displayName = GlobalStorageSiK.Permissions.getPlayerDisplayName(player),
 					username = player.getUsername and player:getUsername() or "",
 					sameFaction = requestingPlayer and requestingPlayer.getUsername and player.getUsername
 						and GlobalStorageSiK.Permissions.sameFaction(
@@ -657,7 +690,7 @@ local function collectOnlineCharacterRecords(requestingPlayer)
 		end
 	end
 	table.sort(result, function(a, b)
-		return normalizeName(a.name) < normalizeName(b.name)
+		return normalizeName(a.displayName or a.name) < normalizeName(b.displayName or b.name)
 	end)
 	return result
 end
@@ -686,6 +719,7 @@ local function collectFactionCharacterRecords(requestingPlayer, onlineCharacters
 		result[#result + 1] = {
 			id = online and online.id or "",
 			name = online and online.name or username,
+			displayName = online and online.displayName or username,
 			username = username,
 			online = online ~= nil,
 		}
@@ -808,9 +842,13 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	local memberEntries = {}
 	local seenNames = {}
 	if net.owner and net.owner ~= "" then
+		local ownerRecord = net.characterPermissions
+			and net.ownerCharacterId and net.characterPermissions[net.ownerCharacterId] or nil
 		memberEntries[#memberEntries + 1] = {
 			id = net.ownerCharacterId or "",
 			name = net.owner,
+			displayName = ownerRecord and ownerRecord.displayName or net.owner,
+			username = ownerRecord and ownerRecord.username or "",
 			role = GlobalStorageSiK.Permissions.ROLE_OWNER,
 			deniedZoneIds = {},
 		}
@@ -821,6 +859,8 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 			memberEntries[#memberEntries + 1] = {
 				id = id,
 				name = record.name,
+				displayName = record.displayName or record.name,
+				username = record.username or "",
 				role = record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER,
 				deniedZoneIds = deniedZoneIds(id, record.name),
 			}
@@ -838,7 +878,7 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 				end
 			end
 			memberEntries[#memberEntries + 1] = {
-				id = "", name = name, role = role, legacy = true,
+				id = "", name = name, displayName = name, username = "", role = role, legacy = true,
 				deniedZoneIds = deniedZoneIds(nil, name),
 			}
 		end

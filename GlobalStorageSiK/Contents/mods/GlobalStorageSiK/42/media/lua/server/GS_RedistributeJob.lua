@@ -2,26 +2,31 @@
 	GlobalStorageSiK - Job en segundo plano para "Ordenar por categoria"
 	Autor: SiK
 	Fecha: 2026-07-02
-	Descripcion: redistributeNetwork() solo mueve un lote (MaxItemsPerBulkTick)
-	por llamada. Antes el jugador tenia que pulsar el boton a mano una vez por
-	lote. Este modulo relanza la redistribucion automaticamente cada pocos
-	segundos hasta terminar toda la red (o hasta que ya no quede nada por
-	mover), con un solo click inicial.
+	Descripcion: planificador incremental y equitativo de Auto Sort. Conserva
+	una captura/cursor por red, ejecuta un solo paso global acotado cada vez y
+	separa inspeccion de movimientos replicados hasta terminar con un clic.
 ]]
 
 require "GS_Redistribute"
 require "GS_PlayerUtils"
 require "GS_TerminalAccess"
+require "GS_TransferLock"
 
 GlobalStorageSiK.RedistributeJob = {}
 
--- Pausa entre lotes. Bajo para que se note fluido, alto para no saturar el
--- servidor si hay muchos items desordenados; el propio limite de
--- MaxItemsPerBulkTick ya acota el coste de cada lote individual.
-local RETRY_DELAY_MS = 2500
+-- Cada paso ya tiene presupuesto de inspeccion, tiempo y movimientos en
+-- GS_Redistribute. La pausa adicional deja respirar al resto de simulacion y
+-- evita una rafaga continua de remove/add en servidores con muchos jugadores.
+local INDEX_DELAY_MS = 250
+local MOVE_DELAY_MS = 1000
+local MOVE_IDLE_DELAY_MS = 250
+local BUSY_DELAY_MS = 500
+local GLOBAL_STEP_DELAY_MS = 100
+local PROGRESS_INTERVAL_MS = 15000
 
 local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped, watchers }
 local tickInstalled = false
+local nextGlobalRunMs = 0
 
 local function nowMs()
 	if getTimestampMs then
@@ -40,6 +45,30 @@ local function resolvePlayer(username)
 	-- itera getOnlinePlayers/getSpecificPlayer (el mismo patron ya usado con
 	-- exito en GS_Server.lua) antes de caer a getPlayerFromUsername.
 	return GlobalStorageSiK.PlayerUtils.resolveByUsername(username)
+end
+
+local function eachRecipient(job, fn)
+	local recipients = { [job.username] = true }
+	for username in pairs(job.watchers or {}) do recipients[username] = true end
+	for username in pairs(recipients) do
+		local player = resolvePlayer(username)
+		if player then fn(player) end
+	end
+end
+
+local function notifyProgress(job, summary)
+	local messageKey = summary.phase == "index"
+		and "IGUI_GS_RedistributeProgressIndex"
+		or "IGUI_GS_RedistributeProgressMove"
+	eachRecipient(job, function(player)
+		GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
+			ok = true,
+			message = GlobalStorageSiK.I18n.remote(messageKey,
+				summary.checked or 0, summary.total or 0, job.moved or 0),
+			jobType = "redistribute",
+			jobState = "running",
+		})
+	end)
 end
 
 local function finishJob(networkId, job, reason)
@@ -65,30 +94,21 @@ local function finishJob(networkId, job, reason)
 	-- para que el cliente pueda distinguir ESTE actionResult concreto del
 	-- resto (depositos/retiros normales), actualizar el panel de estado y
 	-- volver a habilitar Auto-ordenar sin adivinar por el texto.
-	local recipients = { [job.username] = true }
-	for username in pairs(job.watchers or {}) do
-		recipients[username] = true
-	end
-	for username in pairs(recipients) do
-		local player = resolvePlayer(username)
-		if player then
-			GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
-				ok = ok,
-				message = msg,
-				jobType = "redistribute",
-				jobState = "finished",
-			})
-			if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
-				-- terminalAnchor preserva las pestañas de addons en cada estado
-				-- enviado durante y al terminar el job.
-				local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
-					and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
-				GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
-			end
-		else
-			GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | jugador " .. tostring(username) .. " no resuelto, sin notificar")
+	eachRecipient(job, function(player)
+		GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
+			ok = ok,
+			message = msg,
+			jobType = "redistribute",
+			jobState = "finished",
+		})
+		if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
+			-- terminalAnchor preserva las pestañas de addons en cada estado
+			-- enviado durante y al terminar el job.
+			local anchor = GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor
+				and GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+			GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, "", nil, false, nil, anchor)
 		end
-	end
+	end)
 end
 
 --- Ejecuta como maximo UN lote global por tick. Con muchas redes activas,
@@ -98,30 +118,51 @@ end
 --- por lo que los demas vencidos quedan elegibles en los ticks siguientes.
 local function onTick()
 	local now = nowMs()
+	if now < nextGlobalRunMs then return end
 	local networkId = nil
 	local job = nil
+	local oldestDueMs = nil
 	for candidateId, candidate in pairs(jobs) do
-		if now >= candidate.nextRunMs then
+		if now >= candidate.nextRunMs
+			and (oldestDueMs == nil or candidate.nextRunMs < oldestDueMs) then
 			networkId = candidateId
 			job = candidate
-			break
+			oldestDueMs = candidate.nextRunMs
 		end
 	end
 	if not job then
 		return
 	end
+	-- Presupuesto compartido: aunque haya muchas redes vencidas, todo Auto Sort
+	-- combinado ejecuta como máximo un paso cada 100 ms. El job elegido queda
+	-- aplazado y los demás se atienden en ticks posteriores (round-robin por
+	-- vencimiento, sin sumar N presupuestos pesados en el mismo frame).
+	nextGlobalRunMs = now + GLOBAL_STEP_DELAY_MS
 
 	local player = resolvePlayer(job.username)
 	if not player then
-		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | jugador " .. tostring(job.username) .. " no resuelto, job cancelado en silencio")
-		jobs[networkId] = nil
+		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | jugador " .. tostring(job.username) .. " no resuelto, job cancelado")
+		finishJob(networkId, job, "no_player")
 		return
 	end
 
-	local ok, summary = pcall(GlobalStorageSiK.Redistribute.redistributeNetwork, player, networkId)
+	-- El bloqueo se conserva solo durante ESTE paso acotado. Entre pasos la red
+	-- queda libre para depósitos, retiros y otras sesiones; si otra operación
+	-- está activa, Auto Sort cede el turno sin invalidar su captura/cursor.
+	local acquired = GlobalStorageSiK.TransferLock.acquire(networkId, player, "redistribute")
+	if not acquired then
+		job.nextRunMs = now + BUSY_DELAY_MS
+		return
+	end
+	local ok, summary, session = pcall(
+		GlobalStorageSiK.Redistribute.redistributeNetwork, player, networkId, job.session)
+	GlobalStorageSiK.TransferLock.release(networkId, player)
 	if ok then
+		job.session = session
 		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
-			.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped) .. " reason=" .. tostring(summary.reason))
+			.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped)
+			.. " checked=" .. tostring(summary.checked) .. "/" .. tostring(summary.total)
+			.. " phase=" .. tostring(summary.phase) .. " reason=" .. tostring(summary.reason))
 	end
 	if not ok then
 		-- Sin este pcall, un error aqui dejaba el job colgado para siempre
@@ -142,7 +183,19 @@ local function onTick()
 		-- No se envia un terminalState completo en cada paso intermedio. El
 		-- boton ya indica que el job sigue activo y el estado final refresca la
 		-- UI; esto evita otro payload grande repetido durante redes masivas.
-		job.nextRunMs = now + RETRY_DELAY_MS
+		local stepDelay = INDEX_DELAY_MS
+		if summary.phase ~= "index" then
+			-- Los remove/add replicados son lo caro y conservan la pausa larga.
+			-- Un barrido que no movió nada puede continuar antes sin generar red.
+			stepDelay = (summary.moved or 0) > 0 and MOVE_DELAY_MS or MOVE_IDLE_DELAY_MS
+		end
+		job.nextRunMs = now + stepDelay
+		local phaseChanged = summary.phase ~= job.lastPhase
+		if phaseChanged or now - (job.lastProgressMs or 0) >= PROGRESS_INTERVAL_MS then
+			job.lastPhase = summary.phase
+			job.lastProgressMs = now
+			notifyProgress(job, summary)
+		end
 	else
 		finishJob(networkId, job, summary.reason)
 	end
@@ -180,6 +233,9 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		failed    = 0,
 		skipped   = 0,
 		watchers  = {},
+		session   = nil,
+		lastPhase = nil,
+		lastProgressMs = 0,
 	}
 	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId) .. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled))
 	return true

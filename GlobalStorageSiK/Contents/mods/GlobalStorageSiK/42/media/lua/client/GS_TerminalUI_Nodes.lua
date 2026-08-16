@@ -503,6 +503,8 @@ local function createNodeRow(scroll, listPanel, terminal)
 			if GlobalStorageSiK.NodeHighlight then
 				GlobalStorageSiK.NodeHighlight.highlightZone(data.zoneId, data.zoneName, allNodes)
 			end
+			if self.terminal and self.terminal.canEditNetworkConfig
+				and not self.terminal:canEditNetworkConfig(true) then return true end
 			local zones = self.terminal and self.terminal.terminalState and self.terminal.terminalState.zones or {}
 			local zoneObj = nil
 			for i = 1, #zones do
@@ -522,7 +524,8 @@ local function createNodeRow(scroll, listPanel, terminal)
 			end
 			local state = self.terminal and self.terminal.terminalState or {}
 			local playerRole = state.permissions and state.permissions.playerRole or "member"
-			if playerRole ~= "member" then
+			if playerRole ~= "member" and (not self.terminal.canEditNetworkConfig
+				or self.terminal:canEditNetworkConfig(true)) then
 				GlobalStorageSiK.TerminalNodeEditor.open(self.terminal, data.node, self.listPanel._categories or {})
 			end
 			return true
@@ -756,25 +759,29 @@ function GlobalStorageSiK.TerminalNodes.refresh(nodesPanel, terminal, nodes, cat
 	-- abrir cada editor. El servidor conserva su validacion normal de permisos.
 	panel._canonicalMigrationSent = panel._canonicalMigrationSent or {}
 	local catalog = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
-	for i = 1, #nodes do
-		local node = nodes[i]
-		local migrated = {}
-		local changed = false
-		local seen = {}
-		for _, rule in ipairs(node.categories or {}) do
-			local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(rule, catalog)
-			if canonical ~= rule then changed = true end
-			local sig = string.lower(canonical)
-			if not seen[sig] then
-				seen[sig] = true
-				migrated[#migrated + 1] = canonical
+	local configLocked = terminal and terminal.canEditNetworkConfig
+		and not terminal:canEditNetworkConfig(false)
+	if not configLocked then
+		for i = 1, #nodes do
+			local node = nodes[i]
+			local migrated = {}
+			local changed = false
+			local seen = {}
+			for _, rule in ipairs(node.categories or {}) do
+				local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(rule, catalog)
+				if canonical ~= rule then changed = true end
+				local sig = string.lower(canonical)
+				if not seen[sig] then
+					seen[sig] = true
+					migrated[#migrated + 1] = canonical
+				end
 			end
-		end
-		if changed then
-			node.categories = migrated
-			if node.id and not panel._canonicalMigrationSent[node.id] then
-				panel._canonicalMigrationSent[node.id] = true
-				GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = migrated })
+			if changed then
+				node.categories = migrated
+				if node.id and not panel._canonicalMigrationSent[node.id] then
+					panel._canonicalMigrationSent[node.id] = true
+					GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = migrated })
+				end
 			end
 		end
 	end
@@ -1046,6 +1053,11 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			end
 			ui.nodesPriorityInfoEndY = infoY
 		end
+	end
+	local configEnabled = not terminal.canEditNetworkConfig
+		or terminal:canEditNetworkConfig(false)
+	for _, button in ipairs({ ui.nodesRoomZoneBtn, ui.nodesStructureZoneBtn, ui.nodesSelectZoneBtn }) do
+		if button then button:setEnable(configEnabled) end
 	end
 
 	local embedH = embedPanelHeight()
