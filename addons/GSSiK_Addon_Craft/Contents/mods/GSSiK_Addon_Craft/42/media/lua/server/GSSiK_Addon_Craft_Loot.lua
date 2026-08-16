@@ -37,6 +37,11 @@ local function addToList(listName, itemType, weight)
 		return
 
 	end
+	for i = 1, #list.items, 2 do
+		if list.items[i] == itemType then
+			return
+		end
+	end
 
 	table.insert(list.items, itemType)
 
@@ -47,6 +52,9 @@ end
 
 
 function GSSiK_Addon_Craft.Loot.register()
+	if GSSiK_Addon_Craft.Loot.registered then
+		return
+	end
 
 	if not ProceduralDistributions or not ProceduralDistributions.list then
 
@@ -90,11 +98,21 @@ function GSSiK_Addon_Craft.Loot.register()
 
 		"LibraryBooks",
 
+		"LibraryMagazines",
+
+		"UniversityLibraryMagazines",
+
 		"LivingRoomShelf",
 
 		"MagazineRackMixed",
 
-		"ElectronicStoreBooks",
+		"MagazineRackPaperback",
+
+		"MagazineRackFancy",
+
+		"CrateMagazines",
+
+		"ElectronicStoreMagazines",
 
 		"ElectronicStoreMisc",
 
@@ -148,7 +166,7 @@ function GSSiK_Addon_Craft.Loot.register()
 
 		"ElectronicStoreMisc",
 
-		"SafehouseLoot",
+		"ArmyStorageElectronics",
 
 	}
 
@@ -172,13 +190,13 @@ function GSSiK_Addon_Craft.Loot.register()
 
 		"ElectronicStoreMisc",
 
-		"ElectronicStoreShelf",
+		"ElectronicStoreComputers",
 
-		"GarageMisc",
+		"GarageMechanics",
 
 		"ToolStoreTools",
 
-		"WarehouseElectronics",
+		"CrateElectronics",
 
 	}
 
@@ -192,9 +210,10 @@ function GSSiK_Addon_Craft.Loot.register()
 
 	end
 
+	GSSiK_Addon_Craft.Loot.registered = true
+
 end
 
 
 
 GSSiK_Addon_Craft.Loot.register()
-

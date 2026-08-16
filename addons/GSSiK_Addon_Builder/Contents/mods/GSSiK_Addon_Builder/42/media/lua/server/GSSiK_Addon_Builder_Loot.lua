@@ -18,11 +18,19 @@ local function addToList(listName, itemType, weight)
 	if not list or not list.items or not weight or weight <= 0 then
 		return
 	end
+	for i = 1, #list.items, 2 do
+		if list.items[i] == itemType then
+			return
+		end
+	end
 	table.insert(list.items, itemType)
 	table.insert(list.items, weight)
 end
 
 function GSSiK_Addon_Builder.Loot.register()
+	if GSSiK_Addon_Builder.Loot.registered then
+		return
+	end
 	if not ProceduralDistributions or not ProceduralDistributions.list then
 		return
 	end
@@ -39,8 +47,9 @@ function GSSiK_Addon_Builder.Loot.register()
 		"GSSiK_Addon_Builder.GS_DigitalWhiteboard_Stylus",
 	}
 	local bookLists = {
-		"LibraryBooks", "LivingRoomShelf", "MagazineRackMixed",
-		"ElectronicStoreBooks", "OfficeDesk", "ToolStoreBooks",
+		"LibraryBooks", "LibraryMagazines", "UniversityLibraryMagazines",
+		"LivingRoomShelf", "MagazineRackMixed", "MagazineRackPaperback", "MagazineRackFancy",
+		"CrateMagazines", "ElectronicStoreMagazines", "OfficeDesk", "ToolStoreBooks",
 	}
 	for i = 1, #bookLists do
 		addToList(bookLists[i], manualBuilder, manualW)
@@ -48,7 +57,7 @@ function GSSiK_Addon_Builder.Loot.register()
 	end
 	local rareLists = {
 		"ToolStoreTools", "CarpenterTools", "GarageTools",
-		"ElectronicStoreMisc", "SafehouseLoot", "ConstructionSiteTools",
+		"ElectronicStoreMisc", "CrateElectronics", "ToolStoreCarpentry",
 	}
 	for i = 1, #rareLists do
 		addToList(rareLists[i], installModule, moduleW)
@@ -58,8 +67,8 @@ function GSSiK_Addon_Builder.Loot.register()
 	-- montada, en tiendas de electronica y talleres (coherente con marco
 	-- metalico, panel y lapiz optico).
 	local componentLists = {
-		"ElectronicStoreMisc", "ElectronicStoreShelf", "GarageTools",
-		"ToolStoreTools", "OfficeDesk",
+		"ElectronicStoreMisc", "ElectronicStoreComputers", "GarageTools",
+		"ToolStoreTools", "CrateElectronics", "OfficeDesk",
 	}
 	for i = 1, #componentLists do
 		for j = 1, #componentItems do
@@ -75,6 +84,8 @@ function GSSiK_Addon_Builder.Loot.register()
 	for i = 1, #diskLists do
 		addToList(diskLists[i], installDisk, installDiskW)
 	end
+
+	GSSiK_Addon_Builder.Loot.registered = true
 end
 
 GSSiK_Addon_Builder.Loot.register()

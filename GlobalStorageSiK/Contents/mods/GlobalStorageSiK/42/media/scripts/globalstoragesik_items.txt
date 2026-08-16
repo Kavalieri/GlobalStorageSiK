@@ -223,7 +223,7 @@ module GlobalStorageSiK
 	   propia receta de vanilla (sin el soldador como requisito - no puede
 	   exigirse la herramienta que aun no existe), su propia opcion de
 	   sandbox y su propio peso de loot, igual que el resto de piezas
-	   intermedias del mod (ver GS_Distributions.lua, partsW). */
+	   intermedias del mod (ver GS_LootDistributions.lua). */
 	item GS_SolderingTip
 	{
 		DisplayName = GS Soldering Tip,

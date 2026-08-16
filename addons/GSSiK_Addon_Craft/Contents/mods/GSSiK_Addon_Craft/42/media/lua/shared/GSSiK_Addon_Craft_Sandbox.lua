@@ -13,7 +13,7 @@ GSSiK_Addon_Craft.Sandbox = {}
 --- (modversion=) en cada release, mismo criterio ya usado en Core con
 --- GS_Config.MOD_VERSION (ver CLAUDE.md raiz, regla 7bis: mod.info es la
 --- unica fuente de verdad de version, esto es solo un espejo para la UI).
-GSSiK_Addon_Craft.VERSION = "1.0.3"
+GSSiK_Addon_Craft.VERSION = "1.0.4"
 
 --- Peso loot periférico instalable (Craft).
 ---@return number
@@ -45,7 +45,7 @@ end
 
 --- Peso loot del disco de instalacion ya programado (GS_FloppyDisk_Craft).
 --- Bajo a proposito, igual que Core con sus discos ya programados (mas raro
---- encontrarlo hecho que uno en blanco - ver GS_Distributions.lua de Core).
+--- encontrarlo hecho que uno en blanco - ver GS_LootDistributions.lua de Core).
 ---@return number
 function GSSiK_Addon_Craft.Sandbox.getLootInstallDiskWeight()
 	local v = SandboxVars.GSSiK_Addon_Craft

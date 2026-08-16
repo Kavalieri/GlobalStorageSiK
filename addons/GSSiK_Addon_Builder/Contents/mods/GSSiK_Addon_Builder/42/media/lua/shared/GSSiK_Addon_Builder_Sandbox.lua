@@ -10,7 +10,7 @@ GSSiK_Addon_Builder.Sandbox = {}
 --- Version del addon para mostrar en su propia pestaña del terminal - se
 --- sincroniza a mano con Contents/mods/GSSiK_Addon_Builder/42/mod.info
 --- (modversion=) en cada release, mismo criterio que Core (GS_Config.MOD_VERSION).
-GSSiK_Addon_Builder.VERSION = "1.0.2"
+GSSiK_Addon_Builder.VERSION = "1.0.3"
 
 --- Peso loot periférico instalable (Pizarra Digital GS).
 ---@return number

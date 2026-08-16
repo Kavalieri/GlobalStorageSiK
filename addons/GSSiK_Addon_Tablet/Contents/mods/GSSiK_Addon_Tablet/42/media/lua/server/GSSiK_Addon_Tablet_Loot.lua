@@ -22,6 +22,11 @@ local function addToList(listName, itemType, weight)
 	if not list or not list.items or not weight or weight <= 0 then
 		return
 	end
+	for i = 1, #list.items, 2 do
+		if list.items[i] == itemType then
+			return
+		end
+	end
 	table.insert(list.items, itemType)
 	table.insert(list.items, weight)
 end
@@ -36,6 +41,9 @@ local function addToLists(lists, itemType, weight)
 end
 
 function GSSiK_Addon_Tablet.Loot.register()
+	if GSSiK_Addon_Tablet.Loot.registered then
+		return
+	end
 	if not ProceduralDistributions or not ProceduralDistributions.list then
 		return
 	end
@@ -44,8 +52,9 @@ function GSSiK_Addon_Tablet.Loot.register()
 	local P = "GSSiK_Addon_Tablet."
 
 	local bookLists = {
-		"LibraryBooks", "LivingRoomShelf", "MagazineRackMixed",
-		"ElectronicStoreBooks", "ElectronicStoreMisc", "OfficeDesk",
+		"LibraryBooks", "LibraryMagazines", "UniversityLibraryMagazines",
+		"LivingRoomShelf", "MagazineRackMixed", "MagazineRackPaperback", "MagazineRackFancy",
+		"CrateMagazines", "ElectronicStoreMagazines", "ElectronicStoreMisc", "OfficeDesk",
 		"StoreShelfElectronics",
 	}
 	addToLists(bookLists, P .. "GS_Manual_Antenna", S.getLootManualAntennaWeight())
@@ -60,7 +69,7 @@ function GSSiK_Addon_Tablet.Loot.register()
 	-- cuanto mas alto el tier.
 	local rareLists = {
 		"ArmySurplusMisc", "SecurityLockers", "PoliceEvidence",
-		"ElectronicStoreMisc", "SafehouseLoot", "LockerArmyBedroom",
+		"ElectronicStoreMisc", "ArmyStorageElectronics", "LockerArmyBedroom",
 	}
 	addToLists(rareLists, P .. "GS_WifiAntenna", S.getLootAntennaWeight())
 	addToLists(rareLists, P .. "GS_WifiAntenna_T2", S.getLootAntennaT2Weight())
@@ -73,8 +82,8 @@ function GSSiK_Addon_Tablet.Loot.register()
 	-- Piezas sueltas: mas comunes que los montajes completos, en tiendas
 	-- de electronica.
 	local componentLists = {
-		"ElectronicStoreMisc", "ElectronicStoreShelf", "StoreShelfElectronics",
-		"WarehouseElectronics",
+		"ElectronicStoreMisc", "ElectronicStoreComputers", "StoreShelfElectronics",
+		"CrateElectronics",
 	}
 	addToLists(componentLists, P .. "GS_WifiAntenna_Dish", S.getLootAntennaDishWeight())
 	addToLists(componentLists, P .. "GS_WifiAntenna_Transmitter", S.getLootAntennaTransmitterWeight())
@@ -90,6 +99,8 @@ function GSSiK_Addon_Tablet.Loot.register()
 	-- GS_FloppyDisk_Tablet ya programado: sitios de electronica/oficina.
 	local diskLists = { "OfficeDesk", "ElectronicStoreMisc", "StoreShelfElectronics" }
 	addToLists(diskLists, P .. "GS_FloppyDisk_Tablet", S.getLootInstallDiskWeight())
+
+	GSSiK_Addon_Tablet.Loot.registered = true
 end
 
 GSSiK_Addon_Tablet.Loot.register()

@@ -475,7 +475,7 @@ function GlobalStorageSiK.Sandbox.getLootBooksWeight()
 	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.LootBooksWeight or 2.0
 end
 
---- Multiplicadores de sandbox por familia de item para GS_Distributions.lua
+--- Multiplicadores de sandbox por familia de item para GS_LootDistributions.lua
 --- (0 = nunca aparece en loot, 1.0 = comportamiento original). Mismo patron
 --- que ya usan los addons (GSSiK_Addon_Tablet_Sandbox.lua, getLoot*Weight).
 ---@return number
