@@ -751,6 +751,31 @@ function GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
 	return _fullCatalogRows
 end
 
+-- Algunos mods incluyen ScriptItems auxiliares con DisplayCategory de una sola
+-- letra (B, F...) o categorias compuestas cuyo segmento intermedio termina
+-- reducido a esa letra (FoodF). getText("IGUI_ItemCat_<clave>") puede existir
+-- para ellas, por lo que isDisplayCategoryKey() debe seguir aceptandolas para
+-- resolver items, pero no son dimensiones utiles para configurar un contenedor.
+--
+-- La comprobacion se limita deliberadamente a UNA letra ASCII. Una etiqueta
+-- localizada de un solo caracter en chino/japones sigue siendo valida, igual
+-- que cualquier clave real de Extended Categories o nuestros huecos de joyeria.
+---@param key string|nil clave canonica del nivel
+---@param label string|nil etiqueta localizada del nivel
+---@param parentKey string|nil clave canonica del nivel padre
+---@return boolean
+local function isUsefulFilterDimension(key, label, parentKey)
+	if not key or key == "" or not label or label == "" then return false end
+	local keyPart = tostring(key):match("^%s*(.-)%s*$") or ""
+	if parentKey and parentKey ~= "" and isCanonicalPrefix(keyPart, parentKey) and #keyPart > #parentKey then
+		keyPart = keyPart:sub(#parentKey + 1):gsub("^[_%-%s]+", "")
+	end
+	local labelPart = tostring(label):match("^%s*(.-)%s*$") or ""
+	if keyPart:match("^[A-Za-z]$") then return false end
+	if labelPart:match("^[A-Za-z]$") then return false end
+	return true
+end
+
 --- Recopila categorías principales presentes en filas (solo DisplayCategory válidas).
 ---@param rows table[]
 ---@return table[] { key: string, label: string, typeCount: number }
@@ -772,7 +797,7 @@ function GlobalStorageSiK.ItemTaxonomy.collectMainFilters(rows)
 	for i = 1, #rows do
 		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(rows[i].fullType, rows[i])
 		if tax.mainKey ~= "" and GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(tax.mainCanon)
-			and tax.groupKey and tax.groupKey ~= "" and tax.groupLabel ~= "" then
+			and isUsefulFilterDimension(tax.groupKey, tax.groupLabel, nil) then
 			local label = tax.groupLabel
 			local sig = string.lower(tax.groupKey)
 			local key = EXT .. tax.groupKey
@@ -850,7 +875,7 @@ function GlobalStorageSiK.ItemTaxonomy.collectSubFilters(rows, mainKey)
 				.. " groupLabel=" .. tostring(tax.groupLabel) .. " subGroupLabel=" .. tostring(tax.subGroupLabel))
 		end
 		if tax.groupKey and string.lower(tax.groupKey) == groupLower
-			and tax.subGroupKey and tax.subGroupKey ~= "" and tax.subGroupLabel and tax.subGroupLabel ~= "" then
+			and isUsefulFilterDimension(tax.subGroupKey, tax.subGroupLabel, tax.groupKey) then
 			local label = tax.subGroupLabel
 			local sig2 = string.lower(tax.subGroupKey)
 			local key = SUB .. groupOriginal .. "::" .. tax.subGroupKey
@@ -934,12 +959,16 @@ function GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(rows, mainKey, subKey)
 				else
 					key = tax.mainCanon
 				end
-				local sig2 = string.lower(key)
-				if not map[sig2] then
-					map[sig2] = { key = key, label = label, typeCount = 0 }
-					list[#list + 1] = map[sig2]
+				local dimensionKey = tax.jewelrySlotKey or tax.categoryLeafKey or tax.subCanon or tax.mainCanon
+				local dimensionParent = tax.categoryLeafKey and (tax.subGroupKey or tax.groupKey) or nil
+				if isUsefulFilterDimension(dimensionKey, label, dimensionParent) then
+					local sig2 = string.lower(key)
+					if not map[sig2] then
+						map[sig2] = { key = key, label = label, typeCount = 0 }
+						list[#list + 1] = map[sig2]
+					end
+					map[sig2].typeCount = map[sig2].typeCount + 1
 				end
-				map[sig2].typeCount = map[sig2].typeCount + 1
 			end
 		end
 	end
