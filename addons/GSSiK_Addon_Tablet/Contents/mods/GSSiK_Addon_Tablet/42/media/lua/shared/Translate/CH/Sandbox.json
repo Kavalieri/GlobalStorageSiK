@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "找到教授如何写入Tablet安装磁盘的杂志的概率。0 = 不生成。",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet（调试）",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "调试模式（Tablet）",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "仅为Tablet插件启用额外的控制台日志。不影响游戏玩法。",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "警告：为Tablet插件启用额外控制台日志。调试日志可能降低游戏和服务器性能；仅用于定向诊断，正常游戏和生产服务器中请关闭。",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "战利品权重：预先编程好的安装磁盘",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "已编程的Tablet安装磁盘作为战利品在世界中出现频率的倍率（与其空白/可编程版本分开计算）。1.0 = 正常，0 = 永不生成（仅可制作）。",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "战利品权重：天线升级手册",

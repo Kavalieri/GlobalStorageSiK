@@ -11,6 +11,7 @@ require "GS_Redistribute"
 require "GS_PlayerUtils"
 require "GS_TerminalAccess"
 require "GS_TransferLock"
+require "GS_InventorySync"
 
 GlobalStorageSiK.RedistributeJob = {}
 
@@ -22,11 +23,28 @@ local MOVE_DELAY_MS = 1000
 local MOVE_IDLE_DELAY_MS = 250
 local BUSY_DELAY_MS = 500
 local GLOBAL_STEP_DELAY_MS = 100
-local PROGRESS_INTERVAL_MS = 15000
+local PROGRESS_INTERVAL_MS = 5000
+local MAX_BUSY_RETRIES = 120
+local MAX_STALLED_STEPS = 5
 
 local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped, watchers }
 local tickInstalled = false
 local nextGlobalRunMs = 0
+local onTick
+
+local function hasJobs()
+	for _ in pairs(jobs) do return true end
+	return false
+end
+
+local function uninstallTickIfIdle()
+	if hasJobs() then return end
+	if tickInstalled and Events and Events.OnTick and onTick then
+		Events.OnTick.Remove(onTick)
+	end
+	tickInstalled = false
+	nextGlobalRunMs = 0
+end
 
 local function nowMs()
 	if getTimestampMs then
@@ -56,6 +74,39 @@ local function eachRecipient(job, fn)
 	end
 end
 
+local function mergeCounts(dest, source)
+	for key, count in pairs(source or {}) do
+		dest[key] = (dest[key] or 0) + (tonumber(count) or 0)
+	end
+end
+
+local function tierSummary(counts)
+	local parts = {}
+	for tier = 1, 5 do
+		local count = counts and counts[tostring(tier)] or 0
+		if count > 0 then
+			parts[#parts + 1] = tostring(tier) .. ":" .. tostring(count)
+		end
+	end
+	return #parts > 0 and table.concat(parts, ",") or "none"
+end
+
+local function topTypeSummary(counts, limit)
+	local rows = {}
+	for fullType, count in pairs(counts or {}) do
+		rows[#rows + 1] = { fullType = tostring(fullType), count = tonumber(count) or 0 }
+	end
+	table.sort(rows, function(a, b)
+		if a.count ~= b.count then return a.count > b.count end
+		return a.fullType < b.fullType
+	end)
+	local parts = {}
+	for i = 1, math.min(#rows, limit or 8) do
+		parts[#parts + 1] = rows[i].fullType .. ":" .. tostring(rows[i].count)
+	end
+	return #parts > 0 and table.concat(parts, ",") or "none"
+end
+
 local function notifyProgress(job, summary)
 	local messageKey = summary.phase == "index"
 		and "IGUI_GS_RedistributeProgressIndex"
@@ -64,7 +115,8 @@ local function notifyProgress(job, summary)
 		GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
 			ok = true,
 			message = GlobalStorageSiK.I18n.remote(messageKey,
-				summary.checked or 0, summary.total or 0, job.moved or 0),
+				summary.checked or 0, summary.total or 0, job.moved or 0,
+				job.skipped or 0, job.failed or 0),
 			jobType = "redistribute",
 			jobState = "running",
 		})
@@ -72,20 +124,30 @@ local function notifyProgress(job, summary)
 end
 
 local function finishJob(networkId, job, reason)
+	local tiers = tierSummary(job.movedByTier)
+	local topTypes = topTypeSummary(job.movedByType, 8)
 	GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. tostring(networkId) .. " reason=" .. tostring(reason)
-		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed))
+		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
+		.. " tiers=" .. tiers .. " topTypes=" .. topTypes)
 	jobs[networkId] = nil
+	-- Liberar el tick antes de cualquier notificación/UI potencialmente falible:
+	-- un error al informar no puede dejar polling sin un job que procesar.
+	uninstallTickIfIdle()
 	local summary = { moved = job.moved, failed = job.failed, skipped = job.skipped, reason = reason }
 	local msg
-	if reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
+	if reason == "network_busy" or reason == "stalled" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError")
+	elseif reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
 		msg = GlobalStorageSiK.Redistribute.formatSummaryMessage(summary)
 	elseif job.moved == 0 and job.failed == 0 then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeNothingToSort")
 	else
-		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeCompleteMsg", job.moved, job.failed)
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeCompleteMsg",
+			job.moved, job.skipped, job.failed)
 	end
 	local ok = reason ~= "remote_disabled" and reason ~= "no_power"
 		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
+		and reason ~= "network_busy" and reason ~= "stalled"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
@@ -100,6 +162,8 @@ local function finishJob(networkId, job, reason)
 			message = msg,
 			jobType = "redistribute",
 			jobState = "finished",
+			redistributeTiers = tiers,
+			redistributeTopTypes = topTypes,
 		})
 		if GlobalStorageSiK.Server and GlobalStorageSiK.Server.pushTerminalState then
 			-- terminalAnchor preserva las pestañas de addons en cada estado
@@ -116,7 +180,7 @@ end
 --- presupuestos y podia volver a bloquear el servidor aunque cada red
 --- individual estuviera limitada. El job procesado aplaza su siguiente turno,
 --- por lo que los demas vencidos quedan elegibles en los ticks siguientes.
-local function onTick()
+onTick = function()
 	local now = nowMs()
 	if now < nextGlobalRunMs then return end
 	local networkId = nil
@@ -151,15 +215,26 @@ local function onTick()
 	-- está activa, Auto Sort cede el turno sin invalidar su captura/cursor.
 	local acquired = GlobalStorageSiK.TransferLock.acquire(networkId, player, "redistribute")
 	if not acquired then
+		job.busyRetries = (job.busyRetries or 0) + 1
+		if job.busyRetries > MAX_BUSY_RETRIES then
+			GlobalStorageSiK.Log.error("RedistributeJob", "network remained busy",
+				"networkId=" .. tostring(networkId) .. " retries=" .. tostring(MAX_BUSY_RETRIES))
+			finishJob(networkId, job, "network_busy")
+			return
+		end
 		job.nextRunMs = now + BUSY_DELAY_MS
 		return
 	end
-	local ok, summary, session = pcall(
-		GlobalStorageSiK.Redistribute.redistributeNetwork, player, networkId, job.session)
+	job.busyRetries = 0
+	local ok, summary, session = pcall(function()
+		return GlobalStorageSiK.InventorySync.withBatch(function()
+			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session)
+		end)
+	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
 	if ok then
 		job.session = session
-		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
+		GlobalStorageSiK.Log.detail("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
 			.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped)
 			.. " checked=" .. tostring(summary.checked) .. "/" .. tostring(summary.total)
 			.. " phase=" .. tostring(summary.phase) .. " reason=" .. tostring(summary.reason))
@@ -175,11 +250,26 @@ local function onTick()
 	job.moved   = job.moved   + (summary.moved   or 0)
 	job.failed  = job.failed  + (summary.failed  or 0)
 	job.skipped = job.skipped + (summary.skipped or 0)
+	mergeCounts(job.movedByTier, summary.movedByTier)
+	mergeCounts(job.movedByType, summary.movedByType)
 	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
 		and GlobalStorageSiK.Server.markInventoryDirty then
-		GlobalStorageSiK.Server.markInventoryDirty(networkId)
+		GlobalStorageSiK.Server.markInventoryDirty(networkId, player)
 	end
 	if summary.reason == "limit" then
+		local progressKey = tostring(summary.phase) .. ":" .. tostring(summary.checked or 0)
+		if progressKey == job.lastProgressKey then
+			job.stalledSteps = (job.stalledSteps or 0) + 1
+		else
+			job.lastProgressKey = progressKey
+			job.stalledSteps = 0
+		end
+		if job.stalledSteps >= MAX_STALLED_STEPS then
+			GlobalStorageSiK.Log.error("RedistributeJob", "job made no progress",
+				"networkId=" .. tostring(networkId) .. " cursor=" .. progressKey)
+			finishJob(networkId, job, "stalled")
+			return
+		end
 		-- No se envia un terminalState completo en cada paso intermedio. El
 		-- boton ya indica que el job sigue activo y el estado final refresca la
 		-- UI; esto evita otro payload grande repetido durante redes masivas.
@@ -236,6 +326,11 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		session   = nil,
 		lastPhase = nil,
 		lastProgressMs = 0,
+		lastProgressKey = nil,
+		stalledSteps = 0,
+		busyRetries = 0,
+		movedByTier = {},
+		movedByType = {},
 	}
 	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId) .. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled))
 	return true

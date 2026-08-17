@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Szansa na znalezienie magazynu uczącego zapisu dyskietki instalacyjnej Tablet. 0 = nigdy.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (debug)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Tryb debug (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Włącza dodatkowe logi konsoli tylko dla dodatku Tablet. Brak wpływu na rozgrywkę.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "OSTRZEŻENIE: włącza dodatkowe logi konsoli dla dodatku Tablet. Debugowanie może obniżyć wydajność gry i serwera; używaj tylko do ukierunkowanej diagnostyki i wyłączaj podczas normalnej gry oraz na serwerach produkcyjnych.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Waga lootu: gotowa zaprogramowana dyskietka instalacyjna",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Mnożnik częstotliwości pojawiania się jako loot już zaprogramowanej dyskietki instalacyjnej Tablet (inna niż jej pusta/programowalna wersja). 1.0 = normalnie, 0 = nigdy się nie pojawia (tylko do wytworzenia).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Waga lootu: podręcznik Ulepszeń Anteny",

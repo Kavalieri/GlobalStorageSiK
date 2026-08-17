@@ -1,13 +1,5 @@
 VERSION = 1,
 
-option GlobalStorageSiK.DebugSkipTerminalAccess
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugSkipTerminalAccess,
-}
-
 option GlobalStorageSiK.TerminalProximityRange
 {
 	type = integer,
@@ -76,14 +68,6 @@ option GlobalStorageSiK.MaxNodesPerNetwork
 	max = 256,
 	page = GlobalStorageSiK,
 	translation = GlobalStorageSiK_MaxNodesPerNetwork,
-}
-
-option GlobalStorageSiK.DebugSkipContainerRange
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugSkipContainerRange,
 }
 
 option GlobalStorageSiK.TerminalContainerMaxDistance
@@ -168,6 +152,14 @@ option GlobalStorageSiK.DebugMode
 	translation = GlobalStorageSiK_DebugMode,
 }
 
+option GlobalStorageSiK.DebugRelayToClients
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugRelayToClients,
+}
+
 option GlobalStorageSiK.DebugModeUI
 {
 	type = boolean,
@@ -182,6 +174,14 @@ option GlobalStorageSiK.DebugCatNetwork
 	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugCatNetwork,
+}
+
+option GlobalStorageSiK.DebugDetailNetwork
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailNetwork,
 }
 
 option GlobalStorageSiK.DebugCatTerminalAccess
@@ -200,12 +200,28 @@ option GlobalStorageSiK.DebugCatCraft
 	translation = GlobalStorageSiK_DebugCatCraft,
 }
 
+option GlobalStorageSiK.DebugDetailCraft
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailCraft,
+}
+
 option GlobalStorageSiK.DebugCatInventory
 {
 	type = boolean,
 	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugCatInventory,
+}
+
+option GlobalStorageSiK.DebugDetailInventory
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailInventory,
 }
 
 option GlobalStorageSiK.DebugCatTooltip
@@ -230,6 +246,30 @@ option GlobalStorageSiK.DebugCatRouter
 	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugCatRouter,
+}
+
+option GlobalStorageSiK.DebugDetailRouter
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailRouter,
+}
+
+option GlobalStorageSiK.DebugSkipTerminalAccess
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Testing,
+	translation = GlobalStorageSiK_DebugSkipTerminalAccess,
+}
+
+option GlobalStorageSiK.DebugSkipContainerRange
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Testing,
+	translation = GlobalStorageSiK_DebugSkipContainerRange,
 }
 
 option GlobalStorageSiK.RequirePower
@@ -308,6 +348,14 @@ option GlobalStorageSiK.BulkDepositEnabled
 	translation = GlobalStorageSiK_BulkDepositEnabled,
 }
 
+option GlobalStorageSiK.OperationHaloFeedback
+{
+	type = boolean,
+	default = true,
+	page = GlobalStorageSiK_Items,
+	translation = GlobalStorageSiK_OperationHaloFeedback,
+}
+
 option GlobalStorageSiK.RejectDepositIfNoMatch
 {
 	type = boolean,
@@ -330,16 +378,6 @@ option GlobalStorageSiK.RespectEquippedItems
 	default = true,
 	page = GlobalStorageSiK_Items,
 	translation = GlobalStorageSiK_RespectEquippedItems,
-}
-
-option GlobalStorageSiK.MaxItemsPerBulkTick
-{
-	type = integer,
-	default = 10,
-	min = 1,
-	max = 10,
-	page = GlobalStorageSiK_Items,
-	translation = GlobalStorageSiK_MaxItemsPerBulkTick,
 }
 
 option GlobalStorageSiK.RequireRecipeBooks

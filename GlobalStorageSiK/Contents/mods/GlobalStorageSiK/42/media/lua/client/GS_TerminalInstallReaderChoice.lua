@@ -22,6 +22,7 @@
 
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
+require "ISUI/ISComboBox"
 require "ISUI/ISTextEntryBox"
 require "GS_I18n"
 require "GS_NetClient"
@@ -42,7 +43,7 @@ local BTN_H = FONT_HGT_SMALL + 10
 local ENTRY_H = FONT_HGT_SMALL + 8
 local PANEL_W = 480
 local SECTION_GAP = 16
-local NETWORK_ROW_MAX = 6
+local NETWORK_INFO_LINE_COUNT = 8
 
 GS_TerminalInstallReaderChoice = ISPanel:derive("GS_TerminalInstallReaderChoice")
 
@@ -50,6 +51,33 @@ GS_TerminalInstallReaderChoice = ISPanel:derive("GS_TerminalInstallReaderChoice"
 local function networkRows()
 	local serverList = GlobalStorageSiK.Client and GlobalStorageSiK.Client.recoveryNetworks
 	return serverList or {}
+end
+
+local function recoveryLocationText(row)
+	local p = row and (row.lastLocation or row.anchor)
+	if not p or p.x == nil or p.y == nil then
+		return T("IGUI_GS_NetLocationUnknown")
+	end
+	return string.format("%d, %d, %d", math.floor(p.x), math.floor(p.y), math.floor(p.z or 0))
+end
+
+---@param row table
+---@param textW number
+---@return string[]
+local function recoverySummaryLines(row, textW)
+	local status = (row.activeTerminals or 0) > 0
+		and T("IGUI_GS_NetStatusActive") or T("IGUI_GS_NetStatusSuspended")
+	local texts = {
+		T("IGUI_GS_RecoveryNetworkStatusLine", row.label or row.name or row.networkId or "?", status),
+		T("IGUI_GS_NetCounts", row.zoneCount or 0, row.nodeCount or 0),
+		T("IGUI_GS_NetLastLocation", recoveryLocationText(row)),
+	}
+	local lines = {}
+	for i = 1, #texts do
+		local wrapped = GlobalStorageSiK.TerminalChrome.wrapTextLines(texts[i], textW, UIFont.Small)
+		for j = 1, #wrapped do lines[#lines + 1] = wrapped[j] end
+	end
+	return lines
 end
 
 --- Crea una o varias ISLabel (una por linea, con salto cuando no cabe en w)
@@ -78,6 +106,28 @@ local function addWrappedLabel(panel, x, y, w, text, r, g, b)
 	return labels, y
 end
 
+local function selectedRecoveryRow(panel)
+	local index = panel.networkCombo and panel.networkCombo.selected or 1
+	return panel.networkRows and panel.networkRows[index] or nil
+end
+
+local function refreshRecoverySelection(panel)
+	local row = selectedRecoveryRow(panel)
+	local lines = row and recoverySummaryLines(row, panel.width - PAD * 2) or {}
+	for i = 1, #(panel.networkInfoLbls or {}) do
+		local lbl = panel.networkInfoLbls[i]
+		lbl.name = lines[i] or ""
+		lbl:setVisible(lines[i] ~= nil)
+	end
+	if panel.networkActionBtn then
+		local label = row and ((row.activeTerminals or 0) > 0
+			and T("IGUI_GS_NetLinkAction") or T("IGUI_GS_NetReactivateAction"))
+			or T("IGUI_GS_NetLinkAction")
+		panel.networkActionBtn._gsNeatLabel = label
+		panel.networkActionBtn:setEnable(row ~= nil)
+	end
+end
+
 ---@param rows table[]
 ---@return number
 local function measurePanelHeight(rows)
@@ -100,8 +150,9 @@ local function measurePanelHeight(rows)
 			T("IGUI_GS_InstallReaderNoNetworks"), textW, UIFont.Small)
 		h = h + #noNetLines * (FONT_HGT_SMALL + LINE_GAP) + 4
 	else
-		local rowCount = math.min(#rows, NETWORK_ROW_MAX)
-		h = h + rowCount * (BTN_H + 6)
+		h = h + ENTRY_H + 6
+		h = h + NETWORK_INFO_LINE_COUNT * (FONT_HGT_SMALL + LINE_GAP)
+		h = h + BTN_H + 10
 	end
 	h = h + PAD
 	return math.max(320, h)
@@ -199,20 +250,41 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 	y = y + FONT_HGT_SMALL + 6
 
 	self.networkBtns = {}
+	self.networkInfoLbls = {}
+	self.networkCombo = nil
+	self.networkActionBtn = nil
 	if #rows == 0 then
 		self.noNetworksLbls, y = addWrappedLabel(self, pad, y, textW, T("IGUI_GS_InstallReaderNoNetworks"), 0.7, 0.55, 0.4)
 		y = y + 4
 	else
+		self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
+		self.networkCombo:initialise()
+		GlobalStorageSiK.TerminalChrome.styleComboBox(self.networkCombo)
 		for i = 1, #rows do
 			local row = rows[i]
-			local btn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-				pad, y, textW, BTN_H, row.label or row.networkId, self, function()
-					self:onLinkTo(row)
-				end)
-			self:addChild(btn)
-			self.networkBtns[#self.networkBtns + 1] = btn
-			y = y + BTN_H + 6
+			local status = (row.activeTerminals or 0) > 0
+				and T("IGUI_GS_NetStatusActive") or T("IGUI_GS_NetStatusSuspended")
+			self.networkCombo:addOption((row.label or row.networkId or "?") .. " - " .. status)
 		end
+		self.networkCombo.onChange = function() refreshRecoverySelection(self) end
+		self:addChild(self.networkCombo)
+		y = y + ENTRY_H + 6
+
+		for i = 1, NETWORK_INFO_LINE_COUNT do
+			local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, "", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
+			lbl:initialise()
+			self:addChild(lbl)
+			self.networkInfoLbls[#self.networkInfoLbls + 1] = lbl
+			y = y + FONT_HGT_SMALL + LINE_GAP
+		end
+		self.networkActionBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			pad, y, textW, BTN_H, T("IGUI_GS_NetLinkAction"), self, function()
+				self:onLinkTo(selectedRecoveryRow(self))
+			end)
+		self:addChild(self.networkActionBtn)
+		self.networkBtns[1] = self.networkActionBtn
+		y = y + BTN_H + 6
+		refreshRecoverySelection(self)
 	end
 	return y
 end
@@ -285,6 +357,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.newTitle)
 	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.linkTitle)
 	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.noNetworksLbls or {})
+	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.networkInfoLbls or {})
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "TerminalInstallReaderChoice")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "TerminalInstallReaderChoice")
@@ -304,6 +377,9 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 	for _, lbl in ipairs(self.noNetworksLbls or {}) do
 		toRemove[#toRemove + 1] = lbl
 	end
+	for _, lbl in ipairs(self.networkInfoLbls or {}) do
+		toRemove[#toRemove + 1] = lbl
+	end
 	for _, w in ipairs(toRemove) do
 		if w then
 			self:removeChild(w)
@@ -314,7 +390,12 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 		self:removeChild(btn)
 		if btn.removeFromUIManager then btn:removeFromUIManager() end
 	end
-	self.linkTitle, self.noNetworksLbls, self.networkBtns = nil, nil, {}
+	if self.networkCombo then
+		self:removeChild(self.networkCombo)
+		if self.networkCombo.removeFromUIManager then self.networkCombo:removeFromUIManager() end
+	end
+	self.linkTitle, self.noNetworksLbls, self.networkBtns, self.networkInfoLbls = nil, nil, {}, {}
+	self.networkCombo, self.networkActionBtn = nil, nil
 	local y = self:buildLinkSection(startY, textW)
 	y = y + 6
 	if self.statusLabel then
@@ -322,8 +403,10 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 	end
 	y = y + FONT_HGT_SMALL + pad
 	self:setHeight(y)
+	GlobalStorageSiK.TerminalChrome.centerModal(self)
 	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.linkTitle)
 	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.noNetworksLbls or {})
+	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.networkInfoLbls or {})
 end
 
 --- Abre el diálogo. `target` = { x, y, z, object } del ordenador ya detectado.

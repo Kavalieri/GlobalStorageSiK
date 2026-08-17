@@ -71,7 +71,7 @@ GlobalStorageSiK.Config = {
 	-- Unificada con modversion de mod.info (antes llevaba un esquema interno
 	-- 0.10.x-preprod aparte, lo que dificultaba saber que build produjo un
 	-- error en el log). A partir de aqui suben siempre juntas.
-	MOD_VERSION = "1.3.75",
+	MOD_VERSION = "1.3.76",
 	ADDON_ID_TABLET = "TabletLink",
 	ADDON_ID_CRAFT = "Craft",
 	WEIGHT_WARN_PERCENT = 80,

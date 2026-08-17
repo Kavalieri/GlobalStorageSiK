@@ -11,17 +11,16 @@ require "GS_ItemTaxonomy"
 
 GlobalStorageSiK.Categories = {}
 
--- NOTA (v1.2.78): Accessory, FirstAid, Food, Gardening, Material y Weapon NO
--- estan aqui a proposito - igual que en GS_ItemTaxonomy.MAIN_DISPLAY_KEYS,
--- GS_CategoryRewrite.lua reescribe TODO item de esas categorias a una
--- subcategoria real mas especifica (nuestra o la de Extended Categories), asi
--- que ningun item vivo vuelve a reportarlas "en crudo".
+-- Bootstrap reducido para redes nuevas. La detección real de categorías se
+-- delega a GS_ItemTaxonomy. Food debe estar aquí: solo los perecederos se
+-- reescriben a FoodPerishable; la comida estable conserva Food general.
 GlobalStorageSiK.Categories.DEFAULTS = {
 	"Ammo",
 	"Clothing",
 	"Container",
 	"Cooking",
 	"Electronics",
+	"Food",
 	"Literature",
 	"Tool",
 	"VehicleMaintenance",

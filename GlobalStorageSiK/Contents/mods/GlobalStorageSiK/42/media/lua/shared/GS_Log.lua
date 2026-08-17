@@ -6,12 +6,10 @@
 ]]
 
 require "GS_Sandbox"
+require "GS_DebugRelay"
 
 GlobalStorageSiK.Log = GlobalStorageSiK.Log or {}
-
---- Hook opcional: cuando está establecido, cada línea de log se reenvía (servidor → cliente).
----@type function|nil
-GlobalStorageSiK.Log._echoHook = nil
+GlobalStorageSiK.Log._detailNoticeShown = GlobalStorageSiK.Log._detailNoticeShown or {}
 
 local PREFIX = "[GlobalStorageSiK"
 
@@ -48,7 +46,11 @@ local AREA_CATEGORY = {
 	Permissions = "TerminalAccess",
 	CraftUtils = "Craft",
 	RecipeTuning = "Craft",
+	-- El estado/fallo del hook pertenece al bloque Tooltip. El render por
+	-- frame usa un area separada y queda bajo el sublog masivo de inventario,
+	-- de modo que activar solo Tooltip no llena console.txt.
 	ItemNetworkTooltip = "Tooltip",
+	ItemNetworkTooltipDetail = "Inventory",
 	Server = "Inventory",
 	Deposit = "Inventory",
 	DepositClient = "Inventory",
@@ -68,14 +70,13 @@ local AREA_CATEGORY = {
 ---@param message string
 ---@param detail any|nil
 local function write(level, area, message, detail)
-	local line = "[" .. elapsedTag() .. "] " .. PREFIX .. ":" .. tostring(level) .. ":" .. tostring(area) .. "] " .. tostring(message)
+	local origin = GlobalStorageSiK.DebugRelay.processTag()
+	local line = "[" .. elapsedTag() .. "][" .. origin .. "] " .. PREFIX .. ":" .. tostring(level) .. ":" .. tostring(area) .. "] " .. tostring(message)
 	if detail ~= nil then
 		line = line .. " | " .. tostring(detail)
 	end
 	print(line)
-	if GlobalStorageSiK.Log._echoHook then
-		pcall(GlobalStorageSiK.Log._echoHook, line)
-	end
+	GlobalStorageSiK.DebugRelay.emit(line)
 end
 
 --- Error siempre visible (compatible con Error Magnifier).
@@ -129,6 +130,25 @@ function GlobalStorageSiK.Log.debug(area, message, detail)
 	write("DEBUG", area, message, detail)
 end
 
+--- Traza de alto volumen dentro de la categoria del area. Se usa para
+--- payloads completos y lineas por objeto/nodo; nunca se activa solo por
+--- encender el bloque padre.
+---@param area string
+---@param message string
+---@param detail any|nil
+function GlobalStorageSiK.Log.detail(area, message, detail)
+	local category = AREA_CATEGORY[area]
+	if not category or not GlobalStorageSiK.Sandbox.debugDetailEnabled(category) then
+		return
+	end
+	if not GlobalStorageSiK.Log._detailNoticeShown[category] then
+		GlobalStorageSiK.Log._detailNoticeShown[category] = true
+		write("SYSTEM", area, "DETAIL sublog enabled category=" .. tostring(category)
+			.. "; high-volume output may fill console.txt; use only for targeted diagnostics")
+	end
+	write("DETAIL", area, message, detail)
+end
+
 --- Ejecuta función con captura de error reportada.
 ---@param area string
 ---@param fn function
@@ -136,10 +156,11 @@ end
 ---@return boolean ok
 ---@return any result
 function GlobalStorageSiK.Log.pcall(area, fn, ...)
-	local results = { pcall(fn, ...) }
-	local ok = results[1]
+	-- Conservar posiciones aunque un retorno intermedio sea nil. Guardarlo en
+	-- una tabla y usar unpack sin limite puede truncar los valores posteriores.
+	local ok, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(fn, ...)
 	if not ok then
-		GlobalStorageSiK.Log.error(area, results[2])
+		GlobalStorageSiK.Log.error(area, r1)
 	end
-	return ok, unpack(results, 2)
+	return ok, r1, r2, r3, r4, r5, r6, r7, r8
 end

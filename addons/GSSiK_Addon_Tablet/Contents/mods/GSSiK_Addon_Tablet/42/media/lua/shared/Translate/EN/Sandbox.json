@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Chance to find the magazine that teaches how to program the Tablet install disk. 0 = no spawn.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (debug)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Debug mode (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Enables extra console logging for the Tablet add-on only. No gameplay effect.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "WARNING: Enables extra console logging for the Tablet add-on. Debug logging can reduce game and server performance; use only for targeted diagnostics and disable during normal play and on production servers.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Loot weight: pre-programmed install disk",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Multiplier for how often the already-programmed Tablet install disk spawns as loot in the world (separate from its blank/programmable counterpart). 1.0 = normal, 0 = never spawns (craft-only).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Loot weight: Antenna Upgrades manual",

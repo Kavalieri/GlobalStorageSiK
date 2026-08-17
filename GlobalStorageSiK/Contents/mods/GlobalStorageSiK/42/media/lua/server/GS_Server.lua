@@ -41,6 +41,7 @@ require "GS_TransferLock"
 
 require "GS_Redistribute"
 require "GS_RedistributeJob"
+require "GS_ZoneScanJob"
 
 require "GS_Bulk"
 
@@ -111,20 +112,9 @@ end
 --- en SP real, asi que esto es una llamada normal a funcion, no una
 --- reimplementacion de nada.
 
---- playerNum -> IsoPlayer para jugadores que han enviado al menos un
---- comando con DebugMode activo - BUG REAL encontrado (reportado: "el log
---- CraftDiag del servidor no llega marcado [SRV] al cliente como el resto"):
---- el echo hook antiguo solo se instalaba DENTRO de onClientCommand, valido
---- solo mientras se procesaba ESE comando concreto - cualquier log que
---- ocurriera despues (ej. CraftDiag, que se dispara cuando termina la accion
---- de crafteo varios segundos mas tarde, fuera de cualquier comando) nunca
---- tenia el hook activo y se perdia sin marca [SRV]. Ahora se registra a
---- cada jugador que hable con DebugMode activo, y el hook (instalado UNA
---- vez, no por comando) reenvia a todos los registrados, sin importar
---- cuando se dispare el log.
-local debugEchoPlayers = {}
-local debugEchoHookInstalled = false
-
+--- El reenvio de diagnostico ya no vive en este dispatcher. GS_DebugRelay
+--- conserva el origen, agrupa lineas y limita trafico sin referencias Java
+--- persistentes; los addons publican en la misma API neutral.
 -- characterId/username -> networkId de la terminal que ese cliente tiene realmente
 -- abierta. Los permisos de red NO equivalen a estar mirando la terminal:
 -- enviar el indice completo a todos los miembros tras cada lote de deposito
@@ -133,15 +123,14 @@ local terminalWatchNetworkByPlayer = {}
 local pendingTerminalRefreshes = {}
 local flushPendingTerminalRefreshes
 
--- networkId -> { dueMs, forceMs }. Crear snapshots ricos vuelve a recorrer
--- todos los items de todos los nodos vivos; hacerlo tras CADA bloque de 10
--- anulaba parte del beneficio del troceado. Se consolida tras un periodo de
--- calma y, en una red continuamente activa, se fuerza como maximo cada 10 s.
+-- networkId -> { dueMs, forceMs, username }. Tras una transferencia no se
+-- reconstruye el snapshot en un único tick: al vencer esta cola se inicia el
+-- mismo escaneo incremental y presupuestado usado al abrir el terminal.
 local pendingSnapshotSync = {}
 local SNAPSHOT_QUIET_MS = 2000
 local SNAPSHOT_FORCE_MS = 10000
 
-local function scheduleSnapshotSync(networkId)
+local function scheduleSnapshotSync(networkId, player, revision)
 	if not networkId then
 		return
 	end
@@ -149,10 +138,18 @@ local function scheduleSnapshotSync(networkId)
 	local pending = pendingSnapshotSync[networkId]
 	if pending then
 		pending.dueMs = now + SNAPSHOT_QUIET_MS
+		-- Una transferencia incremental activa no debe disparar una captura
+		-- completa a mitad del trabajo. El limite vuelve a contar desde el ultimo
+		-- bloque confirmado; cuando cesa la actividad, dueMs la ejecuta en 2 s.
+		pending.forceMs = now + SNAPSHOT_FORCE_MS
+		pending.revision = math.max(pending.revision or 0, revision or 0)
+		if player and player.getUsername then pending.username = player:getUsername() end
 	else
 		pendingSnapshotSync[networkId] = {
 			dueMs = now + SNAPSHOT_QUIET_MS,
 			forceMs = now + SNAPSHOT_FORCE_MS,
+			revision = revision or 0,
+			username = player and player.getUsername and player:getUsername() or nil,
 		}
 	end
 end
@@ -169,27 +166,49 @@ local function flushPendingSnapshotSync()
 	if not selectedId then
 		return
 	end
-	-- Quitar fuera del recorrido; si otra transferencia lo vuelve a ensuciar
-	-- despues, scheduleSnapshotSync creara una entrada nueva.
-	pendingSnapshotSync[selectedId] = nil
-	local ok, err = pcall(GlobalStorageSiK.Index.syncLiveSnapshots, selectedId)
-	if not ok then
-		GlobalStorageSiK.Log.error("Server", "snapshotSync", tostring(err))
+	local pending = pendingSnapshotSync[selectedId]
+	if GlobalStorageSiK.ZoneScanJob.isActive(selectedId) then
+		pending.dueMs = now + 500
+		return
+	end
+	local player = GlobalStorageSiK.PlayerUtils.resolveByUsername(pending.username)
+	if not player then
+		-- No conservar para siempre un trabajo sin consumidor. La próxima
+		-- apertura de la red ya inicia su propio scan incremental fresco.
+		pendingSnapshotSync[selectedId] = nil
+		GlobalStorageSiK.Log.detail("Server", "snapshotSync cancelled no_player network="
+			.. tostring(selectedId))
+		return
+	end
+	local started, reason = GlobalStorageSiK.ZoneScanJob.start(player, selectedId, {
+		background = true,
+	})
+	if started then
+		-- Quitar fuera del recorrido. Si otra transferencia ocurre durante el
+		-- job, scheduleSnapshotSync creará una nueva pasada posterior.
+		pendingSnapshotSync[selectedId] = nil
+	elseif reason == "active" or reason == "redistribute_active" then
+		pending.dueMs = now + 500
+	else
+		pending.dueMs = now + 1000
+		GlobalStorageSiK.Log.warn("Server", "snapshotSync deferred network="
+			.. tostring(selectedId) .. " reason=" .. tostring(reason))
 	end
 end
 
 --- Marca una red como modificada sin difundir el Global ModData completo.
 --- Expuesto solo para jobs server (p. ej. auto-ordenar), no es API de addons.
 ---@param networkId string|nil
-function GlobalStorageSiK.Server.markInventoryDirty(networkId)
+function GlobalStorageSiK.Server.markInventoryDirty(networkId, player)
 	if not networkId then
 		return
 	end
-	scheduleSnapshotSync(networkId)
-	local ok, err = pcall(GlobalStorageSiK.Index.bumpInventoryRevision, networkId, false)
+	local ok, revision = pcall(GlobalStorageSiK.Index.bumpInventoryRevision, networkId, false)
 	if not ok then
-		GlobalStorageSiK.Log.error("Server", "inventoryRevision", tostring(err))
+		GlobalStorageSiK.Log.error("Server", "inventoryRevision", tostring(revision))
+		revision = 0
 	end
+	scheduleSnapshotSync(networkId, player, revision)
 end
 
 local function terminalWatcherKey(player)
@@ -259,18 +278,6 @@ local lastOperationByPlayer = {}
 --- nativa de PZ.
 local lastNetworkIdByPlayer = {}
 
-local function installDebugEchoHook()
-	if debugEchoHookInstalled then
-		return
-	end
-	debugEchoHookInstalled = true
-	GlobalStorageSiK.Log._echoHook = function(line)
-		for _, p in pairs(debugEchoPlayers) do
-			sendServerCommand(p, GlobalStorageSiK.MOD_ID, "debugEcho", { line = line })
-		end
-	end
-end
-
 --- Envía comando al cliente con traza debug opcional.
 ---@param player IsoPlayer|nil
 ---@param command string
@@ -335,6 +342,7 @@ local function serializeNodes(networkId, player)
 				vanillaName = n.name,
 				zoneId = n.zoneId,
 				zoneName = zone.name,
+				zonePriority = tonumber(zone.priority) or 50,
 				categories = n.categories or {},
 				filters = n.filters or {},
 				membership = n.membership or "auto",
@@ -439,7 +447,15 @@ end
 ---@return table
 local function buildTerminalState(networkId, scanSummary, searchQuery, craftProbe, player)
 
-	local rows = GlobalStorageSiK.Index.buildRows(networkId, player)
+	local freshSnapshotScope = scanSummary and scanSummary._freshSnapshotScope or nil
+	local rows = GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
+	-- Los campos con prefijo "_" coordinan servidor/indice y no forman parte
+	-- del contrato MP. No mutar scanSummary: el mismo resultado se reutiliza
+	-- para todos los observadores de la red al completar un job incremental.
+	local scanPayload = {}
+	for key, value in pairs(scanSummary or {}) do
+		if string.sub(tostring(key), 1, 1) ~= "_" then scanPayload[key] = value end
+	end
 
 	if GlobalStorageSiK.Sandbox.debugMode() then
 		for i = 1, #rows do
@@ -466,7 +482,9 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		fuelConsumption = GlobalStorageSiK.Power.serializeConsumption(#nodesList),
 
-		scan = scanSummary or {},
+		scan = scanPayload,
+
+		scanActive = GlobalStorageSiK.ZoneScanJob.isActive(networkId),
 
 		zones = serializeZones(networkId),
 
@@ -498,6 +516,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 
 		inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+		snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId),
 
 	}
 end
@@ -940,6 +959,9 @@ local function requireNetworkPermission(player, networkId, resultMeta)
 		message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess"),
 		jobType = resultMeta and resultMeta.jobType or nil,
 		jobState = resultMeta and resultMeta.jobState or nil,
+		queueId = resultMeta and resultMeta.queueId or nil,
+		withdrawId = resultMeta and resultMeta.withdrawId or nil,
+		transferOp = resultMeta and resultMeta.transferOp or nil,
 	})
 	return false
 end
@@ -970,10 +992,42 @@ local function requireAdminAccess(player, networkId, resultMeta)
 	return false
 end
 
+--- Gate exclusivo de Auto Sort: solo roles persistentes owner/admin de ESTA
+--- red. Deliberadamente no aplica el override global de staff usado por las
+--- demás herramientas administrativas.
+---@param player IsoPlayer
+---@param networkId string
+---@param resultMeta table|nil
+---@return boolean
+local function requireAutoSortAccess(player, networkId, resultMeta)
+	if not requireNetworkPermission(player, networkId, resultMeta) then
+		return false
+	end
+	if GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId) then
+		return true
+	end
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeAdminOnly"),
+		jobType = resultMeta and resultMeta.jobType or nil,
+		jobState = resultMeta and resultMeta.jobState or nil,
+	})
+	return false
+end
+
 --- Mantiene estable el contrato de nodos/zonas que Auto Sort capturó. No
 --- bloquea depósitos ni retiros: solo cambios estructurales que alterarían los
 --- candidatos o sus reglas a mitad del job.
 local function requireNetworkConfigIdle(player, networkId)
+	if GlobalStorageSiK.ZoneScanJob.isActive(networkId) then
+		gsSendServerCommand(player, "actionResult", {
+			ok = false,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanConfigLocked"),
+			jobType = "zoneScan",
+			jobState = "running",
+		})
+		return false
+	end
 	if not GlobalStorageSiK.RedistributeJob.isActive(networkId) then return true end
 	gsSendServerCommand(player, "actionResult", {
 		ok = false,
@@ -987,9 +1041,10 @@ end
 --- Comprueba permisos y proximidad al terminal.
 ---@param player IsoPlayer
 ---@param networkId string
+---@param resultMeta table|nil
 ---@return boolean
-local function requireTerminalAccess(player, networkId)
-	if not requireNetworkPermission(player, networkId) then
+local function requireTerminalAccess(player, networkId, resultMeta)
+	if not requireNetworkPermission(player, networkId, resultMeta) then
 		return false
 	end
 	local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
@@ -1001,7 +1056,13 @@ local function requireTerminalAccess(player, networkId)
 		return true
 	end
 	local msg = ACCESS_MESSAGES[accessReason] or GlobalStorageSiK.I18n.remote("IGUI_GS_NoTerminalAccessMsg")
-	gsSendServerCommand(player, "actionResult", { ok = false, message = msg })
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = msg,
+		queueId = resultMeta and resultMeta.queueId or nil,
+		withdrawId = resultMeta and resultMeta.withdrawId or nil,
+		transferOp = resultMeta and resultMeta.transferOp or nil,
+	})
 	GlobalStorageSiK.TerminalAccess.clearSession(player)
 	return false
 end
@@ -1156,8 +1217,9 @@ end
 ---@param networkId string|nil
 ---@param op string
 ---@param fn function
+---@param resultMeta table|nil
 ---@return boolean ran
-local function runLockedTransfer(player, networkId, op, fn)
+local function runLockedTransfer(player, networkId, op, fn, resultMeta)
 	if not fn then
 		return false
 	end
@@ -1168,6 +1230,8 @@ local function runLockedTransfer(player, networkId, op, fn)
 			message = TRANSFER_BUSY_MSG,
 			reason = lockReason or "network_busy",
 			transferOp = op,
+			queueId = resultMeta and resultMeta.queueId or nil,
+			withdrawId = resultMeta and resultMeta.withdrawId or nil,
 		})
 		return false
 	end
@@ -1182,18 +1246,19 @@ local function runLockedTransfer(player, networkId, op, fn)
 			message = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError"),
 			reason = "transfer_error",
 			transferOp = op,
+			queueId = resultMeta and resultMeta.queueId or nil,
+			withdrawId = resultMeta and resultMeta.withdrawId or nil,
 		})
 		return false
 	end
 	return true
 end
 
---- Cuenta tipos por nodo VIVO (contenedor cargado) de una red, a partir de
---- registry.nodes[id].itemSnapshot - ya refrescado por
---- GlobalStorageSiK.Index.syncLiveSnapshots() justo antes en
---- afterTransferSync(). Usado para que la columna "Tipos" del listado de
---- nodos se actualice en el sync ligero tras depositar/retirar, sin esperar
---- a un pushTerminalState completo (BUG REAL reportado 2026-08-16: "la lista
+--- Cuenta tipos por nodo accesible a partir del snapshot persistido. No lee
+--- InventoryItem: el GS_ZoneScanJob actualiza la captura con presupuesto y
+--- después se envía el estado dirigido. Usado para que la columna "Tipos" del
+--- listado de nodos se actualice tras depositar/retirar (BUG REAL reportado
+--- 2026-08-16: "la lista
 --- de nodos no actualiza su cantidad de tipos distintos... retiré los items,
 --- debería poner 0 pero no actualiza si no cierro y abro o cambio de
 --- pestaña" - pushTerminalInventorySync solo mandaba agregados de red, nunca
@@ -1233,6 +1298,7 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 			items = rows,
 			searchQuery = searchQuery or "",
 			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId),
 			redistributeActive = GlobalStorageSiK.RedistributeJob.isActive(networkId),
 			itemTypeCount = #rows,
 			nodeTypeCounts = buildLiveNodeTypeCounts(networkId, player),
@@ -1311,22 +1377,21 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	-- contener snapshots de todos los nodos y, al depositar cientos de items,
 	-- se estaba difundiendo una vez por cada lote ademas de los mensajes
 	-- vanilla por objeto. El terminal se actualiza por terminalState, debajo.
-	GlobalStorageSiK.Server.markInventoryDirty(networkId)
+	GlobalStorageSiK.Server.markInventoryDirty(networkId, actor)
 	if options.suppressUi == true then
-		GlobalStorageSiK.Debug.log("Server", "afterTransferSync",
+		-- Una linea por microlote solo resulta util al diagnosticar la
+		-- consolidacion interna. El resumen funcional ya llega por actionResult.
+		GlobalStorageSiK.Log.detail("Server", "afterTransferSync",
 			"network=" .. tostring(networkId) .. " ui=suppressed")
 		return
 	end
-	local actorPushed = false
-	if actor and isTerminalWatcher(actor, networkId) then
-		pushTerminalInventorySync(actor, networkId, searchQuery)
-		actorPushed = true
-	end
-	local watchersPushed = pushTerminalStateToNetworkWatchers(actor, networkId, searchQuery)
-	GlobalStorageSiK.Debug.log("Server", "afterTransferSync",
+	-- El resultado de la operación ya se informa por actionResult. El catálogo
+	-- completo se enviará una sola vez al terminar el snapshot incremental de
+	-- fondo; reconstruirlo aquí recorría de nuevo miles de instancias y repetía
+	-- el mismo payload para cada lote.
+	GlobalStorageSiK.Log.detail("Server", "afterTransferSync",
 		"network=" .. tostring(networkId)
-			.. " actor=" .. tostring(actorPushed)
-			.. " otherWatchers=" .. tostring(watchersPushed))
+			.. " refresh=deferred_incremental")
 end
 
 --- Envía estado del terminal al cliente.
@@ -1421,6 +1486,149 @@ end
 GlobalStorageSiK.Server = GlobalStorageSiK.Server or {}
 GlobalStorageSiK.Server.pushTerminalState = pushTerminalState
 GlobalStorageSiK.Server.sendCommand = gsSendServerCommand
+
+--- Inicia/reengancha un reescaneo incremental. El estado inicial se sirve
+--- desde snapshots ya persistidos; el job enviara el resultado fresco solo a
+--- quienes observen esta red cuando termine.
+local function startIncrementalScan(player, networkId, searchQuery, zoneId)
+	local started, reason = GlobalStorageSiK.ZoneScanJob.start(player, networkId, {
+		zoneId = zoneId,
+		searchQuery = searchQuery or "",
+	})
+	if not started and reason ~= "active" then
+		local key = reason == "zone_not_found" and "IGUI_GS_ZoneNotFoundMsg"
+			or (reason == "redistribute_active" and "IGUI_GS_RedistributeConfigLocked")
+			or "IGUI_GS_ScanFailed"
+		gsSendServerCommand(player, "actionResult", {
+			ok = false,
+			message = GlobalStorageSiK.I18n.remote(key),
+			jobType = "zoneScan",
+			jobState = "finished",
+		})
+		return false, reason
+	end
+	gsSendServerCommand(player, "actionResult", {
+		ok = true,
+		message = GlobalStorageSiK.I18n.remote(reason == "active"
+			and "IGUI_GS_ScanAlreadyRunning" or "IGUI_GS_ScanStarted"),
+		jobType = "zoneScan",
+		jobState = "running",
+	})
+	return true, reason
+end
+
+--- Callback del job: un unico resumen y un terminalState dirigido por cliente.
+--- No hay ModData.transmit; clientes sin esta red abierta no reciben snapshots.
+function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, requestedWatchers)
+	local startRevision = summary._startRevision or 0
+	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	if currentRevision ~= startRevision then
+		-- El job recorrió la red mientras una transferencia seguía mutándola. Sus
+		-- nodos pueden pertenecer a instantes distintos: no publicar esa mezcla ni
+		-- certificarla como snapshot fresco. Programamos una pasada tras la pausa.
+		local retryPlayer = nil
+		for username in pairs(requestedWatchers or {}) do
+			retryPlayer = GlobalStorageSiK.PlayerUtils.resolveByUsername(username)
+			if retryPlayer then break end
+		end
+		if not retryPlayer then
+			forEachOnlinePlayer(function(player)
+				if not retryPlayer and isTerminalWatcher(player, networkId) then
+					retryPlayer = player
+				end
+			end)
+		end
+		scheduleSnapshotSync(networkId, retryPlayer, currentRevision)
+		GlobalStorageSiK.Log.warn("ZoneScanJob", "discard unstable network="
+			.. tostring(networkId) .. " startRevision=" .. tostring(startRevision)
+			.. " currentRevision=" .. tostring(currentRevision))
+		return
+	end
+	if summary._freshSnapshotScope == "network" then
+		GlobalStorageSiK.Index.setSnapshotRevision(networkId, currentRevision)
+	end
+	local pending = pendingSnapshotSync[networkId]
+	if pending and (pending.revision or 0) <= (summary._startRevision or -1) then
+		-- Este scan comenzó después del último cambio conocido y ya lo cubre.
+		-- Evitar una segunda pasada idéntica al vencer la cola de snapshots.
+		pendingSnapshotSync[networkId] = nil
+	end
+	forEachOnlinePlayer(function(player)
+		local username = player.getUsername and player:getUsername() or ""
+		local explicitlyRequested = requestedWatchers and requestedWatchers[username] ~= nil
+		-- Si el solicitante cerró o cambió de red durante el job, ya no debe
+		-- recibir un catálogo grande de la red anterior.
+		if isTerminalWatcher(player, networkId) then
+			local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
+			if allowed then
+				local query = explicitlyRequested and requestedWatchers[username] or ""
+				pushTerminalState(player, networkId, summary, query)
+				if summary._background ~= true then
+					gsSendServerCommand(player, "actionResult", {
+						ok = true,
+						message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanCompleteMetrics",
+							summary.durationMs or 0, summary.nodesScanned or 0,
+							summary.itemInstances or 0, summary.distinctTypes or 0,
+							summary.snapshotRows or 0),
+						jobType = "zoneScan",
+						jobState = "finished",
+					})
+				end
+			end
+		end
+	end)
+end
+
+function GlobalStorageSiK.Server.onNetworkScanFailed(networkId, requestedWatchers, errorText)
+	forEachOnlinePlayer(function(player)
+		if isTerminalWatcher(player, networkId) then
+			gsSendServerCommand(player, "actionResult", {
+				ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanFailed"),
+				jobType = "zoneScan",
+				jobState = "finished",
+			})
+		end
+	end)
+	GlobalStorageSiK.Log.error("Server", "zoneScan callback network=" .. tostring(networkId)
+		.. " error=" .. tostring(errorText))
+end
+
+local function clearDeletedNetworkReferences(networkId)
+	pendingSnapshotSync[networkId] = nil
+	local watcherKeys = {}
+	for key, watchedId in pairs(terminalWatchNetworkByPlayer) do
+		if watchedId == networkId then watcherKeys[#watcherKeys + 1] = key end
+	end
+	for i = 1, #watcherKeys do
+		local key = watcherKeys[i]
+		terminalWatchNetworkByPlayer[key] = nil
+		pendingTerminalRefreshes[key] = nil
+	end
+	forEachOnlinePlayer(function(player)
+		if GlobalStorageSiK.NetworkManager.getPlayerSessionNetwork(player) == networkId then
+			GlobalStorageSiK.NetworkManager.setPlayerSessionNetwork(player, nil)
+		end
+		if GlobalStorageSiK.TerminalAccess.getSessionNetworkId(player) == networkId then
+			GlobalStorageSiK.TerminalAccess.clearSession(player)
+		end
+	end)
+end
+
+local function broadcastNetworkLists()
+	forEachOnlinePlayer(function(player)
+		-- El manifiesto dirigido elimina inmediatamente terminales/redes borradas
+		-- de la caché del cliente; personajes offline se autorreparan al entrar.
+		GlobalStorageSiK.Server.pushTerminalManifest(player)
+		gsSendServerCommand(player, "networkList", {
+			networks = GlobalStorageSiK.NetworkManager.listForPlayer(player),
+			activeNetworkId = GlobalStorageSiK.NetworkManager.getPlayerSessionNetwork(player),
+		})
+		gsSendServerCommand(player, "recoveryNetworks", {
+			networks = GlobalStorageSiK.TerminalRecovery.buildNetworksForPlayer(player),
+		})
+	end)
+end
 
 -- Despacha como maximo un indice/estado completo a un espectador por tick.
 -- La tabla por clave de personaje deduplica multiples cambios de la misma red
@@ -1583,11 +1791,14 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 		GlobalStorageSiK.NetworkManager.setPlayerSessionNetwork(player, networkId)
 	end
 
-	local scanSummary = { added = 0, updated = 0, offline = 0, zones = 0 }
-
+	-- Abrir inmediatamente desde la ultima captura persistida. El barrido real
+	-- continua por ticks y refresca esta misma UI al terminar; una red con miles
+	-- de objetos ya no bloquea el handler de apertura ni duplica el recorrido.
+	local scanSummary = { running = false, _freshSnapshotScope = "network" }
 	if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen()
 		and not GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-		scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
+		local accepted = startIncrementalScan(player, networkId, searchQuery)
+		scanSummary.running = accepted == true
 	end
 
 	pushTerminalState(player, networkId, scanSummary, searchQuery, nil, true, accessMode, terminal, { openSeq = openSeq })
@@ -1698,6 +1909,65 @@ local function handleInstallTerminalReader(player, args)
 	})
 end
 
+--- Normaliza un filtro de nodo recibido por red. Se usa tanto al anadir una
+--- regla como al pegar una plantilla completa, para que ambos caminos tengan
+--- exactamente los mismos limites y nunca confien en tablas del cliente.
+---@param filter table|nil
+---@return table|nil
+local function sanitizeNodeFilter(filter)
+	if type(filter) ~= "table" then return nil end
+	if filter.type == "name" and filter.value and tostring(filter.value) ~= "" then
+		local mode = filter.mode
+		if mode ~= "exact" and mode ~= "startsWith" and mode ~= "endsWith" then mode = "contains" end
+		return { type = "name", mode = mode, value = tostring(filter.value):sub(1, 60) }
+	end
+	if filter.type == "weight" and tonumber(filter.value) then
+		local mode = filter.mode
+		local allowed = { gt = true, lt = true, gte = true, lte = true, between = true, eq = true }
+		if not allowed[mode] then mode = "eq" end
+		local clean = { type = "weight", mode = mode, value = tonumber(filter.value) }
+		if mode == "between" and tonumber(filter.value2) then clean.value2 = tonumber(filter.value2) end
+		return clean
+	end
+	if filter.type == "tag" and filter.value and tostring(filter.value) ~= "" then
+		return { type = "tag", value = tostring(filter.value):sub(1, 60) }
+	end
+	if filter.type == "item" and filter.itemType and tostring(filter.itemType) ~= "" then
+		return {
+			type = "item",
+			itemType = tostring(filter.itemType):sub(1, 120),
+			itemDisplay = filter.itemDisplay and tostring(filter.itemDisplay):sub(1, 60) or nil,
+		}
+	end
+	return nil
+end
+
+local function sanitizeNodeCategories(categories)
+	local result, seen = {}, {}
+	if type(categories) ~= "table" then return result end
+	for i = 1, math.min(#categories, 20) do
+		local category = tostring(categories[i] or ""):sub(1, 160)
+		if category ~= "" then
+			local signature = string.lower(category)
+			if not seen[signature] then
+				seen[signature] = true
+				result[#result + 1] = category
+			end
+		end
+	end
+	return result
+end
+
+local function cloneNodeFilters(filters)
+	local result = {}
+	for i = 1, #(filters or {}) do
+		local copy = {}
+		for key, value in pairs(filters[i]) do copy[key] = value end
+		result[i] = copy
+	end
+	return result
+end
+
 local function onClientCommand(module, command, player, args)
 
 	if module ~= GlobalStorageSiK.MOD_ID or not player then
@@ -1712,17 +1982,6 @@ local function onClientCommand(module, command, player, args)
 
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logServerRecv then
 		GlobalStorageSiK.NetTrace.logServerRecv(player, command, args)
-	end
-
-	-- Cuando debug activo, redirigir trazas del servidor a la consola del
-	-- cliente - hook PERSISTENTE (ver installDebugEchoHook), no solo durante
-	-- este comando, para que trazas asincronas (CraftDiag al terminar una
-	-- accion de crafteo, varios segundos despues) tambien lleguen marcadas
-	-- [SRV]. En SP real NUNCA se instala: cliente y servidor comparten la
-	-- misma consola/print, asi que cada linea ya se ve una vez sola.
-	if GlobalStorageSiK.Sandbox.debugMode() and not isTrueSingleplayer() then
-		debugEchoPlayers[player:getPlayerNum()] = player
-		installDebugEchoHook()
 	end
 
 	local networkId = GlobalStorageSiK.Network.resolveCommandNetworkId(player, args, command)
@@ -1765,10 +2024,11 @@ local function onClientCommand(module, command, player, args)
 				GlobalStorageSiK.TerminalAccess.setSessionAnchor(player, terminal, accessMode, networkId)
 			end
 			setTerminalWatcher(player, networkId)
-			local scanSummary = { added = 0, updated = 0, offline = 0, zones = 0 }
+			local scanSummary = { running = false, _freshSnapshotScope = "network" }
 			if GlobalStorageSiK.Sandbox.rescanOnTerminalOpen()
 				and not GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-				scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
+				local accepted = startIncrementalScan(player, networkId, searchQuery)
+				scanSummary.running = accepted == true
 			end
 			pushTerminalState(
 				player, networkId, scanSummary, searchQuery, nil, true, accessMode, terminal,
@@ -1780,10 +2040,11 @@ local function onClientCommand(module, command, player, args)
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
-		local scanSummary = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
-		pushTerminalState(player, networkId, scanSummary, searchQuery, nil, false, nil, anchor)
+		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+			requireNetworkConfigIdle(player, networkId)
+			return
+		end
+		startIncrementalScan(player, networkId, searchQuery)
 
 	elseif command == "getNodeContents" then
 		if not requireTerminalAccess(player, networkId) then
@@ -1915,9 +2176,65 @@ local function onClientCommand(module, command, player, args)
 				and GlobalStorageSiK.NetworkManager.getPlayerSessionNetwork(player),
 		})
 
+	elseif command == "deleteSuspendedNetwork" then
+		-- `networkId` sigue siendo la red del terminal desde el que se administra;
+		-- targetNetworkId es la red suspendida a eliminar. Asi se conserva la
+		-- validacion de acceso fisico/tableta a una red activa sin pretender abrir
+		-- una sesion contra una red que, por definicion, no tiene terminal activo.
+		if not requireTerminalAccess(player, networkId) then return end
+		local targetId = args.targetNetworkId
+		if type(targetId) ~= "string" or targetId == "" or #targetId > 128 then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg") })
+			return
+		end
+		local acquired = GlobalStorageSiK.TransferLock.acquire(targetId, player, "deleteNetwork")
+		if not acquired then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkDeleteBusy") })
+			return
+		end
+		local callOk, ok, reason, deleted = pcall(
+			GlobalStorageSiK.NetworkManager.deleteSuspendedNetwork, player, targetId)
+		GlobalStorageSiK.TransferLock.release(targetId, player)
+		if not callOk then
+			GlobalStorageSiK.Log.error("Server", "deleteSuspendedNetwork", tostring(ok))
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError") })
+			return
+		end
+		if not ok then
+			local key = reason == "owner_only" and "IGUI_GS_NetworkDeleteOwnerOnly"
+				or (reason == "active_terminals" and "IGUI_GS_NetworkDeleteActive")
+				or (reason == "network_busy" and "IGUI_GS_NetworkDeleteBusy")
+				or "IGUI_GS_NetworkNotFoundMsg"
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote(key),
+			})
+			return
+		end
+		clearDeletedNetworkReferences(targetId)
+		broadcastNetworkLists()
+		gsSendServerCommand(player, "actionResult", {
+			ok = true,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkDeleted",
+				deleted and deleted.name or targetId,
+				deleted and deleted.zones or 0, deleted and deleted.nodes or 0),
+		})
+
 	elseif command == "setActiveNetwork" then
 		local ok, reason = false, "error"
-		if GlobalStorageSiK.NetworkManager then
+		local requestedId = GlobalStorageSiK.Network.resolveNetworkId(args.networkId)
+		local requestedRegistry = GlobalStorageSiK.Network.getRegistry()
+		local requestedNet = requestedId and requestedRegistry.networks
+			and requestedRegistry.networks[requestedId] or nil
+		if requestedNet and GlobalStorageSiK.TerminalRecord.countActive(requestedNet) == 0 then
+			reason = "network_suspended"
+			gsSendServerCommand(player, "actionResult", {
+				ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NetReactivateViaTerminal"),
+			})
+		elseif GlobalStorageSiK.NetworkManager then
 			ok, reason = GlobalStorageSiK.NetworkManager.setPlayerSessionNetwork(player, args.networkId)
 		end
 		gsSendServerCommand(player, "activeNetworkSet", {
@@ -2096,7 +2413,11 @@ local function onClientCommand(module, command, player, args)
 		end)
 
 	elseif command == "depositItems" then
-		if not requireTerminalAccess(player, networkId) then
+		local depositMeta = {
+			queueId = type(args.queueId) == "string" and string.sub(args.queueId, 1, 96) or nil,
+			transferOp = "depositItems",
+		}
+		if not requireTerminalAccess(player, networkId, depositMeta) then
 			return
 		end
 
@@ -2115,6 +2436,8 @@ local function onClientCommand(module, command, player, args)
 			end
 			local operationId = type(args.operationId) == "string"
 				and string.sub(args.operationId, 1, 96) or nil
+			local queueId = type(args.queueId) == "string"
+				and string.sub(args.queueId, 1, 96) or nil
 			local requested = 0
 			if args.mode == "partial" then
 				requested = tonumber(args.count) or 0
@@ -2123,18 +2446,21 @@ local function onClientCommand(module, command, player, args)
 			elseif type(args.itemIds) == "table" then
 				requested = #args.itemIds
 			end
-			local summary
-			if args.mode == "container" and args.referenceItemId then
-				summary = GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, args.referenceItemId)
-			elseif args.mode == "partial" and args.referenceItemId and args.count then
-				summary = GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, args.referenceItemId, args.count)
-			else
-				summary = GlobalStorageSiK.Deposit.depositByIds(player, networkId, args.itemIds or {})
-			end
+			local summary = GlobalStorageSiK.InventorySync.withBatch(function()
+				if args.mode == "container" and args.referenceItemId then
+					return GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, args.referenceItemId)
+				elseif args.mode == "partial" and args.referenceItemId and args.count then
+					return GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, args.referenceItemId, args.count)
+				end
+				return GlobalStorageSiK.Deposit.depositByIds(player, networkId, args.itemIds or {})
+			end)
 
 			local msg = GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
-			GlobalStorageSiK.Log.info("Deposit", "depositItems origin=" .. tostring(origin)
+			local logFn = summary.reason == "limit" and GlobalStorageSiK.Log.detail
+				or GlobalStorageSiK.Log.info
+			logFn("Deposit", "depositItems origin=" .. tostring(origin)
 				.. " operationId=" .. tostring(operationId)
+				.. " queueId=" .. tostring(queueId)
 				.. " requested=" .. tostring(requested)
 				.. " moved=" .. tostring(summary.moved or 0)
 				.. " skipped=" .. tostring(summary.skipped or 0)
@@ -2146,6 +2472,7 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", {
 				ok = (summary.moved or 0) > 0,
 				message = msg,
+				queueId = queueId,
 				deposit = summary,
 				transfer = {
 					op = "deposit",
@@ -2159,10 +2486,16 @@ local function onClientCommand(module, command, player, args)
 					reason = summary.reason,
 				},
 			})
-		end)
+		end, depositMeta)
 
 	elseif command == "withdrawItem" then
-		if not requireTerminalAccess(player, networkId) then
+		local withdrawId = type(args.withdrawId) == "string"
+			and string.sub(args.withdrawId, 1, 96) or nil
+		local withdrawMeta = {
+			withdrawId = withdrawId,
+			transferOp = "withdrawItem",
+		}
+		if not requireTerminalAccess(player, networkId, withdrawMeta) then
 			return
 		end
 		runLockedTransfer(player, networkId, "withdrawItem", function()
@@ -2175,13 +2508,19 @@ local function onClientCommand(module, command, player, args)
 				end
 			end
 
-			local fullType = args.fullType
-			local requested = args.amount or 1
-			local availableBefore = GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, player)
-
-			local ok, reason, moved = GlobalStorageSiK.Transfer.withdrawType(
-				player, fullType, networkId, requested, dest
-			)
+			local fullType = type(args.fullType) == "string"
+				and string.sub(args.fullType, 1, 160) or nil
+			local requested = math.floor(tonumber(args.amount) or 1)
+			if requested <= 0 then requested = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
+			requested = math.min(requested, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
+			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
+			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
+			-- antes de confirmar al cliente, que decide si queda otro.
+			local ok, reason, moved = GlobalStorageSiK.InventorySync.withBatch(function()
+				return GlobalStorageSiK.Transfer.withdrawType(
+					player, fullType, networkId, requested, dest
+				)
+			end)
 
 			-- Texto vía I18n (nunca literales con acentos incrustados en el
 			-- .lua: se han visto mostrar "?" en vez de la tilde en cliente).
@@ -2196,22 +2535,24 @@ local function onClientCommand(module, command, player, args)
 				msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "?"))
 			end
 
-			afterTransferSync(player, networkId, searchQuery)
+			if (moved or 0) > 0 then
+				afterTransferSync(player, networkId, searchQuery)
+			end
 			gsSendServerCommand(player, "actionResult", {
 				ok = ok,
 				message = msg,
+				withdrawId = withdrawId,
 				transfer = {
 					op = "withdraw",
 					networkId = networkId,
 					fullType = fullType,
 					requested = requested,
 					moved = moved or 0,
-					available = availableBefore,
 					inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 					reason = reason,
 				},
 			})
-		end)
+		end, withdrawMeta)
 
 	elseif command == "craftAttemptStart" then
 		-- Solo diagnostico (ver newOperationId en GS_NetworkCraftSession.lua) -
@@ -2272,23 +2613,19 @@ local function onClientCommand(module, command, player, args)
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+			requireNetworkConfigIdle(player, networkId)
+			return
+		end
 		local zoneId = args.zoneId
 		if not zoneId or zoneId == "" then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 			return
 		end
-		local summary = GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
-		if not summary then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg") })
-			return
-		end
-		local msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneRescannedMsg", summary.added or 0, summary.offline or 0, summary.outOfRange or 0)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = msg })
-		pushTerminalState(player, networkId, summary, searchQuery)
+		startIncrementalScan(player, networkId, searchQuery, zoneId)
 
 	elseif command == "redistributeNetwork" then
-		if not requireAdminAccess(player, networkId, {
+		if not requireAutoSortAccess(player, networkId, {
 			jobType = "redistribute",
 			jobState = "finished",
 		}) then
@@ -2389,13 +2726,7 @@ local function onClientCommand(module, command, player, args)
 				end
 			end
 		elseif args.categories ~= nil then
-			node.categories = {}
-			for i = 1, #args.categories do
-				local cat = args.categories[i]
-				if cat and cat ~= "" then
-					table.insert(node.categories, cat)
-				end
-			end
+			node.categories = sanitizeNodeCategories(args.categories)
 		end
 		if args.enabled ~= nil then
 			node.enabled = args.enabled == true
@@ -2413,29 +2744,22 @@ local function onClientCommand(module, command, player, args)
 			local notes = tostring(args.notes):gsub("^%s*(.-)%s*$", "%1")
 			node.notes = (notes ~= "") and notes:sub(1, 120) or nil
 		end
-		if args.addFilter ~= nil then
+		if args.filters ~= nil then
+			-- Pegado de plantilla: reemplazo completo, acotado y validado. Un
+			-- payload malformado no conserva referencias del cliente ni supera el
+			-- mismo maximo de 20 reglas que el editor individual.
+			node.filters = {}
+			if type(args.filters) == "table" then
+				for i = 1, math.min(#args.filters, 20) do
+					local clean = sanitizeNodeFilter(args.filters[i])
+					if clean then node.filters[#node.filters + 1] = clean end
+				end
+			end
+		elseif args.addFilter ~= nil then
 			-- Añade UN filtro (validado aquí, nunca se confía en la forma
 			-- exacta que mandó el cliente). Límite razonable por nodo para
 			-- que la lista de filtros no crezca sin control.
-			local f = args.addFilter
-			local clean = nil
-			if f and f.type == "name" and f.value and tostring(f.value) ~= "" then
-				local mode = f.mode
-				if mode ~= "exact" and mode ~= "startsWith" and mode ~= "endsWith" then mode = "contains" end
-				clean = { type = "name", mode = mode, value = tostring(f.value):sub(1, 60) }
-			elseif f and f.type == "weight" and tonumber(f.value) then
-				local mode = f.mode
-				local allowed = { gt = true, lt = true, gte = true, lte = true, between = true, eq = true }
-				if not allowed[mode] then mode = "eq" end
-				clean = { type = "weight", mode = mode, value = tonumber(f.value) }
-				if mode == "between" and tonumber(f.value2) then
-					clean.value2 = tonumber(f.value2)
-				end
-			elseif f and f.type == "tag" and f.value and tostring(f.value) ~= "" then
-				clean = { type = "tag", value = tostring(f.value):sub(1, 60) }
-			elseif f and f.type == "item" and f.itemType and tostring(f.itemType) ~= "" then
-				clean = { type = "item", itemType = tostring(f.itemType), itemDisplay = f.itemDisplay and tostring(f.itemDisplay):sub(1, 60) or nil }
-			end
+			local clean = sanitizeNodeFilter(args.addFilter)
 			if clean then
 				node.filters = node.filters or {}
 				if #node.filters < 20 then
@@ -2466,6 +2790,52 @@ local function onClientCommand(module, command, player, args)
 		-- el resto tocara algo que disparase su propio refresco.
 		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
 
+	elseif command == "applyNodeTemplateToZone" then
+		if not requireAdminAccess(player, networkId) then return end
+		if not requireNetworkConfigIdle(player, networkId) then return end
+		local registry = GlobalStorageSiK.Zones.getRegistry()
+		local zone = registry.zones and registry.zones[args.zoneId]
+		if not zone or zone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
+			})
+			return
+		end
+		local categories = sanitizeNodeCategories(args.categories)
+		local filters = {}
+		if type(args.filters) == "table" then
+			for i = 1, math.min(#args.filters, 20) do
+				local clean = sanitizeNodeFilter(args.filters[i])
+				if clean then filters[#filters + 1] = clean end
+			end
+		end
+		local priority = tonumber(args.priority)
+		if not priority then
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg"),
+			})
+			return
+		end
+		priority = math.floor(priority + 0.5)
+		if priority < 1 then priority = 1 elseif priority > 100 then priority = 100 end
+		local updated = 0
+		for _, target in pairs(registry.nodes or {}) do
+			if target.zoneId == zone.id then
+				target.categories = {}
+				for i = 1, #categories do target.categories[i] = categories[i] end
+				target.filters = cloneNodeFilters(filters)
+				target.priority = priority
+				updated = updated + 1
+			end
+		end
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		gsSendServerCommand(player, "actionResult", {
+			ok = true,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneTemplateAppliedMsg", updated, zone.name or zone.id),
+		})
+		pushTerminalState(player, networkId, nil, searchQuery)
+		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
+
 	elseif command == "createZoneRoom" then
 		if not requireAdminAccess(player, networkId) then
 			return
@@ -2488,11 +2858,8 @@ local function onClientCommand(module, command, player, args)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 
 		if ok then
-
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-
-			pushTerminalState(player, networkId, scan, searchQuery)
-
+			startIncrementalScan(player, networkId, searchQuery, zone.id)
+			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
 
 	elseif command == "moveZonePriority" then
@@ -2502,8 +2869,8 @@ local function onClientCommand(module, command, player, args)
 		if not requireNetworkConfigIdle(player, networkId) then return end
 		local ok = GlobalStorageSiK.Zones.moveZonePriority(networkId, args.zoneId, args.direction)
 		if ok then
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-			pushTerminalState(player, networkId, scan, searchQuery)
+			-- Cambiar prioridad no altera el inventario ni exige volver a recorrerlo.
+			pushTerminalState(player, networkId, { _freshSnapshotScope = "network" }, searchQuery)
 		else
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg") })
 		end
@@ -2540,8 +2907,8 @@ local function onClientCommand(module, command, player, args)
 		local ok, message = addZone(zone)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-			pushTerminalState(player, networkId, scan, searchQuery)
+			startIncrementalScan(player, networkId, searchQuery, zone.id)
+			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
 
 	elseif command == "createZoneBuilding" then
@@ -2559,8 +2926,8 @@ local function onClientCommand(module, command, player, args)
 		local ok, message = addZone(zone)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-			pushTerminalState(player, networkId, scan, searchQuery)
+			startIncrementalScan(player, networkId, searchQuery, zone.id)
+			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
 
 	elseif command == "createZoneSafehouse" then
@@ -2597,11 +2964,8 @@ local function onClientCommand(module, command, player, args)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 
 		if ok then
-
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-
-			pushTerminalState(player, networkId, scan, searchQuery)
-
+			startIncrementalScan(player, networkId, searchQuery, zone.id)
+			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
 
 	elseif command == "createZoneSelection" then
@@ -2632,8 +2996,8 @@ local function onClientCommand(module, command, player, args)
 		local ok, message = addZone(zone)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
-			local scan = GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
-			pushTerminalState(player, networkId, scan, searchQuery)
+			startIncrementalScan(player, networkId, searchQuery, zone.id)
+			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
 
 	elseif command == "probeCraft" then

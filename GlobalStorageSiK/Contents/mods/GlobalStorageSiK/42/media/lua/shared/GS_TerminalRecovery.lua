@@ -9,6 +9,7 @@ require "GS_Network"
 require "GS_Permissions"
 require "GS_Sandbox"
 require "GS_TerminalPlacementIntent"
+require "GS_TerminalRecord"
 
 GlobalStorageSiK.TerminalRecovery = {}
 
@@ -21,6 +22,33 @@ local function networkLabel(net, networkId)
 		return net.name .. " (" .. string.sub(networkId, -8) .. ")"
 	end
 	return networkId
+end
+
+local function networkCounts(registry, networkId, net)
+	local zoneSet = {}
+	local zones = 0
+	for zoneId, zone in pairs(registry.zones or {}) do
+		if zone and zone.networkId == networkId then
+			zoneSet[zoneId] = true
+			zones = zones + 1
+		end
+	end
+	local nodes = 0
+	local seen = {}
+	for nodeId, node in pairs(registry.nodes or {}) do
+		if node and zoneSet[node.zoneId] then
+			seen[nodeId] = true
+			nodes = nodes + 1
+		end
+	end
+	for i = 1, #(net and net.containers or {}) do
+		local entry = net.containers[i]
+		if entry and entry.id and not seen[entry.id] then
+			seen[entry.id] = true
+			nodes = nodes + 1
+		end
+	end
+	return zones, nodes
 end
 
 --- Serializa redes a las que el jugador tiene acceso (servidor).
@@ -41,6 +69,9 @@ function GlobalStorageSiK.TerminalRecovery.buildNetworksForPlayer(player)
 		local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
 		if allowed and net then
 			local anchor = GlobalStorageSiK.TerminalRegistry.getActiveAnchor(net)
+			local zoneCount, nodeCount = networkCounts(registry, networkId, net)
+			local activeCount = GlobalStorageSiK.TerminalRegistry.countTerminals(net)
+			local last = GlobalStorageSiK.TerminalRecord.getLastKnownLocation(net)
 			-- No tiene sentido poder vincularse a una red cuya cobertura no
 			-- llega hasta donde estamos (ver GS_Sandbox.isWithinNetworkRange) -
 			-- se filtra aqui para no ofrecer en el dialogo una red que el
@@ -53,8 +84,14 @@ function GlobalStorageSiK.TerminalRecovery.buildNetworksForPlayer(player)
 					label = networkLabel(net, networkId),
 					owner = net.owner or "",
 					isOwner = GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId),
-					terminalCount = GlobalStorageSiK.TerminalRegistry.countTerminals(net),
+					terminalCount = activeCount,
+					activeTerminals = activeCount,
 					maxTerminals = GlobalStorageSiK.Sandbox.getMaxTerminalsPerNetwork(),
+					zoneCount = zoneCount,
+					nodeCount = nodeCount,
+					status = activeCount > 0 and "active" or "suspended",
+					suspended = activeCount == 0,
+					lastLocation = last and { x = last.x, y = last.y, z = last.z or 0 } or nil,
 					anchor = anchor and {
 						x = anchor.x,
 						y = anchor.y,

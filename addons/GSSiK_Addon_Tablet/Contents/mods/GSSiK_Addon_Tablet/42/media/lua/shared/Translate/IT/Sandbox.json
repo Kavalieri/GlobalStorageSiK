@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Probabilità di trovare la rivista che insegna a scrivere il dischetto di installazione Tablet. 0 = mai.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (debug)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Modalità debug (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Abilita log extra in console solo per l'addon Tablet. Nessun effetto sul gameplay.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "ATTENZIONE: abilita registri aggiuntivi in console per l'addon Tablet. Il debug può ridurre le prestazioni del gioco e del server; usalo solo per diagnosi mirate e disattivalo durante il gioco normale e in produzione.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Peso loot: dischetto di installazione già programmato",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Moltiplicatore della frequenza con cui il dischetto di installazione Tablet già programmato compare come loot nel mondo (distinto dalla sua versione vuota/programmabile). 1.0 = normale, 0 = non compare mai (solo craftabile).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Peso loot: manuale Potenziamenti Antenna",

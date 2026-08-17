@@ -11,6 +11,7 @@ require "GS_Log"
 require "GS_NetClient"
 require "GS_Debug"
 require "GS_NetTrace"
+require "GS_Sandbox"
 
 require "GS_NodeNaming"
 require "GS_I18n"
@@ -30,6 +31,13 @@ local function showMessage(text, failed)
 			player:setHaloNote(tostring(text), 220, 220, 220, 300)
 		end
 	end
+end
+
+---@param args table|nil
+---@return boolean
+local function isOperationFeedback(args)
+	return args ~= nil and (args.transfer ~= nil or args.deposit ~= nil or args.bulk ~= nil
+		or args.jobType == "redistribute")
 end
 
 --- Fusiona terminalState parcial de inventario con el estado cacheado previo.
@@ -114,37 +122,35 @@ local function onServerCommand(module, command, args)
 		-- para que cada cliente lo traduzca a SU propio idioma en vez de
 		-- heredar el idioma configurado en el proceso del servidor - ver
 		-- GlobalStorageSiK.I18n.remote / resolveRemote en GS_I18n.lua.
-		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
 		local continuing = false
 		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.onActionResult then
 			continuing = GlobalStorageSiK.TransferQueue.onActionResult(args) == true
 		end
+		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.onActionResult then
+			continuing = GlobalStorageSiK.WithdrawClient.onActionResult(args) == true or continuing
+		end
+		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
 		end
-		-- BUG REAL (2026-08-16, "no me deja encadenar retiros, no hay logs
-		-- de nada tras el primer bloqueo"): esto era un if/elseif, y como
-		-- GlobalStorageSiK.TerminalSync.onActionResult SIEMPRE existe, el
-		-- elseif de abajo (pensado para liberar WithdrawClient._pending
-		-- cuando TerminalSync no aplica) nunca se ejecutaba en la practica.
-		-- TerminalSync.onActionResult tambien libera _pending, pero solo si
-		-- args.transfer viene relleno (mira "not args or not args.transfer"
-		-- -> return temprano) - una respuesta de fallo de acceso al terminal
-		-- (requireTerminalAccess) NO incluye transfer, asi que _pending se
-		-- quedaba en true para siempre tras el primer fallo de acceso, y
-		-- WithdrawClient.sendWithdraw cortaba en silencio TODOS los retiros
-		-- siguientes sin ni siquiera contactar al servidor - de ahi que no
-		-- apareciera ningun log, ni de Router ni de Deposit ni de nada.
-		-- clearPending() es idempotente (poner false a false no hace nada),
-		-- asi que llamarla siempre aqui, incondicional, es seguro aunque
-		-- TerminalSync.onActionResult ya la haya llamado tambien.
-		if not continuing and GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.clearPending then
-			GlobalStorageSiK.WithdrawClient.clearPending()
-		end
+		-- Cada cola consume exclusivamente su operation ID. Una respuesta de
+		-- otra acción nunca libera ni hace avanzar depósitos o retiradas.
 		if not continuing then
-			showMessage(resolvedMessage or "Listo", args and args.ok == false)
+			local failed = args and args.ok == false
+			local showOperation = not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
+				or GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
+			-- Los errores nunca se silencian. La opción solo controla feedback
+			-- funcional de procesos largos; el resto de mensajes conserva su flujo.
+			if failed or not isOperationFeedback(args) or showOperation then
+				showMessage(resolvedMessage or "Listo", failed)
+			end
 		end
 		if args and args.jobType == "redistribute" then
+			if args.jobState == "finished" and (args.redistributeTiers or args.redistributeTopTypes) then
+				GlobalStorageSiK.Log.info("RedistributeJob", "completed breakdown",
+					"tiers=" .. tostring(args.redistributeTiers or "none")
+						.. " topTypes=" .. tostring(args.redistributeTopTypes or "none"))
+			end
 			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 			if ui and args.jobState == "running" and ui.onRedistributeStarted then
 				ui:onRedistributeStarted(resolvedMessage)
@@ -154,14 +160,28 @@ local function onServerCommand(module, command, args)
 				ui:onRedistributeFinished(args.ok == true, resolvedMessage)
 			end
 		end
+		if args and args.jobType == "zoneScan" then
+			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+			if ui and ui.terminalState then
+				ui.terminalState.scanActive = args.jobState == "running"
+				ui.terminalState.scan = ui.terminalState.scan or {}
+				ui.terminalState.scan.running = args.jobState == "running"
+				if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
+					GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
+				end
+			end
+		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
 			-- Cualquier deposito/retiro cambia cantidades en red: invalida la
 			-- cache del tooltip global para que no siga mostrando el numero
 			-- de antes de la transferencia.
 			GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
 		end
-		GlobalStorageSiK.Debug.log("Client", "actionResult", resolvedMessage or "")
-		GlobalStorageSiK.Debug.halo(GlobalStorageSiK.NetClient.getPlayer(), resolvedMessage or "")
+		if continuing then
+			GlobalStorageSiK.Log.detail("Client", "actionResult batch", resolvedMessage or "")
+		else
+			GlobalStorageSiK.Debug.log("Client", "actionResult", resolvedMessage or "")
+		end
 		local player = GlobalStorageSiK.NetClient.getPlayer()
 		if player and player.getInventory then
 			local inv = player:getInventory()
@@ -236,11 +256,9 @@ local function onServerCommand(module, command, args)
 			end
 		end
 	elseif command == "terminalState" then
-		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onTerminalState then
-			GlobalStorageSiK.TerminalSync.onTerminalState(args)
-		end
 		local itemCount = args and args.items and #args.items or 0
 		local explicitOpen = args and args.openUi == true
+		local inventorySync = args and args.inventorySync == true
 		local openSeq = args and args.openSeq
 		-- Solo se descarta como "respuesta vieja" si sabemos POSITIVAMENTE que
 		-- hay una petición más nueva todavía en vuelo (pendingTerminalOpen).
@@ -264,10 +282,16 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "openSeq desync resync -> " .. tostring(openSeq))
 			GlobalStorageSiK.Client.terminalOpenSeq = openSeq
 		end
-		if args and args.inventorySync then
+		if inventorySync then
 			args = mergeInventorySyncState(args, GlobalStorageSiK.Client.cachedTerminalState)
 		end
-		GlobalStorageSiK.Client.cachedTerminalState = args
+		local deferVisibleRefresh = false
+		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onTerminalState then
+			deferVisibleRefresh = GlobalStorageSiK.TerminalSync.onTerminalState(args, inventorySync) == true
+		end
+		if not deferVisibleRefresh then
+			GlobalStorageSiK.Client.cachedTerminalState = args
+		end
 		if args and args.networkId and GlobalStorageSiK.Client then
 			GlobalStorageSiK.Client.activeNetworkId = args.networkId
 		end
@@ -327,7 +351,17 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Client.lastServerAccessMode = args.accessMode
 		end
 
-		if uiVisible then
+		if deferVisibleRefresh then
+			GlobalStorageSiK.Log.detail("Client", "terminalState deferred during transfer",
+				"items=" .. tostring(itemCount))
+			if explicitOpen and not uiVisible and GlobalStorageSiK.Client.cachedTerminalState
+				and GlobalStorageSiK.Client.cachedTerminalState.networkId == args.networkId
+				and GlobalStorageSiK.TerminalUI and type(GlobalStorageSiK.TerminalUI.show) == "function" then
+				-- Reabrir con el modelo local ya confirmado en lugar de restaurar el
+				-- snapshot servidor anterior mientras termina la consolidación.
+				GlobalStorageSiK.TerminalUI.show(GlobalStorageSiK.Client.cachedTerminalState)
+			end
+		elseif uiVisible then
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "refresh items=" .. tostring(itemCount))
 			if GlobalStorageSiK.TerminalUI and type(GlobalStorageSiK.TerminalUI.show) == "function" then
 				local ok, err = pcall(function()
@@ -480,18 +514,12 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived then
 			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType, args and args.networks or {}, args and args.hasAnyNetwork)
 		end
-	elseif command == "debugEcho" then
-		if args and args.line and GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugMode() then
-			GlobalStorageSiK.Log.debug("Network", "serverEcho", tostring(args.line))
-		end
 	elseif command == "networkList" then
 		if not GlobalStorageSiK.Client then
 			GlobalStorageSiK.Client = {}
 		end
 		GlobalStorageSiK.Client.networkList = args and args.networks or {}
-		if args and args.activeNetworkId then
-			GlobalStorageSiK.Client.activeNetworkId = args.activeNetworkId
-		end
+		GlobalStorageSiK.Client.activeNetworkId = args and args.activeNetworkId or nil
 		local mainUi = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 		if mainUi and mainUi.refreshNetworkPanel then
 			mainUi:refreshNetworkPanel()
@@ -536,8 +564,8 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
 			GlobalStorageSiK.TransferQueue.clear()
 		end
-		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.clearPending then
-			GlobalStorageSiK.WithdrawClient.clearPending()
+		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
+			GlobalStorageSiK.WithdrawClient.cancelAll()
 		end
 		GlobalStorageSiK.Log.info("Client", "terminalBlocked", args and args.reason or "no_access")
 		local payload = args or {}

@@ -120,6 +120,25 @@ end)
 
 `debugLog(message)` enruta la traza al logger del addon activo. Nunca uses `print()` directo. Consulta [DEBUGGING.md](DEBUGGING.md).
 
+### Relé neutral de diagnósticos
+
+El Core expone `GlobalStorageSiK.DebugRelay` como transporte neutral. No contiene categorías ni decisiones específicas de Craft, Builder u otro addon.
+
+```lua
+local ok, relay = pcall(require, "GS_DebugRelay")
+if ok and relay then
+    relay.requestClientSubscription("ExampleAddon")
+    relay.emit(alreadyFormattedLine)
+end
+```
+
+- `processTag()` devuelve `CLI`, `SRV`, `HOST` o `SP` para formar una sola línea con origen estable.
+- `requestClientSubscription(source)` declara que el addon cliente quiere recibir lotes mientras su propio diagnóstico esté activo.
+- `emit(line)` entrega una línea ya formada al sink del dedicado; en otros procesos no crea una segunda copia.
+- `printRemotePayload(payload)` pertenece al receptor Core y no debe usarse para volver a loguear el payload.
+
+El servidor limita cola, tamaño de línea, bytes por lote y frecuencia de envío. Un addon no abre comandos de red propios si puede reutilizar este contrato. El addon sigue siendo responsable de su logger, categorías, sandbox, textos y decisión de cuándo suscribirse.
+
 ## Acceso a contenedores por zona
 
 Los permisos se conceden a zonas y se aplican a todos los contenedores que

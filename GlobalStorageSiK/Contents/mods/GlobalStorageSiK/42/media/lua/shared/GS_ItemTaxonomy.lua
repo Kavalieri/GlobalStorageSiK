@@ -20,13 +20,10 @@ GlobalStorageSiK.ItemTaxonomy = {}
 local _lastCollectSubFiltersSig = nil
 
 --- DisplayCategory base del juego (excluye rarezas tipo Badger/Fox del combo de filtros).
--- NOTA (v1.2.76): Accessory, Bandage, FirstAid, Food, Gardening, Material,
--- Weapon y WeaponCrafted NO estan aqui a proposito - GS_CategoryRewrite.lua
--- reescribe TODO item de esas categorias a una de nuestras subcategorias reales
--- (ver GS_Subcategories.lua, campo "override"), asi que ningun item vivo
--- vuelve a reportar la categoria vanilla "en crudo" nunca mas. Mantenerlas
--- aqui solo crearia una opcion fantasma en el editor de contenedor que jamas
--- coincidiria con ningun item.
+-- NOTA: Food sí permanece como categoría general. Solo los perecederos se
+-- reescriben a FoodPerishable; el resto conserva Food y actúa como fallback
+-- menos específico. Accessory, Bandage, FirstAid, Gardening, Material, Weapon
+-- y WeaponCrafted sí se reescriben por completo mediante GS_CategoryRewrite.
 GlobalStorageSiK.ItemTaxonomy.MAIN_DISPLAY_KEYS = {
 	"Ammo",
 	"Appearance",
@@ -41,6 +38,7 @@ GlobalStorageSiK.ItemTaxonomy.MAIN_DISPLAY_KEYS = {
 	"Entertainment",
 	"Explosives",
 	"Fishing",
+	"Food",
 	"Furniture",
 	"Household",
 	"Instrument",
@@ -205,6 +203,79 @@ GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX = "__subgroup__:"
 local WEAPON_TYPE_PREFIX = "__weapontype__:"
 local FLAT_CATEGORY_ROOTS = { firearm = true, weaponmelee = true }
 
+-- Gramática estable que usa Extended Categories para armas. No se deduce por
+-- texto localizado ni partiendo CamelCase: WeaponSmallBlunt significa
+-- Weapon > SmallBlunt (dos niveles), no Weapon > WeaponSmall > SmallBlunt.
+-- Las mismas claves se pueden resolver aunque el ScriptItem no esté disponible
+-- en el cliente, mientras que weapon*MeleeTypeKey confirma el tipo cuando sí lo
+-- está. Las combinaciones conservan su categoría primaria y el arma como hoja.
+local CAEC_MELEE_SUFFIX = {
+	Axe = "axe",
+	Blunt = "blunt",
+	SmallBlunt = "smallblunt",
+	LongBlade = "longblade",
+	SmallBlade = "smallblade",
+	Spear = "spear",
+	Crafted = "crafted",
+	Improvised = "crafted",
+}
+
+local CAEC_FIREARM_SUFFIX = {
+	Handgun = "handgun",
+	Rifle = "rifle",
+	Shotgun = "shotgun",
+}
+
+-- Raíces B42 cuyo nombre canónico contiene varias palabras. Sin esta lista,
+-- un separador CamelCase genérico convertiría AnimalPart en Animal, FirstAid
+-- en First o ProtectiveGear en Protective. Son identidad de primer nivel, no
+-- una jerarquía. Beverage/Liquid son raíces añadidas por Extended Categories.
+local ATOMIC_CATEGORY_ROOTS = {
+	"Accessory",
+	"AlarmClock",
+	"AnimalPart",
+	"Beverage",
+	"FireSource",
+	"FirstAid",
+	"Food",
+	"Gardening",
+	"LightSource",
+	"Liquid",
+	"Material",
+	"Memento",
+	"ProtectiveGear",
+	"RecipeResource",
+	"Smoking",
+	"VehicleMaintenance",
+	"WaterContainer",
+	"Weapon",
+}
+
+-- Extended Categories solo declara tres niveles puros para estas familias
+-- (además de Tool<X>OrWeapon<Y>, tratado por su gramática OrWeapon). El resto
+-- de claves concatenadas son conceptos completos de Nivel 2: SoftDrink,
+-- SmallBlunt, FancyBook, etc.; partir su última mayúscula inventa niveles.
+local CAEC_THREE_LEVEL_PARENT = {
+	FoodPerishable = true,
+	ContainerWearable = true,
+}
+
+-- Excepciones vanilla cuyo orden canónico no empieza por su familia visual.
+-- La identidad exacta se conserva como Nivel 2 para que el router siga
+-- comparando la DisplayCategory real.
+local EXACT_CATEGORY_GROUP = {
+	BrokenWeapon = "Weapon",
+}
+
+--- Última defensa para claves auxiliares realmente degeneradas. Se aplica
+--- después de normalizar la gramática de armas; por tanto W en un ScriptItem no
+--- oculta Weapon: el tipo ya se obtuvo de WeaponSmallBlunt/WeaponCategory.
+local function isSingleAsciiDimension(key)
+	if not key or key == "" then return false end
+	local part = tostring(key):match("^%s*(.-)%s*$") or ""
+	return part:match("^[A-Za-z]$") ~= nil
+end
+
 local _canonicalRootKeys = nil
 local function canonicalRootKeys()
 	if _canonicalRootKeys then return _canonicalRootKeys end
@@ -218,6 +289,10 @@ local function canonicalRootKeys()
 		if sub.parentCategory and sub.parentCategory ~= "" then
 			_canonicalRootKeys[string.lower(sub.parentCategory)] = sub.parentCategory
 		end
+	end
+	for i = 1, #ATOMIC_CATEGORY_ROOTS do
+		local key = ATOMIC_CATEGORY_ROOTS[i]
+		_canonicalRootKeys[string.lower(key)] = key
 	end
 	-- Firearm/WeaponMelee son familias de Nivel 1 deliberadas; sus tipos
 	-- (rifle, escopeta, hacha...) cuelgan como Nivel 2.
@@ -235,9 +310,10 @@ local function isCanonicalPrefix(value, prefix)
 end
 
 --- Devuelve la ruta canonica de una DisplayCategory, independiente del idioma.
---- Las relaciones propias conocidas tienen prioridad; para categorias
---- compuestas de terceros se usa su convencion CamelCase, nunca el texto
---- traducido. Una categoria desconocida sin raiz reconocible queda plana.
+--- Las relaciones propias conocidas y la gramática publicada por Extended
+--- Categories tienen prioridad. CamelCase solo identifica la familia raíz;
+--- nunca se usa para inventar niveles intermedios. Una categoría desconocida
+--- sin raíz reconocible queda plana.
 ---@param mainCanon string
 ---@param scriptItem any|nil
 ---@return string groupKey
@@ -246,36 +322,73 @@ end
 local function canonicalHierarchy(mainCanon, scriptItem)
 	if not mainCanon or mainCanon == "" then return "", nil, nil end
 	local roots = canonicalRootKeys()
-	local groupKey = nil
+	local groupKey = EXACT_CATEGORY_GROUP[mainCanon]
 	for _, candidate in pairs(roots) do
 		if isCanonicalPrefix(mainCanon, candidate)
 			and (not groupKey or #candidate > #groupKey) then
 			groupKey = candidate
 		end
 	end
-	-- Extended Categories puede aportar familias que no existen en nuestra
-	-- lista vanilla. Descubrir la raiz por el primer segmento CamelCase de la
-	-- propia clave. No consultar siquiera si existe una traduccion del prefijo:
-	-- cliente y dedicado deben derivar lo mismo aunque carguen idiomas distintos.
-	if not groupKey then
-		for pos = 2, #mainCanon do
-			local ch = mainCanon:sub(pos, pos)
-			local prev = mainCanon:sub(pos - 1, pos - 1)
-			if ch:match("%u") and prev:match("[%l%d]") then
-				groupKey = mainCanon:sub(1, pos - 1)
-				break
+	-- Una clave desconocida se conserva plana. CamelCase no codifica por sí
+	-- solo una jerarquía: SoftDrink, SmallBlade, KeyRing o AnimalPart son
+	-- conceptos atómicos reales. Solo las raíces/gramáticas registradas arriba
+	-- pueden crear niveles; así un mod nuevo sigue siendo filtrable por su clave
+	-- exacta sin que cliente y servidor inventen relaciones distintas.
+	groupKey = groupKey or mainCanon
+	if EXACT_CATEGORY_GROUP[mainCanon] then
+		return groupKey, mainCanon, nil
+	end
+
+	-- Categorías mixtas reales de Extended Categories:
+	-- ToolCarpentryOrWeaponSmallBlunt -> Tool > ToolCarpentry > clave exacta.
+	-- MaterialOrWeaponAxe             -> Material > clave exacta.
+	-- Nunca inventar un cuarto nivel ni usar la W de la subcategoría vanilla.
+	local comboPos = mainCanon:find("OrWeapon", 1, true)
+	if comboPos then
+		local primaryKey = mainCanon:sub(1, comboPos - 1)
+		local weaponSuffix = mainCanon:sub(comboPos + #"OrWeapon")
+		if primaryKey ~= "" and CAEC_MELEE_SUFFIX[weaponSuffix] then
+			if string.lower(primaryKey) == string.lower(groupKey) then
+				return groupKey, mainCanon, nil
 			end
+			return groupKey, primaryKey, mainCanon
 		end
 	end
-	groupKey = groupKey or mainCanon
-	if string.lower(mainCanon) == string.lower(groupKey) then
+
+	-- Armas puras de Extended Categories: familia -> tipo real. El helper del
+	-- ScriptItem tiene prioridad; el sufijo canónico permite la misma respuesta
+	-- en cliente y servidor incluso si uno de ellos no puede resolver el item.
+	local groupLower = string.lower(groupKey)
+	if groupLower == "weapon" then
+		local suffix = mainCanon:match("^Weapon(.+)$")
+		local weaponKey = GlobalStorageSiK.Subcategories.weaponMeleeTypeKey
+			and GlobalStorageSiK.Subcategories.weaponMeleeTypeKey(scriptItem) or nil
+		weaponKey = weaponKey or (suffix and CAEC_MELEE_SUFFIX[suffix]) or nil
+		if weaponKey then
+			return groupKey, WEAPON_TYPE_PREFIX .. "Weapon:" .. weaponKey, nil
+		end
+	elseif groupLower == "firearm" then
+		local suffix = mainCanon:match("^Firearm(.+)$")
+		local weaponKey = GlobalStorageSiK.Subcategories.weaponFirearmTypeKey
+			and GlobalStorageSiK.Subcategories.weaponFirearmTypeKey(scriptItem) or nil
+		weaponKey = weaponKey or (suffix and CAEC_FIREARM_SUFFIX[suffix]) or nil
+		if weaponKey then
+			return groupKey, WEAPON_TYPE_PREFIX .. "Firearm:" .. weaponKey, nil
+		end
+	end
+
+	-- Familias propias cuando Extended Categories no está instalado.
+	if FLAT_CATEGORY_ROOTS[string.lower(groupKey)] then
 		local weaponKey = nil
-		if mainCanon == "Firearm" and GlobalStorageSiK.Subcategories.weaponFirearmTypeKey then
+		if string.lower(groupKey) == "firearm" and GlobalStorageSiK.Subcategories.weaponFirearmTypeKey then
 			weaponKey = GlobalStorageSiK.Subcategories.weaponFirearmTypeKey(scriptItem)
-		elseif mainCanon == "WeaponMelee" and GlobalStorageSiK.Subcategories.weaponMeleeTypeKey then
+		elseif string.lower(groupKey) == "weaponmelee" and GlobalStorageSiK.Subcategories.weaponMeleeTypeKey then
 			weaponKey = GlobalStorageSiK.Subcategories.weaponMeleeTypeKey(scriptItem)
 		end
-		return groupKey, weaponKey and (WEAPON_TYPE_PREFIX .. mainCanon .. ":" .. weaponKey) or nil, nil
+		return groupKey, weaponKey and (WEAPON_TYPE_PREFIX .. groupKey .. ":" .. weaponKey) or nil, nil
+	end
+	if string.lower(mainCanon) == string.lower(groupKey) then
+		return groupKey, nil, nil
 	end
 
 	local subGroupKey = nil
@@ -284,26 +397,29 @@ local function canonicalHierarchy(mainCanon, scriptItem)
 		if sub.override and sub.parentCategory
 			and string.lower(sub.parentCategory) == string.lower(groupKey)
 			and isCanonicalPrefix(mainCanon, sub.override)
+			and (string.lower(mainCanon) == string.lower(sub.override)
+				or CAEC_THREE_LEVEL_PARENT[sub.override])
 			and not FLAT_CATEGORY_ROOTS[string.lower(sub.override)]
 			and (not subGroupKey or #sub.override > #subGroupKey) then
 			subGroupKey = sub.override
 		end
 	end
 
-	-- Adaptador generico para Extended Categories y mods equivalentes: su
-	-- contrato real concatena los niveles en CamelCase. Si no existe una
-	-- relacion propia registrada, el prefijo anterior al ultimo segmento es
-	-- el Nivel 2 (CookingCrockeryCup -> CookingCrockery).
+	-- Los únicos padres de tres niveles adicionales publicados hoy por EC. Las
+	-- relaciones GS registradas arriba (FoodPerishable, AccessoryJewelry, etc.)
+	-- siguen siendo la primera fuente y cubren también el modo sin EC.
 	if not subGroupKey then
-		for pos = #groupKey + 2, #mainCanon do
-			local ch = mainCanon:sub(pos, pos)
-			local prev = mainCanon:sub(pos - 1, pos - 1)
-			if ch:match("%u") and prev:match("[%l%d]") then
-				local candidate = mainCanon:sub(1, pos - 1)
-				if #candidate > #groupKey then subGroupKey = candidate end
+		for parentKey in pairs(CAEC_THREE_LEVEL_PARENT) do
+			if isCanonicalPrefix(mainCanon, parentKey) then
+				subGroupKey = parentKey
+				break
 			end
 		end
 	end
+	-- Cualquier otra clave concatenada representa UN concepto completo de
+	-- Nivel 2. Su etiqueta puede contener varias palabras, pero eso no crea más
+	-- niveles. Es la diferencia entre Beverage > Soft Drink (correcto) y el
+	-- antiguo Beverage > Soft > Drink (inventado).
 	if not subGroupKey then subGroupKey = mainCanon end
 	local leafKey = string.lower(subGroupKey) ~= string.lower(mainCanon) and mainCanon or nil
 	return groupKey, subGroupKey, leafKey
@@ -324,7 +440,8 @@ function GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key, parentKey)
 		local typeKey = sep and rest:sub(sep + 1) or rest
 		if family == "Firearm" and GlobalStorageSiK.Subcategories.weaponFirearmTypeLabel then
 			return GlobalStorageSiK.Subcategories.weaponFirearmTypeLabel(typeKey)
-		elseif family == "WeaponMelee" and GlobalStorageSiK.Subcategories.weaponMeleeTypeLabel then
+		elseif (family == "Weapon" or family == "WeaponMelee")
+			and GlobalStorageSiK.Subcategories.weaponMeleeTypeLabel then
 			return GlobalStorageSiK.Subcategories.weaponMeleeTypeLabel(typeKey)
 		end
 		return typeKey
@@ -479,10 +596,15 @@ function GlobalStorageSiK.ItemTaxonomy.readMainKey(item, scriptItem, fallback)
 	if (not raw or raw == "") and GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(fallback) then
 		raw = fallback
 	end
-	return GlobalStorageSiK.ItemTaxonomy.normalizeDisplayCategoryKey(raw)
+	local normalized = GlobalStorageSiK.ItemTaxonomy.normalizeDisplayCategoryKey(raw)
+	-- B/F/W procedentes de metadata técnica no son DisplayCategory utilizables.
+	-- Las categorías reales de armas/comida se resuelven por su clave completa o
+	-- por nuestras reescrituras base, nunca por estos códigos de tipo.
+	if isSingleAsciiDimension(normalized) then return nil end
+	return normalized
 end
 
---- Lee subcategoría (getCategory / BodyLocation; no Categories del script).
+--- Lee subcategoría semántica (BodyLocation; no Categories/getCategory).
 ---@param item any|nil
 ---@param scriptItem any|nil
 ---@param mainKey string|nil
@@ -506,17 +628,13 @@ function GlobalStorageSiK.ItemTaxonomy.readSubKey(item, scriptItem, mainKey, fal
 		end
 	end
 
-	if item and item.getCategory then
-		local cat = normKey(safeCall(function()
-			return item:getCategory()
-		end))
-		if cat and not keysEqual(cat, mainKey) and not GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(cat) then
-			return cat
-		end
-	end
-
 	local fb = normKey(fallback)
-	if fb and not keysEqual(fb, mainKey) and not GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(fb) then
+	-- Compatibilidad con snapshots antiguos: conservar BodyLocation/perk reales,
+	-- pero descartar B/F/W. InventoryItem:getCategory() en B42 expone esos
+	-- códigos de tipo y nunca fue una dimensión taxonómica válida.
+	if fb and not isSingleAsciiDimension(fb)
+		and not keysEqual(fb, mainKey)
+		and not GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(fb) then
 		return fb
 	end
 	return nil
@@ -644,7 +762,9 @@ function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 	-- SIN tabla nueva: subLabel ya existe y ya esta bien traducida hoy, solo
 	-- se expone aqui como nivel 3 en vez de ir solo dentro de fullLabel).
 	local gsLeafLabel = gsSubLabel ~= "" and gsSubLabel or nil
-	if subGroupKey and subGroupKey:sub(1, #WEAPON_TYPE_PREFIX) == WEAPON_TYPE_PREFIX then
+	local isWeaponTypeSubgroup = subGroupKey
+		and subGroupKey:sub(1, #WEAPON_TYPE_PREFIX) == WEAPON_TYPE_PREFIX
+	if isWeaponTypeSubgroup then
 		gsLeafLabel = nil
 	end
 	if subGroupKey and #gsSubKeys > 0 and GlobalStorageSiK.Subcategories.get then
@@ -653,7 +773,17 @@ function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 			gsLeafLabel = nil
 		end
 	end
-	local leafLabel = jewelrySlotLabel or categoryLeafLabel or (subLabel ~= "" and subLabel or nil) or gsLeafLabel
+	-- Una ruta normalizada de arma ya consumió toda la semántica disponible en
+	-- su Nivel 2. La subcategoría vanilla (W/Swinging/etc.) es metadata del motor,
+	-- no un tercer nivel de organización y no debe reaparecer en ningún idioma.
+	local rawSubLeafLabel = not isWeaponTypeSubgroup and (subLabel ~= "" and subLabel or nil) or nil
+	if isSingleAsciiDimension(subCanon) or (rawSubLeafLabel and rawSubLeafLabel:match("^[A-Za-z]$")) then
+		rawSubLeafLabel = nil
+	end
+	if categoryLeafKey and isSingleAsciiDimension(categoryLeafKey) then
+		categoryLeafLabel = nil
+	end
+	local leafLabel = jewelrySlotLabel or categoryLeafLabel or rawSubLeafLabel or gsLeafLabel
 
 	-- fullLabel (columna "Categoria"): SIEMPRE los mismos 3 niveles con el
 	-- MISMO separador " - ", sin mezclar con " / " en ningun caso - fuente
@@ -751,11 +881,10 @@ function GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
 	return _fullCatalogRows
 end
 
--- Algunos mods incluyen ScriptItems auxiliares con DisplayCategory de una sola
--- letra (B, F...) o categorias compuestas cuyo segmento intermedio termina
--- reducido a esa letra (FoodF). getText("IGUI_ItemCat_<clave>") puede existir
--- para ellas, por lo que isDisplayCategoryKey() debe seguir aceptandolas para
--- resolver items, pero no son dimensiones utiles para configurar un contenedor.
+-- Defensa final para snapshots antiguos o metadata defectuosa que aún contenga
+-- códigos técnicos de tipo de una sola letra (B/F/W). Las rutas nuevas no los
+-- producen: readSubKey() ya no consulta InventoryItem:getCategory(). Aun así,
+-- nunca deben reaparecer como dimensiones configurables al leer datos viejos.
 --
 -- La comprobacion se limita deliberadamente a UNA letra ASCII. Una etiqueta
 -- localizada de un solo caracter en chino/japones sigue siendo valida, igual
@@ -771,7 +900,7 @@ local function isUsefulFilterDimension(key, label, parentKey)
 		keyPart = keyPart:sub(#parentKey + 1):gsub("^[_%-%s]+", "")
 	end
 	local labelPart = tostring(label):match("^%s*(.-)%s*$") or ""
-	if keyPart:match("^[A-Za-z]$") then return false end
+	if isSingleAsciiDimension(keyPart) then return false end
 	if labelPart:match("^[A-Za-z]$") then return false end
 	return true
 end
@@ -858,9 +987,10 @@ function GlobalStorageSiK.ItemTaxonomy.collectSubFilters(rows, mainKey)
 	local groupLower, groupOriginal = extractGroupFromKey(mainKey)
 
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory")
 	local sig = "L2|" .. groupLower .. "|" .. tostring(#rows)
 	local logChanged = debugOn and sig ~= _lastCollectSubFiltersSig
-	local shouldLog = logChanged and #rows <= MAX_DETAILED_LOG_ROWS
+	local shouldLog = logChanged and detailOn and #rows <= MAX_DETAILED_LOG_ROWS
 	if logChanged then
 		_lastCollectSubFiltersSig = sig
 		GlobalStorageSiK.Log.debug("ItemTaxonomy", "collectSubFilters(L2) | group=" .. groupLower .. " rows=" .. tostring(#rows)
@@ -870,7 +1000,7 @@ function GlobalStorageSiK.ItemTaxonomy.collectSubFilters(rows, mainKey)
 	for i = 1, #rows do
 		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(rows[i].fullType, rows[i])
 		if shouldLog then
-			GlobalStorageSiK.Log.debug("ItemTaxonomy", "collectSubFilters(L2) | fullType=" .. tostring(rows[i].fullType)
+			GlobalStorageSiK.Log.detail("ItemTaxonomy", "collectSubFilters(L2) | fullType=" .. tostring(rows[i].fullType)
 				.. " groupKey=" .. tostring(tax.groupKey) .. " subGroupKey=" .. tostring(tax.subGroupKey)
 				.. " groupLabel=" .. tostring(tax.groupLabel) .. " subGroupLabel=" .. tostring(tax.subGroupLabel))
 		end
@@ -921,9 +1051,10 @@ function GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(rows, mainKey, subKey)
 	end
 
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory")
 	local sig = "L3|" .. groupLower .. "|" .. tostring(wantSubGroup) .. "|" .. tostring(#rows)
 	local logChanged = debugOn and sig ~= _lastCollectSubFiltersSig
-	local shouldLog = logChanged and #rows <= MAX_DETAILED_LOG_ROWS
+	local shouldLog = logChanged and detailOn and #rows <= MAX_DETAILED_LOG_ROWS
 	if logChanged then
 		_lastCollectSubFiltersSig = sig
 		GlobalStorageSiK.Log.debug("ItemTaxonomy", "collectLeafFilters(L3) | group=" .. groupLower
@@ -934,7 +1065,7 @@ function GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(rows, mainKey, subKey)
 	for i = 1, #rows do
 		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(rows[i].fullType, rows[i])
 		if shouldLog then
-			GlobalStorageSiK.Log.debug("ItemTaxonomy", "collectLeafFilters(L3) | fullType=" .. tostring(rows[i].fullType)
+			GlobalStorageSiK.Log.detail("ItemTaxonomy", "collectLeafFilters(L3) | fullType=" .. tostring(rows[i].fullType)
 				.. " groupLabel=" .. tostring(tax.groupLabel) .. " subGroupLabel=" .. tostring(tax.subGroupLabel)
 				.. " leafLabel=" .. tostring(tax.leafLabel))
 		end

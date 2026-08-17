@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Probabilité de trouver le magazine qui apprend à graver la disquette d'installation Tablet. 0 = jamais.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (debug)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Mode debug (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Active des journaux console supplémentaires pour l'addon Tablet uniquement. Aucun effet sur le jeu.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "AVERTISSEMENT : active une journalisation supplémentaire pour l'addon Tablet. Le débogage peut réduire les performances du jeu et du serveur ; à utiliser uniquement pour un diagnostic ciblé, puis à désactiver en jeu normal et en production.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Poids loot : disquette d'installation déjà programmée",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Multiplicateur de la fréquence à laquelle la disquette d'installation Tablet déjà programmée apparaît en loot dans le monde (distincte de sa version vierge/programmable). 1.0 = normal, 0 = jamais (fabrication uniquement).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Poids loot : manuel Améliorations d'antenne",

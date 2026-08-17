@@ -30,6 +30,7 @@ local function mergeLiveContainer(byType, container, nodeId)
 			byType[fullType] = {
 				fullType = row.fullType,
 				displayName = row.displayName,
+				worldSprite = row.worldSprite,
 				category = row.category,
 				subCategory = row.subCategory,
 				gsSubKeys = row.gsSubKeys or {},
@@ -56,6 +57,7 @@ local function mergeNodeSnapshot(byType, node)
 			byType[fullType] = {
 				fullType = row.fullType,
 				displayName = row.displayName,
+				worldSprite = row.worldSprite,
 				category = row.category,
 				subCategory = row.subCategory,
 				gsSubKeys = row.gsSubKeys or {},
@@ -72,8 +74,9 @@ end
 --- Construye índice serializable para el cliente.
 ---@param networkId string|nil
 ---@param player IsoPlayer|nil limita el indice a sus zonas autorizadas
+---@param freshSnapshotScope string|nil "network" o zoneId cuyo snapshot acaba de actualizarse
 ---@return table rows Lista ordenada { fullType, displayName, category, count, nodeId }
-function GlobalStorageSiK.Index.buildRows(networkId, player)
+function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
 	local byType = {}
@@ -85,7 +88,19 @@ function GlobalStorageSiK.Index.buildRows(networkId, player)
 		local liveEntry = live[i]
 		local nodeId = liveEntry.entry and liveEntry.entry.id or ("node_" .. i)
 		liveIds[nodeId] = true
-		mergeLiveContainer(byType, liveEntry.container, nodeId)
+		local node = registry.nodes and registry.nodes[nodeId]
+		local snapshotAvailable = node and node.itemSnapshot
+		if snapshotAvailable then
+			-- El snapshot persistido es la fuente de lectura del terminal. Abrir,
+			-- buscar o editar configuración no debe volver a recorrer miles de
+			-- InventoryItem. Un reescaneo incremental actualiza esta captura y al
+			-- terminar envía el estado fresco solo a observadores de la red.
+			mergeNodeSnapshot(byType, node)
+		else
+			-- Compatibilidad inicial/legacy: solo un nodo que aún no tenga captura
+			-- paga una lectura viva. El siguiente scan lo deja cacheado.
+			mergeLiveContainer(byType, liveEntry.container, nodeId)
+		end
 	end
 
 	for _, node in pairs(registry.nodes or {}) do
@@ -165,6 +180,40 @@ function GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	registry._inventoryRevision = registry._inventoryRevision or {}
 	return registry._inventoryRevision[networkId] or 0
+end
+
+--- Revisión hasta la que los snapshots persistidos representan una captura
+--- completa y estable de la red. No debe adelantarse al inventoryRevision:
+--- una transferencia incrementa este último inmediatamente, mientras que el
+--- snapshot se consolida después mediante ZoneScanJob.
+---@param networkId string|nil
+---@param revision number|nil
+---@return number
+function GlobalStorageSiK.Index.setSnapshotRevision(networkId, revision)
+	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
+	if not networkId then
+		return 0
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	GlobalStorageSiK.Network.ensureRegistry(registry)
+	registry._snapshotRevision = registry._snapshotRevision or {}
+	local stableRevision = math.max(0, math.floor(tonumber(revision) or 0))
+	registry._snapshotRevision[networkId] = stableRevision
+	return stableRevision
+end
+
+--- Revisión de la última captura completa y estable de la red.
+---@param networkId string|nil
+---@return number
+function GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
+	if not networkId then
+		return 0
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	GlobalStorageSiK.Network.ensureRegistry(registry)
+	registry._snapshotRevision = registry._snapshotRevision or {}
+	return registry._snapshotRevision[networkId] or 0
 end
 
 --- Cuenta cuántas unidades de un fullType tiene el jugador en cada red

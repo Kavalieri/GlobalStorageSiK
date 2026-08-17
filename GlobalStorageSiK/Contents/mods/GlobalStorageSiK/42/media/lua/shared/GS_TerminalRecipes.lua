@@ -479,23 +479,32 @@ function GlobalStorageSiK.TerminalRecipes.craft(player, recipeId, opts)
 
 	end
 
-	if recipe.outputCount and recipe.outputCount > 1 and output.setCount then
-
-		output:setCount(recipe.outputCount)
-
+	-- outputCount representa objetos físicos producidos, no un valor que pueda
+	-- guardarse en InventoryItem:setCount(). La misma suposición inflaba los
+	-- clavos en snapshots/transferencias; crear N itemId mantiene un único
+	-- contrato para cualquier tipo de objeto.
+	local outputCount = math.max(1, math.floor(tonumber(recipe.outputCount) or 1))
+	local outputs = { output }
+	for i = 2, outputCount do
+		local extra = instanceItem(recipe.output)
+		if not extra then
+			return false, GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
+		end
+		outputs[#outputs + 1] = extra
 	end
 
-	if GlobalStorageSiK.ItemHooks and GlobalStorageSiK.ItemHooks.applyForOutput then
-		GlobalStorageSiK.ItemHooks.applyForOutput(recipe.output, output)
+	for i = 1, #outputs do
+		local produced = outputs[i]
+		if GlobalStorageSiK.ItemHooks and GlobalStorageSiK.ItemHooks.applyForOutput then
+			GlobalStorageSiK.ItemHooks.applyForOutput(recipe.output, produced)
+		end
+		if not GlobalStorageSiK.InventorySync.addToPlayer(player, produced) then
+			return false, GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
+		end
 	end
 
-	if not GlobalStorageSiK.InventorySync.addToPlayer(player, output) then
-
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
-
-	end
-
-	GlobalStorageSiK.InventorySync.notifyPlayer(player)
+	-- addToPlayer ya envia el alta incremental vanilla. No competir con ella
+	-- mediante un snapshot completo del inventario.
 
 	return true, GlobalStorageSiK.I18n.text("IGUI_GS_CraftOk", outputDisplayForRecipe(recipe))
 
@@ -608,4 +617,3 @@ function GlobalStorageSiK.TerminalRecipes.serializeForClient(player, options)
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
 	}
 end
-

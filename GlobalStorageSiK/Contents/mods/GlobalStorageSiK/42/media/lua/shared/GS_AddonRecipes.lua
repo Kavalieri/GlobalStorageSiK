@@ -234,6 +234,8 @@ function GlobalStorageSiK.AddonRecipes.craftModule(player, addonId)
 	if not GlobalStorageSiK.InventorySync.addToPlayer(player, output) then
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
 	end
-	GlobalStorageSiK.InventorySync.notifyPlayer(player)
+	-- addToPlayer ya replica el alta mediante el paquete vanilla del
+	-- contenedor. Un sync completo adicional puede llegar fuera de orden y
+	-- restaurar el inventario anterior.
 	return true, GlobalStorageSiK.I18n.text("IGUI_GS_CraftOk", displayNameForType(def.itemType))
 end

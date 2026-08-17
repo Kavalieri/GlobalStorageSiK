@@ -375,13 +375,21 @@ local function logLiveContainerMiss(nid, entry, obj, container)
 		tostring(nid), tostring(entry.id), tostring(entry.x), tostring(entry.y), tostring(entry.z),
 		tostring(entry.containerIndex), reason)
 	if GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
-		GlobalStorageSiK.Debug.log("Network", "getLiveContainers", line)
+		GlobalStorageSiK.Log.detail("Network", "getLiveContainers", line)
 	elseif GlobalStorageSiK.Log then
-		GlobalStorageSiK.Log.debug("Network", "getLiveContainers", line)
+		GlobalStorageSiK.Log.detail("Network", "getLiveContainers", line)
 	end
 end
 
 local lastLiveContainerSourceSignature = {}
+
+--- Prioridad efectiva de la zona sin duplicarla en la entrada persistente del
+--- nodo. En cliente MP puede venir serializada junto al nodo; en autoridad se
+--- resuelve siempre desde la fuente de verdad registry.zones.
+local function liveZonePriority(registry, entry)
+	local zone = entry and entry.zoneId and registry.zones and registry.zones[entry.zoneId]
+	return tonumber(zone and zone.priority) or tonumber(entry and entry.zonePriority) or 50
+end
 
 function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -428,6 +436,7 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 					entry = node,
 					object = obj,
 					container = container,
+					zonePriority = liveZonePriority(registry, node),
 				})
 			else
 				logLiveContainerMiss(nid, node, obj, container)
@@ -460,6 +469,7 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 						entry = node,
 						object = obj,
 						container = container,
+						zonePriority = liveZonePriority(registry, node),
 					})
 				else
 					logLiveContainerMiss(nid, node, obj, container)
@@ -484,6 +494,7 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 				entry = entry,
 				object = obj,
 				container = container,
+				zonePriority = liveZonePriority(registry, entry),
 			})
 		else
 			logLiveContainerMiss(nid, entry, obj, container)

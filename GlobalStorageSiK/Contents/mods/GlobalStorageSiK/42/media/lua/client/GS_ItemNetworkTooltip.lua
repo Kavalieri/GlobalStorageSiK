@@ -21,6 +21,20 @@ local cache = {}
 local pending = {}
 local CACHE_TTL_MS = 4000
 local hooksInstalled = false
+local activeRenderWrapper = nil
+
+-- Todos los wrappers GS comparten estas guardas. Es importante que no vivan
+-- dentro de installHooks(): si otro mod sustituye ISToolTipInv.render despues
+-- y tenemos que envolverlo de nuevo, el wrapper GS anterior puede seguir en
+-- mitad de la cadena capturada por ese mod. La instancia GS mas reciente es
+-- la unica que dibuja nuestra extension; las anteriores se convierten en una
+-- pasarela transparente hacia su original y no duplican bloques ni guardas.
+local renderingInstances = {}
+local failCooldownUntil = setmetatable({}, { __mode = "k" })
+local FAIL_COOLDOWN_MS = 8000
+local FAIL_LOG_COOLDOWN_MS = 3000
+local lastFailLogAt = 0
+local lastFailSig = nil
 
 -- Reactivado en v1.2.97 tras confirmar (traza real del jugador) que el bucle
 -- de renders encadenados que rompia el tooltip era entre "Show VHS skills in
@@ -437,16 +451,17 @@ end
 --- reintento posible.
 function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	if not FEATURE_ENABLED then
-		return
-	end
-	if hooksInstalled then
-		return
+		return false
 	end
 	if not ISToolTipInv or not ISToolTipInv.render then
-		return
+		return false
 	end
-	hooksInstalled = true
+	if activeRenderWrapper and ISToolTipInv.render == activeRenderWrapper then
+		hooksInstalled = true
+		return true
+	end
 
+	local recoveringOuterPosition = hooksInstalled and activeRenderWrapper ~= nil
 	local original = ISToolTipInv.render
 	-- Guarda de reentrada: reportado un crash en SP (stack overflow) al usar
 	-- el mod "Magic Accessories" a la vez - su cadena de "customRender
@@ -472,7 +487,6 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	-- Tabla normal (sin metatabla de claves debiles): cada entrada solo vive
 	-- entre el "= true" y el "= nil" de la MISMA llamada sincrona de abajo,
 	-- nunca se acumula nada que limpiar.
-	local renderingInstances = {}
 	-- BUG REAL encontrado (traza real de un jugador: "Show VHS skills in
 	-- tooltip" se re-invoca a si mismo decenas de veces antes de fallar
 	-- dentro de la cadena Magic Accessories -> nosotros): el motor vuelca la
@@ -490,16 +504,19 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	-- frames - sin metatabla debil, cada instancia de tooltip que falle
 	-- alguna vez quedaria referenciada aqui para siempre (fuga de memoria en
 	-- sesiones largas con muchos items distintos).
-	local failCooldownUntil = setmetatable({}, { __mode = "k" })
 	-- 8s en vez de 3s: la traza real muestra un STACK OVERFLOW autentico
 	-- (Coroutine.ensureCallFrameStackSize) dentro de SVSIT, no un error
 	-- ligero - mas caro de recuperar y mas motivo para no reintentar cada
 	-- pocos segundos mientras el jugador siga con el raton quieto encima.
-	local FAIL_COOLDOWN_MS = 8000
-	local lastFailLogAt = 0
-	local lastFailSig = nil
-	local FAIL_LOG_COOLDOWN_MS = 3000
-	ISToolTipInv.render = function(self, ...)
+	local wrapper
+	wrapper = function(self, ...)
+		-- Si un mod de terceros capturo un wrapper GS anterior y despues GS
+		-- recupero la posicion exterior, ese wrapper viejo seguira apareciendo
+		-- dentro de la cadena. Debe limitarse a delegar: solo el wrapper activo
+		-- aplica guardas, fallback y extension visual.
+		if wrapper ~= activeRenderWrapper then
+			return original(self, ...)
+		end
 		if renderingInstances[self] then
 			-- Reentrada real (mismo self, dentro de la misma pasada) - ver
 			-- safeFallbackRender de arriba: dibujamos contenido real sin volver
@@ -545,14 +562,14 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		pcall(function()
 			if self.item and self.isVisible and self:isVisible() then
 				local fullType = self.item.getFullType and self.item:getFullType()
-				if GlobalStorageSiK.Sandbox.debugMode() and fullType then
+				if fullType then
 					-- Diagnostico de compatibilidad con mods que tambien parchean el
 					-- tooltip de items (Magic Accessories, etc.): confirma que ESTE
 					-- wrapper se ejecuta de verdad para items con modData de otros
 					-- mods (encantamientos, bonos aleatorios...) antes de asumir que
 					-- el problema esta en nuestro codigo.
 					local hasModData = self.item.hasModData and self.item:hasModData()
-					GlobalStorageSiK.Debug.log("ItemNetworkTooltip", "render",
+					GlobalStorageSiK.Log.detail("ItemNetworkTooltipDetail", "render",
 						string.format("fullType=%s hasModData=%s", tostring(fullType), tostring(hasModData)))
 				end
 				if fullType then
@@ -616,37 +633,45 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		end)
 		return result
 	end
+
+	activeRenderWrapper = wrapper
+	ISToolTipInv.render = wrapper
+	hooksInstalled = true
+	if recoveringOuterPosition then
+		GlobalStorageSiK.Log.debug("ItemNetworkTooltip",
+			"hook chain changed; GS outer wrapper restored")
+	end
+	return true
 end
 
--- Reintenta cada tick hasta que ISInventoryPane exista y el parche prenda
--- (en vez de un unico intento al cargar este fichero, que podia perderse
--- segun el orden de carga cliente).
+-- Espera a que el resto de la UI/mods hayan instalado sus hooks y despues
+-- vigila a bajo coste la identidad de ISToolTipInv.render. Si otro mod lo
+-- sustituye mas tarde, GS vuelve a envolver la NUEVA cadena en el siguiente
+-- intervalo; no obliga al usuario a resolver el orden de carga a mano.
 --
--- RETRASO DELIBERADO (ver installHooks de arriba): nuestro wrapper SIEMPRE
+-- Nuestro wrapper SIEMPRE
 -- dibuja su contenido tras llamar a "original", pase lo que pase dentro -
--- eso nos hace compatibles con CUALQUIER otro mod que tambien parchee este
--- render, SIEMPRE QUE seamos el envoltorio MAS EXTERNO (el que se instala
--- ULTIMO, capturando como "original" lo que sea que hubiera antes). Si nos
--- instalamos en el primer tick posible (como antes), es una carrera contra
--- otros mods de tooltip (Magic Accessories, etc.) que tambien parchean
--- pronto - si ellos ganan esa carrera y su propio codigo no vuelve a llamar
--- a nuestro "original" para ciertos items (p.ej. joyas encantadas con rama
--- propia de renderizado), nuestro tooltip nunca se ejecuta para esos items,
--- sin importar el orden real de mods en la lista. Esperar unos segundos
--- (no solo unos ticks) antes de instalar reduce mucho esa ventana de
--- carrera sin depender de que el jugador reordene mods a mano.
+-- eso conserva el contenido vanilla/ajeno y deja GS como envoltorio exterior.
+-- Los wrappers GS anteriores que hayan quedado capturados dentro de otro mod
+-- se vuelven pasarelas transparentes (ver installHooks), por lo que recuperar
+-- la posicion exterior no duplica nuestra informacion.
 local INSTALL_DELAY_TICKS = 180
-local _installTickCount = 0
-local function tryInstallUntilReady()
-	_installTickCount = _installTickCount + 1
-	if _installTickCount < INSTALL_DELAY_TICKS then
+local HOOK_MONITOR_INTERVAL_TICKS = 60
+local _hookTickCount = 0
+local function monitorTooltipHook()
+	_hookTickCount = _hookTickCount + 1
+	if _hookTickCount < INSTALL_DELAY_TICKS then
+		return
+	end
+	if ((_hookTickCount - INSTALL_DELAY_TICKS) % HOOK_MONITOR_INTERVAL_TICKS) ~= 0 then
+		return
+	end
+	if hooksInstalled and activeRenderWrapper and ISToolTipInv
+		and ISToolTipInv.render == activeRenderWrapper then
 		return
 	end
 	GlobalStorageSiK.ItemNetworkTooltip.installHooks()
-	if hooksInstalled then
-		Events.OnTick.Remove(tryInstallUntilReady)
-	end
 end
 if FEATURE_ENABLED then
-	Events.OnTick.Add(tryInstallUntilReady)
+	Events.OnTick.Add(monitorTooltipHook)
 end

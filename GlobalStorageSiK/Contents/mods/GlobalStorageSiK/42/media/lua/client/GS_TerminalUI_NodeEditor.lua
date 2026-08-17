@@ -23,6 +23,10 @@ require "GS_CompatMods"
 
 GlobalStorageSiK.TerminalNodeEditor = {}
 GlobalStorageSiK.TerminalNodeEditor.instance = nil
+-- Plantilla puramente temporal de esta sesion de cliente. No contiene
+-- identidad fisica ni permisos: solo las reglas de destino que tiene sentido
+-- repetir en muchos contenedores de una red grande.
+GlobalStorageSiK.TerminalNodeEditor.configTemplate = nil
 
 GS_NodeEditorUI = ISPanel:derive("GS_NodeEditorUI")
 
@@ -34,6 +38,27 @@ local BTN_H = FONT_HGT_SMALL + 10
 local PAD = 10
 local RESIZE_GRAB = 12
 local CONTENTS_TAG = "_gsNodeEditorContents"
+
+local function cloneArray(source)
+	local result = {}
+	for i = 1, #(source or {}) do
+		result[i] = source[i]
+	end
+	return result
+end
+
+local function cloneFilters(source)
+	local result = {}
+	for i = 1, #(source or {}) do
+		local original = source[i]
+		local copy = {}
+		for key, value in pairs(original or {}) do
+			copy[key] = value
+		end
+		result[i] = copy
+	end
+	return result
+end
 
 ---@param x number
 ---@param y number
@@ -136,7 +161,7 @@ end
 
 --- Envía cambios de nodo al servidor.
 ---@param nodeId string
----@param opts table  { displayName, categories, enabled, membership, priority, notes }
+---@param opts table  { displayName, categories, filters, enabled, membership, priority, notes }
 --- Manda SOLO los campos presentes en opts (todos opcionales). Cada campo del
 --- formulario tiene su propio boton "Aplicar" que llama esto con un unico
 --- campo; nunca se resetean sin querer los demas (antes `categories` se
@@ -150,11 +175,53 @@ function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts)
 	local payload = { nodeId = nodeId, searchQuery = searchQuery }
 	if opts.displayName ~= nil then payload.displayName = opts.displayName end
 	if opts.categories  ~= nil then payload.categories  = opts.categories  end
+	if opts.filters     ~= nil then payload.filters     = opts.filters     end
 	if opts.enabled     ~= nil then payload.enabled     = opts.enabled     end
 	if opts.membership  ~= nil then payload.membership  = opts.membership end
 	if opts.priority    ~= nil then payload.priority    = opts.priority   end
 	if opts.notes       ~= nil then payload.notes       = opts.notes      end
 	GlobalStorageSiK.NetClient.sendCommand("updateNode", payload)
+end
+
+--- Captura la configuracion visible del editor. El nombre, la etiqueta, la
+--- zona, el estado y la identidad del contenedor quedan fuera a proposito.
+function GS_NodeEditorUI:copyConfigTemplate()
+	if not self.node then return end
+	local priority = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
+		or self._editPriority or self.node.priority or 50
+	priority = math.floor(priority + 0.5)
+	if priority < 1 then priority = 1 elseif priority > 100 then priority = 100 end
+	GlobalStorageSiK.TerminalNodeEditor.configTemplate = {
+		sourceNodeId = self.node.id,
+		sourceName = self.node.displayName or self.node.name or "?",
+		categories = cloneArray(self._editCategories or self.node.categories),
+		filters = cloneFilters(self.node.filters),
+		priority = priority,
+	}
+	self:rebuildForm()
+end
+
+--- Sustituye de una vez las reglas de destino del nodo abierto. Se envia un
+--- unico update acotado; el servidor vuelve a validar categorias, filtros y
+--- prioridad y conserva intacta toda la metadata fisica/administrativa.
+function GS_NodeEditorUI:pasteConfigTemplate()
+	if not self.node then return end
+	local template = GlobalStorageSiK.TerminalNodeEditor.configTemplate
+	if not template then return end
+	local categories = cloneArray(template.categories)
+	local filters = cloneFilters(template.filters)
+	local priority = tonumber(template.priority) or 50
+	self._editCategories = categories
+	self._editPriority = priority
+	self.node.categories = cloneArray(categories)
+	self.node.filters = cloneFilters(filters)
+	self.node.priority = priority
+	self:requestNodeUpdate({
+		categories = categories,
+		filters = filters,
+		priority = priority,
+	})
+	self:rebuildForm()
 end
 
 --- Aplica y persiste inmediatamente un unico campo del formulario.
@@ -335,6 +402,39 @@ function GS_NodeEditorUI:ensureForm()
 	hintLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hintLbl)
 	y = y + FONT_HGT_SMALL + 8
+
+	-- ── Plantilla rapida de configuracion ─────────────────────────────────
+	local templateTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeConfigTemplateTitle"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	templateTitle:initialise()
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, templateTitle)
+	y = y + FONT_HGT_SMALL + 3
+	local template = GlobalStorageSiK.TerminalNodeEditor.configTemplate
+	local templateStatus = template
+		and T("IGUI_GS_NodeConfigTemplateReady", template.sourceName or "?", #(template.categories or {}), #(template.filters or {}), template.priority or 50)
+		or T("IGUI_GS_NodeConfigTemplateEmpty")
+	local statusText = GlobalStorageSiK.TerminalChrome.truncateText(templateStatus, innerW, UIFont.Small)
+	self.configTemplateStatusLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, statusText, 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.configTemplateStatusLbl:initialise()
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.configTemplateStatusLbl)
+	y = y + FONT_HGT_SMALL + 4
+	local templateGap = 4
+	local templateBtnW = math.floor((innerW - templateGap) / 2)
+	self.copyConfigBtn = createBtn(pad, y, templateBtnW, T("IGUI_GS_NodeConfigCopy"), scroll, function()
+		self:copyConfigTemplate()
+	end)
+	if self.copyConfigBtn.setToolTipMap then
+		self.copyConfigBtn:setToolTipMap({ toolTip = T("IGUI_GS_NodeConfigCopyTooltip") })
+	end
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.copyConfigBtn)
+	self.pasteConfigBtn = createBtn(pad + templateBtnW + templateGap, y, templateBtnW, T("IGUI_GS_NodeConfigPaste"), scroll, function()
+		self:pasteConfigTemplate()
+	end)
+	self.pasteConfigBtn:setEnable(template ~= nil)
+	if self.pasteConfigBtn.setToolTipMap then
+		self.pasteConfigBtn:setToolTipMap({ toolTip = T("IGUI_GS_NodeConfigPasteTooltip") })
+	end
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.pasteConfigBtn)
+	y = y + BTN_H + 12
 
 	local applyW = 70
 
@@ -880,6 +980,9 @@ function GS_NodeEditorUI:resetForm()
 	self.notesLbl        = nil
 	self.notesEntry      = nil
 	self.applyAllBtn     = nil
+	self.configTemplateStatusLbl = nil
+	self.copyConfigBtn   = nil
+	self.pasteConfigBtn  = nil
 	self.contentsTitleLbl = nil
 	self.contentsHost    = nil
 	self._contentsStartY = 0

@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Шанс найти журнал, обучающий записи установочной дискеты Tablet. 0 = никогда не появляется.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (отладка)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Режим отладки (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Включает дополнительное логирование в консоли только для аддона Tablet. Не влияет на игровой процесс.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "ПРЕДУПРЕЖДЕНИЕ: включает дополнительное журналирование для аддона Tablet. Отладка может снизить производительность игры и сервера; используйте только для целевой диагностики и отключайте во время обычной игры и на рабочих серверах.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Вес добычи: уже запрограммированная установочная дискета",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Множитель частоты появления уже запрограммированной установочной дискеты Tablet в качестве добычи в мире (отдельно от её пустой/программируемой версии). 1.0 = обычно, 0 = никогда не появляется (только крафт).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Вес добычи: руководство по улучшениям антенны",

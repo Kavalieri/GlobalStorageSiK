@@ -147,52 +147,6 @@ function GlobalStorageSiK.Deposit.findItemById(player, itemId)
 	return nil, nil
 end
 
---- Separa unidades de un ítem apilable para depósito parcial.
----@param item InventoryItem
----@param count number
----@return InventoryItem|nil
-local function splitStackForDeposit(item, count)
-	if not item or not count or count <= 0 then
-		return nil
-	end
-	local total = 1
-	if item.getCount then
-		total = item:getCount() or 1
-	end
-	if count >= total then
-		return item
-	end
-	if item.split then
-		local ok, part = pcall(function()
-			return item:split(count)
-		end)
-		if ok and part then
-			return part
-		end
-	end
-	local container = item.getContainer and item:getContainer() or nil
-	if not container or not instanceItem or not item.getFullType then
-		return nil
-	end
-	local part = instanceItem(item:getFullType())
-	if not part then
-		return nil
-	end
-	if part.copyModData and item.copyModData then
-		pcall(function()
-			part:copyModData(item)
-		end)
-	end
-	part:setCount(count)
-	item:setCount(total - count)
-	if container.AddItem then
-		pcall(function()
-			container:AddItem(part)
-		end)
-	end
-	return part
-end
-
 --- Deposita una cantidad parcial de un ítem por ID.
 ---@param player IsoPlayer
 ---@param networkId string|nil
@@ -224,39 +178,39 @@ function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referen
 		return summary
 	end
 
-	count = math.floor(count or 1)
+	count = math.floor(tonumber(count) or 1)
 	if count < 1 then
 		summary.reason = "invalid"
 		return summary
 	end
 
-	local allowed = GlobalStorageSiK.BulkFilters.canDeposit(
-		item, player, GlobalStorageSiK.BulkFilters.SCOPE.SELECTION, item:getContainer()
-	)
-	if not allowed then
-		summary.skipped = summary.skipped + 1
+	-- Compatibilidad con clientes anteriores: "cantidad" significa N itemId
+	-- físicos del mismo tipo y contenedor, nunca dividir referenceItem mediante
+	-- InventoryItem:getCount()/setCount(). El cliente actual ya envía esos IDs
+	-- directamente por la cola segura; esta ruta queda acotada a un micro-lote
+	-- para que un payload legacy no haga trabajo monolítico ni infle unidades.
+	local fullType = item.getFullType and item:getFullType() or nil
+	local items = container.getItems and container:getItems() or nil
+	if not fullType or not items then
+		summary.reason = "invalid"
 		return summary
 	end
-
-	local toMove = splitStackForDeposit(item, count)
-	if not toMove then
-		summary.failed = summary.failed + 1
-		return summary
-	end
-
-	local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, toMove, networkId)
-	if ok then
-		summary.moved = summary.moved + 1
-	elseif reason == "filtered" then
-		summary.skipped = summary.skipped + 1
-	else
-		summary.failed = summary.failed + 1
-		if (reason == "no_space" or reason == "no_match") and not summary.reason then
-			summary.reason = reason
+	local maxItems = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local target = math.min(count, maxItems)
+	local itemIds = {}
+	for i = 0, items:size() - 1 do
+		if #itemIds >= target then break end
+		local candidate = items:get(i)
+		if candidate and candidate.getFullType and candidate:getFullType() == fullType then
+			local id = GlobalStorageSiK.Deposit.getItemId(candidate)
+			if id then itemIds[#itemIds + 1] = id end
 		end
 	end
-
-	return summary
+	if #itemIds == 0 then
+		summary.reason = "not_found"
+		return summary
+	end
+	return GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 end
 
 --- Deposita ítems por lista de IDs.
@@ -265,7 +219,8 @@ end
 ---@param itemIds number[]
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
-	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil, remainingIds = {} }
+	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
+		reason = nil, failureReason = nil, remainingIds = {} }
 
 	if not player or not itemIds or #itemIds == 0 then
 		summary.reason = "invalid"
@@ -285,7 +240,7 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 	local seenIds = {}
 
 	for i = 1, #itemIds do
-		if summary.moved >= maxPerTick then
+		if summary.processed >= maxPerTick then
 			summary.reason = "limit"
 			-- BUG REAL (2026-08-16, "si ya esta devuelto o no existe, por
 			-- que seguir iterando sobre ello tanto" - reportado con Project
@@ -309,22 +264,20 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 			end
 			break
 		end
+		summary.processed = summary.processed + 1
 
 		local itemId = itemIds[i]
 		if itemId and not seenIds[itemId] then
 			seenIds[itemId] = true
 			local item, container = GlobalStorageSiK.Deposit.findItemById(player, itemId)
 			if not item or not container then
-				-- "No encontrado" NO cuenta como fallo real: antes de este
-				-- fix, GS_TransferQueue reenviaba la lista COMPLETA de
-				-- itemIds original en cada reintento, asi que los items YA
-				-- depositados con exito en una pasada anterior ya no estaban
-				-- en ningun contenedor alcanzable del jugador - "no
-				-- encontrado" en ese caso significa "ya se hizo", no un
-				-- error. Ahora ya no se reenvian (ver remainingIds arriba),
-				-- pero se deja el log por si aparece un caso real de item
-				-- invalido. Se ignora en silencio para el resumen.
-				GlobalStorageSiK.Debug.log("Deposit", "depositByIds item not found (ya depositado o invalido)", tostring(itemId))
+				-- remainingIds ya impide reenviar objetos resueltos. Un ID
+				-- ausente en una petición vigente revela un inventario cliente
+				-- atrasado o un payload inválido; no es éxito implícito.
+				summary.failed = summary.failed + 1
+				summary.missing = summary.missing + 1
+				if not summary.reason then summary.reason = "not_found" end
+				GlobalStorageSiK.Log.detail("Deposit", "depositByIds item not found", tostring(itemId))
 			elseif GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
 				summary.skipped = summary.skipped + 1
 			elseif not GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container) then
@@ -343,16 +296,14 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 						summary.skipped = summary.skipped + 1
 					else
 						summary.failed = summary.failed + 1
+						if not summary.failureReason then summary.failureReason = reason end
 						if (reason == "no_space" or reason == "no_match") and not summary.reason then
 							summary.reason = reason
 						end
-						-- Fallo con motivo potencialmente transitorio (ej. sin
-						-- espacio ahora mismo, puede liberarse tras otros
-						-- depositos del mismo lote) - se mantiene en
-						-- remainingIds para reintentarlo, a diferencia de los
-						-- ya resueltos arriba que no vuelven a la lista.
-						summary.remainingIds[#summary.remainingIds + 1] = itemId
-						GlobalStorageSiK.Debug.log("Deposit", "depositByIds item failed", string.format(
+						-- El ID queda resuelto como fallo y permanece físicamente en
+						-- origen. Reintentarlo no crea espacio y convertiría un
+						-- almacén lleno en un bucle costoso.
+						GlobalStorageSiK.Log.detail("Deposit", "depositByIds item failed", string.format(
 							"fullType=%s reason=%s movedSoFar=%d",
 							tostring(item.getFullType and item:getFullType() or "?"), tostring(reason), summary.moved
 						))
@@ -371,7 +322,8 @@ end
 ---@param referenceItemId number
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId)
-	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil }
+	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
+		reason = nil, failureReason = nil, remainingIds = {} }
 
 	local item, container = GlobalStorageSiK.Deposit.findItemById(player, referenceItemId)
 	if not item or not container then
@@ -402,10 +354,15 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 	)
 
 	for c = 1, #candidates do
-		if summary.moved >= maxPerTick then
+		if summary.processed >= maxPerTick then
 			summary.reason = "limit"
+			for pending = c, #candidates do
+				local pendingId = GlobalStorageSiK.Deposit.getItemId(candidates[pending])
+				if pendingId then summary.remainingIds[#summary.remainingIds + 1] = pendingId end
+			end
 			break
 		end
+		summary.processed = summary.processed + 1
 		local candidate = candidates[c]
 		if candidate and candidate:getContainer() == container then
 			local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId)
@@ -415,6 +372,7 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 				summary.skipped = summary.skipped + 1
 			else
 				summary.failed = summary.failed + 1
+				if not summary.failureReason then summary.failureReason = reason end
 				if (reason == "no_space" or reason == "no_match") and not summary.reason then
 					summary.reason = reason
 				end
@@ -425,7 +383,7 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 				-- imposible saber si el contador miente o si de verdad se
 				-- estaban reintentando (via GS_TransferQueue) hasta acabar
 				-- bien pero mostrando solo el resumen del primer intento.
-				GlobalStorageSiK.Debug.log("Deposit", "depositFromContainer item failed", string.format(
+				GlobalStorageSiK.Log.detail("Deposit", "depositFromContainer item failed", string.format(
 					"fullType=%s reason=%s movedSoFar=%d totalCandidates=%d",
 					tostring(candidate.getFullType and candidate:getFullType() or "?"),
 					tostring(reason), summary.moved, #candidates

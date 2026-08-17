@@ -328,7 +328,11 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 	end
 
 	local scan = state.scan or {}
-	setText(ui.stats.scanNew, T("IGUI_GS_ScanNew", scan.added or 0), 0.82, 0.86, 0.92, ui.colW)
+	local scanRunning = state.scanActive == true or scan.running == true
+	setText(ui.stats.scanNew, scanRunning and T("IGUI_GS_ScanRunning")
+		or T("IGUI_GS_ScanNew", scan.added or 0),
+		scanRunning and 0.95 or 0.82, scanRunning and 0.75 or 0.86,
+		scanRunning and 0.3 or 0.92, ui.colW)
 	setText(ui.stats.scanUpdated, T("IGUI_GS_ScanUpdated", scan.updated or 0), 0.82, 0.86, 0.92, ui.colW)
 	local offlineText = T("IGUI_GS_ScanOffline", scan.offline or 0)
 	if scan.limitHit then offlineText = offlineText .. T("IGUI_GS_ScanLimitHit") end
@@ -339,6 +343,18 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 			setText(ui.stats.scanOutOfRange, T("IGUI_GS_ScanOutOfRange", outOfRange), 0.9, 0.7, 0.3, ui.colW)
 		else
 			setText(ui.stats.scanOutOfRange, "", 0.9, 0.7, 0.3, ui.colW)
+		end
+	end
+	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
+		ui.rescanBtn:setEnable(not scanRunning)
+		ui.rescanBtn._gsNeatLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
+		if scan.durationMs then
+			ui.rescanBtn:setTooltip(T("IGUI_GS_ScanMetricsTooltip",
+				scan.durationMs or 0, scan.nodesScanned or 0,
+				scan.itemInstances or 0, scan.distinctTypes or 0,
+				scan.snapshotRows or 0))
+		else
+			ui.rescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
 		end
 	end
 

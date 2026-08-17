@@ -44,7 +44,7 @@
 	"Sandbox_GSSiK_Addon_Tablet_LootDiskProgramMagazineWeight_tooltip": "Chance, das Magazin zu finden, das erklärt, wie man die Tablet-Installationsdiskette beschreibt. 0 = kein Spawn.",
 	"Sandbox_GSSiK_Addon_Tablet_Debug": "GSSiK: Tablet (Debug)",
 	"Sandbox_GSSiK_Addon_Tablet_DebugMode": "Debug-Modus (Tablet)",
-	"Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "Aktiviert zusätzliche Konsolenprotokolle nur für das Tablet-Addon. Kein Einfluss auf das Gameplay.",
+  "Sandbox_GSSiK_Addon_Tablet_DebugMode_tooltip": "WARNUNG: Aktiviert zusätzliche Konsolenprotokolle für das Tablet-Addon. Debug-Protokollierung kann die Spiel- und Serverleistung beeinträchtigen; nur für gezielte Diagnosen verwenden und im normalen Spiel sowie auf Produktionsservern ausschalten.",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight": "Loot-Gewicht: bereits programmierte Installationsdiskette",
 	"Sandbox_GSSiK_Addon_Tablet_LootInstallDiskWeight_tooltip": "Multiplikator dafür, wie oft die bereits programmierte Tablet-Installationsdiskette als Loot in der Welt erscheint (getrennt von ihrem leeren/programmierbaren Gegenstück). 1.0 = normal, 0 = erscheint nie (nur herstellbar).",
 	"Sandbox_GSSiK_Addon_Tablet_LootManualAntennaAdvancedWeight": "Loot-Gewicht: Antennen-Upgrades-Handbuch",

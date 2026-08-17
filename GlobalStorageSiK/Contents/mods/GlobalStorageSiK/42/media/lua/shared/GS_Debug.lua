@@ -28,12 +28,10 @@ function GlobalStorageSiK.Debug.log(area, message, detail)
 	end
 end
 
---- Halo azul de diagnóstico en cliente (solo debug).
+--- Compatibilidad con callers antiguos. Los diagnósticos son exclusivamente
+--- de consola: no deben competir con el feedback funcional sobre el jugador.
 ---@param player IsoPlayer|nil
 ---@param message string
 function GlobalStorageSiK.Debug.halo(player, message)
-	if not GlobalStorageSiK.Debug.isEnabled() or not player or not message then
-		return
-	end
-	player:setHaloNote("[GS DBG] " .. tostring(message), 120, 200, 255, 350)
+	GlobalStorageSiK.Debug.log("VisualDebug", "halo suppressed", message)
 end

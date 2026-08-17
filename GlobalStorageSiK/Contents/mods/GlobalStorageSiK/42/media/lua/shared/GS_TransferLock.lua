@@ -98,11 +98,12 @@ function GlobalStorageSiK.TransferLock.withNetworkLock(networkId, player, op, fn
 	if not acquired then
 		return false, reason
 	end
-	local results = { pcall(fn) }
-	local callOk = results[1]
+	-- No desempaquetar una tabla con huecos: `true, nil, moved` debe conservar
+	-- moved. Es el mismo contrato posicional usado por las transferencias.
+	local callOk, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(fn)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
 	if not callOk then
-		error(results[2])
+		error(r1)
 	end
-	return unpack(results, 2)
+	return r1, r2, r3, r4, r5, r6, r7, r8
 end

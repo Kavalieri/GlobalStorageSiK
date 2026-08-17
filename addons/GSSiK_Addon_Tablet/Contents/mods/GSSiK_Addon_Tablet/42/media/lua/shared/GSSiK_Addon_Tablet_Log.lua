@@ -8,10 +8,21 @@
 ]]
 
 require "GSSiK_Addon_Tablet_Sandbox"
+pcall(require, "GS_DebugRelay")
 
 GSSiK_Addon_Tablet.Log = GSSiK_Addon_Tablet.Log or {}
 
-local PREFIX = "[GSSiK_Addon_Tablet:DEBUG] "
+local function relay()
+	return GlobalStorageSiK and GlobalStorageSiK.DebugRelay or nil
+end
+
+local function requestRelay()
+	local r = relay()
+	if r and isClient and isClient() and not (isServer and isServer())
+		and GSSiK_Addon_Tablet.Sandbox.isDebugMode() then
+		r.requestClientSubscription("Tablet")
+	end
+end
 
 --- Segundos transcurridos (con decimas) desde que arranco el proceso actual -
 --- la fecha no importa para depurar, pero medir cuanto tarda algo entre dos
@@ -29,5 +40,14 @@ function GSSiK_Addon_Tablet.Log.debug(message)
 	if not GSSiK_Addon_Tablet.Sandbox.isDebugMode() then
 		return
 	end
-	print("[" .. elapsedTag() .. "] " .. PREFIX .. tostring(message))
+	requestRelay()
+	local r = relay()
+	local origin = r and r.processTag() or "?"
+	local line = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Tablet:DEBUG] " .. tostring(message)
+	print(line)
+	if r then r.emit(line) end
+end
+
+if Events and Events.OnCreatePlayer then
+	Events.OnCreatePlayer.Add(requestRelay)
 end

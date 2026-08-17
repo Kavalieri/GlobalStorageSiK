@@ -31,6 +31,7 @@ local ICON_SIZE = 32
 local ROW_H = ICON_SIZE + 8
 local HEADER_H = FONT_HGT_SMALL + 10
 local DRAG_THRESHOLD = 6
+local ITEM_TEXTURE_CACHE = {}
 
 ---@param panel ISPanel
 ---@param fullType string|nil
@@ -141,25 +142,85 @@ end
 
 GlobalStorageSiK.TerminalItems.ROW_H = ROW_H
 
---- Textura de ítem por fullType.
 ---@param fullType string|nil
----@return Texture|nil
-local function itemTexture(fullType)
-	if not fullType then
-		return nil
-	end
-	if getItemTex then
-		return getItemTex(fullType)
-	end
+---@return any|nil
+local function scriptItem(fullType)
+	if not fullType then return nil end
 	local sm = getScriptManager and getScriptManager()
-	if not sm or not sm.getItem then
+	if not sm or not sm.getItem then return nil end
+	local ok, script = pcall(function() return sm:getItem(fullType) end)
+	return ok and script or nil
+end
+
+--- Crea una instancia de tooltip válida sin consultar como ScriptItem los
+--- tokens de muebles recogidos.
+---@param row table|nil
+---@return InventoryItem|nil
+local function itemProbe(row)
+	if not row then return nil end
+	-- Los muebles recogidos suelen compartir un fullType generico. Vanilla
+	-- reconstruye el InventoryItem desde el sprite del mundo; hacerlo primero
+	-- conserva su icono de inventario, nombre y propiedades reales.
+	if row.worldSprite then
+		if not ISMoveableSpriteProps then
+			pcall(require, "Moveables/ISMoveableSpriteProps")
+		end
+		if ISMoveableSpriteProps and ISMoveableSpriteProps.new then
+			local ok, probe = pcall(function()
+				local props = ISMoveableSpriteProps.new(row.worldSprite)
+				return props and props.instanceItem and props:instanceItem(row.worldSprite) or nil
+			end)
+			if ok and probe then return probe end
+		end
+	end
+	if scriptItem(row.fullType) and instanceItem then
+		local ok, probe = pcall(instanceItem, row.fullType)
+		if ok then return probe end
+	end
+	return nil
+end
+
+--- Textura de inventario resuelta como vanilla (`InventoryItem:getTex()`).
+--- El resultado se cachea porque la lista virtual puede redibujar la misma
+--- fila muchas veces. ScriptItem y sprite del mundo son solo fallbacks.
+---@param row table|nil
+---@return Texture|nil
+local function itemTexture(row)
+	if not row or not row.fullType then
 		return nil
 	end
-	local ok, script = pcall(function()
-		return sm:getItem(fullType)
-	end)
-	if ok and script and script.getNormalTexture then
-		return script:getNormalTexture()
+	local cacheKey = tostring(row.fullType) .. "\31" .. tostring(row.worldSprite or "")
+	local cached = ITEM_TEXTURE_CACHE[cacheKey]
+	if cached then
+		return cached
+	end
+
+	local probe = itemProbe(row)
+	if probe and probe.getTex then
+		local ok, tex = pcall(function() return probe:getTex() end)
+		if ok and tex then
+			ITEM_TEXTURE_CACHE[cacheKey] = tex
+			return tex
+		end
+	end
+
+	local script = scriptItem(row.fullType)
+	if script and script.getNormalTexture then
+		local ok, tex = pcall(function() return script:getNormalTexture() end)
+		if ok and tex then
+			ITEM_TEXTURE_CACHE[cacheKey] = tex
+			return tex
+		end
+	end
+	if row.worldSprite and getSprite then
+		local ok, tex = pcall(function()
+			local sprite = getSprite(row.worldSprite)
+			return sprite and sprite.getTexture and sprite:getTexture() or nil
+		end)
+		if ok and tex then
+			ITEM_TEXTURE_CACHE[cacheKey] = tex
+			return tex
+		end
 	end
 	return nil
 end
@@ -179,7 +240,7 @@ local function sortKeyValue(row, sortKey)
 		end
 		return string.lower(tostring(row.category or ""))
 	end
-	local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName)
+	local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
 	return string.lower(tostring(name or row.fullType or ""))
 end
 
@@ -581,12 +642,12 @@ local function createItemRow(scroll, listPanel, terminal)
 		end
 		if data then
 			local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-			local tex = itemTexture(data.fullType)
+			local tex = itemTexture(data)
 			if tex then
 				self:drawTextureScaledAspect(tex, 6, math.floor((self.height - ICON_SIZE) / 2), ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
 			end
 			local textX = 6 + ICON_SIZE + 8
-			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName)
+			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
 			local cat = GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
 			local count = tostring(data.count or 0)
 			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
@@ -612,9 +673,10 @@ local function createItemRow(scroll, listPanel, terminal)
 		-- si el texto no cabe en la columna, se trunca con "..." (ver
 		-- drawText de arriba) y el detalle completo se lee en este tooltip.
 		-- Se oculta mientras hay un arrastre activo (no tapar el preview de drop).
-		if data and self:isMouseOver() and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() and instanceItem then
-			if not self._gsTooltip or self._gsTooltip._gsFullType ~= data.fullType then
-				local probe = instanceItem(data.fullType)
+		if data and self:isMouseOver() and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			local tooltipKey = tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or "")
+			if not self._gsTooltip or self._gsTooltip._gsItemKey ~= tooltipKey then
+				local probe = itemProbe(data)
 				if probe then
 					if self._gsTooltip then
 						self._gsTooltip:setItem(probe)
@@ -625,7 +687,11 @@ local function createItemRow(scroll, listPanel, terminal)
 						local ttPlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getSpecificPlayer(0)
 						self._gsTooltip:setCharacter(ttPlayer)
 					end
-					self._gsTooltip._gsFullType = data.fullType
+					self._gsTooltip._gsItemKey = tooltipKey
+				elseif self._gsTooltip then
+					self._gsTooltip:removeFromUIManager()
+					self._gsTooltip:setVisible(false)
+					self._gsTooltip = nil
 				end
 			end
 			if self._gsTooltip then
@@ -674,6 +740,7 @@ local function createItemRow(scroll, listPanel, terminal)
 		end
 		return false
 	end
+	row.onMouseMoveOutside = row.onMouseMove
 
 	row.onMouseUp = function(self, x, y)
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then

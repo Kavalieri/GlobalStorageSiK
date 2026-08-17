@@ -18,17 +18,12 @@ GlobalStorageSiK.TransferMenu = {}
 local T = GlobalStorageSiK.I18n.text
 local PRESET_AMOUNTS = { 2, 3, 5, 10, 25, 50, 100, 250, 500 }
 
---- Cuenta unidades en un ítem apilable.
+--- Cuenta instancias físicas del mismo tipo en el contenedor de la referencia.
 ---@param item InventoryItem|nil
 ---@return number
 local function stackCount(item)
-	if not item then
-		return 0
-	end
-	if item.getCount then
-		return item:getCount() or 1
-	end
-	return 1
+	if not item or not GlobalStorageSiK.DepositClient.collectSameTypeItemIds then return 0 end
+	return #GlobalStorageSiK.DepositClient.collectSameTypeItemIds(item)
 end
 
 --- Deposita cantidad acotada de un ítem.

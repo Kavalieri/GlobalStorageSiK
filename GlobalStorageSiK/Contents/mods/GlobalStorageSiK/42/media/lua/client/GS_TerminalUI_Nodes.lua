@@ -65,18 +65,17 @@ end
 local function nodeScrollViewportHeight(panel)
 	local listGap = GlobalStorageSiK.TerminalScroll.listBottomGap()
 	local minH = MIN_EMBED_ROWS * ROW_H
-	if panel and panel._gsEmbedMode then
-		return minH
-	end
 	local avail = math.max(80, (panel and panel.height or 200) - HEADER_H - listGap - 4)
 	return math.max(minH, avail)
 end
 
 --- Altura total del panel embebido en pestaña Red.
+---@param availableHeight number|nil alto que puede aprovechar al crecer la ventana
 ---@return number
-function GlobalStorageSiK.TerminalNodes.embedPanelHeight()
+function GlobalStorageSiK.TerminalNodes.embedPanelHeight(availableHeight)
 	local listGap = GlobalStorageSiK.TerminalScroll.listBottomGap()
-	return HEADER_H + 2 + MIN_EMBED_ROWS * ROW_H + listGap + 4
+	local minimum = HEADER_H + 2 + MIN_EMBED_ROWS * ROW_H + listGap + 4
+	return math.max(minimum, tonumber(availableHeight) or 0)
 end
 
 ---@deprecated Usar GlobalStorageSiK.TerminalNodes.embedPanelHeight()
@@ -367,6 +366,7 @@ local function buildGroupedDisplayRows(nodes, zones, collapsedZones, sortColumn,
 			zoneId = zoneId,
 			zoneName = zoneName,
 			count = #list,
+			zonePriority = zonePriorities[zoneId],
 			collapsed = collapsed,
 		}
 		if not collapsed then
@@ -423,7 +423,13 @@ local function createNodeRow(scroll, listPanel, terminal)
 			GlobalStorageSiK.TerminalChrome.drawZoneHeaderBackground(self, hover)
 			local arrow = data.collapsed and "+ " or "- "
 			local title = arrow .. T("IGUI_GS_ZoneGroupHeader", data.zoneName or "—", data.count or 0)
-			self:drawText(truncateText(title, w - 16, UIFont.Small), 8, yMid, hover and 1 or pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+			local _, _, _, priorityRightX = computeNodeColumns(w)
+			local titleMaxW = math.max(40, priorityRightX - priorityColW() - 16)
+			self:drawText(truncateText(title, titleMaxW, UIFont.Small), 8, yMid, hover and 1 or pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+			if data.zonePriority then
+				self:drawTextRight(T("IGUI_GS_ZonePriorityValue", data.zonePriority), priorityRightX, yMid,
+					pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+			end
 			return
 		end
 
@@ -956,6 +962,16 @@ end
 function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
 	local pad = 8
 	local titleY = y
+	local infoMaxW = innerW - pad * 2
+	local infoLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_NodesPriorityHelp"), infoMaxW, UIFont.Small)
+	local infoH = #infoLines * (FONT_HGT_SMALL + 2) + 8
+	local function heightFor(currentY)
+		-- La ayuda queda visible debajo de la tabla. Si la ventana crece, todo
+		-- el alto adicional se entrega al viewport virtual de filas; si es
+		-- pequena se conserva el minimo y el scroll exterior cubre el resto.
+		local available = (scroll.height or 0) - currentY - infoH - 24
+		return GlobalStorageSiK.TerminalNodes.embedPanelHeight(available)
+	end
 	if not ui.nodesEmbedBuilt or not GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
 		ui.nodesEmbedBuilt = false
 		local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
@@ -986,7 +1002,8 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		-- la seccion Zonas, que no se retira todavia) - primer paso hacia la
 		-- gestion unificada de zonas+contenedores desde un solo sitio.
 		y = GlobalStorageSiK.TerminalNodes.buildZoneCreateButtons(scroll, terminal, ui, pad, y)
-		ui.nodesEmbedPanel = ISPanel:new(0, y, innerW, embedPanelHeight())
+		ui.nodesEmbedHeight = heightFor(y)
+		ui.nodesEmbedPanel = ISPanel:new(0, y, innerW, ui.nodesEmbedHeight)
 		ui.nodesEmbedPanel:initialise()
 		ui.nodesEmbedPanel.drawBackground = false
 		ui.nodesEmbedPanel._gsNetStatic = true
@@ -1019,10 +1036,9 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		-- depositar/auto-ordenar, en el mismo texto plano que ya se usa para
 		-- explicarselo al jugador en el chat - evita que el sistema parezca
 		-- "aleatorio" cuando en realidad sigue un orden fijo y documentado.
-		local infoY = y + embedPanelHeight() + 8
+		local infoY = y + ui.nodesEmbedHeight + 8
 		ui.nodesPriorityInfoLbls = {}
-		local infoMaxW = innerW - pad * 2
-		for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_NodesPriorityHelp"), infoMaxW, UIFont.Small)) do
+		for _, line in ipairs(infoLines) do
 			local lbl = ISLabel:new(pad, infoY, FONT_HGT_SMALL, line, 0.62, 0.66, 0.7, 1, UIFont.Small, true)
 			lbl:initialise()
 			lbl._gsNetStatic = true
@@ -1044,8 +1060,9 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		y = y + FONT_HGT_SMALL + 8
 		y = GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y)
 		ui.nodesEmbedY = y
+		ui.nodesEmbedHeight = heightFor(y)
 		if ui.nodesPriorityInfoLbls and #ui.nodesPriorityInfoLbls > 0 then
-			local infoY = y + embedPanelHeight() + 8
+			local infoY = y + ui.nodesEmbedHeight + 8
 			for _, lbl in ipairs(ui.nodesPriorityInfoLbls) do
 				GlobalStorageSiK.TerminalScroll.setContentX(scroll, lbl, pad)
 				GlobalStorageSiK.TerminalScroll.setContentY(scroll, lbl, infoY)
@@ -1060,7 +1077,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		if button then button:setEnable(configEnabled) end
 	end
 
-	local embedH = embedPanelHeight()
+	local embedH = ui.nodesEmbedHeight or heightFor(y)
 	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesEmbedPanel, y)
 		ui.nodesEmbedPanel:setWidth(innerW)

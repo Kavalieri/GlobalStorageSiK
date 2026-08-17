@@ -82,6 +82,7 @@ function GlobalStorageSiK.CraftUtils.knowsRecipe(player, recipeName)
 	-- isRecipeKnown/isRecipeActuallyKnown, contenido real de
 	-- getKnownRecipes()) para localizar en cual de los 3 metodos falla.
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Craft")
 
 	local sm = getScriptManager and getScriptManager() or nil
 	local craftRecipe = resolveCraftRecipe(sm, recipeName)
@@ -95,8 +96,8 @@ function GlobalStorageSiK.CraftUtils.knowsRecipe(player, recipeName)
 			local ok, known = pcall(function()
 				return player:isRecipeKnown(craftRecipe, true)
 			end)
-			if debugOn then
-				GlobalStorageSiK.Log.debug("CraftUtils", "knowsRecipe | isRecipeKnown ok=" .. tostring(ok) .. " known=" .. tostring(known))
+			if detailOn then
+				GlobalStorageSiK.Log.detail("CraftUtils", "knowsRecipe | isRecipeKnown ok=" .. tostring(ok) .. " known=" .. tostring(known))
 			end
 			if ok and known then
 				return true
@@ -106,8 +107,8 @@ function GlobalStorageSiK.CraftUtils.knowsRecipe(player, recipeName)
 			local ok, known = pcall(function()
 				return player:isRecipeActuallyKnown(craftRecipe)
 			end)
-			if debugOn then
-				GlobalStorageSiK.Log.debug("CraftUtils", "knowsRecipe | isRecipeActuallyKnown ok=" .. tostring(ok) .. " known=" .. tostring(known))
+			if detailOn then
+				GlobalStorageSiK.Log.detail("CraftUtils", "knowsRecipe | isRecipeActuallyKnown ok=" .. tostring(ok) .. " known=" .. tostring(known))
 			end
 			if ok and known then
 				return true
@@ -117,8 +118,8 @@ function GlobalStorageSiK.CraftUtils.knowsRecipe(player, recipeName)
 
 	if player.getKnownRecipes then
 		local known = player:getKnownRecipes()
-		if debugOn then
-			GlobalStorageSiK.Log.debug("CraftUtils", "knowsRecipe | getKnownRecipes contents: " .. dumpKnownRecipes(known))
+		if detailOn then
+			GlobalStorageSiK.Log.detail("CraftUtils", "knowsRecipe | getKnownRecipes contents: " .. dumpKnownRecipes(known))
 		end
 		if known and known.contains then
 			local variants = {
@@ -127,8 +128,8 @@ function GlobalStorageSiK.CraftUtils.knowsRecipe(player, recipeName)
 			}
 			for i = 1, #variants do
 				local ok, contains = pcall(function() return known:contains(variants[i]) end)
-				if debugOn then
-					GlobalStorageSiK.Log.debug("CraftUtils", "knowsRecipe | contains(\"" .. variants[i] .. "\") ok=" .. tostring(ok) .. " => " .. tostring(contains))
+				if detailOn then
+					GlobalStorageSiK.Log.detail("CraftUtils", "knowsRecipe | contains(\"" .. variants[i] .. "\") ok=" .. tostring(ok) .. " => " .. tostring(contains))
 				end
 				if ok and contains then
 					return true
@@ -301,6 +302,7 @@ end
 
 function GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Craft")
 	-- Linea de entrada INCONDICIONAL (no depende de que haya algo que
 	-- conceder): confirma que la funcion se invoco de verdad en este punto -
 	-- sin esto, "no aparece ninguna linea de CraftUtils" es ambiguo entre
@@ -310,7 +312,7 @@ function GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
 			"player=" .. tostring(player and player.getUsername and player:getUsername() or player))
 	end
 	if not player or not player.getAlreadyReadBook or not player.learnRecipe then
-		if debugOn then
+		if detailOn then
 			GlobalStorageSiK.Log.debug("CraftUtils", "ensureManualRecipesGranted.exit",
 				"player invalido o sin getAlreadyReadBook/learnRecipe")
 		end
@@ -328,7 +330,7 @@ function GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
 	for fullType, recipeList in pairs(MANUAL_RECIPES) do
 		local hasRead = safeGet(function() return alreadyRead:contains(fullType) end)
 		if debugOn then
-			GlobalStorageSiK.Log.debug("CraftUtils", "ensureManualRecipesGranted.manual",
+			GlobalStorageSiK.Log.detail("CraftUtils", "ensureManualRecipesGranted.manual",
 				fullType .. " hasRead=" .. tostring(hasRead))
 		end
 		if hasRead then
@@ -345,8 +347,8 @@ function GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
 							(granted and "concedida " or "FALLO al conceder ") .. tostring(recipeName)
 							.. " (manual " .. fullType .. " ya leido)")
 					end
-				elseif debugOn then
-					GlobalStorageSiK.Log.debug("CraftUtils", "ensureManualRecipesGranted.recipe",
+				elseif detailOn then
+					GlobalStorageSiK.Log.detail("CraftUtils", "ensureManualRecipesGranted.recipe",
 						tostring(recipeName) .. " ya conocida, nada que hacer")
 				end
 			end

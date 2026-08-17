@@ -330,14 +330,12 @@ function GlobalStorageSiK.Permissions.setMemberZoneDenials(networkId, characterI
 	return true
 end
 
---- Indica si el jugador tiene rol admin o superior.
+--- Indica si el personaje tiene rol propietario o administrador DENTRO de
+--- esta red. No concede acceso por rango global del servidor.
 ---@param player IsoPlayer
 ---@param networkId string
 ---@return boolean
-function GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId)
-	if GlobalStorageSiK.Permissions.isServerStaff(player) then
-		return true
-	end
+function GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
 	if GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return true
 	end
@@ -357,6 +355,18 @@ function GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId)
 		end
 	end
 	return false
+end
+
+--- Indica si el jugador puede administrar la red. Conserva el override de
+--- staff global para las herramientas generales de moderación.
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean
+function GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId)
+	if GlobalStorageSiK.Permissions.isServerStaff(player) then
+		return true
+	end
+	return GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
 end
 
 --- Devuelve el rol del jugador en la red: "owner" | "admin" | "member".
@@ -894,6 +904,8 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 		enforce = GlobalStorageSiK.Permissions.shouldEnforce(),
 		playerFactionName = playerFactionName,
 		playerRole = playerRole,
+		canAutoSort = resolvedPlayer ~= nil
+			and GlobalStorageSiK.Permissions.hasNetworkAdminRole(resolvedPlayer, networkId) or false,
 		memberEntries = memberEntries,
 		onlineCharacters = onlineCharacters,
 		factionMembers = collectFactionCharacterRecords(resolvedPlayer, onlineCharacters),

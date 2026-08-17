@@ -19,6 +19,7 @@ require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Chrome"
 require "GS_NetClient"
 require "GS_NodeHighlight"
+require "GS_TerminalUI_NodeEditor"
 
 GlobalStorageSiK.TerminalZoneEditor = {}
 GlobalStorageSiK.TerminalZoneEditor.instance = nil
@@ -150,6 +151,40 @@ function GS_ZoneEditorUI:applyAll()
 	end
 end
 
+local function countZoneNodes(nodes, zoneId)
+	local count = 0
+	for i = 1, #(nodes or {}) do
+		if nodes[i].zoneId == zoneId then count = count + 1 end
+	end
+	return count
+end
+
+--- Confirma y aplica la plantilla copiada a todos los contenedores actuales de
+--- esta zona en una sola orden. La confirmacion es deliberada: reemplaza
+--- categorias, filtros y prioridad de varios nodos, aunque conserva identidad,
+--- nombre, etiqueta, membresia y estado.
+function GS_ZoneEditorUI:confirmApplyNodeTemplate()
+	local template = GlobalStorageSiK.TerminalNodeEditor
+		and GlobalStorageSiK.TerminalNodeEditor.configTemplate or nil
+	if not template or not self.zone then return end
+	local count = countZoneNodes(self.allNodes, self.zone.id)
+	local message = T("IGUI_GS_ZoneTemplateConfirm", count, self.zone.name or "?", template.sourceName or "?")
+	local function onResult(_, button)
+		if not button or button.internal ~= "YES" then return end
+		GlobalStorageSiK.NetClient.sendCommand("applyNodeTemplateToZone", {
+			zoneId = self.zone.id,
+			categories = template.categories or {},
+			filters = template.filters or {},
+			priority = template.priority or 50,
+		})
+	end
+	local modal = ISModalDialog:new(0, 0, 520, 220, message, true, nil, onResult, nil)
+	modal:initialise()
+	modal:addToUIManager()
+	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
+	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
+end
+
 function GS_ZoneEditorUI:buildForm()
 	local pad = self.padding
 	local y = self.headerHeight + pad
@@ -172,11 +207,11 @@ function GS_ZoneEditorUI:buildForm()
 	-- Etiqueta + pista en 2 lineas (no concatenadas en una sola): la pista
 	-- ("1 = maxima prioridad, 100 = minima") desbordaba el ancho del panel
 	-- en una sola linea, saliendose visualmente del modal.
-	self.priorityLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodePriorityLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	self.priorityLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZonePriorityLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
 	self.priorityLbl:initialise()
 	self:addChild(self.priorityLbl)
 	y = y + FONT_HGT_SMALL + 2
-	self.priorityHintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodePriorityHint"), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.priorityHintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZonePriorityHint"), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
 	self.priorityHintLbl:initialise()
 	self:addChild(self.priorityHintLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -202,6 +237,31 @@ function GS_ZoneEditorUI:buildForm()
 		self:applyAll()
 	end)
 	self:addChild(self.applyAllBtn)
+	y = y + BTN_H + 16
+
+	local bulkTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZoneTemplateTitle"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	bulkTitle:initialise()
+	self:addChild(bulkTitle)
+	y = y + FONT_HGT_SMALL + 3
+	local template = GlobalStorageSiK.TerminalNodeEditor
+		and GlobalStorageSiK.TerminalNodeEditor.configTemplate or nil
+	local summary = template
+		and T("IGUI_GS_ZoneTemplateReady", template.sourceName or "?", #(template.categories or {}), #(template.filters or {}), template.priority or 50)
+		or T("IGUI_GS_ZoneTemplateEmpty")
+	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(summary, innerW, UIFont.Small)) do
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+		lbl:initialise()
+		self:addChild(lbl)
+		y = y + FONT_HGT_SMALL + 2
+	end
+	self.applyTemplateBtn = createBtn(pad, y, innerW, T("IGUI_GS_ZoneTemplateApply"), self, function()
+		self:confirmApplyNodeTemplate()
+	end)
+	self.applyTemplateBtn:setEnable(template ~= nil)
+	if self.applyTemplateBtn.setToolTipMap then
+		self.applyTemplateBtn:setToolTipMap({ toolTip = T("IGUI_GS_ZoneTemplateApplyTooltip") })
+	end
+	self:addChild(self.applyTemplateBtn)
 	y = y + BTN_H + 16
 
 	self.deleteBtn = createBtn(pad, y, innerW, T("IGUI_GS_DeleteZone"), self, function()
@@ -273,6 +333,7 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
 	local ui = GS_ZoneEditorUI:new(0, 0, PANEL_W, 100)
 	ui.terminal = terminal
 	ui.zone = zone
+	ui.allNodes = allNodes or {}
 	ui:initialise()
 	ui:addToUIManager()
 	GlobalStorageSiK.TerminalZoneEditor.instance = ui

@@ -147,9 +147,15 @@ function GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
 	local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
 		registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded
 	)
+	-- Marca interna consumida por GS_Index al construir inmediatamente el
+	-- terminalState: solo esta zona tiene snapshots recién capturados.
+	summary._freshSnapshotScope = zoneId
 	summary.limitHit = limitHit == true
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	-- Un reescaneo actualiza snapshots autoritativos, pero no debe difundir el
+	-- Global ModData completo (incluye todas las redes/nodos). GS_Server envia
+	-- terminalState dirigido y RegistryStore persiste el catalogo por separado.
+	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 	return summary
 end
@@ -182,10 +188,13 @@ function GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 		end
 	end
 
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 
+	-- Todas las zonas de esta red acaban de recorrer sus contenedores cargados.
+	-- GS_Index puede reutilizar esas capturas sin repetir el mismo barrido.
+	totals._freshSnapshotScope = "network"
 	return totals
 end
 
@@ -211,9 +220,13 @@ function GlobalStorageSiK.ZoneRefresh.getActiveNodes(networkId)
 end
 
 --[[
-	Política (cerrada):
-	- No hay polling en segundo plano.
-	- Al abrir terminal (físico o hotkey): refreshNetworkOnTerminalOpen().
+	Política:
+	- No hay polling continuo. Apertura, reescaneo y consolidación tras cambios
+	  crean un GS_ZoneScanJob incremental con presupuesto temporal por red.
+	- refreshNetworkOnTerminalOpen()/refreshZone() quedan como wrappers legacy;
+	  GS_Server no los usa en el flujo normal porque son síncronos.
+	- Un escaneo de inventario no transmite Global ModData completo: persiste la
+	  captura y GS_Server envía terminalState solo a observadores de esa red.
 	- Zonas solapadas: gana la de menor área (orden ascendente al escanear).
 	- Contenedor en zona = accesible; offline solo si no se detecta en el último scan.
 	- Configuración del jugador (nombre, reglas, enabled) persiste aunque esté offline.

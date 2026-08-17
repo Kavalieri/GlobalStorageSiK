@@ -7,14 +7,131 @@
 
 GlobalStorageSiK.InventorySync = {}
 
---- Comprueba espacio en contenedor (B42: hasRoomFor(character, item)).
+-- Durante una operación autoritativa se agrupan los mensajes vanilla por
+-- contenedor. El estado Java se modifica inmediatamente, pero MP recibe una
+-- lista por origen/destino en vez de dos paquetes por cada objeto. Esto evita
+-- saturar la conexión del jugador y dejar copias fantasma en su inventario al
+-- depositar cientos de instancias.
+local batchDepth = 0
+local pendingRemovals = {}
+local pendingAdds = {}
+
+local function notifyPlayerNow(player)
+	if not player or not (isServer and isServer()) then return end
+	pcall(function()
+		if player.syncInventory then
+			player:syncInventory()
+		elseif player.sendInventory then
+			player:sendInventory()
+		end
+	end)
+end
+
+local function queueItem(groups, container, item)
+	local group = groups[container]
+	if not group then
+		group = { container = container, items = {} }
+		groups[container] = group
+	end
+	group.items[#group.items + 1] = item
+end
+
+local function toJavaList(items)
+	if not ArrayList or not ArrayList.new then
+		return nil
+	end
+	local list = ArrayList.new()
+	for i = 1, #items do
+		list:add(items[i])
+	end
+	return list
+end
+
+local function flushGroups(groups, batchFn, singleFn)
+	for _, group in pairs(groups) do
+		local sent = false
+		local list = toJavaList(group.items)
+		if list and batchFn then
+			local ok = pcall(batchFn, group.container, list)
+			sent = ok
+		end
+		if not sent and singleFn then
+			for i = 1, #group.items do
+				pcall(singleFn, group.container, group.items[i])
+			end
+		end
+	end
+end
+
+function GlobalStorageSiK.InventorySync.beginBatch()
+	if isServer and isServer() then
+		batchDepth = batchDepth + 1
+	end
+end
+
+function GlobalStorageSiK.InventorySync.endBatch()
+	if not (isServer and isServer()) or batchDepth <= 0 then
+		return
+	end
+	batchDepth = batchDepth - 1
+	if batchDepth > 0 then
+		return
+	end
+	local removals = pendingRemovals
+	local additions = pendingAdds
+	pendingRemovals = {}
+	pendingAdds = {}
+	flushGroups(removals, sendRemoveItemsFromContainer, sendRemoveItemFromContainer)
+	flushGroups(additions, sendAddItemsToContainer, sendAddItemToContainer)
+	-- No forzar player:syncInventory() despues de los paquetes incrementales.
+	-- Vanilla usa sendAddItemsToContainer(player:getInventory(), items) como
+	-- notificacion completa del lote. Enviar inmediatamente despues un snapshot
+	-- global del jugador permite que ambos paquetes lleguen/apliquen fuera de
+	-- orden y que el snapshot anterior sobrescriba parte de las altas. En la
+	-- prueba dedicada dev9 el servidor confirmaba 10 clavos por micro-lote pero
+	-- el cliente solo conservaba aproximadamente 2. Un unico mecanismo de sync
+	-- por mutacion evita esa carrera y sigue exactamente el patron vanilla B42.
+end
+
+---@param fn function
+---@return any
+function GlobalStorageSiK.InventorySync.withBatch(fn)
+	GlobalStorageSiK.InventorySync.beginBatch()
+	-- No guardar los retornos de pcall en una tabla y desempaquetarla sin un
+	-- limite explicito. Un retorno perfectamente valido como
+	--   true, nil, 10
+	-- crea un hueco en el indice 2; en Kahlua/Lua la longitud de esa tabla no
+	-- esta definida y unpack puede cortar antes del 10. Eso hizo que el servidor
+	-- moviese 10 unidades pero confirmase moved=0 al cliente, deteniendo cada
+	-- retirada incremental tras el primer micro-lote. Los consumidores actuales
+	-- usan como maximo tres valores; conservamos margen sin depender de #table.
+	local ok, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(fn)
+	GlobalStorageSiK.InventorySync.endBatch()
+	if not ok then
+		error(r1)
+	end
+	return r1, r2, r3, r4, r5, r6, r7, r8
+end
+
+--- Comprueba espacio en contenedor (B42: hasRoomFor(character, item)). La
+--- carga ilimitada solo anula la capacidad del inventario principal del propio
+--- personaje; bolsas y cofres conservan siempre su límite físico.
 ---@param container ItemContainer
 ---@param item InventoryItem
 ---@param character IsoPlayer|IsoGameCharacter|nil
 ---@return boolean
-local function containerHasRoom(container, item, character)
+function GlobalStorageSiK.InventorySync.containerHasRoom(container, item, character)
 	if not container or not item then
 		return false
+	end
+	if character and character.isUnlimitedCarry and character.getInventory then
+		local unlimitedOk, unlimited = pcall(function()
+			return character:isUnlimitedCarry() == true
+				and character:getInventory() == container
+		end)
+		if unlimitedOk and unlimited then
+			return true
+		end
 	end
 	if container.hasRoomFor and character then
 		local ok, result = pcall(function()
@@ -32,22 +149,24 @@ local function containerHasRoom(container, item, character)
 			return resultLegacy == true
 		end
 	end
+	if container.getCapacity and container.getWeight then
+		local cap = container:getCapacity()
+		local cur = container:getWeight()
+		local weight = 0
+		if item.getActualWeight then
+			weight = item:getActualWeight()
+		elseif item.getWeight then
+			weight = item:getWeight()
+		end
+		return (cur + weight) <= cap
+	end
 	return true
 end
 
 --- Notifica al cliente cambios en el inventario del jugador.
 ---@param player IsoPlayer|nil
 function GlobalStorageSiK.InventorySync.notifyPlayer(player)
-	if not player or not (isServer and isServer()) then
-		return
-	end
-	pcall(function()
-		if player.syncInventory then
-			player:syncInventory()
-		elseif player.sendInventory then
-			player:sendInventory()
-		end
-	end)
+	notifyPlayerNow(player)
 end
 
 --- Elimina un ítem del contenedor con sincronización en servidor.
@@ -64,7 +183,9 @@ function GlobalStorageSiK.InventorySync.removeItem(container, item)
 	end
 	if isServer and isServer() then
 		cont:Remove(item)
-		if sendRemoveItemFromContainer then
+		if batchDepth > 0 then
+			queueItem(pendingRemovals, cont, item)
+		elseif sendRemoveItemFromContainer then
 			sendRemoveItemFromContainer(cont, item)
 		end
 		return true
@@ -82,16 +203,22 @@ function GlobalStorageSiK.InventorySync.addToContainer(container, item, characte
 	if not container or not item then
 		return false
 	end
-	if not containerHasRoom(container, item, character) then
+	if not GlobalStorageSiK.InventorySync.containerHasRoom(container, item, character) then
 		return false
 	end
 	container:AddItem(item)
-	if isServer and isServer() and sendAddItemToContainer then
-		sendAddItemToContainer(container, item)
+	if isServer and isServer() then
+		if batchDepth > 0 then
+			queueItem(pendingAdds, container, item)
+		elseif sendAddItemToContainer then
+			sendAddItemToContainer(container, item)
+		end
 	end
-	if character and character.getInventory and character:getInventory() == container then
-		GlobalStorageSiK.InventorySync.notifyPlayer(character)
-	end
+	-- No llamar tambien a notifyPlayer() cuando el destino es el inventario
+	-- del personaje. Tanto sendAddItemToContainer() como su variante plural
+	-- ya replican el alta en MP; añadir un snapshot completo despues reproduce
+	-- la misma carrera que en los lotes. En SP la mutacion Java local ya es
+	-- visible y tampoco necesita una segunda ruta de sincronizacion.
 	return true
 end
 
@@ -108,7 +235,7 @@ function GlobalStorageSiK.InventorySync.moveBetween(source, dest, item, characte
 	if not source:contains(item) then
 		return false
 	end
-	if not containerHasRoom(dest, item, character) then
+	if not GlobalStorageSiK.InventorySync.containerHasRoom(dest, item, character) then
 		return false
 	end
 	if not GlobalStorageSiK.InventorySync.removeItem(source, item) then
@@ -134,7 +261,7 @@ function GlobalStorageSiK.InventorySync.addToPlayer(player, item)
 	if not inv then
 		return false
 	end
-	if containerHasRoom(inv, item, player) then
+	if GlobalStorageSiK.InventorySync.containerHasRoom(inv, item, player) then
 		return GlobalStorageSiK.InventorySync.addToContainer(inv, item, player)
 	end
 	local sq = player.getCurrentSquare and player:getCurrentSquare() or nil

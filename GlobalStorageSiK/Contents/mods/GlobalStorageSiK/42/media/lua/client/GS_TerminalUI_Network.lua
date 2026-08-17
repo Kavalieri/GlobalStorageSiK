@@ -27,7 +27,7 @@ GlobalStorageSiK.TerminalNetwork = {}
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local SECTION_GAP = 10
-local NET_UI_VERSION = 23
+local NET_UI_VERSION = 24
 
 -- Altura de la barra de sub-pestañas
 local TAB_BAR_H = FONT_HGT_SMALL + 14
@@ -83,6 +83,7 @@ local function buildTabUi(scroll, terminal, key)
 		permsBuilt   = false,
 		nodesEmbedBuilt = false,
 		_lastInnerW  = innerW,
+		_lastInnerH  = scroll.height or 0,
 	}
 	local y = 8
 	if key == "red" then
@@ -168,10 +169,9 @@ local function layoutTabUiInternal(scroll, ui, key, innerW)
 
 	elseif key == "nodos" then
 		if ui.nodesEmbedPanel and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
-			local embedH = (GlobalStorageSiK.TerminalNodes.embedPanelHeight
-				and GlobalStorageSiK.TerminalNodes.embedPanelHeight())
+			local embedH = ui.nodesEmbedHeight
 				or math.max(140, ui.nodesEmbedPanel:getHeight() or 140)
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesEmbedPanel, 8)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesEmbedPanel, ui.nodesEmbedY or 8)
 			ui.nodesEmbedPanel:setWidth(innerW)
 			ui.nodesEmbedPanel:setHeight(embedH)
 			GlobalStorageSiK.TerminalNodes.layout(ui.nodesEmbedPanel, innerW, embedH, 0, 0)
@@ -356,6 +356,7 @@ function GlobalStorageSiK.TerminalNetwork.refreshActiveTab(terminal, state)
 
 	local contentBottom = math.max((y or 8) + 16, 200)
 	ui.contentBottom = contentBottom
+	ui._lastInnerH = scroll.height or 0
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentBottom)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 	GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
@@ -400,6 +401,7 @@ function GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, state)
 
 			local contentBottom = math.max((y or 8) + 16, 200)
 			ui.contentBottom = contentBottom
+			ui._lastInnerH = scroll.height or 0
 			GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentBottom)
 			if key == activeKey then
 				GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
@@ -439,6 +441,15 @@ function GlobalStorageSiK.TerminalNetwork.syncScrollLayout(terminal)
 		scroll._gsTabUi = nil
 		GlobalStorageSiK.TerminalNetwork.refreshActiveTab(terminal, terminal.terminalState)
 		if scroll._gsTabUi then scroll._gsTabUi._lastInnerW = newInnerW end
+		return
+	end
+	local newInnerH = scroll.height or 0
+	if not ui._lastInnerH or math.abs(newInnerH - ui._lastInnerH) > 1 then
+		-- El ancho ya reconstruia la pestaña, pero el alto solo ajustaba el
+		-- scroll exterior. Nodos necesita recalcular su viewport/pool virtual
+		-- para convertir el espacio nuevo en filas visibles.
+		ui._lastInnerH = newInnerH
+		GlobalStorageSiK.TerminalNetwork.refreshActiveTab(terminal, terminal.terminalState)
 		return
 	end
 

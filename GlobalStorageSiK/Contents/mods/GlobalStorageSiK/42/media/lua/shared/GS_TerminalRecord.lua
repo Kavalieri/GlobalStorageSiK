@@ -235,3 +235,29 @@ function GlobalStorageSiK.TerminalRecord.getPrimaryAnchor(network)
 	end
 	return anchors[1]
 end
+
+--- Última ubicación conocida para recuperación/UI. Prioriza un terminal
+--- activo, después el registro explícito de reubicación y por último los
+--- terminales suspendidos históricos. No inspecciona el mundo.
+---@param network table|nil
+---@return table|nil
+function GlobalStorageSiK.TerminalRecord.getLastKnownLocation(network)
+	if not network then return nil end
+	local active = GlobalStorageSiK.TerminalRecord.getPrimaryAnchor(network)
+	if active then return { x = active.x, y = active.y, z = active.z or 0 } end
+	local reloc = network.relocation
+	if reloc and reloc.lastX ~= nil and reloc.lastY ~= nil then
+		return { x = reloc.lastX, y = reloc.lastY, z = reloc.lastZ or 0 }
+	end
+	for i = #(network.terminals or {}), 1, -1 do
+		local terminal = network.terminals[i]
+		if terminal and terminal.x ~= nil and terminal.y ~= nil then
+			return { x = terminal.x, y = terminal.y, z = terminal.z or 0 }
+		end
+	end
+	local controller = network.controller
+	if controller and controller.x ~= nil and controller.y ~= nil then
+		return { x = controller.x, y = controller.y, z = controller.z or 0 }
+	end
+	return nil
+end

@@ -3,7 +3,7 @@
 	Autor: SiK
 	Fecha: 2026-08-02
 	Descripcion: para nuestras subcategorias que distinguen items dentro de una
-	misma categoria vanilla compartida (comida perecedera/no perecedera, joyeria/
+	misma categoria vanilla compartida (comida perecedera, joyeria/
 	otros accesorios, armas de fuego/cuerpo a cuerpo, material metal/cuero/madera...),
 	fijamos una DisplayCategory REAL sobre el script item, con la misma tecnica
 	que usa Extended Categories (item:DoParam("DisplayCategory", ...)).

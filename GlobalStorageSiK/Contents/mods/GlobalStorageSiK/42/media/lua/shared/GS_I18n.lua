@@ -100,7 +100,24 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NoNodesYet = "No containers detected in zones.",
 	IGUI_GS_ShowTerminalCoverage = "Show coverage",
 	IGUI_GS_HideTerminalCoverage = "Hide coverage",
-	IGUI_GS_NodesPriorityHelp = "How items pick a container: 1) exact custom filter or leaf category match, 2) subcategory match (e.g. Food > Perishable), 3) main category match (e.g. Food) with no better option, 4) unrestricted container. If no container matches, the item stays in your inventory instead of taking a wrong spot.",
+	IGUI_GS_NodesPriorityHelp = "Destination order:\n1) Exact custom filter or level-3 category.\n2) Level-2 subcategory.\n3) Level-1 main category.\n4) Affinity: unrestricted container already holding the same item.\n5) Any unrestricted container.\nWithin the same tier: zone priority, then container priority, then a stable internal order.\nIf no valid destination has room, the item stays in your inventory.",
+	IGUI_GS_ZonePriorityLabel = "Zone priority:",
+	IGUI_GS_ZonePriorityHint = "1 = first zone, 100 = last. Used only after match or affinity tier.",
+	IGUI_GS_ZonePriorityValue = "Zone {1}",
+	IGUI_GS_NodeConfigTemplateTitle = "Configuration template",
+	IGUI_GS_NodeConfigTemplateReady = "Copied from {1}: {2} categories, {3} custom filters, priority {4}.",
+	IGUI_GS_NodeConfigTemplateEmpty = "No copied configuration. Configure one container and copy it.",
+	IGUI_GS_NodeConfigCopy = "Copy configuration",
+	IGUI_GS_NodeConfigPaste = "Paste configuration",
+	IGUI_GS_NodeConfigCopyTooltip = "Copies categories, custom filters and container priority only.",
+	IGUI_GS_NodeConfigPasteTooltip = "Replaces this container's categories, custom filters and priority. Its identity and name are preserved.",
+	IGUI_GS_ZoneTemplateTitle = "Configure all containers",
+	IGUI_GS_ZoneTemplateReady = "Template from {1}: {2} categories, {3} custom filters, priority {4}.",
+	IGUI_GS_ZoneTemplateEmpty = "First copy the configuration from a container.",
+	IGUI_GS_ZoneTemplateApply = "Apply configuration to entire zone",
+	IGUI_GS_ZoneTemplateApplyTooltip = "Applies the copied categories, custom filters and container priority to every current container in this zone.",
+	IGUI_GS_ZoneTemplateConfirm = "Replace the configuration of {1} containers in zone '{2}' with the template copied from '{3}'? Names, labels and physical contents will not change.",
+	IGUI_GS_ZoneTemplateAppliedMsg = "Configuration applied to {1} containers in zone '{2}'.",
 	IGUI_GS_NetworkId = "Network: {1}",
 	IGUI_GS_Guide1 = "1. Setup: create a zone (room or MP safehouse) and rescan.",
 	IGUI_GS_Guide2 = "2. Containers: rename each box and pick one category for auto-sort.",
@@ -136,6 +153,14 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ScanNew = "New containers: {1}",
 	IGUI_GS_ScanUpdated = "Updated: {1}",
 	IGUI_GS_ScanOffline = "Offline: {1}",
+	IGUI_GS_ScanConfigLocked = "Network setup is locked while the inventory scan is running.",
+	IGUI_GS_ScanFailed = "Network inventory scan failed.",
+	IGUI_GS_ScanAlreadyRunning = "That network is already being scanned.",
+	IGUI_GS_ScanStarted = "Network inventory scan started.",
+	IGUI_GS_ScanRunning = "Scanning network inventory incrementally...",
+	IGUI_GS_ScanRunningShort = "Scanning...",
+	IGUI_GS_ScanCompleteMetrics = "Scan complete in {1} ms: {2} containers, {3} item instances, {4} types, {5} snapshot rows.",
+	IGUI_GS_ScanMetricsTooltip = "Last scan: {1} ms | {2} containers | {3} item instances | {4} types | {5} rows",
 	IGUI_GS_ItemTypes = "Item types in network: {1}",
 	IGUI_GS_NoZones = "No containers. Create a zone in Setup and press Rescan.",
 	IGUI_GS_NodesHelp = "Rename containers and pick one category. «Any» = accept all items.",
@@ -450,6 +475,23 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NetLinkTerminal = "Link terminal here",
 	IGUI_GS_NetRefreshList = "Refresh list",
 	IGUI_GS_NetNoNetworks = "No networks yet",
+	IGUI_GS_NetStatusActive = "Status: active",
+	IGUI_GS_NetStatusSuspended = "Status: suspended (no active terminals)",
+	IGUI_GS_NetCounts = "Zones: {1} | Containers: {2}",
+	IGUI_GS_NetLastLocation = "Last terminal location: {1}",
+	IGUI_GS_NetLocationUnknown = "unknown",
+	IGUI_GS_NetUseSelectedHint = "Use this active network in the current session.",
+	IGUI_GS_NetReactivateViaTerminal = "Suspended networks are reactivated by installing and linking a physical terminal.",
+	IGUI_GS_NetLinkAction = "Link active network",
+	IGUI_GS_NetReactivateAction = "Reactivate suspended network",
+	IGUI_GS_RecoveryNetworkStatusLine = "{1} - {2}",
+	IGUI_GS_NetworkDeleteSuspended = "Delete suspended network",
+	IGUI_GS_NetworkDeleteConfirm = "Permanently delete the GS metadata for suspended network '{1}' ({2} zones, {3} containers)? Physical containers and their items will not be moved or deleted.",
+	IGUI_GS_NetworkDeleteOwnerOnly = "Only this GS network's owner may delete it.",
+	IGUI_GS_NetworkDeleteActive = "An active network cannot be deleted. Remove or relocate all its terminals first.",
+	IGUI_GS_NetworkDeleteBusy = "This network is busy. Wait for its current task to finish.",
+	IGUI_GS_NetworkDeleteHint = "Deletes only GS metadata. Physical containers and items remain untouched.",
+	IGUI_GS_NetworkDeleted = "Suspended network deleted: {1} ({2} zones, {3} containers). Physical contents were not changed.",
 	IGUI_GS_NetNoActive = "none",
 	IGUI_GS_NetActiveSession = "Active session",
 	IGUI_GS_BlockedTerminalUnlinked = "This terminal is not linked to a network. Use Install GS Terminal or the Network tab to create or link one.",
@@ -635,12 +677,6 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if not fullType or fullType == "" then
 		return "?"
 	end
-	if getItemNameFromFullType then
-		local ok, name = pcall(getItemNameFromFullType, fullType)
-		if ok and name and name ~= "" and name ~= fullType then
-			return name
-		end
-	end
 	local hasScript = false
 	local smEarly = getScriptManager and getScriptManager()
 	if smEarly and smEarly.getItem then
@@ -648,6 +684,15 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 			return smEarly:getItem(fullType)
 		end)
 		hasScript = okScript and script ~= nil
+	end
+	-- getItemNameFromFullType imprime un error Java aunque esté dentro de pcall
+	-- cuando recibe el identificador de sprite de un Moveable (p. ej.
+	-- Base.carpentry_01_16). Consultarlo sólo para ScriptItems reales.
+	if getItemNameFromFullType and hasScript then
+		local ok, name = pcall(getItemNameFromFullType, fullType)
+		if ok and name and name ~= "" and name ~= fullType then
+			return name
+		end
 	end
 	if instanceItem and hasScript then
 		local ok, item = pcall(instanceItem, fullType)
@@ -724,10 +769,64 @@ function GlobalStorageSiK.I18n.isLowQualityDisplayName(name)
 	if trimmed:match("^%u%s+%u%s+%d+") or trimmed:match("^%u%u?%s+%u%u?%s+%d+") then
 		return true
 	end
+	if trimmed:match("^[%a]+_%d+_%d+$") or trimmed:match("^[%a]+%s+%d+%s+%d+$") then
+		return true
+	end
 	if trimmed:match("^[%u%d%s%.%-_]+$") and not trimmed:find("%l") and #trimmed <= 24 then
 		return true
 	end
 	return false
+end
+
+local moveableNameBySprite = {}
+
+--- Resuelve el nombre localizado de un mueble recogido a partir de su sprite.
+--- Reutiliza exactamente las propiedades vanilla; no interpreta el token del
+--- sprite como si fuera un ScriptItem.
+---@param worldSprite string|nil
+---@return string|nil
+function GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
+	if not worldSprite or worldSprite == "" then
+		return nil
+	end
+	if moveableNameBySprite[worldSprite] ~= nil then
+		return moveableNameBySprite[worldSprite] or nil
+	end
+	local function resolved(value)
+		moveableNameBySprite[worldSprite] = value or false
+		return value
+	end
+	if not ISMoveableSpriteProps then
+		pcall(require, "Moveables/ISMoveableSpriteProps")
+	end
+	if not ISMoveableSpriteProps or not ISMoveableSpriteProps.new then
+		return resolved(nil)
+	end
+	local okProps, props = pcall(ISMoveableSpriteProps.new, worldSprite)
+	if not okProps or not props then
+		return resolved(nil)
+	end
+	local rawName = props.name
+	if rawName and Translator and Translator.getMoveableDisplayName then
+		local okName, localized = pcall(Translator.getMoveableDisplayName, rawName)
+		if okName and localized and localized ~= ""
+			and not GlobalStorageSiK.I18n.isLowQualityDisplayName(localized) then
+			return resolved(localized)
+		end
+	end
+	if props.instanceItem then
+		local okItem, probe = pcall(function()
+			return props:instanceItem(worldSprite)
+		end)
+		if okItem and probe then
+			local name = GlobalStorageSiK.I18n.nameFromItemInstance(probe, nil)
+			if name then return resolved(name) end
+		end
+	end
+	if rawName and not GlobalStorageSiK.I18n.isLowQualityDisplayName(rawName) then
+		return resolved(rawName)
+	end
+	return resolved(nil)
 end
 
 --- Nombre desde instancia viva (escaneo / cliente).
@@ -779,11 +878,14 @@ end
 --- Nombre legible de un ítem según idioma del cliente (estable por fullType).
 ---@param fullType string|nil
 ---@param fallback string|nil
+---@param worldSprite string|nil
 ---@return string
-function GlobalStorageSiK.I18n.itemDisplayName(fullType, fallback)
+function GlobalStorageSiK.I18n.itemDisplayName(fullType, fallback, worldSprite)
 	if not fullType then
 		return fallback or "?"
 	end
+	local moveable = GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
+	if moveable then return moveable end
 	local stable = GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if stable and stable ~= "" and stable ~= fullType
 		and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
@@ -838,7 +940,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		parts[#parts + 1] = text
 	end
 
-	local locName = GlobalStorageSiK.I18n.typeDisplayName(fullType)
+	local locName = GlobalStorageSiK.I18n.itemDisplayName(fullType, row.displayName, row.worldSprite)
 	addPart(locName)
 	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
 		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)

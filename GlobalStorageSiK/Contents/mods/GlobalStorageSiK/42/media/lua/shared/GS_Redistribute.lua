@@ -17,7 +17,7 @@ require "GS_I18n"
 
 GlobalStorageSiK.Redistribute = {}
 
--- Presupuesto por paso del job. MaxItemsPerBulkTick limita MOVIMIENTOS en
+-- Presupuesto por paso del job. El límite interno acota MOVIMIENTOS en
 -- depósitos normales, pero Auto Sort también debe limitar ítems INSPECCIONADOS:
 -- una red ya ordenada podía recorrer miles de ítems contra todos los nodos en
 -- un único tick porque moved seguía en cero. Dos movimientos por paso reducen
@@ -54,27 +54,23 @@ end
 
 --- Compara dos nodos candidatos para saber cual es mejor destino (true si a
 --- es mejor que b, para ordenar de mejor a peor).
---- 1) Prioridad EXPLICITA del contenedor (entry.priority, 1-100, 1=mejor)
----    manda sobre cualquier orden de zona: si el jugador puso prioridad 1 a
----    un congelador de zona secundaria, ese gana siempre para su categoria.
---- 2) Si ninguno de los dos tiene prioridad explicita, decide el orden de
----    zonas ya configurado (zone.priority ascendente = zona principal primero).
+--- La especificidad/tier ya se compara antes de llamar a esta funcion.
+--- Dentro del mismo tier: 1) zona, 2) contenedor, 3) ID estable. Esto hace que
+--- la prioridad solo ordene candidatos equivalentes y nunca adelante una
+--- categoria generica frente a una coincidencia o afinidad mejores.
 ---@param a table live entry candidato
 ---@param b table live entry candidato
 ---@param zonePriorityOf table<string, number>
 ---@return boolean
 local function candidateBetter(a, b, zonePriorityOf)
-	local pa = a.entry and a.entry.priority
-	local pb = b.entry and b.entry.priority
-	if pa ~= nil or pb ~= nil then
-		local va = pa or math.huge
-		local vb = pb or math.huge
-		if va ~= vb then return va < vb end
-	end
-	local za = zonePriorityOf[a.entry and a.entry.zoneId] or math.huge
-	local zb = zonePriorityOf[b.entry and b.entry.zoneId] or math.huge
+	local ea, eb = a.entry or {}, b.entry or {}
+	local za = zonePriorityOf[ea.zoneId] or tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
+	local zb = zonePriorityOf[eb.zoneId] or tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
 	if za ~= zb then return za < zb end
-	return false
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
+	return tostring(ea.id or "") < tostring(eb.id or "")
 end
 
 --- Cachea el tier por fullType+nodo solo si el nodo no tiene filtros
@@ -153,12 +149,18 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 		local best = bestByTier[tierIdx]
 		if best then
 			if best.live.container == fromLive.container then
-				return nil, nil
+				return nil, nil, nil
 			end
-			return best.live, best.index
+			return best.live, best.index, tierIdx
 		end
 	end
-	return nil, nil
+	return nil, nil, nil
+end
+
+local function incrementSummaryCount(counts, key)
+	if not counts or key == nil then return end
+	key = tostring(key)
+	counts[key] = (counts[key] or 0) + 1
 end
 
 local function updateTypeCount(session, nodeIndex, fullType, delta)
@@ -269,10 +271,14 @@ local function stepMoves(session, player, summary, startedAt)
 			local container = fromLive and fromLive.container
 			local fullType = item and item.getFullType and item:getFullType() or nil
 			if item and container and container:contains(item) then
-				local target, targetIndex = pickRedistributeTarget(item, nodeIndex, session, player)
+				local target, targetIndex, targetTier = pickRedistributeTarget(item, nodeIndex, session, player)
 				if target and target.container and target.container ~= container then
 					if GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player) then
 						summary.moved = summary.moved + 1
+						summary.movedByTier = summary.movedByTier or {}
+						summary.movedByType = summary.movedByType or {}
+						incrementSummaryCount(summary.movedByTier, targetTier or "?")
+						incrementSummaryCount(summary.movedByType, fullType or "?")
 						updateTypeCount(session, nodeIndex, fullType, -1)
 						updateTypeCount(session, targetIndex, fullType, 1)
 					else

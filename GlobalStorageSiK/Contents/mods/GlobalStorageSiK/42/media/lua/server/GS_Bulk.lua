@@ -54,13 +54,14 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 		for c = 1, #candidates do
 
-			if summary.moved >= maxPerTick then
+			if summary.processed >= maxPerTick then
 
 				summary.reason = "limit"
 
 				return summary
 
 			end
+			summary.processed = summary.processed + 1
 
 			local item = candidates[c]
 
@@ -114,7 +115,7 @@ end
 
 function GlobalStorageSiK.Bulk.depositFromPlayer(player, networkId, sourceIndex)
 
-	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil }
+	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, reason = nil }
 
 
 
@@ -163,4 +164,3 @@ function GlobalStorageSiK.Bulk.depositFromPlayer(player, networkId, sourceIndex)
 	return depositFromContainers(player, networkId, entry.containers, scope, summary, maxPerTick)
 
 end
-

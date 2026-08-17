@@ -109,7 +109,9 @@ function GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, play
 
 				if item and item.getFullType and item:getFullType() == fullType then
 
-					total = total + (item.getCount and item:getCount() or 1)
+					-- Una entrada Java/itemId es una unidad física transferible.
+					-- getCount() contiene metadata de script/receta en varios tipos.
+					total = total + 1
 
 				end
 
@@ -120,92 +122,6 @@ function GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, play
 	end
 
 	return total
-
-end
-
-
-
---- Separa unidades de un stack para retiro parcial.
-
----@param item InventoryItem
-
----@param count number
-
----@return InventoryItem|nil
-
-local function splitStackUnits(item, count)
-
-	if not item or not count or count <= 0 then
-
-		return nil
-
-	end
-
-	local total = item.getCount and item:getCount() or 1
-
-	if count >= total then
-
-		return item
-
-	end
-
-	if item.split then
-
-		local ok, part = pcall(function()
-
-			return item:split(count)
-
-		end)
-
-		if ok and part then
-
-			return part
-
-		end
-
-	end
-
-	local container = item.getContainer and item:getContainer() or nil
-
-	if not container or not instanceItem or not item.getFullType then
-
-		return nil
-
-	end
-
-	local part = instanceItem(item:getFullType())
-
-	if not part then
-
-		return nil
-
-	end
-
-	if part.copyModData and item.copyModData then
-
-		pcall(function()
-
-			part:copyModData(item)
-
-		end)
-
-	end
-
-	part:setCount(count)
-
-	item:setCount(total - count)
-
-	if container.AddItem then
-
-		pcall(function()
-
-			container:AddItem(part)
-
-		end)
-
-	end
-
-	return part
 
 end
 
@@ -299,11 +215,9 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 				else
 
-					local stackCount = item.getCount and item:getCount() or 1
-
-					local need = math.min(units - moved, stackCount)
-
-					local toMove = splitStackUnits(item, need)
+					-- Nunca dividir una instancia usando InventoryItem:getCount():
+					-- cada itemId cubre exactamente una unidad física.
+					local toMove = item
 
 					if not toMove then
 
@@ -319,13 +233,7 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 					elseif moveItem(toMove, toMove:getContainer() or container, destContainer, player) then
 
-						moved = moved + need
-
-						if need < stackCount then
-
-							-- mismo stack reducido en j
-
-						end
+						moved = moved + 1
 
 					else
 
@@ -442,7 +350,7 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
 
 	if moveItem(item, source, target.container, character) then
 
-		local units = item.getCount and item:getCount() or 1
+		local units = 1
 
 		notifyInventoryChanged(networkId, units)
 
@@ -496,25 +404,13 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local available = GlobalStorageSiK.Transfer.countAvailableUnits(networkId, fullType, player)
-
-	if available <= 0 then
-
-		return false, "not_found", 0
-
-	end
-
-
-
 	local target = amount or 1
-
-	if target <= 0 then
-
-		target = available
-
-	end
-
-	target = math.min(math.floor(target), available)
+	-- Nunca recorrer/mover un tipo completo en una sola llamada. El cliente
+	-- serializa la operación lógica y solicita el siguiente micro-lote solo
+	-- después de recibir la confirmación correlacionada del anterior.
+	target = math.floor(tonumber(target) or 1)
+	if target <= 0 then target = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
+	target = math.min(target, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
 
 
 

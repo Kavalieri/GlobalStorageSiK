@@ -227,14 +227,22 @@ function GlobalStorageSiK.Sandbox.bulkDepositEnabled()
 	return SandboxVars.GlobalStorageSiK.BulkDepositEnabled ~= false
 end
 
---- Obtiene el presupuesto de items de una sola peticion masiva. El cliente
---- deja 400 ms entre peticiones, de modo que un maximo pequeno cede tiempo al
---- resto del servidor y permite intercalar trabajos de redes independientes.
+--- Muestra progreso y resumen de depósito, extracción y Auto Sort mediante
+--- notas sobre el personaje. Es feedback de juego, independiente de debug.
+---@return boolean
+function GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
+	if not SandboxVars.GlobalStorageSiK then
+		return true
+	end
+	return SandboxVars.GlobalStorageSiK.OperationHaloFeedback ~= false
+end
+
+--- Presupuesto interno e invariable de una petición masiva. Ya no se expone
+--- en sandbox: valores configurables alteraban el contrato de progreso. El
+--- planificador añade pausas y permite intercalar redes independientes.
 ---@return number
 function GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
-	local configured = SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.MaxItemsPerBulkTick or 10
-	configured = math.floor(tonumber(configured) or 10)
-	return math.max(1, math.min(configured, 10))
+	return 10
 end
 
 --- Indica si se deben respetar los ítems favoritos.
@@ -324,14 +332,23 @@ function GlobalStorageSiK.Sandbox.debugMode()
 	return SandboxVars.GlobalStorageSiK.DebugMode == true
 end
 
---- Indica si el modo debug de INTERFAZ está activo (clicks, árbol de widgets,
---- solapes - ver GS_UIDebug.lua). Independiente de debugMode() a propósito:
---- activar el debug general inunda la consola con trazas de red en cada
---- comando, y el rastro de clics/capas se pierde entre el ruido. Categorías
---- separadas para poder aislar cada tipo de problema.
+--- Reenvia al cliente suscrito las lineas que nacen en el dedicado. Es una
+--- opcion separada porque el debug local puede ser util sin multiplicar
+--- trafico; el transporte aplica limites y lotes adicionales.
+---@return boolean
+function GlobalStorageSiK.Sandbox.debugRelayToClients()
+	if not SandboxVars.GlobalStorageSiK then
+		return true
+	end
+	return SandboxVars.GlobalStorageSiK.DebugRelayToClients ~= false
+end
+
+--- Indica si el bloque de interfaz está activo (clicks, árbol de widgets,
+--- solapes - ver GS_UIDebug.lua). DebugMode es el interruptor maestro; las
+--- categorías normales y DETAIL siguen siendo opt-in para evitar ruido.
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugModeUI()
-	if not SandboxVars.GlobalStorageSiK then
+	if not GlobalStorageSiK.Sandbox.debugMode() or not SandboxVars.GlobalStorageSiK then
 		return false
 	end
 	return SandboxVars.GlobalStorageSiK.DebugModeUI == true
@@ -344,8 +361,9 @@ end
 --- si esta desactivado, ninguna categoria imprime nada, sin excepcion; con
 --- DebugMode activo, cada categoria se puede apagar por separado para ver
 --- solo el tipo de diagnostico que se necesita en cada momento. Todas
---- por defecto en true: activar DebugMode sigue dando el mismo volumen de
---- siempre salvo que el usuario decida apagar categorias concretas.
+--- En instalaciones nuevas todas quedan apagadas y el administrador activa
+--- solo el bloque que corresponda a su prueba. Una clave ausente de una
+--- partida anterior conserva el fallback historico para no ocultar trazas.
 ---@param key string "Network"|"TerminalAccess"|"Craft"|"Inventory"|"Tooltip"|"UI"|"Router"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
@@ -361,6 +379,20 @@ function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
 		return true
 	end
 	return value == true
+end
+
+--- Sublog detallado dentro de una categoria principal. Siempre requiere que
+--- la categoria padre este activa; las claves nuevas/ausentes quedan apagadas
+--- para que una actualizacion no empiece a volcar inventarios completos.
+---@param key string "Network"|"Craft"|"Inventory"|"Router"
+---@return boolean
+function GlobalStorageSiK.Sandbox.debugDetailEnabled(key)
+	if not GlobalStorageSiK.Sandbox.debugMode()
+		or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(key) then
+		return false
+	end
+	if not SandboxVars.GlobalStorageSiK then return false end
+	return SandboxVars.GlobalStorageSiK["DebugDetail" .. tostring(key)] == true
 end
 
 --- Indica si la construcción GS es gratuita (ambas recetas).

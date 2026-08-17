@@ -69,7 +69,6 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args)
 		GlobalStorageSiK.Log.error("NetClient", "sendClientCommand failed", err)
 		return false
 	end
-	GlobalStorageSiK.Debug.halo(player, "CMD " .. tostring(command))
 	return true
 end
 

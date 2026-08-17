@@ -11,6 +11,7 @@ require "GS_ItemTaxonomy"
 require "GS_Subcategories"
 require "GS_Log"
 require "GS_NodeFilters"
+require "GS_InventorySync"
 
 GlobalStorageSiK.Router = {}
 
@@ -164,37 +165,7 @@ end
 ---@param character IsoPlayer|IsoGameCharacter|nil
 ---@return boolean
 function GlobalStorageSiK.Router.containerHasSpace(container, item, character)
-	if not container or not item then
-		return false
-	end
-	if container.hasRoomFor and character then
-		local ok, result = pcall(function()
-			return container:hasRoomFor(character, item)
-		end)
-		if ok then
-			return result == true
-		end
-	end
-	if container.hasRoomFor then
-		local okLegacy, resultLegacy = pcall(function()
-			return container:hasRoomFor(item)
-		end)
-		if okLegacy then
-			return resultLegacy == true
-		end
-	end
-	if container.getCapacity and container.getWeight then
-		local cap = container:getCapacity()
-		local cur = container:getWeight()
-		local w = 0
-		if item.getActualWeight then
-			w = item:getActualWeight()
-		elseif item.getWeight then
-			w = item:getWeight()
-		end
-		return (cur + w) <= cap
-	end
-	return true
+	return GlobalStorageSiK.InventorySync.containerHasRoom(container, item, character)
 end
 
 --- Calcula el nivel de especificidad con que un nodo acepta un item, en 4
@@ -398,6 +369,23 @@ function GlobalStorageSiK.Router.containerHasItemType(container, fullType)
 	return false
 end
 
+--- Orden total para candidatos que YA pertenecen al mismo tier de
+--- coincidencia. La categoria/filtro decide antes de llegar aqui; por tanto
+--- ninguna prioridad puede hacer ganar a un contenedor generico frente a una
+--- coincidencia o afinidad mejores.
+local function depositCandidateBetter(a, b)
+	local ea, eb = a.entry or {}, b.entry or {}
+	local za = tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
+	local zb = tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
+	if za ~= zb then return za < zb end
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
+	-- Desempate estable: evita que table.sort deje resultados equivalentes en
+	-- un orden dependiente del recorrido de tablas/ModData.
+	return tostring(ea.id or "") < tostring(eb.id or "")
+end
+
 --- Elige el mejor nodo vivo para depositar un ítem.
 ---@param item InventoryItem
 ---@param liveNodes table[]
@@ -428,6 +416,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 	-- sin ninguna relacion con el.
 	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Router")
 	local ft = item.getFullType and item:getFullType() or "?"
 	if debugOn then
 		local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
@@ -447,12 +436,15 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 		-- (numero alto) se elegia ANTES que uno "Alta" (numero bajo).
 		--
 		-- Especificidad de categoria PRIMERO, prioridad numerica solo como
-		-- desempate DENTRO del mismo nivel (ver comentario de matchSpecificity):
+		-- desempate DENTRO del mismo nivel (ver comentario de matchSpecificity).
+		-- Dentro de un tier: zona primero, contenedor despues e ID como empate
+		-- tecnico final. Esta misma jerarquia se usa en GS_Redistribute.lua:
 		-- tier 1 = hoja/custom exacto, tier 2 = subcategoria, tier 3 = categoria,
 		-- tier 4 = nodo sin restriccion que YA contiene ese fullType, tier 5 =
 		-- nodo sin restriccion cualquiera. "Queda en inventario" es el resultado
 		-- terminal cuando ninguno tiene hueco, no un sexto destino.
 		local tiers = { {}, {}, {}, {}, {} }
+		local hasStrictCandidate = false
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
 			local entry = live.entry or {}
@@ -464,19 +456,23 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 			if destinationTier then
 				table.insert(tiers[destinationTier], live)
 			end
-			if debugOn then
-				GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | nodeId=" .. tostring(entry.id)
+			if detailOn then
+				GlobalStorageSiK.Log.detail("Router", "pickDepositTarget | nodeId=" .. tostring(entry.id)
 					.. " displayName=" .. tostring(entry.displayName or entry.name)
 					.. " rules=" .. (entry.categories and #entry.categories > 0 and table.concat(entry.categories, ",") or "(sin restriccion)")
+					.. " zonePriority=" .. tostring(live.zonePriority or entry.zonePriority or 50)
 					.. " priority=" .. tostring(entry.priority or 50)
 					.. " tier=" .. tostring(destinationTier or "rechazado"))
 			end
 		end
 		for tierIdx = 1, 5 do
 			local sorted = tiers[tierIdx]
-			table.sort(sorted, function(a, b)
-				return ((a.entry or {}).priority or 50) < ((b.entry or {}).priority or 50)
-			end)
+			if tierIdx < 5 and #sorted > 0 then
+				-- Categoría/filtro (1-3) o afinidad real (4). Si existe pero
+				-- está lleno, el motivo correcto será no_space, no no_match.
+				hasStrictCandidate = true
+			end
+			table.sort(sorted, depositCandidateBetter)
 			-- Tier 5 = sin restriccion ni afinidad: el barrido generico
 			-- (ignora afinidad, solo mira hueco libre) es exactamente el "a
 			-- lo loco" que rejectDepositIfNoMatch debe evitar. Tiers 1-3 son
@@ -485,8 +481,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 				for i = 1, #sorted do
 					local live = sorted[i]
 					local hasSpace = GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
-					if debugOn then
-						GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | tier=" .. tostring(tierIdx)
+					if detailOn then
+						GlobalStorageSiK.Log.detail("Router", "pickDepositTarget | tier=" .. tostring(tierIdx)
 							.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
 					end
 					if hasSpace then
@@ -500,6 +496,13 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 					end
 				end
 			end
+		end
+		if strictNoMatch and not hasStrictCandidate then
+			if debugOn then
+				GlobalStorageSiK.Log.debug("Router", "RESULT no_match: no hay categoria, filtro ni afinidad permitida para fullType="
+					.. tostring(fullType))
+			end
+			return nil, "no_match"
 		end
 	end
 
@@ -534,22 +537,25 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 			return not rules or #rules == 0
 		end
 
+		local hasAffinityCandidate = false
 		if fullType then
 			for i = 1, #liveNodes do
 				local live = liveNodes[i]
 				if nodeHasNoCategories(live.entry)
-					and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType)
-					and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
-					if debugOn then
-						GlobalStorageSiK.Log.debug("Router", "RESULT fallback final: afinidad mismo item -> nodeId="
-							.. tostring((live.entry or {}).id))
+					and GlobalStorageSiK.Router.containerHasItemType(live.container, fullType) then
+					hasAffinityCandidate = true
+					if GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
+						if debugOn then
+							GlobalStorageSiK.Log.debug("Router", "RESULT fallback final: afinidad mismo item -> nodeId="
+								.. tostring((live.entry or {}).id))
+						end
+						return live
 					end
-					return live
 				end
 			end
 		end
 
-		if strictNoMatch then
+		if strictNoMatch and not hasAffinityCandidate then
 			return nil, "no_match"
 		end
 
@@ -565,5 +571,5 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character)
 		GlobalStorageSiK.Log.debug("Router", "RESULT no_space: ningun nodo compatible tenia hueco para fullType=" .. tostring(fullType))
 	end
 
-	return nil
+	return nil, "no_space"
 end

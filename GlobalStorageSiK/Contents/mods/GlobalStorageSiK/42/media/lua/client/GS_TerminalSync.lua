@@ -13,7 +13,9 @@ local PULL_DEBOUNCE_TICKS = 4
 local _pullDueTick = 0
 local _tickCounter = 0
 local _lastAppliedRevision = {}
+local _requiredSnapshotRevision = {}
 local _tickInstalled = false
+local _managedTransfer = nil
 
 ---@param networkId string|nil
 ---@return number
@@ -43,6 +45,93 @@ local function currentSearchQuery()
 		return ui.searchEntry:getText() or ""
 	end
 	return ""
+end
+
+---@param networkId string|nil
+---@return boolean
+local function isManagedTransferNetwork(networkId)
+	if not _managedTransfer then
+		return false
+	end
+	if not _managedTransfer.networkId then
+		return true
+	end
+	return networkId == _managedTransfer.networkId
+end
+
+--- Abre una transaccion visual para una cola de transferencias. Los micro-lotes
+--- siguen confirmandose uno a uno, pero la lista visible no se reconstruye
+--- hasta que toda la operacion termina o se cancela.
+---@param owner string
+---@param networkId string|nil
+---@param searchQuery string|nil
+---@return boolean
+function GlobalStorageSiK.TerminalSync.beginManagedTransfer(owner, networkId, searchQuery)
+	if _managedTransfer then
+		return _managedTransfer.owner == owner
+	end
+	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local panel = ui and ui.itemsListPanel
+	if panel and panel.itemScroll and GlobalStorageSiK.TerminalScroll
+		and GlobalStorageSiK.TerminalScroll.getScrollOffset then
+		panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(panel.itemScroll)
+	end
+	_managedTransfer = {
+		owner = owner,
+		networkId = networkId,
+		searchQuery = searchQuery or currentSearchQuery(),
+		pendingState = nil,
+		dirty = false,
+	}
+	if ui then
+		ui._gsManagedTransferActive = true
+	end
+	return true
+end
+
+--- Cierra la transaccion visual y reconcilia una sola vez. Si el servidor ya
+--- envio un snapshot ligero durante la cola se aplica el mas reciente; si no,
+--- se pinta el modelo ajustado por deltas y se solicita una verificacion.
+---@param owner string
+---@param searchQuery string|nil
+---@param expectedRevision number|nil
+function GlobalStorageSiK.TerminalSync.finishManagedTransfer(owner, searchQuery, expectedRevision)
+	local managed = _managedTransfer
+	if not managed or managed.owner ~= owner then
+		return
+	end
+	_managedTransfer = nil
+	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	if ui then
+		ui._gsManagedTransferActive = nil
+	end
+	local uiVisible = ui and (not ui.isVisible or ui:isVisible())
+	local uiNetworkId = ui and ui.terminalState and ui.terminalState.networkId
+	local sameNetwork = not managed.networkId or not uiNetworkId or managed.networkId == uiNetworkId
+	if managed.networkId and expectedRevision then
+		_requiredSnapshotRevision[managed.networkId] = math.max(
+			_requiredSnapshotRevision[managed.networkId] or 0, expectedRevision)
+	end
+	local pendingRevision = managed.pendingState and managed.pendingState.snapshotRevision or 0
+	local pendingIsFresh = managed.pendingState
+		and (not expectedRevision or pendingRevision >= expectedRevision)
+	if pendingIsFresh and uiVisible and sameNetwork and GlobalStorageSiK.TerminalUI
+		and type(GlobalStorageSiK.TerminalUI.show) == "function" then
+		markRevision(managed.networkId or managed.pendingState.networkId, pendingRevision)
+		if managed.networkId then _requiredSnapshotRevision[managed.networkId] = nil end
+		GlobalStorageSiK.TerminalUI.show(managed.pendingState)
+	elseif uiVisible and sameNetwork then
+		if managed.dirty and ui.refreshItemsTab then
+			ui:refreshItemsTab()
+		end
+		if managed.dirty and ui.refreshNetworkPanel then
+			ui:refreshNetworkPanel()
+		end
+	end
+	-- No pedir inmediatamente searchItems: mientras el snapshot incremental de
+	-- fondo no termine, esa consulta solo devolvería la misma captura antigua y
+	-- haría parpadear/reaparecer cantidades. El servidor empuja el estado estable
+	-- a los observadores al finalizar el scan.
 end
 
 --- Solicita al servidor un terminalState actualizado.
@@ -94,6 +183,12 @@ function GlobalStorageSiK.TerminalSync.onTick()
 		ui._gsPendingInventorySearch = nil
 	end
 	GlobalStorageSiK.TerminalSync.requestInventoryRefresh(q)
+	-- El debounce es one-shot. Mantener este OnTick instalado despues del pull
+	-- no aporta trabajo y deja un proceso latente por el resto de la sesion.
+	if _tickInstalled and _pullDueTick <= 0 and Events and Events.OnTick then
+		Events.OnTick.Remove(GlobalStorageSiK.TerminalSync.onTick)
+		_tickInstalled = false
+	end
 end
 
 --- Aplica retiro optimista a la lista cacheada del terminal.
@@ -125,6 +220,10 @@ function GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, fullType, m
 			if GlobalStorageSiK.Client then
 				GlobalStorageSiK.Client.cachedTerminalState = ui.terminalState
 			end
+			if isManagedTransferNetwork(networkId) then
+				_managedTransfer.dirty = true
+				return
+			end
 			if ui.refreshItemsTab then
 				ui:refreshItemsTab()
 			end
@@ -148,14 +247,32 @@ function GlobalStorageSiK.TerminalSync.refreshVisibleItemsTab()
 end
 
 ---@param state table|nil
-function GlobalStorageSiK.TerminalSync.onTerminalState(state)
+---@param inventorySync boolean|nil estado ligero antes de fusionarlo con cache
+---@return boolean deferVisibleRefresh
+function GlobalStorageSiK.TerminalSync.onTerminalState(state, inventorySync)
 	if not state then
-		return
+		return false
 	end
 	local networkId = state.networkId
-	if networkId and state.inventoryRevision then
-		markRevision(networkId, state.inventoryRevision)
+	local snapshotRevision = state.snapshotRevision or 0
+	if inventorySync == true and state.openUi ~= true and isManagedTransferNetwork(networkId) then
+		_managedTransfer.pendingState = state
+		_managedTransfer.dirty = true
+		return true
 	end
+	local requiredRevision = networkId and _requiredSnapshotRevision[networkId] or 0
+	if requiredRevision > 0 and snapshotRevision < requiredRevision then
+		-- Una búsqueda o reapertura puede responder antes que el escaneo de fondo.
+		-- No permitir que ese snapshot anterior restaure cantidades confirmadas.
+		return true
+	end
+	if networkId then
+		markRevision(networkId, snapshotRevision)
+		if requiredRevision > 0 and snapshotRevision >= requiredRevision then
+			_requiredSnapshotRevision[networkId] = nil
+		end
+	end
+	return false
 end
 
 --- Procesa actionResult de transferencias.
@@ -179,11 +296,10 @@ function GlobalStorageSiK.TerminalSync.onActionResult(args)
 		GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, transfer.fullType, transfer.moved)
 	end
 
-	if args.ok and (transfer.moved or 0) > 0 then
+	if args.ok and (transfer.moved or 0) > 0 and transfer.deferInventoryPull ~= true then
 		GlobalStorageSiK.TerminalSync.scheduleInventoryPull(currentSearchQuery(), transfer.inventoryRevision)
 	end
 
-	if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.clearPending then
-		GlobalStorageSiK.WithdrawClient.clearPending()
-	end
+	-- WithdrawClient posee la cola y la correlación de respuestas. TerminalSync
+	-- solo aplica el delta confirmado; nunca libera trabajos por su cuenta.
 end

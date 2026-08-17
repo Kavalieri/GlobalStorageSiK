@@ -8,6 +8,7 @@
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISComboBox"
+require "ISUI/ISModalDialog"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
@@ -19,6 +20,7 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local BTN_H = FONT_HGT_SMALL + 6
 local ROW_GAP = 6
+local INFO_LINE_COUNT = 8
 
 ---@param state table|nil
 ---@return table[]
@@ -39,6 +41,76 @@ local function selectedNetworkId(ui, state)
 	local idx = ui.netCombo and ui.netCombo.selected or 1
 	local row = rows[idx]
 	return row and row.networkId or nil
+end
+
+local function selectedNetworkRow(ui, state)
+	local rows = networkRows(state)
+	return rows[ui.netCombo and ui.netCombo.selected or 1]
+end
+
+local function locationText(row)
+	local p = row and (row.lastLocation or row.anchor)
+	if not p or p.x == nil or p.y == nil then return T("IGUI_GS_NetLocationUnknown") end
+	return string.format("%d, %d, %d", math.floor(p.x), math.floor(p.y), math.floor(p.z or 0))
+end
+
+---@param ui table
+---@param state table|nil
+local function refreshSelectedNetworkInfo(ui, state)
+	local row = selectedNetworkRow(ui, state)
+	local info = {}
+	if row then
+		info[#info + 1] = row.activeTerminals == 0
+			and T("IGUI_GS_NetStatusSuspended") or T("IGUI_GS_NetStatusActive")
+		info[#info + 1] = T("IGUI_GS_NetCounts", row.zoneCount or 0, row.nodeCount or 0)
+		info[#info + 1] = T("IGUI_GS_NetLastLocation", locationText(row))
+	end
+	local wrapped = {}
+	local infoW = math.max(120, (ui.netCombo and ui.netCombo.width or 200) - 4)
+	for i = 1, #info do
+		local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(info[i], infoW, UIFont.Small)
+		for j = 1, #lines do wrapped[#wrapped + 1] = lines[j] end
+	end
+	for i = 1, #(ui.netInfoLabels or {}) do
+		local lbl = ui.netInfoLabels[i]
+		lbl.name = wrapped[i] or ""
+		lbl:setVisible(wrapped[i] ~= nil)
+	end
+
+	if ui.netUseBtn then
+		local canUse = row and (row.activeTerminals or 0) > 0
+		ui.netUseBtn:setEnable(canUse == true)
+		ui.netUseBtn:setTooltip(canUse and T("IGUI_GS_NetUseSelectedHint")
+			or T("IGUI_GS_NetReactivateViaTerminal"))
+	end
+	if ui.netDeleteBtn then
+		local canDelete = row and row.activeTerminals == 0 and row.isOwner == true
+		ui.netDeleteBtn:setEnable(canDelete == true)
+		ui.netDeleteBtn:setTooltip(row and row.activeTerminals ~= 0
+			and T("IGUI_GS_NetworkDeleteActive")
+			or (row and row.isOwner ~= true and T("IGUI_GS_NetworkDeleteOwnerOnly")
+				or T("IGUI_GS_NetworkDeleteHint")))
+	end
+end
+
+local function showDeleteConfirm(terminal, row)
+	if not row or not row.networkId or row.activeTerminals ~= 0 or row.isOwner ~= true then return end
+	local text = T("IGUI_GS_NetworkDeleteConfirm", row.label or row.name or row.networkId,
+		row.zoneCount or 0, row.nodeCount or 0)
+	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, 380, UIFont.Small)
+	local function onResult(_, button)
+		if button and button.internal == "YES" then
+			GlobalStorageSiK.NetClient.sendCommand("deleteSuspendedNetwork", {
+				targetNetworkId = row.networkId,
+			})
+		end
+	end
+	local modal = ISModalDialog:new(0, 0, 420,
+		120 + #lines * (FONT_HGT_SMALL + 2), text, true, nil, onResult, nil)
+	modal:initialise()
+	modal:addToUIManager()
+	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
+	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
 end
 
 ---@param scroll ISPanel
@@ -71,16 +143,23 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 	ui.netCombo.onChange = function()
 		if ui.netCombo._gsSyncing then return end
 		local state = terminal and terminal.terminalState or {}
-		local rows = networkRows(state)
-		local row = rows[ui.netCombo.selected or 1]
-		if not row or not row.networkId then return end
-		GlobalStorageSiK.NetClient.sendNetworkCommand("setActiveNetwork", row.networkId, {})
-		GlobalStorageSiK.NetClient.sendNetworkCommand("rescanNetwork", row.networkId, {
-			searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or "",
-		})
+		-- Seleccionar sirve para inspeccionar. Una red suspendida solo se
+		-- reactiva instalando/vinculando un terminal físico; nunca por mirar
+		-- esta lista ni mediante un reescaneo implícito.
+		refreshSelectedNetworkInfo(ui, state)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netCombo)
 	y = y + BTN_H + ROW_GAP
+
+	ui.netInfoLabels = {}
+	for i = 1, INFO_LINE_COUNT do
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, "", 0.72, 0.76, 0.82, 1, UIFont.Small, true)
+		lbl:initialise()
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
+		ui.netInfoLabels[i] = lbl
+		y = y + FONT_HGT_SMALL + 2
+	end
+	y = y + ROW_GAP
 
 	local btnW = math.floor((comboW - ROW_GAP) / 2)
 	ui.netUseBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
@@ -95,30 +174,19 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 				searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or "",
 			})
 		end)
-	-- Metodo antiguo de colocar/vincular terminal (craftear GS_TerminalUnit)
-	-- retirado por completo: unico camino soportado ahora es lector+disquete
-	-- sobre un ordenador ya en el mapa. Los botones se quedan (evitan
-	-- reordenar el layout) pero avisan claramente en vez de no hacer nada.
-	ui.netNewBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-		pad + btnW + ROW_GAP, y, btnW, BTN_H + 2, T("IGUI_GS_NetCreateNew"), scroll, function()
-			local p = terminal and terminal.player
-			if p and p.setHaloNote then
-				p:setHaloNote(T("IGUI_GS_InstallReaderCardTitle"), 220, 200, 120, 350)
-			end
-		end)
-	y = y + BTN_H + ROW_GAP
-
-	ui.netLinkBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-		pad, y, btnW, BTN_H + 2, T("IGUI_GS_NetLinkTerminal"), scroll, function()
-			local p = terminal and terminal.player
-			if p and p.setHaloNote then
-				p:setHaloNote(T("IGUI_GS_InstallReaderCardTitle"), 220, 200, 120, 350)
-			end
-		end)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netUseBtn)
 	ui.netRefreshBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
 		pad + btnW + ROW_GAP, y, btnW, BTN_H + 2, T("IGUI_GS_NetRefreshList"), scroll, function()
 			GlobalStorageSiK.NetClient.sendCommand("getNetworkList", {})
 		end)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netRefreshBtn)
+	y = y + BTN_H + 10
+
+	ui.netDeleteBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		pad, y, comboW, BTN_H + 2, T("IGUI_GS_NetworkDeleteSuspended"), scroll, function()
+			showDeleteConfirm(terminal, selectedNetworkRow(ui, terminal and terminal.terminalState or {}))
+		end)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netDeleteBtn)
 	y = y + BTN_H + 10
 	ui.netListBlockEndY = y
 
@@ -172,6 +240,8 @@ function GlobalStorageSiK.TerminalNetworkList.sync(ui, state)
 		ui.netCombo.selected = pick
 	end
 	ui.netCombo._gsSyncing = false
+
+	refreshSelectedNetworkInfo(ui, state)
 end
 
 ---@param scroll ISPanel
@@ -186,9 +256,8 @@ function GlobalStorageSiK.TerminalNetworkList.layout(scroll, ui, innerW)
 	ui.netCombo:setWidth(comboW)
 	local btnW = math.floor((comboW - ROW_GAP) / 2)
 	if ui.netUseBtn then ui.netUseBtn:setWidth(btnW) end
-	if ui.netNewBtn then ui.netNewBtn:setX(pad + btnW + ROW_GAP); ui.netNewBtn:setWidth(btnW) end
-	if ui.netLinkBtn then ui.netLinkBtn:setWidth(btnW) end
 	if ui.netRefreshBtn then ui.netRefreshBtn:setX(pad + btnW + ROW_GAP); ui.netRefreshBtn:setWidth(btnW) end
+	if ui.netDeleteBtn then ui.netDeleteBtn:setWidth(comboW) end
 	if ui.netListTitle then ui.netListTitle:setX(pad + 6) end
 	if ui.netListCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.netListCard) then
 		ui.netListCard:setX(pad - 4)

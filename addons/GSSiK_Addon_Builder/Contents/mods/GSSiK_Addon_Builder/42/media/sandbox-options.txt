@@ -48,20 +48,20 @@ option GSSiK_Addon_Builder.DebugMode
 	translation = GSSiK_Addon_Builder_DebugMode,
 }
 
-option GSSiK_Addon_Builder.DebugOperations
-{
-	type = boolean,
-	default = true,
-	page = GSSiK_Addon_Builder_Debug,
-	translation = GSSiK_Addon_Builder_DebugOperations,
-}
-
 option GSSiK_Addon_Builder.DebugLifecycle
 {
 	type = boolean,
 	default = true,
 	page = GSSiK_Addon_Builder_Debug,
 	translation = GSSiK_Addon_Builder_DebugLifecycle,
+}
+
+option GSSiK_Addon_Builder.DebugOperations
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Builder_Debug,
+	translation = GSSiK_Addon_Builder_DebugOperations,
 }
 
 option GSSiK_Addon_Builder.LootInstallDiskWeight

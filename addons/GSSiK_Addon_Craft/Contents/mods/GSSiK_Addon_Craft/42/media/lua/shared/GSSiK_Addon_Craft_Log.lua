@@ -8,11 +8,24 @@
 ]]
 
 require "GSSiK_Addon_Craft_Sandbox"
+pcall(require, "GS_DebugRelay")
 
 GSSiK_Addon_Craft = GSSiK_Addon_Craft or {}
 GSSiK_Addon_Craft.Log = GSSiK_Addon_Craft.Log or {}
 
-local PREFIX = "[GSSiK_Addon_Craft:DEBUG]"
+local detailNoticeShown = false
+
+local function relay()
+	return GlobalStorageSiK and GlobalStorageSiK.DebugRelay or nil
+end
+
+local function requestRelay()
+	local r = relay()
+	if r and isClient and isClient() and not (isServer and isServer())
+		and GSSiK_Addon_Craft.Sandbox.isDebugMode() then
+		r.requestClientSubscription("Craft")
+	end
+end
 
 --- Segundos transcurridos (con decimas) desde que arranco el proceso actual -
 --- la fecha no importa para depurar, pero medir cuanto tarda algo entre dos
@@ -35,5 +48,21 @@ function GSSiK_Addon_Craft.Log.debug(category, message)
 	if not GSSiK_Addon_Craft.Sandbox.isDebugCategoryEnabled(category) then
 		return
 	end
-	print("[" .. elapsedTag() .. "] " .. PREFIX .. "[" .. tostring(category) .. "] " .. tostring(message))
+	requestRelay()
+	local r = relay()
+	local origin = r and r.processTag() or "?"
+	local level = category == "Operations" and "DETAIL" or "DEBUG"
+	if level == "DETAIL" and not detailNoticeShown then
+		detailNoticeShown = true
+		local notice = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Craft:SYSTEM][Operations] DETAIL sublog enabled; high-volume output may fill console.txt; use only for targeted diagnostics"
+		print(notice)
+		if r then r.emit(notice) end
+	end
+	local line = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Craft:" .. level .. "][" .. tostring(category) .. "] " .. tostring(message)
+	print(line)
+	if r then r.emit(line) end
+end
+
+if Events and Events.OnCreatePlayer then
+	Events.OnCreatePlayer.Add(requestRelay)
 end

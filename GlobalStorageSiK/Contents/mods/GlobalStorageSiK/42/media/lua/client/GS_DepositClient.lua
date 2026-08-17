@@ -102,17 +102,6 @@ function GlobalStorageSiK.DepositClient.canDepositDraggedItems(items)
 	return true
 end
 
---- Muestra halo de depósito pendiente de forma segura.
----@param player IsoPlayer|nil
-local function showDepositPending(player)
-	if not player or not player.setHaloNote then
-		return
-	end
-	pcall(function()
-		player:setHaloNote(GlobalStorageSiK.I18n.text("IGUI_GS_DepositPending"), 200, 220, 200, 200)
-	end)
-end
-
 --- Solicita depósito de ítems por ID (validación en servidor).
 ---@param itemIds number[]
 ---@param playerArg IsoPlayer|number|nil
@@ -127,33 +116,59 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg)
 	GlobalStorageSiK.Debug.log("Deposit", "sendDepositItems", "count=" .. tostring(#itemIds))
 	local player = GlobalStorageSiK.PlayerUtils and GlobalStorageSiK.PlayerUtils.resolve(playerArg)
 		or GlobalStorageSiK.NetClient.getPlayer()
-	showDepositPending(player)
+	local queueId, sendNow, networkId = nil, true, nil
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.arm then
-		GlobalStorageSiK.TransferQueue.arm({ type = "depositIds", itemIds = itemIds })
+		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({ type = "depositIds", itemIds = itemIds })
+		if not queueId then return false end
 	end
-	return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+	if sendNow == false then return true end
+	local sent = GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 		itemIds = itemIds,
 		origin = "player",
+		queueId = queueId,
+		networkId = networkId,
 	})
+	if not sent and GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
+		GlobalStorageSiK.TransferQueue.clear()
+	end
+	return sent
 end
 
---- Solicita depósito parcial de un ítem apilable.
+--- Recopila itemId físicos del mismo tipo y contenedor que la referencia.
+--- InventoryItem:getCount() no representa el tamaño de una pila transferible.
+---@param referenceItem InventoryItem|nil
+---@param limit number|nil
+---@return number[]
+function GlobalStorageSiK.DepositClient.collectSameTypeItemIds(referenceItem, limit)
+	if not referenceItem or not referenceItem.getContainer or not referenceItem.getFullType then
+		return {}
+	end
+	local container = referenceItem:getContainer()
+	local fullType = referenceItem:getFullType()
+	local items = container and container.getItems and container:getItems() or nil
+	if not items or not fullType then return {} end
+	local wanted = limit and math.max(0, math.floor(tonumber(limit) or 0)) or nil
+	local ids = {}
+	for i = 0, items:size() - 1 do
+		if wanted and #ids >= wanted then break end
+		local candidate = items:get(i)
+		if candidate and candidate.getFullType and candidate:getFullType() == fullType then
+			local id = GlobalStorageSiK.Deposit.getItemId(candidate)
+			if id then ids[#ids + 1] = id end
+		end
+	end
+	return ids
+end
+
+--- Solicita depósito de una cantidad de instancias físicas del mismo tipo.
 ---@param playerArg IsoPlayer|number|nil
 ---@param referenceItem InventoryItem|nil
 ---@param count number
 ---@return boolean
 function GlobalStorageSiK.DepositClient.sendDepositPartial(playerArg, referenceItem, count)
-	local refId = GlobalStorageSiK.Deposit.getItemId(referenceItem)
-	if not refId or not count or count < 1 then
-		return false
-	end
-	showDepositPending(GlobalStorageSiK.PlayerUtils.resolve(playerArg))
-	return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
-		mode = "partial",
-		referenceItemId = refId,
-		count = math.floor(count),
-		origin = "player",
-	})
+	local ids = GlobalStorageSiK.DepositClient.collectSameTypeItemIds(referenceItem, count)
+	if #ids == 0 then return false end
+	return GlobalStorageSiK.DepositClient.sendDepositItems(ids, playerArg)
 end
 
 --- Solicita depósito de todo el contenedor del ítem de referencia.
@@ -165,15 +180,30 @@ function GlobalStorageSiK.DepositClient.sendDepositContainer(playerArg, referenc
 	if not refId then
 		return false
 	end
-	showDepositPending(GlobalStorageSiK.PlayerUtils.resolve(playerArg))
+	local sourceContainer = referenceItem.getContainer and referenceItem:getContainer() or nil
+	local sourceItems = sourceContainer and sourceContainer.getItems and sourceContainer:getItems() or nil
+	local expectedUnits = sourceItems and sourceItems:size() or 0
+	local queueId, sendNow, networkId = nil, true, nil
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.arm then
-		GlobalStorageSiK.TransferQueue.arm({ type = "container", referenceItemId = refId })
+		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({
+			type = "container",
+			referenceItemId = refId,
+			expectedUnits = expectedUnits,
+		})
+		if not queueId then return false end
 	end
-	return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+	if sendNow == false then return true end
+	local sent = GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 		mode = "container",
 		referenceItemId = refId,
 		origin = "player",
+		queueId = queueId,
+		networkId = networkId,
 	})
+	if not sent and GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
+		GlobalStorageSiK.TransferQueue.clear()
+	end
+	return sent
 end
 
 --- Deposita ítems ya resueltos (arrastre).

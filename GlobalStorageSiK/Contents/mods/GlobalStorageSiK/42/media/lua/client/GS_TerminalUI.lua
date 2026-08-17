@@ -357,6 +357,9 @@ function GS_TerminalUI:buildItemsToolbar()
 	-- job viven en una fila separada para no truncar mensajes dentro del boton.
 	self.autoSortBtn = createNeatButton(0, y, 220, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
 	self.itemsPanel:addChild(self.autoSortBtn)
+	-- Hasta recibir el rol serializado por el servidor no se permite iniciar
+	-- una operación sensible. updateState lo habilita solo para owner/admin.
+	self.autoSortBtn:setEnable(false)
 	if self.autoSortBtn.setTooltip then
 		self.autoSortBtn:setTooltip(T("IGUI_GS_RedistributeHint"))
 	end
@@ -746,6 +749,9 @@ function GS_TerminalUI:refreshFromState(state)
 		if state.inventoryRevision then
 			merged.inventoryRevision = state.inventoryRevision
 		end
+		if state.snapshotRevision then
+			merged.snapshotRevision = state.snapshotRevision
+		end
 		if state.redistributeActive ~= nil then
 			merged.redistributeActive = state.redistributeActive == true
 		end
@@ -781,6 +787,7 @@ function GS_TerminalUI:refreshFromState(state)
 					copy[i] = {
 						fullType = row.fullType,
 						displayName = row.displayName,
+						worldSprite = row.worldSprite,
 						category = row.category,
 						subCategory = row.subCategory,
 						count = row.count,
@@ -802,6 +809,7 @@ function GS_TerminalUI:refreshFromState(state)
 				copy[i] = {
 					fullType = row.fullType,
 					displayName = row.displayName,
+					worldSprite = row.worldSprite,
 					category = row.category,
 					subCategory = row.subCategory,
 					count = row.count,
@@ -818,6 +826,10 @@ function GS_TerminalUI:refreshFromState(state)
 		self:setRedistributeState(true, T("IGUI_GS_RedistributeConfigLocked"), "warn")
 	elseif self._autoSortRunning then
 		self:setRedistributeState(false, T("IGUI_GS_RedistributeIdle"), "muted")
+	elseif self:canUseAutoSort() then
+		self:setRedistributeState(false, T("IGUI_GS_RedistributeIdle"), "muted")
+	else
+		self:setRedistributeState(false, T("IGUI_GS_RedistributeAdminOnly"), "warn")
 	end
 	if state and state.accessMode then
 		self.terminalState.accessMode = state.accessMode
@@ -993,6 +1005,15 @@ function GS_TerminalUI:onRequestOpen()
 	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 end
 
+--- El payload de permisos lo calcula el servidor con la identidad persistente
+--- del personaje. El cliente solo lo usa para representar el mismo gate; el
+--- handler servidor sigue siendo la autoridad definitiva.
+---@return boolean
+function GS_TerminalUI:canUseAutoSort()
+	local permissions = self.terminalState and self.terminalState.permissions or nil
+	return permissions and permissions.canAutoSort == true or false
+end
+
 ---@param running boolean
 ---@param message string|nil
 ---@param status string|nil
@@ -1005,7 +1026,13 @@ function GS_TerminalUI:setRedistributeState(running, message, status)
 	if self.autoSortBtn then
 		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
 		self.autoSortBtn.textColor = nil
-		self.autoSortBtn:setEnable(not self._autoSortRunning)
+		local allowed = self:canUseAutoSort()
+		self.autoSortBtn:setEnable(not self._autoSortRunning and allowed)
+		if self.autoSortBtn.setTooltip then
+			self.autoSortBtn:setTooltip(allowed
+				and T("IGUI_GS_RedistributeHint")
+				or T("IGUI_GS_RedistributeAdminOnly"))
+		end
 	end
 	GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow(
 		self.autoSortStatusRow,
@@ -1035,6 +1062,14 @@ end
 
 function GS_TerminalUI:onRedistributeNetwork()
 	if self._autoSortRunning then return end
+	if not self:canUseAutoSort() then
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+			and GlobalStorageSiK.NetClient.getPlayer() or nil
+		if player and player.setHaloNote then
+			player:setHaloNote(T("IGUI_GS_RedistributeAdminOnly"), 255, 190, 70, 420)
+		end
+		return
+	end
 	self:setRedistributeState(true, T("IGUI_GS_RedistributingNetwork"), "warn")
 	GlobalStorageSiK.NetClient.sendCommand("redistributeNetwork", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",

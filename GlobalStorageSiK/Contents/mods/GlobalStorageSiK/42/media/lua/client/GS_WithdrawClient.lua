@@ -1,108 +1,377 @@
 --[[
-	GlobalStorageSiK - Retiro desde red (cliente)
+	GlobalStorageSiK - Retiro incremental desde red (cliente)
 	Autor: SiK
-	Fecha: 2025-06-24
-	Descripción: Comando withdrawItem con destino opcional y bloqueo local anti-spam.
+	Descripción: serializa todas las retiradas, exige respuesta correlacionada
+	por micro-lote y elimina su OnTick al terminar o caducar.
 ]]
 
 require "GS_NetClient"
 require "GS_I18n"
+require "GS_Log"
 require "GS_PlayerUtils"
+require "GS_Sandbox"
 
 GlobalStorageSiK.WithdrawClient = {}
 
-GlobalStorageSiK.WithdrawClient._pending = false
-GlobalStorageSiK.WithdrawClient._pendingType = nil
--- BUG REAL (2026-08-16, "el retiro almacen->inventario deja de hacer nada
--- en cuanto retiro varios montones seguidos, hasta al cabo de un rato" -
--- pedido explicito de unificar el comportamiento con el deposito, que SI
--- encola via GS_TransferQueue): antes, si el jugador pedia un segundo
--- retiro mientras el primero seguia esperando respuesta del servidor
--- (_pending=true), sendWithdraw lo descartaba en silencio (return false
--- sin encolar ni avisar) - el jugador tenia que esperar el roundtrip
--- completo del primero y volver a pedir el siguiente a mano, pareciendo
--- que el sistema se "atascaba". Ahora los retiros pedidos mientras hay uno
--- en curso se encolan (FIFO) y se disparan automaticamente uno detras de
--- otro segun van llegando las respuestas del servidor, mismo patron que
--- ya usa el deposito.
-local _queue = {}
+local SAFE_BATCH_UNITS = 10
+local BATCH_DELAY_MS = 400
+local RESPONSE_TIMEOUT_MS = 10000
+local MAX_QUEUED_REQUESTS = 4096
 
---- Libera el bloqueo local de retiro pendiente y dispara el siguiente en cola si lo hay.
-function GlobalStorageSiK.WithdrawClient.clearPending()
-	GlobalStorageSiK.WithdrawClient._pending = false
-	GlobalStorageSiK.WithdrawClient._pendingType = nil
-	if #_queue > 0 then
-		local next = table.remove(_queue, 1)
-		GlobalStorageSiK.WithdrawClient.sendWithdraw(next.rowData, next.amount, next.targetKey, next.searchQuery)
-	end
+local queue = {}
+local current = nil
+local serial = 0
+local tickInstalled = false
+local nextDispatchMs = 0
+local responseDeadlineMs = 0
+local operation = nil
+
+local function nowMs()
+	return getTimestampMs and getTimestampMs() or 0
 end
 
---- Indica si hay un retiro en curso esperando respuesta del servidor.
----@return boolean
-function GlobalStorageSiK.WithdrawClient.isPending()
-	return GlobalStorageSiK.WithdrawClient._pending == true
+local function uninstallTickIfIdle()
+	if current or #queue > 0 then return end
+	if tickInstalled and Events and Events.OnTick then
+		Events.OnTick.Remove(GlobalStorageSiK.WithdrawClient.onTick)
+	end
+	tickInstalled = false
+	nextDispatchMs = 0
+	responseDeadlineMs = 0
 end
 
---- Solicita retiro de ítems de la red. Si ya hay uno en curso, encola esta
---- petición en vez de descartarla (se dispara sola cuando el anterior responda).
----@param rowData table { fullType, count, ... }
----@param amount number|nil 1 = una unidad; 0 = todo el tipo
----@param targetKey string|nil clave de contenedor destino
----@param searchQuery string|nil
----@return boolean
-function GlobalStorageSiK.WithdrawClient.sendWithdraw(rowData, amount, targetKey, searchQuery)
-	if not rowData or not rowData.fullType then
-		return false
-	end
-	if GlobalStorageSiK.WithdrawClient._pending then
-		table.insert(_queue, { rowData = rowData, amount = amount, targetKey = targetKey, searchQuery = searchQuery })
-		return true
-	end
-	GlobalStorageSiK.WithdrawClient._pending = true
-	GlobalStorageSiK.WithdrawClient._pendingType = rowData.fullType
+local function ensureTickInstalled()
+	if tickInstalled or not Events or not Events.OnTick then return end
+	tickInstalled = true
+	Events.OnTick.Add(GlobalStorageSiK.WithdrawClient.onTick)
+end
 
+local function showLocalError(key)
 	local player = GlobalStorageSiK.NetClient.getPlayer()
 	if player and player.setHaloNote then
 		pcall(function()
-			player:setHaloNote(GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawPending"), 200, 220, 200, 200)
+			player:setHaloNote(GlobalStorageSiK.I18n.text(key), 255, 120, 120, 250)
 		end)
 	end
-	return GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
-		fullType = rowData.fullType,
-		amount = amount or 1,
-		targetKey = targetKey,
-		searchQuery = searchQuery or "",
-	})
 end
 
---- Retira varias filas en lote (arrastre de selección múltiple). No usa el
---- bloqueo `_pending` de sendWithdraw: ese gate está pensado para evitar doble
---- click en una sola acción, y con arrastre multi-fila haría que solo la
---- primera fila del lote se enviase al servidor (el resto se descartaría en
---- silencio porque _pending seguiría en true hasta la respuesta del servidor).
----@param rows table[] filas { fullType, ... }
+local function showProgress(force)
+	if not operation then return end
+	if GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
+		and not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled() then return end
+	local now = nowMs()
+	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
+	operation.lastProgressMs = now
+	local player = GlobalStorageSiK.NetClient.getPlayer()
+	if not player or not player.setHaloNote then return end
+	local text = GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawPending")
+	if (operation.totalExpected or 0) > 0 then
+		text = text .. " " .. tostring(operation.totalMoved or 0)
+			.. "/" .. tostring(operation.totalExpected)
+	end
+	text = text .. " (" .. tostring(operation.rowsDone or 0)
+		.. "/" .. tostring(operation.rowsTotal or 0) .. ")"
+	pcall(function()
+		player:setHaloNote(text, 200, 220, 200, 220)
+	end)
+end
+
+local function activeNetworkId()
+	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	return ui and ui.terminalState and ui.terminalState.networkId
+		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+end
+
+---@param networkId string|nil
+---@param searchQuery string|nil
+---@return table|nil
+local function ensureOperation(networkId, searchQuery)
+	if operation then return operation end
+	if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.beginManagedTransfer
+		and not GlobalStorageSiK.TerminalSync.beginManagedTransfer("withdraw", networkId, searchQuery) then
+		return nil
+	end
+	operation = {
+		totalMoved = 0,
+		totalExpected = 0,
+		rowsTotal = 0,
+		rowsDone = 0,
+		startedMs = nowMs(),
+		lastProgressMs = 0,
+		networkId = networkId,
+		searchQuery = searchQuery,
+		lastRevision = nil,
+	}
+	GlobalStorageSiK.Log.info("WithdrawClient", "operation started")
+	return operation
+end
+
+local function finishCurrent(delayNext)
+	current = nil
+	responseDeadlineMs = 0
+	if #queue > 0 then
+		nextDispatchMs = nowMs() + (delayNext and BATCH_DELAY_MS or 0)
+		ensureTickInstalled()
+		return true
+	else
+		uninstallTickIfIdle()
+	end
+	return false
+end
+
+local function startNext()
+	if current or #queue == 0 then
+		uninstallTickIfIdle()
+		return
+	end
+	current = table.remove(queue, 1)
+	current.totalMoved = 0
+	current.remaining = current.amount > 0 and math.floor(current.amount) or nil
+	current.all = current.openEnded == true
+	current.sequence = 0
+	nextDispatchMs = nowMs()
+	ensureTickInstalled()
+end
+
+local function dispatchCurrent()
+	if not current then return end
+	current.sequence = current.sequence + 1
+	local requested = current.all and SAFE_BATCH_UNITS
+		or math.min(current.remaining or 1, SAFE_BATCH_UNITS)
+	current.batchRequested = requested
+	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
+	local expectedRequestId = current.requestId
+	-- Armar ANTES del envío: en SP/host el bypass local puede entregar y
+	-- resolver actionResult de forma síncrona dentro de sendCommand.
+	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
+	nextDispatchMs = math.huge
+	local sent = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
+		fullType = current.rowData.fullType,
+		amount = requested,
+		targetKey = current.targetKey,
+		searchQuery = current.searchQuery or "",
+		withdrawId = current.requestId,
+		networkId = current.networkId,
+	})
+	if not sent and current and current.requestId == expectedRequestId then
+		GlobalStorageSiK.Log.error("WithdrawClient", "send failed",
+			"withdrawId=" .. tostring(expectedRequestId))
+		showLocalError("IGUI_GS_InternalTransferError")
+		GlobalStorageSiK.WithdrawClient.cancelAll()
+	end
+end
+
+function GlobalStorageSiK.WithdrawClient.onTick()
+	local now = nowMs()
+	if not current then
+		if #queue > 0 and now >= nextDispatchMs then startNext() end
+		return
+	end
+	if responseDeadlineMs > 0 then
+		if now < responseDeadlineMs then return end
+		-- Retirar no es idempotente: jamás se reenvía a ciegas una petición cuya
+		-- respuesta se perdió, porque podría retirar dos veces. Tampoco se continúa
+		-- con las filas siguientes: se aborta la operación lógica completa y se
+		-- elimina su OnTick, sin dejar trabajos latentes ni un resultado engañoso.
+		GlobalStorageSiK.Log.error("WithdrawClient", "response timeout",
+			"withdrawId=" .. tostring(current.requestId)
+				.. " movedConfirmed=" .. tostring(current.totalMoved or 0))
+		showLocalError("IGUI_GS_InternalTransferError")
+		GlobalStorageSiK.WithdrawClient.cancelAll()
+		return
+	end
+	if now >= nextDispatchMs then dispatchCurrent() end
+end
+
+--- Cancela el retiro activo y toda la cola local. No inicia otro trabajo.
+function GlobalStorageSiK.WithdrawClient.cancelAll()
+	local cancelledOperation = operation
+	if operation then
+		GlobalStorageSiK.Log.warn("WithdrawClient", "operation cancelled moved="
+			.. tostring(operation.totalMoved or 0)
+			.. " rows=" .. tostring(operation.rowsDone or 0)
+			.. "/" .. tostring(operation.rowsTotal or 0))
+	end
+	queue = {}
+	current = nil
+	operation = nil
+	responseDeadlineMs = 0
+	uninstallTickIfIdle()
+	if cancelledOperation and GlobalStorageSiK.TerminalSync
+		and GlobalStorageSiK.TerminalSync.finishManagedTransfer then
+		GlobalStorageSiK.TerminalSync.finishManagedTransfer(
+			"withdraw", cancelledOperation.searchQuery, cancelledOperation.lastRevision)
+	end
+end
+
+--- Compatibilidad con callers antiguos: liberar ya significa cancelar, nunca
+--- avanzar ante una respuesta no correlacionada.
+function GlobalStorageSiK.WithdrawClient.clearPending()
+	GlobalStorageSiK.WithdrawClient.cancelAll()
+end
+
+function GlobalStorageSiK.WithdrawClient.isPending()
+	return current ~= nil or #queue > 0
+end
+
+---@param rowData table
 ---@param amount number|nil
 ---@param targetKey string|nil
 ---@param searchQuery string|nil
----@return boolean okAny
+---@return boolean
+local function enqueueWithdraw(rowData, amount, targetKey, searchQuery)
+	if not rowData or not rowData.fullType then return false end
+	if #queue + (current and 1 or 0) >= MAX_QUEUED_REQUESTS then return false end
+	serial = serial + 1
+	local requested = math.floor(tonumber(amount) or 1)
+	local openEnded = false
+	if requested <= 0 then
+		-- "Todo" trabaja contra la captura visible que inició el gesto. Conocer el
+		-- total evita una sonda vacía por tipo y permite progreso determinista. Si
+		-- un caller legacy no trae count, se conserva el fallback abierto.
+		requested = math.max(0, math.floor(tonumber(rowData.count) or 0))
+		openEnded = requested <= 0
+	end
+	local networkId = activeNetworkId()
+	local op = operation
+	if op and op.networkId and networkId and op.networkId ~= networkId then
+		GlobalStorageSiK.Log.warn("WithdrawClient", "queue rejected across networks",
+			"active=" .. tostring(op.networkId) .. " requested=" .. tostring(networkId))
+		return false
+	end
+	op = ensureOperation(networkId, searchQuery)
+	if not op then return false end
+	op.rowsTotal = op.rowsTotal + 1
+	if requested > 0 then op.totalExpected = op.totalExpected + requested end
+	table.insert(queue, {
+		logicalId = tostring(nowMs()) .. "-" .. tostring(serial),
+		rowData = rowData,
+		amount = requested,
+		openEnded = openEnded,
+		targetKey = targetKey,
+		searchQuery = searchQuery,
+		networkId = op.networkId or networkId,
+	})
+	return true
+end
+
+---@param rowData table { fullType, count, ... }
+---@param amount number|nil 1 = una unidad; 0 = todo el tipo
+---@param targetKey string|nil
+---@param searchQuery string|nil
+---@return boolean
+function GlobalStorageSiK.WithdrawClient.sendWithdraw(rowData, amount, targetKey, searchQuery)
+	if not enqueueWithdraw(rowData, amount, targetKey, searchQuery) then
+		GlobalStorageSiK.Log.error("WithdrawClient", "queue limit reached",
+			"limit=" .. tostring(MAX_QUEUED_REQUESTS))
+		showLocalError("IGUI_GS_InternalTransferError")
+		return false
+	end
+	if not current then startNext() end
+	showProgress(true)
+	return true
+end
+
+---@param rows table[]
+---@param amount number|nil
+---@param targetKey string|nil
+---@param searchQuery string|nil
+---@return boolean
 function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetKey, searchQuery)
-	if not rows or #rows == 0 then
+	if not rows or #rows == 0 then return false end
+	if #queue + (current and 1 or 0) + #rows > MAX_QUEUED_REQUESTS then
+		GlobalStorageSiK.Log.error("WithdrawClient", "batch queue limit reached",
+			"rows=" .. tostring(#rows) .. " limit=" .. tostring(MAX_QUEUED_REQUESTS))
+		showLocalError("IGUI_GS_InternalTransferError")
 		return false
 	end
 	local okAny = false
 	for i = 1, #rows do
-		local row = rows[i]
-		if row and row.fullType then
-			local ok = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
-				fullType = row.fullType,
-				amount = amount or 1,
-				targetKey = targetKey,
-				searchQuery = searchQuery or "",
-			})
-			if ok then
-				okAny = true
-			end
+		if enqueueWithdraw(rows[i], amount, targetKey, searchQuery) then
+			okAny = true
 		end
 	end
+	if okAny and not current then startNext() end
+	if okAny then showProgress(true) end
 	return okAny
+end
+
+--- Consume solo la respuesta del micro-lote actualmente en vuelo.
+---@param args table|nil
+---@return boolean continuing
+function GlobalStorageSiK.WithdrawClient.onActionResult(args)
+	if not current or not args or args.withdrawId ~= current.requestId then return false end
+	responseDeadlineMs = 0
+	local transfer = args.transfer
+	if not transfer or transfer.op ~= "withdraw" then
+		GlobalStorageSiK.WithdrawClient.cancelAll()
+		return false
+	end
+	-- La lista visible se actualiza por delta confirmado en TerminalSync. No
+	-- pedir además un catálogo completo por cada micro-lote; el servidor ya
+	-- consolida una captura incremental después del periodo de calma.
+	transfer.deferInventoryPull = true
+	local moved = math.max(0, math.floor(tonumber(transfer.moved) or 0))
+	local reason = transfer.reason and tostring(transfer.reason) or nil
+	current.totalMoved = (current.totalMoved or 0) + moved
+	if operation then
+		operation.totalMoved = (operation.totalMoved or 0) + moved
+		local revision = tonumber(transfer.inventoryRevision)
+		if revision then
+			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
+		end
+	end
+	if not current.all then
+		current.remaining = math.max(0, (current.remaining or 0) - moved)
+	end
+	-- not_found (tambien parcial) significa que la captura visible se agoto o
+	-- quedo anticuada: termina este tipo y sigue con el siguiente. Los demas
+	-- fallos son terminales para la operacion completa; no martillear todas las
+	-- filas si se perdio energia, espacio, acceso o una mutacion fallo.
+	local exhausted = reason == "not_found" or reason == "partial:not_found"
+	local hardFailure = (args.ok ~= true and not exhausted)
+		or (reason and string.sub(reason, 1, 8) == "partial:" and not exhausted)
+	if hardFailure then
+		local cleanReason = reason and string.gsub(reason, "^partial:", "") or "unknown"
+		GlobalStorageSiK.Log.error("WithdrawClient", "operation stopped",
+			"reason=" .. tostring(cleanReason)
+				.. " movedConfirmed=" .. tostring(operation and operation.totalMoved or moved))
+		args.ok = false
+		args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", cleanReason)
+		GlobalStorageSiK.WithdrawClient.cancelAll()
+		return false
+	end
+	local shouldContinue = args.ok == true and moved > 0 and not exhausted
+		and ((current.all and moved >= (current.batchRequested or SAFE_BATCH_UNITS))
+			or (not current.all and (current.remaining or 0) > 0))
+	if shouldContinue then
+		showProgress(false)
+		nextDispatchMs = nowMs() + BATCH_DELAY_MS
+		ensureTickInstalled()
+		return true
+	end
+	if operation then operation.rowsDone = (operation.rowsDone or 0) + 1 end
+	local hasNext = finishCurrent(true)
+	if hasNext then
+		showProgress(false)
+		-- No mostrar un "Extraidos: 0" por cada tipo ya agotado; toda la
+		-- selección es una sola operación visible y tendrá un único resultado.
+		return true
+	end
+	local totalMoved = operation and operation.totalMoved or moved
+	local elapsed = operation and (nowMs() - (operation.startedMs or nowMs())) or 0
+	args.ok = totalMoved > 0
+	args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(totalMoved))
+	GlobalStorageSiK.Log.info("WithdrawClient", "operation complete moved="
+		.. tostring(totalMoved)
+		.. " rows=" .. tostring(operation and operation.rowsDone or 1)
+		.. " elapsedMs=" .. tostring(elapsed))
+	showProgress(true)
+	if operation and GlobalStorageSiK.TerminalSync
+		and GlobalStorageSiK.TerminalSync.finishManagedTransfer then
+		GlobalStorageSiK.TerminalSync.finishManagedTransfer(
+			"withdraw", operation.searchQuery, operation.lastRevision)
+	end
+	operation = nil
+	return false
 end

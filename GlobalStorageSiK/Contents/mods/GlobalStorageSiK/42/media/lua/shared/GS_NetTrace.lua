@@ -61,12 +61,7 @@ function GlobalStorageSiK.NetTrace.write(line, detail)
 			and not GlobalStorageSiK.Sandbox.debugCategoryEnabled("Network") then
 		return
 	end
-	local onDedicated = isServer and isServer() and not (isClient and isClient())
-	if onDedicated and GlobalStorageSiK.Log and GlobalStorageSiK.Log.info then
-		GlobalStorageSiK.Log.info("NetTrace", line, detail)
-	else
-		GlobalStorageSiK.Log.debug("NetTrace", line, detail)
-	end
+	GlobalStorageSiK.Log.detail("NetTrace", line, detail)
 end
 
 --- Milisegundos monótonos para medir latencia.

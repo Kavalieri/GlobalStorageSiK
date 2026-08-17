@@ -87,9 +87,8 @@ end
 -- BUG REAL encontrado (confirmado con NetTrace/DebugMode): getDaysFresh()
 -- para comida SIN campo "DaysFresh" en el script (ej. Crisps, no se pudre
 -- nunca) NO devuelve 0 ni un numero negativo como se asumia al escribir
--- gs_food_cold/gs_food_dry — devuelve un centinela ENORME (1000000000).
--- Con el matcher original ("> 0" para perecedero), TODA la comida (perecedera
--- Y no perecedera) caia en gs_food_cold, y gs_food_dry nunca se activaba.
+-- la clasificación de perecederos devuelve un centinela ENORME (1000000000).
+-- Con el matcher original ("> 0"), TODA la comida caía en gs_food_cold.
 -- Los valores reales de DaysFresh en comida perecedera son pequenos (2-28,
 -- ver food.txt vanilla), muy por debajo de este centinela.
 local NEVER_ROTS_SENTINEL = 1000000
@@ -154,7 +153,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Tipo de arma cuerpo a cuerpo ("axe"/"blunt"/"smallblunt"/"longblade"/
---- "smallblade"/"spear"), o nil si no se reconoce ninguna categoria de arma.
+--- "smallblade"/"spear"/"crafted"), o nil si no se reconoce ninguna categoria.
 ---@param si table script item
 ---@return string|nil
 function GlobalStorageSiK.Subcategories.weaponMeleeTypeKey(si)
@@ -167,6 +166,7 @@ function GlobalStorageSiK.Subcategories.weaponMeleeTypeKey(si)
 	if categories:contains(WeaponCategory.LONG_BLADE) then return "longblade" end
 	if categories:contains(WeaponCategory.SMALL_BLADE) then return "smallblade" end
 	if categories:contains(WeaponCategory.SPEAR) then return "spear" end
+	if categories:contains(WeaponCategory.IMPROVISED) then return "crafted" end
 	return nil
 end
 
@@ -177,6 +177,7 @@ local WEAPON_MELEE_TYPE_LABEL_KEY = {
 	longblade  = "IGUI_GS_WeaponMeleeType_LongBlade",
 	smallblade = "IGUI_GS_WeaponMeleeType_SmallBlade",
 	spear      = "IGUI_GS_WeaponMeleeType_Spear",
+	crafted    = "IGUI_GS_WeaponMeleeType_Crafted",
 }
 
 --- Texto traducido de un tipo de arma cuerpo a cuerpo (ver weaponMeleeTypeKey).
@@ -387,16 +388,11 @@ GlobalStorageSiK.Subcategories.LIST = {
 			return isPerishableFood(item)
 		end,
 	},
-	{
-		key            = "gs_food_dry",
-		parentCategory = "Food",
-		labelKey       = "IGUI_GS_SubCat_FoodDry",
-		override       = "FoodNonPerishable",
-		matches        = function(item)
-			if not catIs(item, "Food") then return false end
-			return not isPerishableFood(item)
-		end,
-	},
+	-- No existe una categoria "no perecedero": la comida estable conserva la
+	-- DisplayCategory general Food. Asi, FoodPerishable (tier 2) gana cuando
+	-- corresponde y Food (tier 3) actua como fallback para toda la comida.
+	-- Las claves gs_food_dry/FoodNonPerishable se conservan solo en migracion e
+	-- i18n para datos antiguos; no se generan ni aparecen en filtros nuevos.
 
 	-- ── Gardening (semillas vs herramientas) ─────────────────────────────
 	{
@@ -440,8 +436,12 @@ GlobalStorageSiK.Subcategories.LIST = {
 		matches        = function(item)
 			if not catIsAny(item, { "Bandage", "FirstAid" }) then return false end
 			local ft = fullTypeLower(item)
-			return ft:find("scalpel") or ft:find("suture") or ft:find("surgic")
-			    or ft:find("bloodbag") or ft:find("retractor") or ft:find("forcep")
+			-- El contrato de overrideForScriptItem exige result == true. Devolver
+			-- directamente string.find() entregaba un numero y hacía que Cirugía no
+			-- se seleccionase nunca, aunque la coincidencia existiera.
+			return ft:find("scalpel", 1, true) ~= nil or ft:find("suture", 1, true) ~= nil
+			    or ft:find("surgic", 1, true) ~= nil or ft:find("bloodbag", 1, true) ~= nil
+			    or ft:find("retractor", 1, true) ~= nil or ft:find("forcep", 1, true) ~= nil
 		end,
 	},
 
@@ -581,6 +581,7 @@ function GlobalStorageSiK.Subcategories.keysForItem(item)
 	local si = scriptItemFor(item)
 	if not si then return out end
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode()
+	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory")
 	local list = GlobalStorageSiK.Subcategories.LIST
 	for i = 1, #list do
 		local sub = list[i]
@@ -592,11 +593,11 @@ function GlobalStorageSiK.Subcategories.keysForItem(item)
 			out[#out + 1] = sub.key
 		end
 	end
-	if debugOn then
+	if detailOn then
 		local ft = safeGet(function() return item:getFullType() end)
 		local dc = displayCat(si)
 		local df = getDaysFresh(si)
-		GlobalStorageSiK.Log.debug("Subcategories", "keysForItem | fullType=" .. tostring(ft)
+		GlobalStorageSiK.Log.detail("Subcategories", "keysForItem | fullType=" .. tostring(ft)
 			.. " displayCategory=" .. tostring(dc) .. " daysFresh=" .. tostring(df)
 			.. " gsKeys=" .. (#out > 0 and table.concat(out, ",") or "(ninguna)"))
 	end
