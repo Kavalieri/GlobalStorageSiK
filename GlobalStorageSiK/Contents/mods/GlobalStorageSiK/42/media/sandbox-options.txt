@@ -117,7 +117,7 @@ option GlobalStorageSiK.RescanOnTerminalOpen
 option GlobalStorageSiK.ReaderAcquireCraftTime
 {
 	type = integer,
-	default = 300,
+	default = 120,
 	min = 10,
 	max = 2000,
 	page = GlobalStorageSiK,

@@ -26,6 +26,33 @@ local nextDispatchMs = 0
 local responseDeadlineMs = 0
 local operation = nil
 
+local function runCompletion(request, ok, result)
+	local callback = request and request.onComplete
+	if not callback then return end
+	request.onComplete = nil
+	local callbackOk, err = pcall(callback, ok == true, result or {})
+	if not callbackOk then
+		GlobalStorageSiK.Log.error("WithdrawClient", "completion callback failed", tostring(err))
+	end
+end
+
+local function failQueuedCompletions(cancelledCurrent, cancelledQueue, reason)
+	if cancelledCurrent then
+		runCompletion(cancelledCurrent, false, {
+			reason = reason or "cancelled",
+			moved = cancelledCurrent.totalMoved or 0,
+			itemIds = {},
+		})
+	end
+	for i = 1, #cancelledQueue do
+		runCompletion(cancelledQueue[i], false, {
+			reason = reason or "cancelled",
+			moved = 0,
+			itemIds = {},
+		})
+	end
+end
+
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
 end
@@ -152,12 +179,13 @@ local function dispatchCurrent()
 		searchQuery = current.searchQuery or "",
 		withdrawId = current.requestId,
 		networkId = current.networkId,
+		returnItemIds = current.returnItemIds == true,
 	})
 	if not sent and current and current.requestId == expectedRequestId then
 		GlobalStorageSiK.Log.error("WithdrawClient", "send failed",
 			"withdrawId=" .. tostring(expectedRequestId))
 		showLocalError("IGUI_GS_InternalTransferError")
-		GlobalStorageSiK.WithdrawClient.cancelAll()
+		GlobalStorageSiK.WithdrawClient.cancelAll("send_failed")
 	end
 end
 
@@ -177,15 +205,17 @@ function GlobalStorageSiK.WithdrawClient.onTick()
 			"withdrawId=" .. tostring(current.requestId)
 				.. " movedConfirmed=" .. tostring(current.totalMoved or 0))
 		showLocalError("IGUI_GS_InternalTransferError")
-		GlobalStorageSiK.WithdrawClient.cancelAll()
+		GlobalStorageSiK.WithdrawClient.cancelAll("response_timeout")
 		return
 	end
 	if now >= nextDispatchMs then dispatchCurrent() end
 end
 
 --- Cancela el retiro activo y toda la cola local. No inicia otro trabajo.
-function GlobalStorageSiK.WithdrawClient.cancelAll()
+function GlobalStorageSiK.WithdrawClient.cancelAll(reason)
 	local cancelledOperation = operation
+	local cancelledCurrent = current
+	local cancelledQueue = queue
 	if operation then
 		GlobalStorageSiK.Log.warn("WithdrawClient", "operation cancelled moved="
 			.. tostring(operation.totalMoved or 0)
@@ -197,6 +227,9 @@ function GlobalStorageSiK.WithdrawClient.cancelAll()
 	operation = nil
 	responseDeadlineMs = 0
 	uninstallTickIfIdle()
+	-- Limpiar primero evita que un callback que inicie una nueva operación sea
+	-- borrado por la cancelación de la anterior.
+	failQueuedCompletions(cancelledCurrent, cancelledQueue, reason)
 	if cancelledOperation and GlobalStorageSiK.TerminalSync
 		and GlobalStorageSiK.TerminalSync.finishManagedTransfer then
 		GlobalStorageSiK.TerminalSync.finishManagedTransfer(
@@ -218,8 +251,9 @@ end
 ---@param amount number|nil
 ---@param targetKey string|nil
 ---@param searchQuery string|nil
+---@param opts table|nil { networkId=string, returnItemIds=boolean, onComplete=fun(ok:boolean, result:table) }
 ---@return boolean
-local function enqueueWithdraw(rowData, amount, targetKey, searchQuery)
+local function enqueueWithdraw(rowData, amount, targetKey, searchQuery, opts)
 	if not rowData or not rowData.fullType then return false end
 	if #queue + (current and 1 or 0) >= MAX_QUEUED_REQUESTS then return false end
 	serial = serial + 1
@@ -232,7 +266,7 @@ local function enqueueWithdraw(rowData, amount, targetKey, searchQuery)
 		requested = math.max(0, math.floor(tonumber(rowData.count) or 0))
 		openEnded = requested <= 0
 	end
-	local networkId = activeNetworkId()
+	local networkId = opts and opts.networkId or activeNetworkId()
 	local op = operation
 	if op and op.networkId and networkId and op.networkId ~= networkId then
 		GlobalStorageSiK.Log.warn("WithdrawClient", "queue rejected across networks",
@@ -251,6 +285,8 @@ local function enqueueWithdraw(rowData, amount, targetKey, searchQuery)
 		targetKey = targetKey,
 		searchQuery = searchQuery,
 		networkId = op.networkId or networkId,
+		returnItemIds = opts and opts.returnItemIds == true,
+		onComplete = opts and opts.onComplete or nil,
 	})
 	return true
 end
@@ -259,12 +295,19 @@ end
 ---@param amount number|nil 1 = una unidad; 0 = todo el tipo
 ---@param targetKey string|nil
 ---@param searchQuery string|nil
+---@param opts table|nil { networkId=string, returnItemIds=boolean, onComplete=fun(ok:boolean, result:table) }
 ---@return boolean
-function GlobalStorageSiK.WithdrawClient.sendWithdraw(rowData, amount, targetKey, searchQuery)
-	if not enqueueWithdraw(rowData, amount, targetKey, searchQuery) then
+function GlobalStorageSiK.WithdrawClient.sendWithdraw(rowData, amount, targetKey, searchQuery, opts)
+	if not enqueueWithdraw(rowData, amount, targetKey, searchQuery, opts) then
 		GlobalStorageSiK.Log.error("WithdrawClient", "queue limit reached",
 			"limit=" .. tostring(MAX_QUEUED_REQUESTS))
 		showLocalError("IGUI_GS_InternalTransferError")
+		if opts and opts.onComplete then
+			local ok, err = pcall(opts.onComplete, false, { reason = "queue_rejected", moved = 0, itemIds = {} })
+			if not ok then
+				GlobalStorageSiK.Log.error("WithdrawClient", "rejected callback failed", tostring(err))
+			end
+		end
 		return false
 	end
 	if not current then startNext() end
@@ -287,7 +330,7 @@ function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetK
 	end
 	local okAny = false
 	for i = 1, #rows do
-		if enqueueWithdraw(rows[i], amount, targetKey, searchQuery) then
+		if enqueueWithdraw(rows[i], amount, targetKey, searchQuery, nil) then
 			okAny = true
 		end
 	end
@@ -304,7 +347,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	responseDeadlineMs = 0
 	local transfer = args.transfer
 	if not transfer or transfer.op ~= "withdraw" then
-		GlobalStorageSiK.WithdrawClient.cancelAll()
+		GlobalStorageSiK.WithdrawClient.cancelAll("invalid_response")
 		return false
 	end
 	-- La lista visible se actualiza por delta confirmado en TerminalSync. No
@@ -338,7 +381,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 				.. " movedConfirmed=" .. tostring(operation and operation.totalMoved or moved))
 		args.ok = false
 		args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", cleanReason)
-		GlobalStorageSiK.WithdrawClient.cancelAll()
+		GlobalStorageSiK.WithdrawClient.cancelAll(cleanReason)
 		return false
 	end
 	local shouldContinue = args.ok == true and moved > 0 and not exhausted
@@ -351,7 +394,16 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		return true
 	end
 	if operation then operation.rowsDone = (operation.rowsDone or 0) + 1 end
+	local completedRequest = current
+	local completionResult = {
+		reason = reason,
+		moved = completedRequest and completedRequest.totalMoved or moved,
+		itemIds = transfer.itemIds or {},
+		networkId = transfer.networkId,
+		fullType = transfer.fullType,
+	}
 	local hasNext = finishCurrent(true)
+	runCompletion(completedRequest, completionResult.moved > 0, completionResult)
 	if hasNext then
 		showProgress(false)
 		-- No mostrar un "Extraidos: 0" por cada tipo ya agotado; toda la

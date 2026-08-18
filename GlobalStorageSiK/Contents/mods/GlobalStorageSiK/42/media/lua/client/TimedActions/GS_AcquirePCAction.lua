@@ -15,10 +15,10 @@ GS_AcquirePCAction = ISBaseTimedAction:derive("GS_AcquirePCAction")
 
 ---@return boolean
 function GS_AcquirePCAction:isValid()
-	if not self.character then
-		return false
-	end
-	return GlobalStorageSiK.PCAcquire.status(self.character).allReady
+	-- La comprobacion completa escanea fuentes fisicas cercanas: hacerla cada
+	-- tick castigaba innecesariamente el cliente. Se valida al abrir/confirmar
+	-- y de nuevo en el servidor antes de consumir cualquier pieza.
+	return self.character ~= nil
 end
 
 ---@return boolean

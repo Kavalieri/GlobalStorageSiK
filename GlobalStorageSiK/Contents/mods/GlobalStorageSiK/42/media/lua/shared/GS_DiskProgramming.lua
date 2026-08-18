@@ -105,7 +105,9 @@ function GlobalStorageSiK.DiskProgramming.program(player, programId)
 	if not GlobalStorageSiK.DiskProgramming.terminalInRange(player) then
 		return false, "terminal"
 	end
-	local disk = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, GlobalStorageSiK.DiskProgramming.BLANK_DISK)
+	local containers = GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
+	local disk = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player,
+		GlobalStorageSiK.DiskProgramming.BLANK_DISK, containers)
 	if not disk then
 		return false, "materials"
 	end
@@ -113,16 +115,10 @@ function GlobalStorageSiK.DiskProgramming.program(player, programId)
 	if not inv then
 		return false, "invalid"
 	end
-	local container = disk.getContainer and disk:getContainer() or inv
-	container:Remove(disk)
-	local output = instanceItem(def.outputItem)
-	if not output then
-		return false, "output"
-	end
-	if GlobalStorageSiK.InventorySync and GlobalStorageSiK.InventorySync.addToPlayer then
-		GlobalStorageSiK.InventorySync.addToPlayer(player, output)
-	else
-		inv:AddItem(output)
+	local replaced, _, replaceReason = GlobalStorageSiK.CraftUtils.replaceItemsWithOutput(player,
+		{ disk }, def.outputItem)
+	if not replaced then
+		return false, replaceReason == "materials" and "materials" or "output"
 	end
 	return true, nil
 end

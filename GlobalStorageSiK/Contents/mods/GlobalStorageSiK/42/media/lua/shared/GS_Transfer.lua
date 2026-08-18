@@ -162,6 +162,8 @@ end
 
 ---@return string|nil reason
 
+---@return number[] movedItemIds
+
 local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	destContainer = destContainer or player:getInventory()
@@ -176,6 +178,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
 
 	local moved = 0
+
+	local movedItemIds = {}
 
 	local lastReason = nil
 
@@ -235,6 +239,12 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 						moved = moved + 1
 
+						if toMove.getID then
+
+							movedItemIds[#movedItemIds + 1] = toMove:getID()
+
+						end
+
 					else
 
 						lastReason = "move_failed"
@@ -253,11 +263,11 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	if moved > 0 then
 
-		return moved, nil
+		return moved, nil, movedItemIds
 
 	end
 
-	return 0, lastReason or "not_found"
+	return 0, lastReason or "not_found", movedItemIds
 
 end
 
@@ -382,23 +392,25 @@ end
 
 ---@return number moved
 
+---@return number[] movedItemIds
+
 function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer)
 
 	if not player or not fullType or fullType == "" then
 
-		return false, "invalid", 0
+		return false, "invalid", 0, {}
 
 	end
 
 	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
 
-		return false, "remote_disabled", 0
+		return false, "remote_disabled", 0, {}
 
 	end
 
 	if not GlobalStorageSiK.Power.networkPowered(networkId) then
 
-		return false, "no_power", 0
+		return false, "no_power", 0, {}
 
 	end
 
@@ -414,7 +426,7 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local moved, reason = withdrawUnits(player, fullType, networkId, target, destContainer)
+	local moved, reason, movedItemIds = withdrawUnits(player, fullType, networkId, target, destContainer)
 
 	if moved > 0 then
 
@@ -422,14 +434,14 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 		if moved < target and reason then
 
-			return true, "partial:" .. tostring(reason), moved
+			return true, "partial:" .. tostring(reason), moved, movedItemIds
 
 		end
 
-		return true, nil, moved
+		return true, nil, moved, movedItemIds
 
 	end
 
-	return false, reason or "not_found", 0
+	return false, reason or "not_found", 0, movedItemIds or {}
 
 end

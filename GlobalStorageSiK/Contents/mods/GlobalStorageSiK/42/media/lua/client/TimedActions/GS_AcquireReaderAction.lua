@@ -16,10 +16,10 @@ GS_AcquireReaderAction = ISBaseTimedAction:derive("GS_AcquireReaderAction")
 
 ---@return boolean
 function GS_AcquireReaderAction:isValid()
-	if not self.character then
-		return false
-	end
-	return GlobalStorageSiK.ReaderAcquire.status(self.character).allReady
+	-- No volver a escanear todos los contenedores cercanos en cada tick de la
+	-- barra. La UI valida antes de encolarla y el proceso autoritativo vuelve a
+	-- validar justo al terminar, antes de consumir una sola pieza.
+	return self.character ~= nil
 end
 
 ---@return boolean

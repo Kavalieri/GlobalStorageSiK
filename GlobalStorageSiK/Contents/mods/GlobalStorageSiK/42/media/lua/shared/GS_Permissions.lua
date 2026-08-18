@@ -53,7 +53,10 @@ local function tableHasEntries(values)
 	return false
 end
 
---- Nombre visible del personaje (forename + surname).
+local isCharacterNameAmbiguous
+
+--- Nombre visible del personaje (forename + surname). Conserva mayúsculas y
+--- UTF-8: la normalización solo se usa al comparar, nunca al presentar.
 ---@param player IsoPlayer|nil
 ---@return string
 function GlobalStorageSiK.Permissions.getCharacterName(player)
@@ -64,43 +67,45 @@ function GlobalStorageSiK.Permissions.getCharacterName(player)
 		if player.getDescriptor then
 			local desc = player:getDescriptor()
 			if desc and desc.getForename and desc.getSurname then
-				local full = normalizeName((desc:getForename() or "") .. " " .. (desc:getSurname() or ""))
+				local full = displayText((desc:getForename() or "") .. " " .. (desc:getSurname() or ""))
 				if full ~= "" then
 					return full
 				end
 			end
 		end
 		if player.getForename and player.getSurname then
-			local full = normalizeName((player:getForename() or "") .. " " .. (player:getSurname() or ""))
+			local full = displayText((player:getForename() or "") .. " " .. (player:getSurname() or ""))
 			if full ~= "" then
 				return full
 			end
 		end
 		if player.getForname and player.getSurname then
-			local full = normalizeName((player:getForname() or "") .. " " .. (player:getSurname() or ""))
+			local full = displayText((player:getForname() or "") .. " " .. (player:getSurname() or ""))
 			if full ~= "" then
 				return full
 			end
 		end
-		return player:getUsername() or ""
+		return displayText(player:getUsername() or "")
 	end)
 	if ok and name and name ~= "" then
 		return name
 	end
 	if player.getUsername then
-		return player:getUsername() or ""
+		return displayText(player:getUsername() or "")
 	end
 	return ""
 end
 
---- Nombre que vanilla muestra para el jugador en listas multijugador. En B42
---- getDisplayName conserva nombres Steam/servidor Unicode que pueden no estar
---- disponibles correctamente en el SurvivorDesc remoto. Es solo presentación:
---- permisos, ownership y restricciones siguen vinculados al characterId.
+--- Nombre visible que GS muestra para el jugador. El personaje es la fuente
+--- primaria también en dedicado: getDisplayName/getUsername pueden representar
+--- la cuenta (por ejemplo "admin") y nunca deben sustituir a Kalva, 凯 瓦, etc.
+--- Cuenta e IDs quedan reservados para autorización y desambiguación interna.
 ---@param player IsoPlayer|nil
 ---@return string
 function GlobalStorageSiK.Permissions.getPlayerDisplayName(player)
 	if not player then return "" end
+	local characterName = displayText(GlobalStorageSiK.Permissions.getCharacterName(player))
+	if characterName ~= "" then return characterName end
 	if player.getDisplayName then
 		local ok, value = pcall(function() return player:getDisplayName() end)
 		value = ok and displayText(value) or ""
@@ -111,16 +116,89 @@ function GlobalStorageSiK.Permissions.getPlayerDisplayName(player)
 		value = ok and displayText(value) or ""
 		if value ~= "" then return value end
 	end
-	return displayText(GlobalStorageSiK.Permissions.getCharacterName(player))
+	return ""
 end
 
---- Identidad persistente del PERSONAJE, separada del nombre de cuenta Steam.
---- SurvivorDesc.ID cambia al crear otro personaje y se conserva con el
---- personaje guardado. El fallback por nombre solo mantiene compatibilidad
---- en APIs/modos donde el descriptor no exponga ID.
----@param player IsoPlayer|nil
----@return string
-function GlobalStorageSiK.Permissions.getCharacterId(player)
+local function getPlayerUsername(player)
+	if not player or not player.getUsername then return "" end
+	local ok, value = pcall(function() return player:getUsername() end)
+	return ok and displayText(value) or ""
+end
+
+local function getSteamIdForUsername(username, player)
+	username = displayText(username)
+	if username ~= "" and getSteamIDFromUsername then
+		local ok, value = pcall(getSteamIDFromUsername, username)
+		value = ok and displayText(value) or ""
+		if value ~= "" and value ~= "0" and value ~= "-1" then return value end
+	end
+	if player and player.getSteamID then
+		local ok, value = pcall(function() return player:getSteamID() end)
+		value = ok and displayText(value) or ""
+		if value ~= "" and value ~= "0" and value ~= "-1" then return value end
+	end
+	return ""
+end
+
+local CHARACTER_UUID_KEY = "GS_CharacterUUID"
+local characterUuidSequence = 0
+
+--- Solo usa un getter público si alguna build lo expone. Nunca intenta acceder
+--- al campo ni usa reflexión: B42 lanza una IllegalStateException fuera de
+--- debug incluso dentro de pcall. sqlId es diagnóstico opcional, no identidad.
+local function getPersistentSqlId(player)
+	if not player then return nil end
+	if player.getSqlId then
+		local ok, value = pcall(function() return player:getSqlId() end)
+		value = ok and tonumber(value) or nil
+		if value and value >= 0 then return math.floor(value) end
+	end
+	return nil
+end
+
+local function validCharacterUuid(value)
+	value = tostring(value or "")
+	return value:match("^gsc_[0-9a-f]+_[0-9a-f]+_[0-9a-f]+_[0-9a-f]+$") ~= nil
+end
+
+local function generateCharacterUuid()
+	characterUuidSequence = characterUuidSequence + 1
+	local now = (getTimestampMs and getTimestampMs())
+		or (os and os.time and os.time() * 1000) or 0
+	local rndA = (ZombRand and ZombRand(0, 65535)) or math.random(0, 65535)
+	local rndB = (ZombRand and ZombRand(0, 65535)) or math.random(0, 65535)
+	return string.format("gsc_%x_%x_%04x_%04x",
+		now % 0xFFFFFFF, characterUuidSequence % 0xFFFFFF, rndA, rndB)
+end
+
+--- Identidad propia de la encarnación concreta. Solo el proceso autoritativo
+--- genera el UUID; player modData lo persiste dentro del BLOB del personaje y
+--- transmitModData intenta reflejarlo al cliente. Una ranura sqlId puede ser
+--- reutilizada al crear otro personaje, por lo que nunca autoriza por sí sola.
+local function getOrCreateCharacterUuid(player)
+	if not player or not player.getModData then return "" end
+	local okData, data = pcall(function() return player:getModData() end)
+	if not okData or not data then return "" end
+	local existing = tostring(data[CHARACTER_UUID_KEY] or "")
+	if validCharacterUuid(existing) then return existing end
+	if not GlobalStorageSiK.isAuthoritative() then return "" end
+	local value = generateCharacterUuid()
+	data[CHARACTER_UUID_KEY] = value
+	if player.transmitModData then
+		pcall(function() player:transmitModData() end)
+	end
+	return value
+end
+
+local function getPersistentCharacterToken(player)
+	return getOrCreateCharacterUuid(player)
+end
+
+--- ID legacy usado entre 1.3.71 y 1.3.76. SurvivorDesc.ID procede de un
+--- contador local al proceso y puede repetirse entre clientes MP; jamás debe
+--- autorizar por sí solo. Solo se conserva para migrar registros cuya cuenta
+--- autoritativa también coincide.
+local function getLegacyDescriptorId(player)
 	if not player then return "" end
 	local ok, value = pcall(function()
 		local desc = player.getDescriptor and player:getDescriptor() or nil
@@ -128,11 +206,50 @@ function GlobalStorageSiK.Permissions.getCharacterId(player)
 		if id ~= nil and tonumber(id) and tonumber(id) >= 0 then
 			return "character:" .. tostring(id)
 		end
-		return nil
+		return ""
 	end)
-	if ok and value then return value end
+	return ok and value or ""
+end
+
+--- Identidad persistente de la encarnación. La única clave moderna es el UUID
+--- GS guardado en player modData. Cuenta, Steam y sqlId son auditoría/migración:
+--- una cuenta o ranura reutilizada por otro personaje nunca hereda permisos.
+---@param player IsoPlayer|nil
+---@return string
+function GlobalStorageSiK.Permissions.getCharacterId(player)
+	if not player then return "" end
+	local username = normalizeName(getPlayerUsername(player))
+	if GlobalStorageSiK.Permissions.shouldEnforce() and username == "" then
+		return ""
+	end
+	local characterToken = getPersistentCharacterToken(player)
+	if characterToken ~= "" then return "character:" .. characterToken end
+	-- En cliente remoto el UUID puede no haber llegado todavía. Fallar cerrado
+	-- es preferible a inventar una identidad basada en cuenta o nombre.
+	if GlobalStorageSiK.Permissions.shouldEnforce() then return "" end
 	local name = GlobalStorageSiK.Permissions.getCharacterName(player)
 	return name ~= "" and ("legacy-name:" .. normalizeName(name)) or ""
+end
+
+local function isModernCharacterId(value)
+	value = tostring(value or "")
+	return validCharacterUuid(string.match(value, "^character:(gsc_.+)$") or "")
+end
+
+--- IDs emitidos únicamente por DEV4. Se aceptan solo como candidatos de una
+--- migración acotada; nunca como prueba moderna de autorización.
+local function getDev4CharacterIds(net, player)
+	local result = {}
+	local username = normalizeName(getPlayerUsername(player))
+	if username == "" then return result end
+	local prefix = "account:" .. username
+	for storedId in pairs(net and net.characterPermissions or {}) do
+		storedId = tostring(storedId or "")
+		if storedId == prefix or string.sub(storedId, 1, #prefix + 1) == prefix .. "|" then
+			result[#result + 1] = storedId
+		end
+	end
+	return result
 end
 
 ---@param player IsoPlayer|nil
@@ -147,14 +264,55 @@ function GlobalStorageSiK.Permissions.isServerStaff(player)
 	return false
 end
 
+local function mergeZoneDenials(net, oldKey, newKey)
+	if not net or oldKey == "" or newKey == "" or oldKey == newKey then return end
+	net.memberZoneDenials = net.memberZoneDenials or {}
+	local source = net.memberZoneDenials[oldKey]
+	if not source then return end
+	local target = net.memberZoneDenials[newKey] or {}
+	for zoneId, denied in pairs(source) do
+		if denied == true then target[zoneId] = true end
+	end
+	net.memberZoneDenials[newKey] = target
+	net.memberZoneDenials[oldKey] = nil
+end
+
+local function listContainsIdentity(values, name, username)
+	local wantedName = normalizeName(name)
+	local wantedUsername = normalizeName(username)
+	for i = 1, #(values or {}) do
+		local stored = normalizeName(values[i])
+		if (wantedName ~= "" and stored == wantedName)
+			or (wantedUsername ~= "" and stored == wantedUsername) then
+			return true
+		end
+	end
+	return false
+end
+
+local function logIdentityMigration(net, kind, oldId, newId, username)
+	if not GlobalStorageSiK.Log then return end
+	GlobalStorageSiK.Log.info("Permissions", "identityMigration",
+		tostring(kind or "member")
+			.. " network=" .. tostring(net and net.id or "")
+			.. " account=" .. tostring(username or "")
+			.. " old=" .. tostring(oldId or "")
+			.. " new=" .. tostring(newId or ""))
+end
+
 local function bindCharacter(net, player, role)
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
-	if characterId == "" then return end
+	if characterId == "" then return nil end
 	net.characterPermissions = net.characterPermissions or {}
 	local record = net.characterPermissions[characterId] or {}
-	record.name = GlobalStorageSiK.Permissions.getCharacterName(player)
-	record.displayName = GlobalStorageSiK.Permissions.getPlayerDisplayName(player)
-	record.username = player.getUsername and displayText(player:getUsername()) or ""
+	record.characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
+	record.accountUsername = getPlayerUsername(player)
+	record.steamId = getSteamIdForUsername(record.accountUsername, player)
+	record.sqlId = getPersistentSqlId(player)
+	-- Alias de lectura para consumidores/datos 1.3.x. Nunca son claves.
+	record.name = record.characterName
+	record.displayName = record.characterName
+	record.username = record.accountUsername
 	record.role = role or record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER
 	net.characterPermissions[characterId] = record
 	-- Un miembro de faccion puede haberse añadido estando desconectado. Mover
@@ -177,9 +335,131 @@ local function bindCharacter(net, player, role)
 		end
 	end
 	if target then net.memberZoneDenials[characterId] = target end
+	return record
 end
 
-local function isCharacterNameAmbiguous(name)
+local function consumeLegacyMembership(net, name, username)
+	local nameKey = normalizeName(name)
+	local usernameKey = normalizeName(username)
+	for _, field in ipairs({ "allowedUsers", "adminUsers" }) do
+		local values = net[field] or {}
+		for i = #values, 1, -1 do
+			local stored = normalizeName(values[i])
+			if (nameKey ~= "" and stored == nameKey)
+				or (usernameKey ~= "" and stored == usernameKey) then
+				table.remove(values, i)
+			end
+		end
+	end
+end
+
+--- Migra un registro character:N únicamente si su cuenta y su permiso
+--- nominal también coinciden. Esto evita convertir una colisión previa en un
+--- permiso válido permanente.
+local function migrateLegacyCharacterRecord(net, player)
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if characterId == "" then return nil end
+	net.characterPermissions = net.characterPermissions or {}
+	if net.characterPermissions[characterId] then
+		return net.characterPermissions[characterId]
+	end
+	local username = getPlayerUsername(player)
+	local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
+	local candidates = { getLegacyDescriptorId(player) }
+	local dev4Ids = getDev4CharacterIds(net, player)
+	for i = 1, #dev4Ids do candidates[#candidates + 1] = dev4Ids[i] end
+	local legacyId = ""
+	local legacy = nil
+	for i = 1, #candidates do
+		local candidateId = candidates[i]
+		local candidate = candidateId ~= "" and net.characterPermissions[candidateId] or nil
+		local accountMatches = candidate and normalizeName(candidate.username) ~= ""
+			and normalizeName(candidate.username) == normalizeName(username)
+		local dev4MatchesCharacter = candidate and (
+			string.sub(candidateId, 1, 8) ~= "account:"
+			or normalizeName(candidate.name) == normalizeName(characterName))
+		if accountMatches and dev4MatchesCharacter
+			and candidate.role ~= GlobalStorageSiK.Permissions.ROLE_OWNER then
+			local nominallyAllowed = listContainsIdentity(net.allowedUsers, candidate.name, username)
+				or listContainsIdentity(net.adminUsers, candidate.name, username)
+			if nominallyAllowed then
+				legacyId = candidateId
+				legacy = candidate
+				break
+			end
+		end
+	end
+	if not legacy then return nil end
+	net.characterPermissions[legacyId] = nil
+	net.characterPermissions[characterId] = legacy
+	mergeZoneDenials(net, legacyId, characterId)
+	local role = legacy.role
+	local record = bindCharacter(net, player, role)
+	consumeLegacyMembership(net, record.name, record.username)
+	logIdentityMigration(net, "member", legacyId, characterId, username)
+	return record
+end
+
+--- Vincula al propietario usando la cuenta autoritativa. Si el dato procede
+--- del esquema legacy, el nombre o el ID aislado nunca bastan cuando existe
+--- ownerAccount: esa cuenta es el ancla que impide el cruce de propietarios.
+local function bindOwnerIdentity(net, player)
+	if not net or not player then return false end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if characterId == "" then return false end
+	if net.ownerCharacterId == characterId then
+		net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
+		net.ownerAccount = getPlayerUsername(player)
+		net.ownerSteamId = getSteamIdForUsername(net.ownerAccount, player)
+		bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+		return true
+	end
+	local storedId = tostring(net.ownerCharacterId or "")
+	if isModernCharacterId(storedId) then return false end
+	local username = getPlayerUsername(player)
+	local accountMatches = normalizeName(net.ownerAccount) ~= ""
+		and normalizeName(net.ownerAccount) == normalizeName(username)
+	local currentSteamId = getSteamIdForUsername(username, player)
+	if accountMatches and displayText(net.ownerSteamId) ~= ""
+		and currentSteamId ~= "" and displayText(net.ownerSteamId) ~= currentSteamId then
+		accountMatches = false
+	end
+	local isDescriptorLegacy = string.match(storedId, "^character:%d+$") ~= nil
+	local isNameLegacy = storedId == "" or string.sub(storedId, 1, 12) == "legacy-name:"
+	local isDev4Id = false
+	local dev4Ids = getDev4CharacterIds(net, player)
+	for i = 1, #dev4Ids do
+		if storedId == dev4Ids[i] then isDev4Id = true; break end
+	end
+	if isDev4Id then
+		local oldRecord = net.characterPermissions and net.characterPermissions[storedId] or nil
+		accountMatches = accountMatches and oldRecord ~= nil
+			and normalizeName(oldRecord.name) == normalizeName(
+				GlobalStorageSiK.Permissions.getCharacterName(player))
+	elseif not isDescriptorLegacy and not isNameLegacy then
+		return false
+	end
+	if not accountMatches and normalizeName(net.ownerAccount) == "" and isNameLegacy then
+		local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
+		accountMatches = not isCharacterNameAmbiguous(characterName)
+			and GlobalStorageSiK.Permissions.identityMatches(player, net.owner)
+	end
+	if not accountMatches then return false end
+	if storedId ~= "" and storedId ~= characterId then
+		net.characterPermissions = net.characterPermissions or {}
+		net.characterPermissions[storedId] = nil
+		if net.memberZoneDenials then net.memberZoneDenials[storedId] = nil end
+	end
+	net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
+	net.ownerAccount = username
+	net.ownerSteamId = currentSteamId
+	net.ownerCharacterId = characterId
+	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+	logIdentityMigration(net, "owner", storedId, characterId, username)
+	return true
+end
+
+isCharacterNameAmbiguous = function(name)
 	local wanted = normalizeName(name)
 	local count = 0
 	local players = nil
@@ -202,7 +482,8 @@ local function isCharacterNameAmbiguous(name)
 	return false
 end
 
---- Comprueba si un valor almacenado coincide con el jugador (personaje o cuenta legacy).
+--- Comparador exclusivamente legacy para migrar mundos sin ownerAccount/UUID.
+--- Nunca debe participar en la autorización moderna normal.
 ---@param player IsoPlayer
 ---@param stored string
 ---@return boolean
@@ -239,6 +520,27 @@ function GlobalStorageSiK.Permissions.ensure(registry, networkId, ownerCharacter
 	if ownerCharacter and ownerCharacter ~= "" and (not net.owner or net.owner == "") then
 		net.owner = ownerCharacter
 	end
+end
+
+--- Inicializa la propiedad de una red nueva en una sola operación. Evita que
+--- exista una ventana en la que haya nombre/cuenta pero falte el ID seguro.
+---@param net table
+---@param player IsoPlayer|nil
+---@return boolean
+function GlobalStorageSiK.Permissions.initializeOwner(net, player)
+	if not net or not player then return false end
+	local username = getPlayerUsername(player)
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if GlobalStorageSiK.Permissions.shouldEnforce()
+		and (username == "" or characterId == "") then
+		return false
+	end
+	net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
+	net.ownerAccount = username
+	net.ownerSteamId = getSteamIdForUsername(username, player)
+	net.ownerCharacterId = characterId
+	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+	return net.ownerCharacterId ~= ""
 end
 
 --- Elimina referencias a zonas que ya no existen o pertenecen a otra red.
@@ -345,12 +647,19 @@ function GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
 	local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	local record = net.characterPermissions and net.characterPermissions[characterId]
+		or migrateLegacyCharacterRecord(net, player)
 	if record then
 		return record.role == GlobalStorageSiK.Permissions.ROLE_ADMIN
 	end
+	local usernameKey = normalizeName(getPlayerUsername(player))
+	local characterKey = normalizeName(charName)
+	local characterAmbiguous = isCharacterNameAmbiguous(charName)
 	for i = 1, #(net.adminUsers or {}) do
-		if normalizeName(net.adminUsers[i]) == normalizeName(charName) then
-			bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_ADMIN)
+		local stored = normalizeName(net.adminUsers[i])
+		if (usernameKey ~= "" and stored == usernameKey)
+			or (not characterAmbiguous and stored == characterKey) then
+			local bound = bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_ADMIN)
+			consumeLegacyMembership(net, bound.name, bound.username)
 			return true
 		end
 	end
@@ -389,18 +698,19 @@ end
 ---@param role string "admin" | "member"
 ---@return boolean ok
 function GlobalStorageSiK.Permissions.setUserRole(networkId, characterName, role)
-	characterName = normalizeName(characterName)
-	if characterName == "" then return false end
+	local displayName = displayText(characterName)
+	local characterKey = normalizeName(displayName)
+	if characterKey == "" then return false end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	local net = registry.networks[networkId]
-	if net.owner and normalizeName(net.owner) == characterName then
+	if net.owner and normalizeName(net.owner) == characterKey then
 		return false  -- no se puede cambiar el rol del owner
 	end
 	net.adminUsers = net.adminUsers or {}
 	-- quitar de adminUsers primero
 	for i = #net.adminUsers, 1, -1 do
-		if normalizeName(net.adminUsers[i]) == characterName then
+		if normalizeName(net.adminUsers[i]) == characterKey then
 			table.remove(net.adminUsers, i)
 		end
 	end
@@ -408,32 +718,17 @@ function GlobalStorageSiK.Permissions.setUserRole(networkId, characterName, role
 		-- asegurarse de que está en allowedUsers
 		local inUsers = false
 		for i = 1, #net.allowedUsers do
-			if normalizeName(net.allowedUsers[i]) == characterName then
+			if normalizeName(net.allowedUsers[i]) == characterKey then
+				net.allowedUsers[i] = displayName
 				inUsers = true; break
 			end
 		end
 		if not inUsers then
-			net.allowedUsers[#net.allowedUsers + 1] = characterName
+			net.allowedUsers[#net.allowedUsers + 1] = displayName
 		end
-		net.adminUsers[#net.adminUsers + 1] = characterName
+		net.adminUsers[#net.adminUsers + 1] = displayName
 	end
 	return true
-end
-
---- Registra cuenta del propietario al fijar propiedad.
----@param net table
----@param player IsoPlayer
-local function touchOwnerAccount(net, player)
-	if not net or not player or not player.getUsername then
-		return
-	end
-	local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
-	if net.owner == charName or not net.owner or net.owner == "" then
-		net.owner = charName
-		net.ownerCharacterId = GlobalStorageSiK.Permissions.getCharacterId(player)
-		net.ownerAccount = player:getUsername()
-		bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
-	end
 end
 
 --- Comprueba si dos cuentas comparten facción.
@@ -529,12 +824,13 @@ end
 ---@param username string
 ---@return string
 function GlobalStorageSiK.Permissions.resolveCharacterName(username)
-	username = normalizeName(username)
-	if username == "" then
+	local exactUsername = displayText(username)
+	local usernameKey = normalizeName(exactUsername)
+	if usernameKey == "" then
 		return ""
 	end
 	if getPlayerFromUsername then
-		local ok, player = pcall(getPlayerFromUsername, username)
+		local ok, player = pcall(getPlayerFromUsername, exactUsername)
 		if ok and player then
 			return GlobalStorageSiK.Permissions.getCharacterName(player)
 		end
@@ -544,21 +840,21 @@ function GlobalStorageSiK.Permissions.resolveCharacterName(username)
 		if ok and players and players.size then
 			for i = 0, players:size() - 1 do
 				local p = players:get(i)
-				if p and p.getUsername and p:getUsername() == username then
+				if p and p.getUsername and normalizeName(p:getUsername()) == usernameKey then
 					return GlobalStorageSiK.Permissions.getCharacterName(p)
 				end
 			end
 		end
 	end
-	return username
+	return exactUsername
 end
 
 --- Resuelve cuenta desde nombre de personaje (jugadores conectados).
 ---@param characterName string
 ---@return string|nil
 function GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(characterName)
-	characterName = normalizeName(characterName)
-	if characterName == "" then
+	local characterKey = normalizeName(characterName)
+	if characterKey == "" then
 		return nil
 	end
 	if getActivePlayers then
@@ -566,7 +862,7 @@ function GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(characterName
 		if ok and players and players.size then
 			for i = 0, players:size() - 1 do
 				local p = players:get(i)
-				if p and GlobalStorageSiK.Permissions.getCharacterName(p) == characterName then
+				if p and normalizeName(GlobalStorageSiK.Permissions.getCharacterName(p)) == characterKey then
 					return p:getUsername()
 				end
 			end
@@ -596,36 +892,29 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	GlobalStorageSiK.Permissions.ensure(registry, networkId, characterName)
 	local net = registry.networks[networkId]
 	if not net.owner or net.owner == "" then
-		touchOwnerAccount(net, player)
-		if ModData and ModData.transmit then
+		local initialized = GlobalStorageSiK.Permissions.initializeOwner(net, player)
+		if initialized and ModData and ModData.transmit then
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		end
-		return true
+		return initialized, initialized and nil or "identity_unavailable"
 	end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
-	if net.ownerCharacterId and net.ownerCharacterId ~= "" then
-		if net.ownerCharacterId == characterId then
-			bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
-			return true
-		end
-	elseif not isCharacterNameAmbiguous(characterName)
-		and GlobalStorageSiK.Permissions.identityMatches(player, net.owner) then
-		-- Si el valor legacy era el username Steam, reemplazar también la
-		-- etiqueta visible por el nombre del personaje al vincular el ID.
-		net.owner = characterName
-		net.ownerCharacterId = characterId
-		bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
-		touchOwnerAccount(net, player)
+	if bindOwnerIdentity(net, player) then
 		return true
 	end
 	local characterRecord = net.characterPermissions and net.characterPermissions[characterId]
+		or migrateLegacyCharacterRecord(net, player)
 	if characterRecord then
 		bindCharacter(net, player, characterRecord.role)
 		return true
 	end
+	local usernameKey = normalizeName(username)
+	local characterKey = normalizeName(characterName)
+	local characterAmbiguous = isCharacterNameAmbiguous(characterName)
 	for i = 1, #(net.allowedUsers or {}) do
-		if not isCharacterNameAmbiguous(characterName)
-			and GlobalStorageSiK.Permissions.identityMatches(player, net.allowedUsers[i]) then
+		local storedKey = normalizeName(net.allowedUsers[i])
+		if (usernameKey ~= "" and storedKey == usernameKey)
+			or (not characterAmbiguous and storedKey == characterKey) then
 			local legacyValue = net.allowedUsers[i]
 			local role = GlobalStorageSiK.Permissions.ROLE_MEMBER
 			for j = 1, #(net.adminUsers or {}) do
@@ -636,7 +925,8 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 				end
 			end
 			net.allowedUsers[i] = characterName
-			bindCharacter(net, player, role)
+			local bound = bindCharacter(net, player, role)
+			consumeLegacyMembership(net, bound.name, bound.username)
 			return true
 		end
 	end
@@ -755,9 +1045,9 @@ function GlobalStorageSiK.Permissions.findOnlineCharacter(characterId)
 	return nil
 end
 
---- Añade un personaje ya resuelto por el servidor. Conserva allowedUsers
---- como índice legacy/display para mundos existentes, pero la autorización
---- nueva se vincula al ID persistente del personaje.
+--- Añade un personaje ya resuelto por el servidor. Las altas modernas viven
+--- solo en characterPermissions[UUID]; allowedUsers/adminUsers quedan como
+--- cola offline y compatibilidad legacy, nunca como segunda fuente moderna.
 function GlobalStorageSiK.Permissions.addCharacter(networkId, player)
 	if not player then return false end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
@@ -770,7 +1060,6 @@ function GlobalStorageSiK.Permissions.addCharacter(networkId, player)
 		return false
 	end
 	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_MEMBER)
-	GlobalStorageSiK.Permissions.addUser(networkId, name)
 	return true
 end
 
@@ -783,9 +1072,6 @@ function GlobalStorageSiK.Permissions.setCharacterRole(networkId, characterId, r
 		role = GlobalStorageSiK.Permissions.ROLE_MEMBER
 	end
 	record.role = role
-	-- Mantener los arrays legacy sincronizados mientras existan consumidores
-	-- antiguos o datos previos a esta migración.
-	GlobalStorageSiK.Permissions.setUserRole(networkId, record.name, role)
 	return true
 end
 
@@ -858,7 +1144,7 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 			id = net.ownerCharacterId or "",
 			name = net.owner,
 			displayName = ownerRecord and ownerRecord.displayName or net.owner,
-			username = ownerRecord and ownerRecord.username or "",
+			username = ownerRecord and ownerRecord.username or net.ownerAccount or "",
 			role = GlobalStorageSiK.Permissions.ROLE_OWNER,
 			deniedZoneIds = {},
 		}
@@ -887,8 +1173,13 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 					break
 				end
 			end
+			local legacyUsername = ""
+			if resolvedPlayer and GlobalStorageSiK.Permissions.isFactionUsername(resolvedPlayer, name) then
+				legacyUsername = name
+			end
 			memberEntries[#memberEntries + 1] = {
-				id = "", name = name, displayName = name, username = "", role = role, legacy = true,
+				id = "", name = name, displayName = name, username = legacyUsername,
+				role = role, legacy = true,
 				deniedZoneIds = deniedZoneIds(nil, name),
 			}
 		end
@@ -912,21 +1203,116 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	}
 end
 
---- Transfiere la propiedad a otro personaje.
+local function removeIdentityFromList(values, name, username)
+	local nameKey = normalizeName(name)
+	local usernameKey = normalizeName(username)
+	for i = #(values or {}), 1, -1 do
+		local stored = normalizeName(values[i])
+		if (nameKey ~= "" and stored == nameKey)
+			or (usernameKey ~= "" and stored == usernameKey) then
+			table.remove(values, i)
+		end
+	end
+end
+
+local function findTransferMember(net, targetName, targetUsername, targetCharacterId)
+	targetName = displayText(targetName)
+	targetUsername = displayText(targetUsername)
+	targetCharacterId = tostring(targetCharacterId or "")
+	if targetCharacterId ~= "" then
+		local record = net.characterPermissions and net.characterPermissions[targetCharacterId]
+		if not record then return nil end
+		local recordUsername = displayText(record.username)
+		if targetUsername ~= "" and recordUsername ~= ""
+			and normalizeName(targetUsername) ~= normalizeName(recordUsername) then
+			return nil
+		end
+		return {
+			id = targetCharacterId,
+			name = displayText(record.name),
+			displayName = displayText(record.displayName),
+			username = recordUsername,
+			record = record,
+		}
+	end
+	-- Un miembro desconectado no tiene IsoPlayer ni ID resoluble. Solo se puede
+	-- transferir usando la cuenta exacta que ya figura en los permisos de la red;
+	-- un nombre visible aislado no es una identidad suficiente.
+	if targetUsername == "" then return nil end
+	if not listContainsIdentity(net.allowedUsers, targetName, targetUsername)
+		and not listContainsIdentity(net.adminUsers, targetName, targetUsername) then
+		return nil
+	end
+	return {
+		id = "",
+		name = targetName ~= "" and targetName or targetUsername,
+		displayName = targetName ~= "" and targetName or targetUsername,
+		username = targetUsername,
+		record = nil,
+	}
+end
+
+local function applyOwnerTransfer(networkId, net, player, target, keepFormerOwner)
+	local oldId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	local formerName = GlobalStorageSiK.Permissions.getCharacterName(player)
+	local formerRecord = oldId ~= "" and net.characterPermissions[oldId] or nil
+	local targetId = tostring(target.id or "")
+	local targetName = displayText(target.name)
+	local targetUsername = displayText(target.username)
+	if targetName == "" or targetUsername == "" then return false end
+
+	if keepFormerOwner then
+		if formerRecord then
+			formerRecord.role = GlobalStorageSiK.Permissions.ROLE_MEMBER
+		end
+		GlobalStorageSiK.Permissions.addUser(networkId, formerName)
+	else
+		if oldId ~= "" and oldId ~= targetId then
+			net.characterPermissions[oldId] = nil
+			if net.memberZoneDenials then net.memberZoneDenials[oldId] = nil end
+		end
+		removeIdentityFromList(net.allowedUsers, formerName, getPlayerUsername(player))
+		removeIdentityFromList(net.adminUsers, formerName, getPlayerUsername(player))
+	end
+
+	removeIdentityFromList(net.allowedUsers, targetName, targetUsername)
+	removeIdentityFromList(net.adminUsers, targetName, targetUsername)
+	if net.memberZoneDenials then
+		net.memberZoneDenials[zoneMemberKey(targetId, targetName)] = nil
+		net.memberZoneDenials[zoneMemberKey(nil, targetUsername)] = nil
+	end
+	net.owner = targetName
+	net.ownerAccount = targetUsername
+	net.ownerSteamId = getSteamIdForUsername(targetUsername, nil)
+	net.ownerCharacterId = targetId
+	if target.record then
+		target.record.characterName = targetName
+		target.record.accountUsername = targetUsername
+		target.record.name = targetName
+		target.record.displayName = targetName
+		target.record.username = targetUsername
+		target.record.role = GlobalStorageSiK.Permissions.ROLE_OWNER
+		net.characterPermissions[targetId] = target.record
+	end
+	return true
+end
+
+--- Transfiere la propiedad a un miembro ya autorizado, incluso si está
+--- desconectado. La cuenta enviada por el cliente se contrasta siempre con el
+--- registro/permiso persistente que ya existe en el servidor.
 ---@param networkId string
 ---@param player IsoPlayer
 ---@param toCharacterName string
 ---@param keepFormerOwner boolean|nil
+---@param targetUsername string|nil
+---@param targetCharacterId string|nil
 ---@return boolean ok
 ---@return string message
-function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharacterName, keepFormerOwner)
-	toCharacterName = normalizeName(toCharacterName)
-	if toCharacterName == "" then
+function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharacterName, keepFormerOwner,
+	targetUsername, targetCharacterId)
+	local targetName = displayText(toCharacterName)
+	if normalizeName(targetName) == "" then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
-	end
-	local fromCharacter = GlobalStorageSiK.Permissions.getCharacterName(player)
-	if toCharacterName == fromCharacter then
-		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermAlreadyOwnerMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
@@ -937,20 +1323,19 @@ function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharact
 	if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOnlyOwnerTransferMsg")
 	end
-	local former = net.owner or fromCharacter
-	net.owner = toCharacterName
-	net.ownerAccount = GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(toCharacterName)
-	net.allowedUsers = net.allowedUsers or {}
-	if keepFormerOwner and former and former ~= "" and former ~= toCharacterName then
-		GlobalStorageSiK.Permissions.addUser(networkId, former)
-	else
-		for i = #net.allowedUsers, 1, -1 do
-			if normalizeName(net.allowedUsers[i]) == toCharacterName then
-				table.remove(net.allowedUsers, i)
-			end
-		end
+	local target = findTransferMember(net, targetName, targetUsername, targetCharacterId)
+	if not target then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
-	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipTransferredMsg", toCharacterName)
+	local ownerId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if (target.id ~= "" and target.id == ownerId)
+		or normalizeName(target.username) == normalizeName(getPlayerUsername(player)) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermAlreadyOwnerMsg")
+	end
+	if not applyOwnerTransfer(networkId, net, player, target, keepFormerOwner) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipTransferredMsg", target.name)
 end
 
 function GlobalStorageSiK.Permissions.transferOwnerToCharacter(networkId, player, targetPlayer, keepFormerOwner)
@@ -958,23 +1343,32 @@ function GlobalStorageSiK.Permissions.transferOwnerToCharacter(networkId, player
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
 	local targetName = GlobalStorageSiK.Permissions.getCharacterName(targetPlayer)
-	local oldId = GlobalStorageSiK.Permissions.getCharacterId(player)
-	local ok, message = GlobalStorageSiK.Permissions.transferOwner(
-		networkId, player, targetName, keepFormerOwner)
-	if not ok then return ok, message end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = registry.networks[networkId]
-	local targetId = GlobalStorageSiK.Permissions.getCharacterId(targetPlayer)
-	net.ownerCharacterId = targetId
-	bindCharacter(net, targetPlayer, GlobalStorageSiK.Permissions.ROLE_OWNER)
-	if oldId ~= "" and net.characterPermissions[oldId] then
-		if keepFormerOwner then
-			net.characterPermissions[oldId].role = GlobalStorageSiK.Permissions.ROLE_MEMBER
-		else
-			net.characterPermissions[oldId] = nil
-		end
+	if not net or not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOnlyOwnerTransferMsg")
 	end
-	return true, message
+	local targetId = GlobalStorageSiK.Permissions.getCharacterId(targetPlayer)
+	local targetUsername = getPlayerUsername(targetPlayer)
+	if targetId == "" or targetUsername == "" then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	if targetId == GlobalStorageSiK.Permissions.getCharacterId(player)
+		or normalizeName(targetUsername) == normalizeName(getPlayerUsername(player)) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermAlreadyOwnerMsg")
+	end
+	local target = {
+		id = targetId,
+		name = targetName,
+		displayName = GlobalStorageSiK.Permissions.getPlayerDisplayName(targetPlayer),
+		username = targetUsername,
+		record = net.characterPermissions[targetId] or {},
+	}
+	if not applyOwnerTransfer(networkId, net, player, target, keepFormerOwner) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	net.ownerSteamId = getSteamIdForUsername(targetUsername, targetPlayer)
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipTransferredMsg", targetName)
 end
 
 --- Indica si el jugador es propietario de la red.
@@ -984,41 +1378,32 @@ end
 function GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = registry.networks and registry.networks[networkId]
-	if not net or not net.owner or net.owner == "" then
-		return true
+	if not net then return false end
+	if not net.owner or net.owner == "" then
+		return player ~= nil and GlobalStorageSiK.Permissions.initializeOwner(net, player) or false
 	end
-	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
-	if net.ownerCharacterId and net.ownerCharacterId ~= "" then
-		return net.ownerCharacterId == characterId
-	end
-	local matches = not isCharacterNameAmbiguous(GlobalStorageSiK.Permissions.getCharacterName(player))
-		and GlobalStorageSiK.Permissions.identityMatches(player, net.owner)
-	if matches then
-		net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
-		net.ownerCharacterId = characterId
-		bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
-		touchOwnerAccount(net, player)
-	end
-	return matches
+	return bindOwnerIdentity(net, player)
 end
 
 ---@param networkId string
 ---@param characterName string
 ---@return boolean
 function GlobalStorageSiK.Permissions.addUser(networkId, characterName)
-	characterName = normalizeName(characterName)
-	if characterName == "" then
+	local displayName = displayText(characterName)
+	local characterKey = normalizeName(displayName)
+	if characterKey == "" then
 		return false
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	local list = registry.networks[networkId].allowedUsers
 	for i = 1, #list do
-		if normalizeName(list[i]) == characterName then
+		if normalizeName(list[i]) == characterKey then
+			list[i] = displayName
 			return false
 		end
 	end
-	table.insert(list, characterName)
+	table.insert(list, displayName)
 	return true
 end
 
@@ -1188,7 +1573,25 @@ function GlobalStorageSiK.Permissions.countBackupMembers(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = registry.networks and registry.networks[networkId]
 	if not net then return 0 end
-	return #(net.allowedUsers or {})
+	local count = 0
+	local seen = {}
+	for characterId, record in pairs(net.characterPermissions or {}) do
+		if isModernCharacterId(characterId) and characterId ~= net.ownerCharacterId and record then
+			count = count + 1
+			seen[normalizeName(record.name)] = true
+			seen[normalizeName(record.username)] = true
+		end
+	end
+	for _, field in ipairs({ "allowedUsers", "adminUsers" }) do
+		for i = 1, #(net[field] or {}) do
+			local key = normalizeName(net[field][i])
+			if key ~= "" and not seen[key] then
+				seen[key] = true
+				count = count + 1
+			end
+		end
+	end
+	return count
 end
 
 --- Promueve al primer admin (o si no hay, al primer miembro normal) como
@@ -1202,20 +1605,25 @@ end
 local function promoteOrClearOwner(networkId, net, leavingCharacterName, leavingCharacterId)
 	local promoted = nil
 	local promotedId = nil
+	local promotedRecord = nil
 	for characterId, record in pairs(net.characterPermissions or {}) do
-		if characterId ~= leavingCharacterId and record
+		if isModernCharacterId(characterId)
+			and characterId ~= leavingCharacterId and record
 			and record.role == GlobalStorageSiK.Permissions.ROLE_ADMIN then
 			promotedId = characterId
 			promoted = record.name
+			promotedRecord = record
 			break
 		end
 	end
 	if not promoted then
 		for characterId, record in pairs(net.characterPermissions or {}) do
-			if characterId ~= leavingCharacterId and record
+			if isModernCharacterId(characterId)
+				and characterId ~= leavingCharacterId and record
 				and record.role == GlobalStorageSiK.Permissions.ROLE_MEMBER then
 				promotedId = characterId
 				promoted = record.name
+				promotedRecord = record
 				break
 			end
 		end
@@ -1231,7 +1639,12 @@ local function promoteOrClearOwner(networkId, net, leavingCharacterName, leaving
 		if promotedId and net.characterPermissions[promotedId] then
 			net.characterPermissions[promotedId].role = GlobalStorageSiK.Permissions.ROLE_OWNER
 		end
-		net.ownerAccount = GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(promoted)
+		-- Un registro persistente ya contiene la cuenta autoritativa exacta. Los
+		-- fallbacks nominales solo pueden conservar el valor existente y quedan
+		-- pendientes de vinculación; nunca se resuelven por un nombre ajeno.
+		net.ownerAccount = promotedRecord and displayText(promotedRecord.username)
+			or displayText(promoted)
+		net.ownerSteamId = getSteamIdForUsername(net.ownerAccount)
 		local promotedNorm = normalizeName(promoted)
 		if net.adminUsers then
 			for i = #net.adminUsers, 1, -1 do
@@ -1255,6 +1668,7 @@ local function promoteOrClearOwner(networkId, net, leavingCharacterName, leaving
 		net.owner = ""
 		net.ownerCharacterId = nil
 		net.ownerAccount = nil
+		net.ownerSteamId = nil
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
 				networkId .. ": " .. leavingCharacterName .. " -> (sin miembros, red sin dueño)")
@@ -1276,8 +1690,9 @@ end
 ---@return boolean ok
 ---@return string message
 function GlobalStorageSiK.Permissions.leaveNetwork(networkId, characterName)
-	characterName = normalizeName(characterName)
-	if characterName == "" then
+	local exactName = displayText(characterName)
+	local characterKey = normalizeName(exactName)
+	if characterKey == "" then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -1285,20 +1700,20 @@ function GlobalStorageSiK.Permissions.leaveNetwork(networkId, characterName)
 	if not net then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
-	if net.owner and normalizeName(net.owner) == characterName then
-		promoteOrClearOwner(networkId, net, characterName)
+	if net.owner and normalizeName(net.owner) == characterKey then
+		promoteOrClearOwner(networkId, net, exactName)
 		return true, GlobalStorageSiK.I18n.remote("IGUI_GS_LeftNetworkMsg")
 	end
 	local removedAdmin = false
 	if net.adminUsers then
 		for i = #net.adminUsers, 1, -1 do
-			if normalizeName(net.adminUsers[i]) == characterName then
+			if normalizeName(net.adminUsers[i]) == characterKey then
 				table.remove(net.adminUsers, i)
 				removedAdmin = true
 			end
 		end
 	end
-	local removedUser = GlobalStorageSiK.Permissions.removeUser(networkId, characterName)
+	local removedUser = GlobalStorageSiK.Permissions.removeUser(networkId, exactName)
 	if not removedUser and not removedAdmin then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_UserNotFoundToRemoveMsg")
 	end
@@ -1316,11 +1731,13 @@ function GlobalStorageSiK.Permissions.leaveNetworkPlayer(networkId, player)
 	end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
-	if net.ownerCharacterId and net.ownerCharacterId == characterId then
+	if bindOwnerIdentity(net, player) then
 		promoteOrClearOwner(networkId, net, characterName, characterId)
 		return true, GlobalStorageSiK.I18n.remote("IGUI_GS_LeftNetworkMsg")
 	end
-	if net.characterPermissions and net.characterPermissions[characterId] then
+	local record = net.characterPermissions and net.characterPermissions[characterId]
+		or migrateLegacyCharacterRecord(net, player)
+	if record then
 		local ok = GlobalStorageSiK.Permissions.removeCharacter(networkId, characterId)
 		return ok, GlobalStorageSiK.I18n.remote(ok and "IGUI_GS_LeftNetworkMsg" or "IGUI_GS_UserNotFoundToRemoveMsg")
 	end
@@ -1339,10 +1756,10 @@ end
 function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 	local deadPlayer = type(deadPlayerOrName) == "string" and nil or deadPlayerOrName
 	local deadCharacterName = deadPlayer and GlobalStorageSiK.Permissions.getCharacterName(deadPlayer)
-		or normalizeName(deadPlayerOrName)
+		or displayText(deadPlayerOrName)
 	local deadCharacterId = deadPlayer and GlobalStorageSiK.Permissions.getCharacterId(deadPlayer) or ""
-	deadCharacterName = normalizeName(deadCharacterName)
-	if deadCharacterName == "" then
+	local deadCharacterKey = normalizeName(deadCharacterName)
+	if deadCharacterKey == "" then
 		return
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -1351,9 +1768,10 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 		return
 	end
 	for networkId, net in pairs(networks) do
+		if deadPlayer then bindOwnerIdentity(net, deadPlayer) end
 		local ownsById = deadCharacterId ~= "" and net.ownerCharacterId == deadCharacterId
 		local ownsLegacy = (not net.ownerCharacterId or net.ownerCharacterId == "")
-			and net.owner and net.owner ~= "" and normalizeName(net.owner) == deadCharacterName
+			and net.owner and net.owner ~= "" and normalizeName(net.owner) == deadCharacterKey
 		if ownsById or ownsLegacy then
 			promoteOrClearOwner(networkId, net, deadCharacterName, deadCharacterId)
 		end

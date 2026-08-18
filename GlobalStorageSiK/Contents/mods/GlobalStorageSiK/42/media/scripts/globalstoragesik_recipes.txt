@@ -211,23 +211,27 @@ module GlobalStorageSiK
 		}
 	}
 
-	/* ── Piezas intermedias del LECTOR (no del terminal antiguo) ────────────── */
+	/* ── Piezas intermedias del LECTOR (no del terminal antiguo) ──────────────
+	   El lector abre el primer acceso a Global Storage: conserva el manual, el
+	   soldador encontrado y el destornillador como puertas de progresion, pero
+	   sus piezas usan niveles 1/2/1 y materiales tempranos contenidos. El PC y
+	   los perifericos posteriores mantienen sus requisitos mas altos. */
 
 	craftRecipe Build GS Reader Casing
 	{
 		timedAction = MakingElectrical,
-		time = 90,
+		time = 45,
 		Tags = AnySurfaceCraft;Electrical,
 		category = Electrical,
-		xpAward = Electricity:4,
-		SkillRequired = Electricity:3,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:1,
 		needToBeLearn = true,
 		OnTest = GS_RecipeTests.Recipe_ReaderCasing_Enable,
 		inputs
 		{
 			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
 			item 1 tags[base:screwdriver] mode:keep flags[Prop1],
-			item 2 [Base.SheetMetal],
+			item 1 [Base.SheetMetal],
 			item 1 [Base.NutsBolts],
 		}
 		outputs
@@ -239,19 +243,19 @@ module GlobalStorageSiK
 	craftRecipe Build GS Reader Circuit Board
 	{
 		timedAction = MakingElectrical,
-		time = 130,
+		time = 60,
 		Tags = AnySurfaceCraft;Electrical,
 		category = Electrical,
-		xpAward = Electricity:7,
-		SkillRequired = Electricity:5,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:2,
 		needToBeLearn = true,
 		OnTest = GS_RecipeTests.Recipe_ReaderCircuit_Enable,
 		inputs
 		{
 			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
 			item 1 tags[base:screwdriver] mode:keep,
-			item 2 [Base.ElectronicsScrap],
-			item 2 [Base.ElectricWire],
+			item 1 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
 		}
 		outputs
 		{
@@ -262,11 +266,11 @@ module GlobalStorageSiK
 	craftRecipe Build GS Reader Antenna
 	{
 		timedAction = MakingElectrical,
-		time = 80,
+		time = 45,
 		Tags = AnySurfaceCraft;Electrical,
 		category = Electrical,
-		xpAward = Electricity:4,
-		SkillRequired = Electricity:3,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:1,
 		needToBeLearn = true,
 		OnTest = GS_RecipeTests.Recipe_ReaderAntenna_Enable,
 		inputs
@@ -274,8 +278,7 @@ module GlobalStorageSiK
 			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep flags[Prop1],
 			item 1 tags[base:screwdriver] mode:keep,
 			item 1 [Base.ElectronicsScrap],
-			item 2 [Base.ElectricWire],
-			item 1 [Base.DuctTape],
+			item 1 [Base.ElectricWire],
 		}
 		outputs
 		{
@@ -283,8 +286,9 @@ module GlobalStorageSiK
 		}
 	}
 
-	/* ── Lector de terminal SiK: mismos materiales que "Build GS Terminal
-	   Unit", pero el resultado es el lector portatil (no colocable), usado
+	/* ── Lector de terminal SiK: combina las tres piezas anteriores sin volver
+	   a consumir un rollo completo de cinta; el resultado es el lector portatil
+	   (no colocable), usado
 	   por el nuevo metodo de instalacion sobre un ordenador ya puesto en
 	   el mapa (ver GS_ItemActions.lua / GS_TerminalAccess.installOnObject).
 	   No sustituye a la receta de arriba: coexisten mientras se valida el
@@ -293,11 +297,11 @@ module GlobalStorageSiK
 	craftRecipe Build GS Terminal Reader
 	{
 		timedAction = MakingElectrical,
-		time = 300,
+		time = 120,
 		Tags = AnySurfaceCraft;Electrical,
 		category = Electrical,
-		xpAward = Electricity:20,
-		SkillRequired = Electricity:6,
+		xpAward = Electricity:8,
+		SkillRequired = Electricity:3,
 		needToBeLearn = true,
 		OnTest = GS_RecipeTests.Recipe_TerminalReader_Enable,
 		/* SIN OnCreate: el lector es base:normal, no un moveable que cambia
@@ -317,7 +321,6 @@ module GlobalStorageSiK
 			item 1 [GlobalStorageSiK.GS_ReaderCasing],
 			item 1 [GlobalStorageSiK.GS_ReaderCircuit],
 			item 1 [GlobalStorageSiK.GS_ReaderAntenna],
-			item 1 [Base.DuctTape],
 		}
 		outputs
 		{

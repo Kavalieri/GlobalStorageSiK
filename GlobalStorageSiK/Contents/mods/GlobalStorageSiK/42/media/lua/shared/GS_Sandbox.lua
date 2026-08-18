@@ -292,9 +292,9 @@ end
 ---@return number
 function GlobalStorageSiK.Sandbox.getReaderAcquireCraftTime()
 	if not SandboxVars.GlobalStorageSiK then
-		return 300
+		return 120
 	end
-	return SandboxVars.GlobalStorageSiK.ReaderAcquireCraftTime or 300
+	return SandboxVars.GlobalStorageSiK.ReaderAcquireCraftTime or 120
 end
 
 --- Tiempo de la accion cronometrada de "Conseguir PC" (GS_AcquirePCAction).

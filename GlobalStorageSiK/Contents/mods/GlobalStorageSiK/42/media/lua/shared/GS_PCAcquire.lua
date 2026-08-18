@@ -53,7 +53,7 @@ end
 --- Estado completo de requisitos (para la UI: qué hay, qué falta).
 ---@param player IsoPlayer|nil
 ---@return table status { manual=boolean, items=table<string,boolean>, tools=table, allReady=boolean }
-function GlobalStorageSiK.PCAcquire.status(player)
+function GlobalStorageSiK.PCAcquire.status(player, containers)
 	local status = { manual = GlobalStorageSiK.PCAcquire.hasReadManual(player), items = {}, tools = {}, allReady = true }
 	if not GlobalStorageSiK.Sandbox.requireRecipeBooks() then
 		status.manual = true
@@ -65,9 +65,10 @@ function GlobalStorageSiK.PCAcquire.status(player)
 		status.allReady = false
 		return status
 	end
+	containers = containers or GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	for i = 1, #GlobalStorageSiK.PCAcquire.REQUIRED_ITEMS do
 		local ft = GlobalStorageSiK.PCAcquire.REQUIRED_ITEMS[i]
-		local has = GlobalStorageSiK.CraftUtils.hasItemType(player, ft)
+		local has = GlobalStorageSiK.CraftUtils.hasItemType(player, ft, containers)
 		status.items[ft] = has
 		if not has then
 			status.allReady = false
@@ -75,8 +76,8 @@ function GlobalStorageSiK.PCAcquire.status(player)
 	end
 	-- Herramientas (nunca se consumen, ver craft() mas abajo): igual que
 	-- cualquier crafteo del mod, hace falta soldador + destornillador.
-	status.tools.soldering = GlobalStorageSiK.CraftUtils.hasSolderingIron(player)
-	status.tools.screwdriver = GlobalStorageSiK.CraftUtils.hasScrewdriver(player)
+	status.tools.soldering = GlobalStorageSiK.CraftUtils.hasSolderingIron(player, containers)
+	status.tools.screwdriver = GlobalStorageSiK.CraftUtils.hasScrewdriver(player, containers)
 	if not status.tools.soldering or not status.tools.screwdriver then
 		status.allReady = false
 	end
@@ -99,15 +100,15 @@ function GlobalStorageSiK.PCAcquire.craft(player)
 	if not player then
 		return false, "invalid"
 	end
-	local status = GlobalStorageSiK.PCAcquire.status(player)
+	local containers = GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
+	local status = GlobalStorageSiK.PCAcquire.status(player, containers)
 	if not status.allReady then
 		if not status.manual then return false, "book" end
 		if not status.skillOk then return false, "skill" end
 		if not status.tools.soldering or not status.tools.screwdriver then return false, "tools" end
 		return false, "materials"
 	end
-	local inv = player:getInventory()
-	if not inv then
+	if not player:getInventory() then
 		return false, "invalid"
 	end
 	-- Busca cada pieza en el inventario del jugador O en un contenedor
@@ -116,25 +117,16 @@ function GlobalStorageSiK.PCAcquire.craft(player)
 	local items = {}
 	for i = 1, #GlobalStorageSiK.PCAcquire.REQUIRED_ITEMS do
 		local ft = GlobalStorageSiK.PCAcquire.REQUIRED_ITEMS[i]
-		local item = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, ft)
+		local item = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, ft, containers)
 		if not item then
 			return false, "materials"
 		end
 		items[i] = item
 	end
-	for i = 1, #items do
-		local item = items[i]
-		local container = item.getContainer and item:getContainer() or inv
-		container:Remove(item)
-	end
-	local output = instanceItem(GlobalStorageSiK.PCAcquire.OUTPUT_ITEM)
-	if not output then
-		return false, "output"
-	end
-	if GlobalStorageSiK.InventorySync and GlobalStorageSiK.InventorySync.addToPlayer then
-		GlobalStorageSiK.InventorySync.addToPlayer(player, output)
-	else
-		inv:AddItem(output)
+	local replaced, _, replaceReason = GlobalStorageSiK.CraftUtils.replaceItemsWithOutput(player, items,
+		GlobalStorageSiK.PCAcquire.OUTPUT_ITEM)
+	if not replaced then
+		return false, replaceReason == "materials" and "materials" or "output"
 	end
 	return true, nil
 end

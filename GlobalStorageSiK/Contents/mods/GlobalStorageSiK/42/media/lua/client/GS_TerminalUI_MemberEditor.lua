@@ -166,7 +166,8 @@ end
 
 function GS_MemberEditorUI:onTransferOwnership(keepFormer)
 	if not self.terminal or not self.data then return end
-	self.terminal:onTransferOwnership(self.data.name, keepFormer == true, self.data.characterId)
+	self.terminal:onTransferOwnership(
+		self.data.name, keepFormer == true, self.data.characterId, self.data.username)
 	self:closeAfterAction()
 end
 
@@ -418,9 +419,18 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
 	local myName = player and GlobalStorageSiK.Permissions.getCharacterName(player) or ""
 	local myId = player and GlobalStorageSiK.Permissions.getCharacterId(player) or ""
+	local myUsername = player and player.getUsername and tostring(player:getUsername() or "") or ""
+	local function sameIdentityText(a, b)
+		a = tostring(a or ""):lower():gsub("^%s*(.-)%s*$", "%1")
+		b = tostring(b or ""):lower():gsub("^%s*(.-)%s*$", "%1")
+		return a ~= "" and a == b
+	end
 	local isSelf = data.kind ~= "faction"
 		and ((data.characterId and data.characterId ~= "" and data.characterId == myId)
-			or ((not data.characterId or data.characterId == "") and data.name == myName))
+			or sameIdentityText(data.username, myUsername)
+			or ((not data.characterId or data.characterId == "")
+				and (not data.username or data.username == "")
+				and sameIdentityText(data.name, myName)))
 
 	-- Posicion/alto provisionales - buildLayout() recalcula el alto real
 	-- segun el contenido (numero de lineas envueltas, botones visibles) y

@@ -162,6 +162,18 @@ live = GlobalStorageSiK.Permissions.filterLiveContainers(player, networkId, live
 cuando se proporciona el jugador. La validación cliente solo mejora la UI: el
 proceso autoritativo vuelve a filtrar depósitos, retiradas y reclamos por ID.
 
+`GlobalStorageSiK.Permissions.getCharacterId(player)` devuelve una identidad
+opaca de la encarnación concreta: un UUID generado por el proceso autoritativo
+y persistido en `player:getModData()`. Cuenta, Steam ID y `sqlId` se conservan
+solo para auditoría y migración; B42 puede reutilizar la cuenta y la fila/ranura
+persistente cuando se crea otro personaje, por lo que nunca autorizan solos.
+Un addon puede compararla durante una operación, pero no debe construirla,
+separarla ni persistir una copia propia: el Core posee su esquema y sus
+migraciones. Los nombres visibles, `SurvivorDesc:getID()`, `OnlineID` y
+`getPlayerNum()` son presentación o IDs temporales, nunca claves persistentes.
+El espacio de nombres del mundo ya lo aporta el `GlobalModData` de esa partida;
+la misma cuenta o personaje en otro mundo no comparte registros de red GS.
+
 La ausencia de una excepción significa acceso permitido. Por ello los miembros
 existentes y las zonas creadas en el futuro empiezan habilitados. Owner, admins
 de red y staff del servidor tienen acceso total.

@@ -16,15 +16,17 @@ GlobalStorageSiK.ZoneScanner = {}
 ---@return table[] results
 ---@return boolean limitHit
 ---@return boolean anySquareLoaded true si al menos una baldosa de la zona estaba cargada
+---@return table<string, boolean> excludedEntryIds cámaras de cocción encontradas
 function GlobalStorageSiK.ZoneScanner.scanZone(zone, maxContainers)
 	local state = GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
 	if not state then
-		return {}, false, false
+		return {}, false, false, {}
 	end
 	while not GlobalStorageSiK.ZoneScanner.isIncrementalDone(state) do
 		GlobalStorageSiK.ZoneScanner.stepIncremental(state, 10000, 0)
 	end
-	return state.results, state.limitHit == true, state.anySquareLoaded == true
+	return state.results, state.limitHit == true, state.anySquareLoaded == true,
+		state.excludedEntryIds
 end
 
 --- Añade contenedores de una baldosa a la lista de resultados.
@@ -59,7 +61,8 @@ function GlobalStorageSiK.ZoneScanner.scanSquare(square, zoneId, results, limit,
 	local function tryObject(obj)
 		local count = GlobalStorageSiK.Utils.getContainerCount(obj)
 		for containerIndex = 0, count - 1 do
-			local entry = GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
+			local entry = GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, containerIndex)
+				and GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex) or nil
 			if entry and not seenEntryIds[entry.id] then
 				if #results >= limit then
 					return true
@@ -129,6 +132,7 @@ function GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
 		phase = "squares",
 		results = {},
 		seenEntryIds = {},
+		excludedEntryIds = {},
 		containerTasks = {},
 		taskIndex = 1,
 		itemIndex = 0,
@@ -138,6 +142,7 @@ function GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
 			squaresVisited = 0,
 			loadedSquares = 0,
 			nodesDetected = 0,
+			cookingContainersExcluded = 0,
 			itemInstances = 0,
 			snapshotRows = 0,
 			distinctTypes = 0,
@@ -165,30 +170,39 @@ local function queueIncrementalObject(state, obj)
 	if not obj then return false end
 	local count = GlobalStorageSiK.Utils.getContainerCount(obj)
 	for containerIndex = 0, count - 1 do
-		local entry = GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
-		if entry and not state.seenEntryIds[entry.id] then
-			if #state.results >= state.limit then
-				state.limitHit = true
-				state.phase = "snapshots"
-				return true
+		local eligible, rejectionReason = GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, containerIndex)
+		if not eligible and rejectionReason == "cooking" then
+			local excludedId = GlobalStorageSiK.Utils.getContainerId(obj, containerIndex)
+			if excludedId and not state.excludedEntryIds[excludedId] then
+				state.excludedEntryIds[excludedId] = true
+				state.metrics.cookingContainersExcluded = state.metrics.cookingContainersExcluded + 1
 			end
-			state.seenEntryIds[entry.id] = true
-			entry.zoneId = state.zone.id
-			entry.membership = "auto"
-			entry.enabled = true
-			entry.displayName = obj:getName() or entry.name
-			entry.itemSnapshot = {}
-			local container = GlobalStorageSiK.Utils.getObjectContainer(obj, containerIndex)
-			if container and container.getCapacity then
-				local okCap, cap = pcall(function() return container:getCapacity() end)
-				if okCap and cap and cap > 0 then entry.storedCapacity = cap end
+		elseif eligible then
+			local entry = GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
+			if entry and not state.seenEntryIds[entry.id] then
+				if #state.results >= state.limit then
+					state.limitHit = true
+					state.phase = "snapshots"
+					return true
+				end
+				state.seenEntryIds[entry.id] = true
+				entry.zoneId = state.zone.id
+				entry.membership = "auto"
+				entry.enabled = true
+				entry.displayName = obj:getName() or entry.name
+				entry.itemSnapshot = {}
+				local container = GlobalStorageSiK.Utils.getObjectContainer(obj, containerIndex)
+				if container and container.getCapacity then
+					local okCap, cap = pcall(function() return container:getCapacity() end)
+					if okCap and cap and cap > 0 then entry.storedCapacity = cap end
+				end
+				state.results[#state.results + 1] = entry
+				state.containerTasks[#state.containerTasks + 1] = {
+					entry = entry,
+					container = container,
+				}
+				state.metrics.nodesDetected = state.metrics.nodesDetected + 1
 			end
-			state.results[#state.results + 1] = entry
-			state.containerTasks[#state.containerTasks + 1] = {
-				entry = entry,
-				container = container,
-			}
-			state.metrics.nodesDetected = state.metrics.nodesDetected + 1
 		end
 	end
 	return false

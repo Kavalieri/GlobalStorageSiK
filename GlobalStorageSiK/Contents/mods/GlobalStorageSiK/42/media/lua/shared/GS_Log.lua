@@ -46,6 +46,7 @@ local AREA_CATEGORY = {
 	Permissions = "TerminalAccess",
 	CraftUtils = "Craft",
 	RecipeTuning = "Craft",
+	Acquire = "Craft",
 	-- El estado/fallo del hook pertenece al bloque Tooltip. El render por
 	-- frame usa un area separada y queda bajo el sublog masivo de inventario,
 	-- de modo que activar solo Tooltip no llena console.txt.
@@ -55,6 +56,7 @@ local AREA_CATEGORY = {
 	Deposit = "Inventory",
 	DepositClient = "Inventory",
 	TransferQueue = "Inventory",
+	NetworkReadAction = "Inventory",
 	CraftSession = "Craft",
 	RedistributeJob = "Inventory",
 	ItemTaxonomy = "Inventory",

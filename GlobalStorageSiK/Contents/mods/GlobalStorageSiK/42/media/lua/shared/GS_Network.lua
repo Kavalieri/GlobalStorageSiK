@@ -225,6 +225,14 @@ function GlobalStorageSiK.Network.createNetwork(player)
 		createdMs = (getTimestampMs and getTimestampMs()) or 0,
 	}
 	GlobalStorageSiK.Permissions.ensure(registry, id, owner)
+	if player and not GlobalStorageSiK.Permissions.initializeOwner(registry.networks[id], player) then
+		registry.networks[id] = nil
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.error("Permissions", "createNetwork rejected",
+				"authoritative account/character identity unavailable")
+		end
+		return nil
+	end
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end
@@ -431,14 +439,16 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 		for _, node in ipairs(nodes) do
 			local obj = GlobalStorageSiK.Network.findWorldObject(node)
 			local container = GlobalStorageSiK.Utils.getObjectContainer(obj, node.containerIndex)
-			if container then
+			local eligible = container
+				and GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, node.containerIndex)
+			if eligible then
 				table.insert(live, {
 					entry = node,
 					object = obj,
 					container = container,
 					zonePriority = liveZonePriority(registry, node),
 				})
-			else
+			elseif not container then
 				logLiveContainerMiss(nid, node, obj, container)
 			end
 		end
@@ -464,14 +474,16 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 			for _, node in ipairs(cached.nodes) do
 				local obj = GlobalStorageSiK.Network.findWorldObject(node)
 				local container = GlobalStorageSiK.Utils.getObjectContainer(obj, node.containerIndex)
-				if container then
+				local eligible = container
+					and GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, node.containerIndex)
+				if eligible then
 					table.insert(live, {
 						entry = node,
 						object = obj,
 						container = container,
 						zonePriority = liveZonePriority(registry, node),
 					})
-				else
+				elseif not container then
 					logLiveContainerMiss(nid, node, obj, container)
 				end
 			end
@@ -489,14 +501,16 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	for _, entry in ipairs(network.containers) do
 		local obj = GlobalStorageSiK.Network.findWorldObject(entry)
 		local container = GlobalStorageSiK.Utils.getObjectContainer(obj, entry.containerIndex)
-		if container then
+		local eligible = container
+			and GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, entry.containerIndex)
+		if eligible then
 			table.insert(live, {
 				entry = entry,
 				object = obj,
 				container = container,
 				zonePriority = liveZonePriority(registry, entry),
 			})
-		else
+		elseif not container then
 			logLiveContainerMiss(nid, entry, obj, container)
 		end
 	end

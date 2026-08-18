@@ -1330,10 +1330,11 @@ function GS_TerminalUI:onRequestNodeContents(nodeId)
 	GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { nodeId = nodeId })
 end
 
-function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer, characterId)
+function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer, characterId, username)
 	GlobalStorageSiK.NetClient.sendCommand("transferOwnership", {
 		newOwner = newOwner,
 		characterId = characterId or "",
+		username = username or "",
 		keepFormerOwner = keepFormer == true,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})

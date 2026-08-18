@@ -46,6 +46,18 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 
 Las líneas del Core usan componente y evento estables. Operaciones largas deben emitir estados significativos, no una línea por tick. Si un estado no cambió, no se repite.
 
+Los reescaneos incrementales de zonas emiten una sola línea `ZoneScanJob complete`. `cookingExcluded` cuenta cámaras de cocción rechazadas durante el barrido y `removedIneligible` las entradas GS antiguas eliminadas del registro; esta limpieza afecta solo a metadata, nunca al contenido físico del aparato:
+
+```text
+[12.3s][SRV] [GlobalStorageSiK:INFO:ZoneScanJob] complete network=... durationMs=42 zones=2 nodes=18 instances=530 distinctTypes=47 snapshotRows=82 squares=225 loadedSquares=225 added=1 updated=17 offline=0 cookingExcluded=3 removedIneligible=1 limitHit=false
+```
+
+La migración de identidades MP antiguas pertenece a `Acceso a terminal / Terminal access` y emite una sola línea por vínculo reparado. El campo `account` procede del `IsoPlayer` autoritativo; los IDs se tratan como opacos y no deben editarse a mano:
+
+```text
+[12.3s][SRV] [GlobalStorageSiK:INFO:Permissions] identityMigration | owner network=... account=KavaAccount old=character:7 new=character:gsc_...
+```
+
 Si otro mod sustituye `ISToolTipInv.render` después de GS, el vigilante restaura el wrapper exterior y, con `DebugCatTooltip`, deja una única línea resumida:
 
 ```text
@@ -91,6 +103,7 @@ El resumen servidor `depositItems` y su `actionResult.transfer` incluyen `origin
 - `operation_result_deposit`: resultado creado enviado automáticamente a la red.
 - `operation_complete_return`: herramienta o sobrante devuelto tras finalizar.
 - `operation_abort_return`: préstamo devuelto al abortar o cancelar.
+- `network_read_return`: libro, revista u otra literatura devuelta automáticamente a la red original al completar o cancelar la lectura.
 - `return stuckActive`: advertencia única cuando una operación lleva cinco minutos sin señal de fin. No mueve objetos; evita que un cronómetro devuelva herramientas durante un lote largo.
 
 Los orígenes de operación llevan también `operationId`. `origin=player`/`player_queue` identifica movimientos pedidos por el jugador; `operation_complete_return` y `operation_abort_return` identifican devoluciones automáticas tras una señal explícita del addon.
@@ -107,6 +120,18 @@ Las colas cliente usan `queueId` (depósito) o `withdrawId` (retirada). Una resp
 - `[CLI] [GlobalStorageSiK:DEBUG:RedistributeJob] completed breakdown | tiers=1:12,4:3 topTypes=Base.Nails:8,...`: resumen acotado al terminar Auto Sort. `tiers` indica el nivel de destino (1=filtro/hoja exacta, 2=subcategoría, 3=categoría, 4=afinidad, 5=contenedor libre) y `topTypes` muestra como máximo ocho tipos; no emite una línea por objeto.
 
 Al terminar cualquiera de estos casos, el correspondiente `Events.OnTick` se retira. Para diagnosticarlos activa `Modo depuración (debug)` / `Debug mode` e `Inventario y transferencias` / `Inventory & transfers`; añade `Router` y `DETALLE: enrutado por nodo` / `DETAIL: routing by node` solo si se investiga la selección de destino.
+
+### Prueba DEV: leer literatura y devolverla a la red
+
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` e `Inventario y transferencias` / `Inventory & transfers`. En dedicado, añade `Reenviar logs del dedicado a clientes` / `Relay dedicated-server logs to clients`. No hace falta activar ningún sublog `DETALLE / DETAIL`.
+
+Prueba por separado un libro de habilidad, una revista de receta y una revista o periódico normal: abre el menú contextual de la fila de red, elige `Leer y devolver a la red` / `Read and return to network`, deja terminar una lectura y cancela otra. Debe retirarse exactamente una instancia, encolarse la acción vanilla y regresar el mismo `itemId` a la misma red. Espera `NetworkReadAction read queued`, después `return scheduled` y `return queued`; el servidor debe registrar `depositItems origin=network_read_return operationId=Read-...`. Si la devolución no puede encolarse durante 30 segundos, debe quedar una sola línea `return queue timeout`, cesar el `OnTick` y conservarse el objeto en el inventario del jugador. Guarda `console.txt` del cliente y, en dedicado, el del servidor.
+
+### Prueba DEV: requisitos y montaje del lector/PC
+
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `Recetas y crafteo` / `Recipes & crafting`. En dedicado, añade `Reenviar logs del dedicado a clientes` / `Relay dedicated-server logs to clients`. Mantén apagados todos los sublogs `DETALLE / DETAIL`.
+
+Prueba el lector con tres distribuciones: todos los requisitos en el inventario principal, todos en contenedores físicos cercanos y una mezcla entre inventario, mochila equipada y contenedor. El modal y el servidor deben coincidir; debe aparecer una única salida, consumirse cada pieza de su origen real y conservarse soldador y destornillador. Repite retirando una pieza durante la barra: debe fallar con `reason=materials`, no crear salida y no consumir las demás. El evento esperado es `[SRV] [GlobalStorageSiK:INFO:Acquire] reader result | ok=true reason=success` o el motivo resumido del fallo. Repite al menos el caso mixto con el PC (`pc result`) y un disquete en blanco cercano (`program disk result`). Guarda `console.txt` del cliente y del servidor; en SP la marca será `[SP]` y no habrá relé.
 
 ## Reglas de emisión
 

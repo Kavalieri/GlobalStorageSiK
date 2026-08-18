@@ -31,10 +31,15 @@ end
 ---@param detected table[]
 ---@param zoneAreaTiles number|nil
 ---@param zoneHadLoadedSquares boolean|nil false si la zona no tenía chunks cargados (no marcar offline)
+---@param excludedEntryIds table<string, boolean>|nil cámaras de cocción detectadas y no elegibles
 ---@return table summary
-function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected, zoneAreaTiles, zoneHadLoadedSquares)
+function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected, zoneAreaTiles,
+	zoneHadLoadedSquares, excludedEntryIds)
 	registry.nodes = registry.nodes or {}
-	local summary = { added = 0, updated = 0, offline = 0, limitHit = false, outOfRange = 0 }
+	local summary = {
+		added = 0, updated = 0, offline = 0, limitHit = false,
+		outOfRange = 0, removedIneligible = 0,
+	}
 	local myArea = zoneAreaTiles or GlobalStorageSiK.ZonePriority.zoneArea(zone)
 
 	local maxNodes = GlobalStorageSiK.Sandbox.getMaxNodes()
@@ -64,6 +69,16 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 			if include then
 				detectedById[entry.id] = entry
 			end
+		end
+	end
+
+	-- Un aparato ya registrado por una versión anterior no queda como nodo
+	-- fantasma/offline: se elimina solo su metadata GS. Su inventario físico no
+	-- se toca y un futuro addon de cocina podrá integrarlo mediante otra API.
+	for id in pairs(excludedEntryIds or {}) do
+		if registry.nodes[id] then
+			registry.nodes[id] = nil
+			summary.removedIneligible = summary.removedIneligible + 1
 		end
 	end
 
@@ -140,12 +155,13 @@ function GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
 		return nil
 	end
 	local maxPerZone = GlobalStorageSiK.Sandbox.getMaxContainersPerZone()
-	local detected, limitHit, zoneLoaded = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
+	local detected, limitHit, zoneLoaded, excludedEntryIds = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
 	if zoneLoaded then
 		zone.everScanLoaded = true
 	end
 	local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
-		registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded
+		registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded,
+		excludedEntryIds
 	)
 	-- Marca interna consumida por GS_Index al construir inmediatamente el
 	-- terminalState: solo esta zona tiene snapshots recién capturados.
@@ -165,24 +181,29 @@ end
 ---@return table
 function GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
-	local totals = { added = 0, updated = 0, offline = 0, zones = 0, limitHit = false, outOfRange = 0 }
+	local totals = {
+		added = 0, updated = 0, offline = 0, zones = 0,
+		limitHit = false, outOfRange = 0, removedIneligible = 0,
+	}
 	local maxPerZone = GlobalStorageSiK.Sandbox.getMaxContainersPerZone()
 	local zones = sortedNetworkZones(registry, networkId)
 
 	for i = 1, #zones do
 		local zone = zones[i]
 		totals.zones = totals.zones + 1
-		local detected, limitHit, zoneLoaded = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
+		local detected, limitHit, zoneLoaded, excludedEntryIds = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
 		if zoneLoaded then
 			zone.everScanLoaded = true
 		end
 		local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
-			registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded
+			registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded,
+			excludedEntryIds
 		)
 		totals.added = totals.added + summary.added
 		totals.updated = totals.updated + summary.updated
 		totals.offline = totals.offline + summary.offline
 		totals.outOfRange = totals.outOfRange + (summary.outOfRange or 0)
+		totals.removedIneligible = totals.removedIneligible + (summary.removedIneligible or 0)
 		if limitHit then
 			totals.limitHit = true
 		end

@@ -80,11 +80,15 @@ local function completeZone(job)
 	if state.anySquareLoaded then zone.everScanLoaded = true end
 	local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
 		GlobalStorageSiK.Zones.getRegistry(), zone, state.results,
-		GlobalStorageSiK.ZonePriority.zoneArea(zone), state.anySquareLoaded)
+		GlobalStorageSiK.ZonePriority.zoneArea(zone), state.anySquareLoaded,
+		state.excludedEntryIds)
 	job.totals.added = job.totals.added + (summary.added or 0)
 	job.totals.updated = job.totals.updated + (summary.updated or 0)
 	job.totals.offline = job.totals.offline + (summary.offline or 0)
 	job.totals.outOfRange = job.totals.outOfRange + (summary.outOfRange or 0)
+	job.totals.removedIneligible = job.totals.removedIneligible + (summary.removedIneligible or 0)
+	job.totals.cookingContainersExcluded = job.totals.cookingContainersExcluded
+		+ (state.metrics.cookingContainersExcluded or 0)
 	job.totals.zones = job.totals.zones + 1
 	job.totals.limitHit = job.totals.limitHit or state.limitHit == true
 	job.totals.squaresVisited = job.totals.squaresVisited + (state.metrics.squaresVisited or 0)
@@ -107,12 +111,13 @@ local function finishJob(networkId, job)
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 	GlobalStorageSiK.Log.info("ZoneScanJob", string.format(
-		"complete network=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d limitHit=%s",
+		"complete network=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d cookingExcluded=%d removedIneligible=%d limitHit=%s",
 		tostring(networkId), job.totals.durationMs or 0, job.totals.zones or 0,
 		job.totals.nodesScanned or 0, job.totals.itemInstances or 0,
 		job.totals.distinctTypes or 0, job.totals.snapshotRows or 0,
 		job.totals.squaresVisited or 0, job.totals.loadedSquares or 0,
 		job.totals.added or 0, job.totals.updated or 0, job.totals.offline or 0,
+		job.totals.cookingContainersExcluded or 0, job.totals.removedIneligible or 0,
 		tostring(job.totals.limitHit == true)))
 	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanComplete then
 		GlobalStorageSiK.Server.onNetworkScanComplete(networkId, job.totals, job.watchers)
@@ -227,6 +232,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		distinctTypeSet = {},
 		totals = {
 			added = 0, updated = 0, offline = 0, outOfRange = 0,
+			removedIneligible = 0, cookingContainersExcluded = 0,
 			zones = 0, limitHit = false, squaresVisited = 0,
 			loadedSquares = 0, nodesScanned = 0, itemInstances = 0,
 			distinctTypes = 0, snapshotRows = 0,

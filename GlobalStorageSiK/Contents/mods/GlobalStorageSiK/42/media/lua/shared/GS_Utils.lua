@@ -9,6 +9,27 @@ require "GS_Config"
 
 GlobalStorageSiK.Utils = {}
 
+-- Aparatos cuyo inventario representa una cámara de cocción/combustión, no
+-- almacenamiento. Se identifican primero por clase vanilla y, como fallback
+-- para objetos genéricos o añadidos por mods, por el tipo interno exacto del
+-- ItemContainer. Nunca usar nombre traducido ni sprite: ambos son inestables.
+local COOKING_CONTAINER_TYPES = {
+	stove = true,
+	woodstove = true,
+	oven = true,
+	microwave = true,
+	barbecue = true,
+	barbecuepropane = true,
+	fireplace = true,
+	campfire = true,
+}
+
+local COOKING_OBJECT_CLASSES = {
+	"IsoStove",
+	"IsoBarbecue",
+	"IsoFireplace",
+}
+
 --- Numero de contenedores reales de un objeto del mundo. La inmensa mayoria
 --- de muebles tiene 1, pero algunos (mueble con 2+ contenedores definidos en
 --- las propiedades del sprite, ver ISMoveableSpriteProps.lua/createContainersFromSpriteProperties
@@ -55,6 +76,30 @@ function GlobalStorageSiK.Utils.getContainerByIndex(obj, containerIndex)
 		return obj:getContainer()
 	end
 	return nil
+end
+
+--- Indica si un compartimento puede funcionar como almacenamiento de red.
+--- Las cámaras de cocción se reservan para una futura integración de cocina;
+--- neveras, congeladores y muebles normales siguen siendo válidos.
+---@param obj IsoObject
+---@param containerIndex number|nil
+---@return boolean
+---@return string|nil reason `cooking` o `missing`
+function GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, containerIndex)
+	local container = GlobalStorageSiK.Utils.getContainerByIndex(obj, containerIndex or 0)
+	if not container then return false, "missing" end
+	if instanceof then
+		for i = 1, #COOKING_OBJECT_CLASSES do
+			local ok, matches = pcall(instanceof, obj, COOKING_OBJECT_CLASSES[i])
+			if ok and matches then return false, "cooking" end
+		end
+	end
+	if container.getType then
+		local ok, containerType = pcall(function() return container:getType() end)
+		containerType = ok and tostring(containerType or ""):lower() or ""
+		if COOKING_CONTAINER_TYPES[containerType] then return false, "cooking" end
+	end
+	return true, nil
 end
 
 --- Genera un identificador estable para un contenedor de un objeto.

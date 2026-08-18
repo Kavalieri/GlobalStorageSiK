@@ -104,7 +104,8 @@ function GlobalStorageSiK.InventorySync.withBatch(fn)
 	-- esta definida y unpack puede cortar antes del 10. Eso hizo que el servidor
 	-- moviese 10 unidades pero confirmase moved=0 al cliente, deteniendo cada
 	-- retirada incremental tras el primer micro-lote. Los consumidores actuales
-	-- usan como maximo tres valores; conservamos margen sin depender de #table.
+	-- usan como maximo cuatro valores (la lectura prestada añade itemIds);
+	-- conservamos margen sin depender de #table.
 	local ok, r1, r2, r3, r4, r5, r6, r7, r8 = pcall(fn)
 	GlobalStorageSiK.InventorySync.endBatch()
 	if not ok then

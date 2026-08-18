@@ -2102,6 +2102,8 @@ local function onClientCommand(module, command, player, args)
 		-- Ventana propia "Conseguir PC" (no receta vanilla) - ver GS_PCAcquire.lua.
 		-- Nunca confía en lo que dijo el cliente: revalida manual + piezas aquí.
 		local ok, reason = GlobalStorageSiK.PCAcquire.craft(player)
+		GlobalStorageSiK.Log.info("Acquire", "pc result",
+			"ok=" .. tostring(ok) .. " reason=" .. tostring(reason or "success"))
 		local msg
 		if ok then
 			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_PCAcquireSuccess")
@@ -2123,11 +2125,15 @@ local function onClientCommand(module, command, player, args)
 		-- GS_ReaderAcquire.lua. Nunca confía en lo que dijo el cliente:
 		-- revalida manual + piezas aquí.
 		local ok, reason = GlobalStorageSiK.ReaderAcquire.craft(player)
+		GlobalStorageSiK.Log.info("Acquire", "reader result",
+			"ok=" .. tostring(ok) .. " reason=" .. tostring(reason or "success"))
 		local msg
 		if ok then
 			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ReaderAcquireSuccess")
 		elseif reason == "book" then
 			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ReaderAcquireFailBook")
+		elseif reason == "skill" then
+			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_AcquireFailSkill")
 		elseif reason == "tools" then
 			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_AcquireFailTools")
 		elseif reason == "materials" then
@@ -2143,6 +2149,9 @@ local function onClientCommand(module, command, player, args)
 		-- el cliente: revalida receta aprendida + terminal cerca + disquete
 		-- en blanco aquí.
 		local ok, reason = GlobalStorageSiK.DiskProgramming.program(player, args.programId)
+		GlobalStorageSiK.Log.info("Acquire", "program disk result",
+			"program=" .. tostring(args.programId) .. " ok=" .. tostring(ok)
+				.. " reason=" .. tostring(reason or "success"))
 		local msg
 		if ok then
 			msg = GlobalStorageSiK.I18n.remote("IGUI_GS_ProgramDiskSuccess")
@@ -2429,6 +2438,7 @@ local function onClientCommand(module, command, player, args)
 				operation_complete_return = true,
 				operation_result_deposit = true,
 				operation_timeout_return = true,
+				network_read_return = true,
 			}
 			local origin = type(args.origin) == "string" and args.origin or "player"
 			if not allowedOrigins[origin] then
@@ -2516,7 +2526,7 @@ local function onClientCommand(module, command, player, args)
 			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
 			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
 			-- antes de confirmar al cliente, que decide si queda otro.
-			local ok, reason, moved = GlobalStorageSiK.InventorySync.withBatch(function()
+			local ok, reason, moved, movedItemIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
 					player, fullType, networkId, requested, dest
 				)
@@ -2550,6 +2560,11 @@ local function onClientCommand(module, command, player, args)
 					moved = moved or 0,
 					inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 					reason = reason,
+					-- Solo la acción explícita «leer y devolver» necesita conocer
+					-- la instancia física. Las retiradas normales conservan el
+					-- payload mínimo de conteos para no aumentar tráfico masivo.
+					itemIds = args.returnItemIds == true and requested == 1
+						and movedItemIds or nil,
 				},
 			})
 		end, withdrawMeta)
@@ -3025,22 +3040,34 @@ local function onClientCommand(module, command, player, args)
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
-		local newOwner = args.newOwner and string.gsub(args.newOwner, "^%s*(.-)%s*$", "%1") or ""
-		if newOwner == "" then
+		local rawNewOwner = type(args.newOwner) == "string" and args.newOwner or ""
+		local targetUsername = type(args.username) == "string" and args.username or ""
+		local targetCharacterId = type(args.characterId) == "string" and args.characterId or ""
+		local newOwner = string.gsub(rawNewOwner, "^%s*(.-)%s*$", "%1")
+		targetUsername = string.gsub(targetUsername, "^%s*(.-)%s*$", "%1")
+		if newOwner == "" or #newOwner > 256 or #targetUsername > 256
+			or #targetCharacterId > 160 then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_EmptyUsername") })
 			return
 		end
-		local targetPlayer = GlobalStorageSiK.Permissions.findOnlineCharacter(args.characterId or "")
+		local targetPlayer = GlobalStorageSiK.Permissions.findOnlineCharacter(targetCharacterId)
+		if not targetPlayer and targetUsername ~= "" and getPlayerFromUsername then
+			local resolvedOk, resolved = pcall(getPlayerFromUsername, targetUsername)
+			if resolvedOk and resolved then
+				local resolvedId = GlobalStorageSiK.Permissions.getCharacterId(resolved)
+				if targetCharacterId == "" or targetCharacterId == resolvedId then
+					targetPlayer = resolved
+				end
+			end
+		end
 		local ok, message
 		if targetPlayer then
 			ok, message = GlobalStorageSiK.Permissions.transferOwnerToCharacter(
 				networkId, player, targetPlayer, args.keepFormerOwner == true)
-		elseif args.characterId and args.characterId ~= "" then
-			ok = false
-			message = GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 		else
 			ok, message = GlobalStorageSiK.Permissions.transferOwner(
-				networkId, player, newOwner, args.keepFormerOwner == true)
+				networkId, player, newOwner, args.keepFormerOwner == true,
+				targetUsername, targetCharacterId)
 		end
 		if ok then
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)

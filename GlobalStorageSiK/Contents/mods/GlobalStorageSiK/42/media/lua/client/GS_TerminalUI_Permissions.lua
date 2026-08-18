@@ -85,18 +85,15 @@ local function trimDisplay(value)
 	return (tostring(value or ""):gsub("^%s*(.-)%s*$", "%1"))
 end
 
---- Etiqueta humana separada de la identidad operativa. displayName sigue el
---- roster vanilla y conserva Unicode; username ayuda a distinguir homónimos.
+--- Etiqueta humana separada de la identidad operativa. El nombre exacto del
+--- personaje es lo que ve el jugador; cuenta e ID nunca sustituyen esa etiqueta.
+--- Los homónimos del selector se desambiguan después con un sufijo de ID.
 local function memberDisplayLabel(entry)
 	local displayName = trimDisplay(entry and entry.displayName)
-	local username = trimDisplay(entry and entry.username)
 	local characterName = trimDisplay(entry and entry.name)
-	local primary = displayName ~= "" and displayName
-		or (username ~= "" and username or characterName)
-	if username ~= "" and memberIdentityKey(username) ~= memberIdentityKey(primary) then
-		return primary .. " [" .. username .. "]"
-	end
-	return primary
+	local username = trimDisplay(entry and entry.username)
+	return characterName ~= "" and characterName
+		or (displayName ~= "" and displayName or username)
 end
 
 --- Construye índices desde memberEntries, que es la lista autoritativa ya
@@ -296,6 +293,9 @@ end
 ---@param perms table|nil
 ---@return boolean
 local function viewerIsOwner(perms, state)
+	-- En MP manda el rol que el servidor calculó con el UUID autoritativo. El
+	-- modData local puede llegar un frame más tarde y no debe ocultar controles.
+	if perms and perms.playerRole == "owner" then return true end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
 	if not player or not GlobalStorageSiK.Permissions or not GlobalStorageSiK.Permissions.isOwnerPlayer then
 		return false
@@ -319,6 +319,7 @@ local function buildMemberRows(perms)
 				name = entry.name,
 				displayName = memberDisplayLabel(entry),
 				characterId = entry.id or "",
+				username = entry.username or "",
 				legacy = entry.legacy == true,
 				deniedZoneIds = entry.deniedZoneIds or {},
 			}

@@ -7,6 +7,8 @@
 
 require "GS_Sandbox"
 require "GS_Log"
+require "GS_DepositSources"
+require "GS_InventorySync"
 
 GlobalStorageSiK.CraftUtils = {}
 
@@ -721,45 +723,32 @@ end
 --- disquete: eso no es fabricar nada).
 GlobalStorageSiK.CraftUtils.SOLDERING_IRON_TYPE = "GlobalStorageSiK.GS_SolderingIron"
 
---- Inventario del jugador + contenedores cercanos, usando EXACTAMENTE el
---- mismo mecanismo que el panel de crafteo vanilla B42
---- (ISHandCraftPanel:updateContainers llama a
---- ISInventoryPaneContextMenu.getContainers(player) - ver
---- media/lua/client/Entity/ISUI/CraftRecipe/ISHandCraftPanel.lua y
---- media/lua/client/ISUI/ISInventoryPaneContextMenu.lua en el juego base).
---- Esa función lee las "backpacks" ya resueltas por los paneles de
---- inventario/loot del propio jugador (getPlayerInventory/getPlayerLoot),
---- que el juego mantiene actualizados en segundo plano con lo que hay cerca
---- - no reinventamos radio ni lógica de detección propia, evita el
---- desajuste que teníamos antes (nuestro escaneo de baldosas propio no
---- coincidía con lo que el crafteo vanilla sí detectaba).
---- ISInventoryPaneContextMenu es una clase de CLIENTE (no existe en un
---- servidor dedicado sin UI, ni en un cliente MP puro sin panel de
---- inventario propio a mano) - si no está disponible, se cae a solo el
---- inventario del jugador.
+--- Fuente única de ingredientes para nuestros modales propios: inventario
+--- principal, bolsas equipadas y contenedores físicos accesibles cercanos.
+--- Se reutiliza GS_DepositSources porque funciona igual en cliente, SP y
+--- dedicado, y además excluye los contenedores que ya son nodos de una red.
+--- No usar ISInventoryPaneContextMenu.getContainers aquí: es una API de UI
+--- cliente, por lo que el modal podía pintar un material en verde y el
+--- servidor autoritativo no encontrarlo después.
 ---@param player IsoPlayer|nil
 ---@return ItemContainer[]
-local function nearbyContainers(player)
+function GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	local list = {}
-	local inv = player and player.getInventory and player:getInventory()
-	if inv then
-		list[#list + 1] = inv
-	end
-	if not player or not ISInventoryPaneContextMenu or not ISInventoryPaneContextMenu.getContainers then
+	local seen = {}
+	if not player or not GlobalStorageSiK.DepositSources then
 		return list
 	end
-	local ok, containers = pcall(function()
-		return ISInventoryPaneContextMenu.getContainers(player)
-	end)
-	if not ok or not containers then
-		return list
-	end
-	for i = 0, containers:size() - 1 do
-		local container = containers:get(i)
-		if container and container ~= inv then
-			list[#list + 1] = container
+	local function append(containers)
+		for i = 1, #(containers or {}) do
+			local container = containers[i]
+			if container and not seen[container] then
+				seen[container] = true
+				list[#list + 1] = container
+			end
 		end
 	end
+	append(GlobalStorageSiK.DepositSources.collectPlayerContainers(player))
+	append(GlobalStorageSiK.DepositSources.collectNearbyContainers(player))
 	return list
 end
 
@@ -768,12 +757,13 @@ end
 --- bolsas/cofres). No lo consume.
 ---@param player IsoPlayer|nil
 ---@param fullType string
+---@param containers ItemContainer[]|nil Snapshot opcional ya recogido
 ---@return boolean
-function GlobalStorageSiK.CraftUtils.hasItemType(player, fullType)
+function GlobalStorageSiK.CraftUtils.hasItemType(player, fullType, containers)
 	if not player or not fullType then
 		return false
 	end
-	local containers = nearbyContainers(player)
+	containers = containers or GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	for i = 1, #containers do
 		local ok, count = pcall(function() return containers[i]:getItemCountRecurse(fullType) end)
 		if ok and count and count > 0 then
@@ -785,19 +775,24 @@ end
 
 --- Busca un ítem por fullType exacto en el inventario del jugador o en un
 --- contenedor cercano (mismo alcance que hasItemType) y lo devuelve SIN
---- quitarlo de donde esté. Usar item:getContainer():Remove(item) para
---- consumirlo del contenedor real en el que se encontró, nunca asumir que
---- estaba en player:getInventory().
+--- quitarlo de donde esté. Usa la variante recursiva para que un requisito
+--- dentro de una bolsa no aparezca en verde y falle después al consumirlo.
 ---@param player IsoPlayer|nil
 ---@param fullType string
+---@param containers ItemContainer[]|nil Snapshot opcional ya recogido
 ---@return InventoryItem|nil
-function GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, fullType)
+function GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, fullType, containers)
 	if not player or not fullType then
 		return nil
 	end
-	local containers = nearbyContainers(player)
+	containers = containers or GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	for i = 1, #containers do
-		local ok, item = pcall(function() return containers[i]:FindAndReturn(fullType) end)
+		local ok, item = pcall(function()
+			if containers[i].getFirstTypeRecurse then
+				return containers[i]:getFirstTypeRecurse(fullType)
+			end
+			return containers[i]:FindAndReturn(fullType)
+		end)
 		if ok and item then
 			return item
 		end
@@ -806,9 +801,11 @@ function GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, fullType)
 end
 
 ---@param player IsoPlayer|nil
+---@param containers ItemContainer[]|nil
 ---@return boolean
-function GlobalStorageSiK.CraftUtils.hasSolderingIron(player)
-	return GlobalStorageSiK.CraftUtils.hasItemType(player, GlobalStorageSiK.CraftUtils.SOLDERING_IRON_TYPE)
+function GlobalStorageSiK.CraftUtils.hasSolderingIron(player, containers)
+	return GlobalStorageSiK.CraftUtils.hasItemType(player,
+		GlobalStorageSiK.CraftUtils.SOLDERING_IRON_TYPE, containers)
 end
 
 -- Set de fullTypes (minuscula) con el tag "screwdriver" (base:screwdriver),
@@ -840,10 +837,11 @@ end
 --- No lo consume. Compara por fullType sobre un set precalculado (nunca
 --- hasTag() en items vivos).
 ---@param player IsoPlayer|nil
+---@param containers ItemContainer[]|nil
 ---@return boolean
-function GlobalStorageSiK.CraftUtils.hasScrewdriver(player)
+function GlobalStorageSiK.CraftUtils.hasScrewdriver(player, containers)
 	local set = buildScrewdriverSet()
-	local containers = nearbyContainers(player)
+	containers = containers or GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	for c = 1, #containers do
 		local inv = containers[c]
 		if inv.getAllEvalRecurse then
@@ -862,6 +860,69 @@ function GlobalStorageSiK.CraftUtils.hasScrewdriver(player)
 		end
 	end
 	return false
+end
+
+--- Sustituye una lista de instancias físicas por una salida de forma
+--- autoritativa y sincronizada. La salida se crea antes de consumir nada; si
+--- una fuente deja de contener su ítem o la entrega falla, restaura todo en
+--- los contenedores originales. Reader, PC y programación de disquetes usan
+--- así el mismo contrato y no pueden perder materiales por un fallo parcial.
+---@param player IsoPlayer
+---@param items InventoryItem[]
+---@param outputType string
+---@return boolean ok
+---@return InventoryItem|nil output
+---@return string|nil reason "materials"|"output"|"invalid"
+function GlobalStorageSiK.CraftUtils.replaceItemsWithOutput(player, items, outputType)
+	if not player or type(items) ~= "table" or not outputType or not instanceItem then
+		return false, nil, "invalid"
+	end
+	local output = instanceItem(outputType)
+	if not output then
+		return false, nil, "output"
+	end
+	local sources = {}
+	local seenItems = {}
+	for i = 1, #items do
+		local item = items[i]
+		local source = item and item.getContainer and item:getContainer() or nil
+		if not item or not source or seenItems[item]
+			or (source.contains and not source:contains(item)) then
+			return false, nil, "materials"
+		end
+		seenItems[item] = true
+		sources[i] = source
+	end
+
+	local sync = GlobalStorageSiK.InventorySync
+	if not sync or not sync.beginBatch or not sync.endBatch or not sync.removeItem
+		or not sync.addToContainer or not sync.addToPlayer then
+		return false, nil, "output"
+	end
+	local removed = 0
+	sync.beginBatch()
+	for i = 1, #items do
+		local ok, didRemove = pcall(sync.removeItem, sources[i], items[i])
+		if not ok or not didRemove then
+			break
+		end
+		removed = i
+	end
+	local delivered = false
+	if removed == #items then
+		local ok, added = pcall(sync.addToPlayer, player, output)
+		delivered = ok and added == true
+	end
+	if not delivered then
+		for i = 1, removed do
+			pcall(sync.addToContainer, sources[i], items[i], player)
+		end
+	end
+	sync.endBatch()
+	if not delivered then
+		return false, nil, removed == #items and "output" or "materials"
+	end
+	return true, output, nil
 end
 
 --- Textura de icono de ítem por fullType.

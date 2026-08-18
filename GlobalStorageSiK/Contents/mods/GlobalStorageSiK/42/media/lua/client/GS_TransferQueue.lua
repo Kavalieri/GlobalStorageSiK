@@ -200,7 +200,8 @@ local function dispatchJob(job)
 	if job.type == "depositIds" then
 		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			itemIds = job.itemIds or {},
-			origin = "player_queue",
+			origin = job.origin or "player_queue",
+			operationId = job.operationId,
 			queueId = job.queueId,
 			networkId = job.networkId,
 		})

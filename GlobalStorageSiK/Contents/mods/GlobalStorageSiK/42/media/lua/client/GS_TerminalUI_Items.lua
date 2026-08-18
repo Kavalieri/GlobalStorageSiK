@@ -22,6 +22,7 @@ require "GS_ContainerTargets"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Chrome"
 require "GS_ItemNetworkTooltip"
+require "GS_NetworkReadAction"
 
 GlobalStorageSiK.TerminalItems = {}
 
@@ -576,6 +577,7 @@ local function openItemContextMenu(listPanel, terminal, data)
 	local ok, err = pcall(function()
 		local cm = ISContextMenu.get(playerNum, getMouseX(), getMouseY())
 		addNetworkItemExamine(cm, player, data.fullType)
+		GlobalStorageSiK.NetworkReadAction.addToContext(cm, player, data, terminal)
 		cm:addOption(T("IGUI_GS_ViewDetails"), player, function(target)
 			local p = target or player
 			if not p or not p.setHaloNote then return end

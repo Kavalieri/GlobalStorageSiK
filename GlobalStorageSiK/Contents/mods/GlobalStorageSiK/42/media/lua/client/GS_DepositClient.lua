@@ -105,8 +105,9 @@ end
 --- Solicita depósito de ítems por ID (validación en servidor).
 ---@param itemIds number[]
 ---@param playerArg IsoPlayer|number|nil
+---@param opts table|nil { networkId=string, origin=string, operationId=string }
 ---@return boolean
-function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg)
+function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opts)
 	if not itemIds or #itemIds == 0 then
 		return false
 	end
@@ -114,17 +115,25 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg)
 	-- reenvíos repetidos se retiró: duplicaba muchas líneas y no pertenece al
 	-- flujo normal; el job posterior queda correlacionado por TransferQueue.
 	GlobalStorageSiK.Debug.log("Deposit", "sendDepositItems", "count=" .. tostring(#itemIds))
+	opts = opts or {}
 	local player = GlobalStorageSiK.PlayerUtils and GlobalStorageSiK.PlayerUtils.resolve(playerArg)
 		or GlobalStorageSiK.NetClient.getPlayer()
 	local queueId, sendNow, networkId = nil, true, nil
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.arm then
-		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({ type = "depositIds", itemIds = itemIds })
+		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({
+			type = "depositIds",
+			itemIds = itemIds,
+			networkId = opts.networkId,
+			origin = opts.origin,
+			operationId = opts.operationId,
+		})
 		if not queueId then return false end
 	end
 	if sendNow == false then return true end
 	local sent = GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 		itemIds = itemIds,
-		origin = "player",
+		origin = opts.origin or "player",
+		operationId = opts.operationId,
 		queueId = queueId,
 		networkId = networkId,
 	})

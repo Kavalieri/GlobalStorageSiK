@@ -862,6 +862,14 @@ function GlobalStorageSiK.TerminalRegistry.register(networkId, x, y, z, player, 
 		}
 		if GlobalStorageSiK.Permissions and player then
 			GlobalStorageSiK.Permissions.ensure(registry, networkId, GlobalStorageSiK.Permissions.getCharacterName(player))
+			if not GlobalStorageSiK.Permissions.initializeOwner(registry.networks[networkId], player) then
+				registry.networks[networkId] = nil
+				if GlobalStorageSiK.Log then
+					GlobalStorageSiK.Log.error("Permissions", "reactivateNetwork rejected",
+						"authoritative account/character identity unavailable")
+				end
+				return nil, "identity_unavailable"
+			end
 		end
 		return GlobalStorageSiK.TerminalRegistry.appendTerminal(networkId, x, y, z, { setController = true }), nil
 	end
