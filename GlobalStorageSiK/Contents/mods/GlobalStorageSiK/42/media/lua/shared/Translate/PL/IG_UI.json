@@ -89,7 +89,7 @@
 	"IGUI_GS_NoNodesYet": "Nie wykryto żadnych pojemników w strefach.",
 	"IGUI_GS_ShowTerminalCoverage": "Pokaż zasięg",
 	"IGUI_GS_HideTerminalCoverage": "Ukryj zasięg",
-	"IGUI_GS_NodesPriorityHelp": "Kolejność celu:\n1) Filtr niestandardowy lub dokładna kategoria poziomu 3.\n2) Podkategoria poziomu 2.\n3) Kategoria główna poziomu 1.\n4) Powiązanie: pojemnik bez ograniczeń zawierający już ten sam przedmiot.\n5) Dowolny pojemnik bez ograniczeń.\nW tym samym poziomie: priorytet strefy, potem priorytet pojemnika, a na końcu stabilna kolejność wewnętrzna.\nJeśli żaden prawidłowy cel nie ma miejsca, przedmiot pozostaje w ekwipunku.",
+	"IGUI_GS_NodesPriorityHelp": "Kolejność celu:\n1) Filtr niestandardowy lub dokładna kategoria poziomu 3.\n2) Podkategoria poziomu 2.\n3) Kategoria główna poziomu 1.\n4) Dokładne powiązanie: pojemnik bez ograniczeń zawierający już ten sam przedmiot.\n5) Powiązanie taksonomiczne: pojemnik bez ograniczeń z tą samą kanoniczną rodziną przedmiotów.\n6) Dowolny pojemnik bez ograniczeń.\nW tym samym poziomie: priorytet pojemnika, potem priorytet strefy, a na końcu stabilna kolejność wewnętrzna.\nJeśli żaden prawidłowy cel nie ma miejsca, przedmiot pozostaje w ekwipunku.",
 	"IGUI_GS_ZonePriorityLabel": "Priorytet strefy:",
 	"IGUI_GS_ZonePriorityHint": "1 = pierwsza strefa, 100 = ostatnia. Używany dopiero po poziomie dopasowania lub powiązania.",
 	"IGUI_GS_ZonePriorityValue": "Strefa {1}",

@@ -100,7 +100,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NoNodesYet = "No containers detected in zones.",
 	IGUI_GS_ShowTerminalCoverage = "Show coverage",
 	IGUI_GS_HideTerminalCoverage = "Hide coverage",
-	IGUI_GS_NodesPriorityHelp = "Destination order:\n1) Exact custom filter or level-3 category.\n2) Level-2 subcategory.\n3) Level-1 main category.\n4) Affinity: unrestricted container already holding the same item.\n5) Any unrestricted container.\nWithin the same tier: zone priority, then container priority, then a stable internal order.\nIf no valid destination has room, the item stays in your inventory.",
+	IGUI_GS_NodesPriorityHelp = "Destination order:\n1) Exact custom filter or level-3 category.\n2) Level-2 subcategory.\n3) Level-1 main category.\n4) Exact affinity: unrestricted container already holding the same item.\n5) Taxonomy affinity: unrestricted container holding the same canonical item family.\n6) Any unrestricted container.\nWithin the same tier: container priority, then zone priority, then a stable internal order.\nIf no valid destination has room, the item stays in your inventory.",
 	IGUI_GS_ZonePriorityLabel = "Zone priority:",
 	IGUI_GS_ZonePriorityHint = "1 = first zone, 100 = last. Used only after match or affinity tier.",
 	IGUI_GS_ZonePriorityValue = "Zone {1}",

@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Afficher la progression au-dessus du joueur",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Affiche la progression et le résumé final au-dessus du joueur pendant les dépôts, retraits et tris automatiques. Indépendant du mode debug. Les erreurs restent visibles même si cette option est désactivée.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Refuser le dépôt si aucun conteneur compatible",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Si un objet n'a pas de catégorie/filtre correspondant et qu'aucun autre conteneur ne contient déjà le même objet, il reste dans l'inventaire du joueur au lieu d'être déposé dans la première boîte «Tout» disponible. Désactivé par défaut (trouve toujours un conteneur, comme avant).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Si un objet ne correspond ni à une catégorie/un filtre, ni à l'affinité d'objet exacte, ni à l'affinité taxonomique canonique, il reste dans l'inventaire au lieu d'être déposé dans le premier conteneur «Tout» disponible. Désactivé par défaut (les conteneurs génériques restent disponibles comme avant).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Respecter les objets favoris",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Les objets marqués comme favoris dans l'inventaire sont ignorés par 'Tout stocker'. Recommandé ACTIVÉ pour protéger les objets importants d'un dépôt accidentel.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respecter les objets équipés",

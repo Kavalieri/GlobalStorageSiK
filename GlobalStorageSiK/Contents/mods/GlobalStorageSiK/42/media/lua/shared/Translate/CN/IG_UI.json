@@ -89,7 +89,7 @@
 	"IGUI_GS_NoNodesYet": "区域内未检测到任何容器。",
 	"IGUI_GS_ShowTerminalCoverage": "显示覆盖范围",
 	"IGUI_GS_HideTerminalCoverage": "隐藏覆盖范围",
-	"IGUI_GS_NodesPriorityHelp": "目标选择顺序：\n1) 自定义过滤器或精确的三级类别。\n2) 二级子类别。\n3) 一级主类别。\n4) 亲和性：已包含相同物品的无限制容器。\n5) 任意无限制容器。\n同一层级内：先按区域优先级，再按容器优先级，最后按稳定的内部顺序。\n如果所有有效目标都没有空间，物品会留在物品栏中。",
+	"IGUI_GS_NodesPriorityHelp": "目标选择顺序：\n1) 自定义过滤器或精确的三级类别。\n2) 二级子类别。\n3) 一级主类别。\n4) 精确亲和性：已包含相同物品的无限制容器。\n5) 分类亲和性：包含同一规范物品系列的无限制容器。\n6) 任意无限制容器。\n同一层级内：先按容器优先级，再按区域优先级，最后按稳定的内部顺序。\n如果所有有效目标都没有空间，物品会留在物品栏中。",
 	"IGUI_GS_ZonePriorityLabel": "区域优先级：",
 	"IGUI_GS_ZonePriorityHint": "1 = 最先，100 = 最后。仅在匹配或亲和性层级相同后使用。",
 	"IGUI_GS_ZonePriorityValue": "区域 {1}",

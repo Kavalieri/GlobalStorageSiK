@@ -2446,6 +2446,13 @@ local function onClientCommand(module, command, player, args)
 			end
 			local operationId = type(args.operationId) == "string"
 				and string.sub(args.operationId, 1, 96) or nil
+			-- Solo «leer y devolver» puede sugerir el nodo fisico de origen. No es
+			-- autoridad cliente: Router vuelve a comprobar que pertenece a esta red,
+			-- que el jugador accede, que sigue aceptando el item y que tiene espacio.
+			local preferredNodeId = nil
+			if origin == "network_read_return" and type(args.preferredNodeId) == "string" then
+				preferredNodeId = string.sub(args.preferredNodeId, 1, 160)
+			end
 			local queueId = type(args.queueId) == "string"
 				and string.sub(args.queueId, 1, 96) or nil
 			local requested = 0
@@ -2456,13 +2463,16 @@ local function onClientCommand(module, command, player, args)
 			elseif type(args.itemIds) == "table" then
 				requested = #args.itemIds
 			end
+			if requested ~= 1 then preferredNodeId = nil end
 			local summary = GlobalStorageSiK.InventorySync.withBatch(function()
 				if args.mode == "container" and args.referenceItemId then
 					return GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, args.referenceItemId)
 				elseif args.mode == "partial" and args.referenceItemId and args.count then
 					return GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, args.referenceItemId, args.count)
 				end
-				return GlobalStorageSiK.Deposit.depositByIds(player, networkId, args.itemIds or {})
+				return GlobalStorageSiK.Deposit.depositByIds(player, networkId, args.itemIds or {}, {
+					preferredNodeId = preferredNodeId,
+				})
 			end)
 
 			local msg = GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
@@ -2471,6 +2481,7 @@ local function onClientCommand(module, command, player, args)
 			logFn("Deposit", "depositItems origin=" .. tostring(origin)
 				.. " operationId=" .. tostring(operationId)
 				.. " queueId=" .. tostring(queueId)
+				.. " preferredNodeId=" .. tostring(preferredNodeId)
 				.. " requested=" .. tostring(requested)
 				.. " moved=" .. tostring(summary.moved or 0)
 				.. " skipped=" .. tostring(summary.skipped or 0)
@@ -2526,7 +2537,7 @@ local function onClientCommand(module, command, player, args)
 			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
 			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
 			-- antes de confirmar al cliente, que decide si queda otro.
-			local ok, reason, moved, movedItemIds = GlobalStorageSiK.InventorySync.withBatch(function()
+			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
 					player, fullType, networkId, requested, dest
 				)
@@ -2565,6 +2576,8 @@ local function onClientCommand(module, command, player, args)
 					-- payload mínimo de conteos para no aumentar tráfico masivo.
 					itemIds = args.returnItemIds == true and requested == 1
 						and movedItemIds or nil,
+					sourceNodeId = args.returnItemIds == true and requested == 1
+						and sourceNodeIds and sourceNodeIds[1] or nil,
 				},
 			})
 		end, withdrawMeta)

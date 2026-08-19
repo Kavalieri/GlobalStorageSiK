@@ -2,8 +2,8 @@
 	GlobalStorageSiK - Auto-ordenar (antes "Redistribución por categoría")
 	Autor: SiK
 	Fecha: 2025-06-25
-	Descripción: Mueve ítems mal ubicados al contenedor adecuado por categoría,
-	o por afinidad "mismo ítem" si no hay categoría configurada; fallback a «cualquiera».
+	Descripción: Mueve ítems mal ubicados por categoría, afinidad exacta o
+	afinidad taxonómica canónica; fallback controlado a «cualquiera».
 ]]
 
 require "GS_Network"
@@ -55,7 +55,7 @@ end
 --- Compara dos nodos candidatos para saber cual es mejor destino (true si a
 --- es mejor que b, para ordenar de mejor a peor).
 --- La especificidad/tier ya se compara antes de llamar a esta funcion.
---- Dentro del mismo tier: 1) zona, 2) contenedor, 3) ID estable. Esto hace que
+--- Dentro del mismo tier: 1) contenedor, 2) zona, 3) ID estable. Esto hace que
 --- la prioridad solo ordene candidatos equivalentes y nunca adelante una
 --- categoria generica frente a una coincidencia o afinidad mejores.
 ---@param a table live entry candidato
@@ -64,12 +64,12 @@ end
 ---@return boolean
 local function candidateBetter(a, b, zonePriorityOf)
 	local ea, eb = a.entry or {}, b.entry or {}
-	local za = zonePriorityOf[ea.zoneId] or tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
-	local zb = zonePriorityOf[eb.zoneId] or tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
-	if za ~= zb then return za < zb end
 	local pa = tonumber(ea.priority) or 50
 	local pb = tonumber(eb.priority) or 50
 	if pa ~= pb then return pa < pb end
+	local za = zonePriorityOf[ea.zoneId] or tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
+	local zb = zonePriorityOf[eb.zoneId] or tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
+	if za ~= zb then return za < zb end
 	return tostring(ea.id or "") < tostring(eb.id or "")
 end
 
@@ -99,7 +99,8 @@ end
 --- especificidad de categorias que GS_Router.pickDepositTarget
 --- (matchSpecificity: 1=hoja exacta, 2=Nivel 2, 3=Nivel 1, 4=sin
 --- restriccion), expandiendo el ultimo caso igual que Router: 4=sin
---- restriccion con el mismo fullType, 5=sin restriccion cualquiera.
+--- restriccion con el mismo fullType, 5=misma ruta taxonomica y 6=sin
+--- restriccion cualquiera.
 --- antes Auto-ordenar solo distinguia esas dos bolsas y trataba Nivel 1/2/3
 --- como un mismo grupo "especifico" sin desempate entre ellos, dando
 --- resultados distintos a un deposito manual del MISMO item con la MISMA
@@ -123,6 +124,12 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 
 	local bestByTier = {}
 	local fullType = item.getFullType and item:getFullType() or nil
+	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch
+		and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
+	local affinityIndex = {
+		exactByNode = session.typeCountsByNode,
+		taxonomyByNode = session.affinityCountsByNode,
+	}
 	for i = 1, #liveNodes do
 		local live = liveNodes[i]
 		local matchTier = cachedMatchTier(session, i, item, fullType)
@@ -132,10 +139,10 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 			if hasSpace then
 				local destinationTier = matchTier
 				if matchTier == 4 then
-					local counts = session.typeCountsByNode[i] or {}
-					destinationTier = fullType and (counts[fullType] or 0) > 0 and 4 or 5
+					destinationTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(
+						item, i, affinityIndex, isSelf)
 				end
-				if destinationTier then
+				if destinationTier and (destinationTier < 6 or not strictNoMatch) then
 					local current = bestByTier[destinationTier]
 					if not current or candidateBetter(live, current.live, session.zonePriorityOf) then
 						bestByTier[destinationTier] = { live = live, index = i }
@@ -145,7 +152,7 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 		end
 	end
 
-	for tierIdx = 1, 5 do
+	for tierIdx = 1, 6 do
 		local best = bestByTier[tierIdx]
 		if best then
 			if best.live.container == fromLive.container then
@@ -171,6 +178,17 @@ local function updateTypeCount(session, nodeIndex, fullType, delta)
 		session.typeCountsByNode[nodeIndex] = counts
 	end
 	counts[fullType] = math.max(0, (counts[fullType] or 0) + delta)
+end
+
+local function updateAffinityCount(session, nodeIndex, item, delta)
+	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	if not affinityKey then return end
+	local counts = session.affinityCountsByNode[nodeIndex]
+	if not counts then
+		counts = {}
+		session.affinityCountsByNode[nodeIndex] = counts
+	end
+	counts[affinityKey] = math.max(0, (counts[affinityKey] or 0) + delta)
 end
 
 ---@param player IsoPlayer
@@ -205,6 +223,7 @@ local function beginSession(player, networkId)
 		itemIndex = 0,
 		itemRefsByNode = {},
 		typeCountsByNode = {},
+		affinityCountsByNode = {},
 		matchTiersByType = {},
 		indexed = 0,
 		processed = 0,
@@ -236,6 +255,7 @@ local function stepIndex(session, startedAt)
 				refs[#refs + 1] = item
 				local fullType = item.getFullType and item:getFullType() or nil
 				updateTypeCount(session, nodeIndex, fullType, 1)
+				updateAffinityCount(session, nodeIndex, item, 1)
 			end
 		end
 	end
@@ -281,6 +301,8 @@ local function stepMoves(session, player, summary, startedAt)
 						incrementSummaryCount(summary.movedByType, fullType or "?")
 						updateTypeCount(session, nodeIndex, fullType, -1)
 						updateTypeCount(session, targetIndex, fullType, 1)
+						updateAffinityCount(session, nodeIndex, item, -1)
+						updateAffinityCount(session, targetIndex, item, 1)
 					else
 						summary.failed = summary.failed + 1
 					end
@@ -292,6 +314,7 @@ local function stepMoves(session, player, summary, startedAt)
 				-- La referencia deja de procesarse y la caché se corrige sin perseguirla.
 				summary.skipped = summary.skipped + 1
 				updateTypeCount(session, nodeIndex, fullType, -1)
+				updateAffinityCount(session, nodeIndex, item, -1)
 			end
 		end
 	end

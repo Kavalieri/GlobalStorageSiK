@@ -263,6 +263,7 @@ function GlobalStorageSiK.NetworkReadAction.request(rowData, player, networkId, 
 					return
 				end
 				loan.itemId = ids[1]
+				loan.preferredNodeId = result and result.sourceNodeId or nil
 				loan.startDeadlineMs = nowMs() + START_WAIT_MS
 				pendingStarts[loan.loanId] = loan
 				ensureTick()
@@ -325,12 +326,14 @@ function GlobalStorageSiK.NetworkReadAction.onTick()
 						networkId = loan.networkId,
 						origin = "network_read_return",
 						operationId = loan.loanId,
+						preferredNodeId = loan.preferredNodeId,
 					})
 			end
 			if sent then
 				pendingReturns[loan.loanId] = nil
 				GlobalStorageSiK.Log.info("NetworkReadAction", "return queued",
-					"loanId=" .. tostring(loan.loanId) .. " itemId=" .. tostring(loan.itemId))
+					"loanId=" .. tostring(loan.loanId) .. " itemId=" .. tostring(loan.itemId)
+						.. " preferredNodeId=" .. tostring(loan.preferredNodeId))
 			elseif now >= (loan.returnDeadlineMs or 0) then
 				pendingReturns[loan.loanId] = nil
 				showError(player, "IGUI_GS_ReadReturnFailed")

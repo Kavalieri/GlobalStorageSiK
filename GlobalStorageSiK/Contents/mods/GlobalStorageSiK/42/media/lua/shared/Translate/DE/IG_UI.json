@@ -89,7 +89,7 @@
 	"IGUI_GS_NoNodesYet": "Keine Behälter in Zonen erkannt.",
 	"IGUI_GS_ShowTerminalCoverage": "Abdeckung anzeigen",
 	"IGUI_GS_HideTerminalCoverage": "Abdeckung ausblenden",
-	"IGUI_GS_NodesPriorityHelp": "Zielreihenfolge:\n1) Benutzerdefinierter Filter oder exakte Kategorie der Ebene 3.\n2) Unterkategorie der Ebene 2.\n3) Hauptkategorie der Ebene 1.\n4) Affinität: uneingeschränkter Behälter mit demselben Gegenstand.\n5) Beliebiger uneingeschränkter Behälter.\nInnerhalb derselben Ebene: Zonenpriorität, dann Behälterpriorität, bei Gleichstand stabile interne Reihenfolge.\nHat kein gültiges Ziel Platz, bleibt der Gegenstand im Inventar.",
+	"IGUI_GS_NodesPriorityHelp": "Zielreihenfolge:\n1) Benutzerdefinierter Filter oder exakte Kategorie der Ebene 3.\n2) Unterkategorie der Ebene 2.\n3) Hauptkategorie der Ebene 1.\n4) Exakte Affinität: uneingeschränkter Behälter mit demselben Gegenstand.\n5) Taxonomie-Affinität: uneingeschränkter Behälter mit derselben kanonischen Gegenstandsfamilie.\n6) Beliebiger uneingeschränkter Behälter.\nInnerhalb derselben Ebene: Behälterpriorität, dann Zonenpriorität, bei Gleichstand stabile interne Reihenfolge.\nHat kein gültiges Ziel Platz, bleibt der Gegenstand im Inventar.",
 	"IGUI_GS_ZonePriorityLabel": "Zonenpriorität:",
 	"IGUI_GS_ZonePriorityHint": "1 = erste Zone, 100 = letzte. Gilt erst nach Übereinstimmungs- oder Affinitätsebene.",
 	"IGUI_GS_ZonePriorityValue": "Zone {1}",

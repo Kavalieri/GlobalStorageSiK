@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Show operation progress above player",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Shows progress and final summaries above the player during deposits, withdrawals and Auto-sort. Independent from Debug mode. Errors remain visible even when this option is disabled.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Reject deposit if no matching container",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "If an item has no matching category/filter and no other container already holds the same item, keep it in the player's inventory instead of dropping it into the first available 'Any' container. OFF by default (always finds a container, as before).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "If an item has no matching category/filter, exact-item affinity, or canonical taxonomy affinity, keep it in the player's inventory instead of dropping it into the first available 'Any' container. OFF by default (generic containers remain available, as before).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Respect favourite items",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Items marked as favourite in the inventory are skipped by 'Store all'. Recommended ON to protect important items from being accidentally deposited.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respect equipped items",

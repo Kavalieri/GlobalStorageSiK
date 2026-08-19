@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Mostrar progreso de operaciones sobre el personaje",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Muestra el progreso y los resúmenes finales sobre el personaje durante depósitos, extracciones y Auto-ordenar. Es independiente del modo debug. Los errores siguen visibles aunque se desactive.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Rechazar depósito sin contenedor adecuado",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Si un ítem no tiene categoría/filtro configurado ni existe ya en otro contenedor de la red, se queda en el inventario del jugador en vez de ir al primer contenedor «Cualquiera» libre. Desactivada por defecto (siempre encuentra sitio, como hasta ahora).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Si un ítem no tiene categoría/filtro configurado, afinidad por objeto exacto ni afinidad taxonómica canónica, se queda en el inventario del jugador en vez de ir al primer contenedor «Cualquiera» libre. Desactivada por defecto (los contenedores genéricos siguen disponibles, como hasta ahora).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Respetar ítems favoritos",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Los ítems marcados como favorito en el inventario no se mueven con 'Guardar todo'. Recomendado activo para proteger objetos importantes.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Respetar ítems equipados",

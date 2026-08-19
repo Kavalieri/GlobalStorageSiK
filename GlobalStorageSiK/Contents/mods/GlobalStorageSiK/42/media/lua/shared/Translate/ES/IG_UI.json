@@ -91,7 +91,7 @@
 	"IGUI_GS_NoNodesYet": "Sin contenedores detectados en las zonas.",
 	"IGUI_GS_ShowTerminalCoverage": "Mostrar cobertura",
 	"IGUI_GS_HideTerminalCoverage": "Ocultar cobertura",
-	"IGUI_GS_NodesPriorityHelp": "Orden de destino:\n1) Filtro personalizado o categoría exacta de nivel 3.\n2) Subcategoría de nivel 2.\n3) Categoría principal de nivel 1.\n4) Afinidad: contenedor sin restricciones que ya contiene el mismo objeto.\n5) Cualquier contenedor sin restricciones.\nDentro del mismo nivel: prioridad de zona, después prioridad del contenedor y, en empate, orden interno estable.\nSi ningún destino válido tiene espacio, el objeto permanece en tu inventario.",
+	"IGUI_GS_NodesPriorityHelp": "Orden de destino:\n1) Filtro personalizado o categoría exacta de nivel 3.\n2) Subcategoría de nivel 2.\n3) Categoría principal de nivel 1.\n4) Afinidad exacta: contenedor sin restricciones que ya contiene el mismo objeto.\n5) Afinidad taxonómica: contenedor sin restricciones con la misma familia canónica de objetos.\n6) Cualquier contenedor sin restricciones.\nDentro del mismo nivel: prioridad del contenedor, después prioridad de zona y, en empate, orden interno estable.\nSi ningún destino válido tiene espacio, el objeto permanece en tu inventario.",
 	"IGUI_GS_ZonePriorityLabel": "Prioridad de la zona:",
 	"IGUI_GS_ZonePriorityHint": "1 = primera zona, 100 = última. Solo se usa tras el nivel de coincidencia o afinidad.",
 	"IGUI_GS_ZonePriorityValue": "Zona {1}",

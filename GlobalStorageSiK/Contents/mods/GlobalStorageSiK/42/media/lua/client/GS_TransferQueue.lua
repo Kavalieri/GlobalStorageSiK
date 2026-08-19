@@ -202,6 +202,7 @@ local function dispatchJob(job)
 			itemIds = job.itemIds or {},
 			origin = job.origin or "player_queue",
 			operationId = job.operationId,
+			preferredNodeId = job.preferredNodeId,
 			queueId = job.queueId,
 			networkId = job.networkId,
 		})

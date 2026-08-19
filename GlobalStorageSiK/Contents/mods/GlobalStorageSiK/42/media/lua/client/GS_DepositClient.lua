@@ -105,7 +105,7 @@ end
 --- Solicita depósito de ítems por ID (validación en servidor).
 ---@param itemIds number[]
 ---@param playerArg IsoPlayer|number|nil
----@param opts table|nil { networkId=string, origin=string, operationId=string }
+---@param opts table|nil { networkId=string, origin=string, operationId=string, preferredNodeId=string }
 ---@return boolean
 function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opts)
 	if not itemIds or #itemIds == 0 then
@@ -126,6 +126,7 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 			networkId = opts.networkId,
 			origin = opts.origin,
 			operationId = opts.operationId,
+			preferredNodeId = opts.preferredNodeId,
 		})
 		if not queueId then return false end
 	end
@@ -134,6 +135,7 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 		itemIds = itemIds,
 		origin = opts.origin or "player",
 		operationId = opts.operationId,
+		preferredNodeId = opts.preferredNodeId,
 		queueId = queueId,
 		networkId = networkId,
 	})

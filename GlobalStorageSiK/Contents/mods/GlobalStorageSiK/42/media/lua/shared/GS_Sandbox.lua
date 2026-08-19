@@ -205,8 +205,8 @@ function GlobalStorageSiK.Sandbox.autoSortEnabled()
 end
 
 --- Indica si el depósito debe RECHAZARSE (quedar en el inventario del
---- jugador) cuando el ítem no encuentra categoría, filtro personalizado, ni
---- otro contenedor con el mismo ítem (afinidad) - en vez de caer al primer
+--- jugador) cuando el ítem no encuentra categoría, filtro personalizado,
+--- afinidad exacta ni afinidad taxonómica canónica - en vez de caer al primer
 --- contenedor «cualquiera» con hueco libre. Desactivada por defecto: el
 --- comportamiento de siempre (fallback a cualquier hueco) no cambia salvo
 --- que el jugador la active a propósito.

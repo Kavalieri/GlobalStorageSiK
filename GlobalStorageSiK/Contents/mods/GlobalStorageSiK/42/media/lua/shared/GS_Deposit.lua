@@ -217,8 +217,9 @@ end
 ---@param player IsoPlayer
 ---@param networkId string|nil
 ---@param itemIds number[]
+---@param options table|nil { preferredNodeId=string }
 ---@return table summary
-function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
+function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
 		reason = nil, failureReason = nil, remainingIds = {} }
 
@@ -238,6 +239,7 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 
 	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
 	local seenIds = {}
+	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 
 	for i = 1, #itemIds do
 		if summary.processed >= maxPerTick then
@@ -289,7 +291,10 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
 				if not allowed then
 					summary.skipped = summary.skipped + 1
 				else
-					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
+					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
+						session = routingSession,
+						preferredNodeId = options and options.preferredNodeId or nil,
+					})
 					if ok then
 						summary.moved = summary.moved + 1
 					elseif reason == "filtered" then
@@ -352,6 +357,7 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 	local candidates = GlobalStorageSiK.BulkFilters.collectCandidates(
 		container, player, GlobalStorageSiK.BulkFilters.SCOPE.SINGLE_BAG
 	)
+	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 
 	for c = 1, #candidates do
 		if summary.processed >= maxPerTick then
@@ -365,7 +371,9 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		summary.processed = summary.processed + 1
 		local candidate = candidates[c]
 		if candidate and candidate:getContainer() == container then
-			local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId)
+			local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
+				session = routingSession,
+			})
 			if ok then
 				summary.moved = summary.moved + 1
 			elseif reason == "filtered" then

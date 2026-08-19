@@ -399,6 +399,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		reason = reason,
 		moved = completedRequest and completedRequest.totalMoved or moved,
 		itemIds = transfer.itemIds or {},
+		sourceNodeId = transfer.sourceNodeId,
 		networkId = transfer.networkId,
 		fullType = transfer.fullType,
 	}

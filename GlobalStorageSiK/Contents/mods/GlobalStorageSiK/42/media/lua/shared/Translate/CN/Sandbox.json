@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "在角色上方显示操作进度",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "存入、取出和自动整理时，在角色上方显示进度与最终摘要。此选项与调试模式无关；即使关闭，错误仍会显示。",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "无匹配容器时拒绝存入",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "如果物品没有匹配的类别/过滤器，且网络中没有其他容器已存放相同物品，则该物品会保留在玩家背包中，而不会被放入第一个可用的“任意”容器。默认关闭（与以往一样，总能找到容器）。",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "如果物品没有匹配的类别/过滤器、相同物品亲和性或规范分类亲和性，则保留在玩家背包中，而不会放入第一个可用的“任意”容器。默认关闭（通用容器仍像以前一样可用）。",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "保护收藏物品",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "背包中标记为收藏的物品会被“全部存入”跳过。建议开启，以保护重要物品不被误存。",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "保护已装备物品",

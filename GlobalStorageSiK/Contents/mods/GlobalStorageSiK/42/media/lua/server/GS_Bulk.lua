@@ -45,6 +45,7 @@ GlobalStorageSiK.Bulk = {}
 ---@return table
 
 local function depositFromContainers(player, networkId, containers, scope, summary, maxPerTick)
+	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 
 	for s = 1, #(containers or {}) do
 
@@ -73,7 +74,9 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 				else
 
-					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
+					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
+						session = routingSession,
+					})
 
 					if ok then
 

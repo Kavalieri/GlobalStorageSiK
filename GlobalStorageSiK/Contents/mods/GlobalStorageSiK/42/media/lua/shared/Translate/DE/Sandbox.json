@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Vorgangsfortschritt über dem Spieler anzeigen",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Zeigt Fortschritt und Abschlusszusammenfassungen bei Einlagerung, Entnahme und Auto-Sortierung über dem Spieler. Unabhängig vom Debug-Modus. Fehler bleiben auch bei deaktivierter Option sichtbar.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Einlagerung ablehnen, wenn kein passender Behälter vorhanden ist",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Wenn ein Gegenstand keiner passenden Kategorie/keinem Filter entspricht und kein anderer Behälter bereits denselben Gegenstand enthält, verbleibt er im Inventar des Spielers, statt in den ersten verfügbaren Behälter mit «Beliebig» zu wandern. Standardmäßig AUS (findet wie bisher immer einen Behälter).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Wenn ein Gegenstand weder einer Kategorie/einem Filter noch der exakten Gegenstands- oder kanonischen Taxonomie-Affinität entspricht, bleibt er im Inventar, statt in den ersten verfügbaren Behälter mit «Beliebig» zu wandern. Standardmäßig AUS (generische Behälter bleiben wie bisher verfügbar).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Favorisierte Gegenstände respektieren",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Im Inventar als Favorit markierte Gegenstände werden von 'Alles einlagern' übersprungen. Empfohlen AN, um wichtige Gegenstände vor versehentlicher Einlagerung zu schützen.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Angelegte Gegenstände respektieren",

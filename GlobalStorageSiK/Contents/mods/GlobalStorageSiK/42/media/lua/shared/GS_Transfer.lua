@@ -164,6 +164,8 @@ end
 
 ---@return number[] movedItemIds
 
+---@return string[] sourceNodeIds
+
 local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	destContainer = destContainer or player:getInventory()
@@ -181,6 +183,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	local movedItemIds = {}
 
+	local sourceNodeIds = {}
+
 	local lastReason = nil
 
 	for i = 1, #live do
@@ -192,6 +196,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 		end
 
 		local container = live[i].container
+
+		local sourceNodeId = live[i].entry and live[i].entry.id or nil
 
 		if not container or not container.getItems then
 
@@ -243,6 +249,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 							movedItemIds[#movedItemIds + 1] = toMove:getID()
 
+							sourceNodeIds[#sourceNodeIds + 1] = sourceNodeId and tostring(sourceNodeId) or ""
+
 						end
 
 					else
@@ -263,11 +271,11 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	if moved > 0 then
 
-		return moved, nil, movedItemIds
+		return moved, nil, movedItemIds, sourceNodeIds
 
 	end
 
-	return 0, lastReason or "not_found", movedItemIds
+	return 0, lastReason or "not_found", movedItemIds, sourceNodeIds
 
 end
 
@@ -283,6 +291,22 @@ end
 
 
 
+--- Crea una captura de enrutado reutilizable durante un micro-lote. Las
+--- transferencias individuales pueden omitirla; los lotes deben compartirla
+--- para no reescanear toda la red por cada item.
+---@param player IsoPlayer
+---@param networkId string|nil
+---@return table
+function GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
+	return {
+		networkId = networkId,
+		liveNodes = live,
+		affinityIndex = GlobalStorageSiK.Router.buildAffinityIndex(live),
+	}
+end
+
 --- Deposita un ítem del jugador en la red.
 
 ---@param player IsoPlayer
@@ -291,11 +315,13 @@ end
 
 ---@param networkId string|nil
 
+---@param options table|nil { session=table, preferredNodeId=string }
+
 ---@return boolean ok
 
 ---@return string|nil reason
 
-function GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
+function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 
 	if not player or not item then
 
@@ -345,10 +371,17 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
 
 
 
-	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
-		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
+	options = options or {}
+	local session = options.session
+	if not session or session.networkId ~= networkId then
+		session = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	end
+	local live = session.liveNodes or {}
 
-	local target, targetReason = GlobalStorageSiK.Router.pickDepositTarget(item, live, character)
+	local target, targetReason = GlobalStorageSiK.Router.pickDepositTarget(item, live, character, {
+		affinityIndex = session.affinityIndex,
+		preferredNodeId = options.preferredNodeId,
+	})
 
 	if not target then
 
@@ -359,6 +392,9 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId)
 
 
 	if moveItem(item, source, target.container, character) then
+		local targetId = target.entry and target.entry.id or nil
+		local targetIndex = targetId and session.affinityIndex.nodeIndexById[tostring(targetId)] or nil
+		GlobalStorageSiK.Router.updateAffinityIndex(session.affinityIndex, targetIndex, item, 1)
 
 		local units = 1
 
@@ -394,6 +430,8 @@ end
 
 ---@return number[] movedItemIds
 
+---@return string[] sourceNodeIds
+
 function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer)
 
 	if not player or not fullType or fullType == "" then
@@ -426,7 +464,7 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local moved, reason, movedItemIds = withdrawUnits(player, fullType, networkId, target, destContainer)
+	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(player, fullType, networkId, target, destContainer)
 
 	if moved > 0 then
 
@@ -434,14 +472,14 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 		if moved < target and reason then
 
-			return true, "partial:" .. tostring(reason), moved, movedItemIds
+			return true, "partial:" .. tostring(reason), moved, movedItemIds, sourceNodeIds
 
 		end
 
-		return true, nil, moved, movedItemIds
+		return true, nil, moved, movedItemIds, sourceNodeIds
 
 	end
 
-	return false, reason or "not_found", 0, movedItemIds or {}
+	return false, reason or "not_found", 0, movedItemIds or {}, sourceNodeIds or {}
 
 end

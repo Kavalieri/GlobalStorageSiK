@@ -89,7 +89,7 @@
 	"IGUI_GS_NoNodesYet": "Nenhum contêiner detectado nas zonas.",
 	"IGUI_GS_ShowTerminalCoverage": "Mostrar cobertura",
 	"IGUI_GS_HideTerminalCoverage": "Ocultar cobertura",
-	"IGUI_GS_NodesPriorityHelp": "Ordem de destino:\n1) Filtro personalizado ou categoria exata de nível 3.\n2) Subcategoria de nível 2.\n3) Categoria principal de nível 1.\n4) Afinidade: contêiner sem restrições que já contém o mesmo item.\n5) Qualquer contêiner sem restrições.\nNo mesmo nível: prioridade da zona, depois prioridade do contêiner e, por fim, ordem interna estável.\nSe nenhum destino válido tiver espaço, o item permanece no inventário.",
+	"IGUI_GS_NodesPriorityHelp": "Ordem de destino:\n1) Filtro personalizado ou categoria exata de nível 3.\n2) Subcategoria de nível 2.\n3) Categoria principal de nível 1.\n4) Afinidade exata: contêiner sem restrições que já contém o mesmo item.\n5) Afinidade taxonômica: contêiner sem restrições com a mesma família canônica de itens.\n6) Qualquer contêiner sem restrições.\nNo mesmo nível: prioridade do contêiner, depois prioridade da zona e, por fim, ordem interna estável.\nSe nenhum destino válido tiver espaço, o item permanece no inventário.",
 	"IGUI_GS_ZonePriorityLabel": "Prioridade da zona:",
 	"IGUI_GS_ZonePriorityHint": "1 = primeira zona, 100 = última. Usada somente após o nível de correspondência ou afinidade.",
 	"IGUI_GS_ZonePriorityValue": "Zona {1}",

@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Pokazuj postęp operacji nad graczem",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Pokazuje postęp i końcowe podsumowanie nad graczem podczas deponowania, pobierania i auto-sortowania. Niezależne od trybu debug. Błędy pozostają widoczne po wyłączeniu tej opcji.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Odrzuć depozyt, jeśli brak pasującego pojemnika",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Jeśli przedmiot nie ma pasującej kategorii/filtra i żaden inny pojemnik nie zawiera już tego samego przedmiotu, pozostaje w ekwipunku gracza zamiast trafić do pierwszej dostępnej skrzyni «Dowolne». Domyślnie WYŁ (zawsze znajduje pojemnik, jak dotychczas).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Jeśli przedmiot nie pasuje do kategorii/filtra, dokładnego powiązania przedmiotu ani kanonicznego powiązania taksonomicznego, pozostaje w ekwipunku zamiast trafić do pierwszego dostępnego pojemnika «Dowolne». Domyślnie WYŁ (pojemniki ogólne pozostają dostępne jak wcześniej).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Szanuj ulubione przedmioty",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Przedmioty oznaczone jako ulubione w ekwipunku są pomijane przez 'Zdeponuj wszystko'. Zalecane WŁ, aby chronić ważne przedmioty przed przypadkowym zdeponowaniem.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Szanuj założone przedmioty",

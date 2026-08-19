@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback": "Mostra avanzamento operazioni sopra il giocatore",
 	"Sandbox_GlobalStorageSiK_OperationHaloFeedback_tooltip": "Mostra avanzamento e riepilogo finale sopra il giocatore durante depositi, prelievi e ordinamento automatico. Indipendente dalla modalità debug. Gli errori restano visibili anche se disattivato.",
 	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch": "Rifiuta il deposito se nessun contenitore compatibile",
-	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Se un oggetto non ha una categoria/filtro corrispondente e nessun altro contenitore contiene già lo stesso oggetto, resta nell'inventario del giocatore invece di finire nella prima cassa \"Qualsiasi\" disponibile. Disattivato per impostazione predefinita (trova sempre un contenitore, come prima).",
+	"Sandbox_GlobalStorageSiK_RejectDepositIfNoMatch_tooltip": "Se un oggetto non corrisponde a categoria/filtro, affinità dell'oggetto esatto o affinità tassonomica canonica, resta nell'inventario invece di finire nel primo contenitore \"Qualsiasi\" disponibile. Disattivato per impostazione predefinita (i contenitori generici restano disponibili come prima).",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems": "Rispetta oggetti preferiti",
 	"Sandbox_GlobalStorageSiK_RespectFavoriteItems_tooltip": "Gli oggetti contrassegnati come preferiti nell'inventario vengono saltati da 'Deposita tutto'. Consigliato ON per proteggere gli oggetti importanti da depositi accidentali.",
 	"Sandbox_GlobalStorageSiK_RespectEquippedItems": "Rispetta oggetti equipaggiati",

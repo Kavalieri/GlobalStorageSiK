@@ -826,6 +826,76 @@ function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 	}
 end
 
+--- Construye una identidad semantica estable para afinidad de contenedor.
+--- Usa exclusivamente claves canonicas (nunca etiquetas traducidas), por lo
+--- que cliente ES, servidor EN y Extended Categories producen la misma ruta.
+--- La hoja mas especifica disponible distingue, por ejemplo, revistas de
+--- receta, comida perecedera por tipo y huecos de joyeria; si una familia no
+--- tiene mas detalle, su Nivel 1 sigue siendo una afinidad valida.
+---@param tax table|nil Resultado de ItemTaxonomy.resolve
+---@return string|nil
+function GlobalStorageSiK.ItemTaxonomy.affinityKeyFromResolved(tax)
+	if not tax then return nil end
+	local parts = {}
+	local seen = {}
+	local function add(value)
+		if value == nil then return end
+		value = tostring(value)
+		if value == "" or isSingleAsciiDimension(value) then return end
+		local normalized = string.lower(value)
+		if seen[normalized] then return end
+		seen[normalized] = true
+		parts[#parts + 1] = normalized
+	end
+
+	add(tax.groupKey or tax.mainCanon)
+	add(tax.subGroupKey)
+	add(tax.categoryLeafKey)
+	add(tax.jewelrySlotKey)
+
+	-- Las reescrituras basicas (sin Extended Categories) viven en gsSubKeys.
+	-- Solo completan la ruta cuando la jerarquia canonica no expuso ya una hoja.
+	if not tax.categoryLeafKey and not tax.jewelrySlotKey
+		and tax.gsSubKeys and #tax.gsSubKeys > 0 then
+		add(tax.gsSubKeys[1])
+	end
+	if #parts <= 1 and tax.subCanon and tax.subCanon ~= "" then
+		add(tax.subCanon)
+	end
+	if #parts == 0 then return nil end
+	return table.concat(parts, "::")
+end
+
+---@param fullType string|nil
+---@param row table|nil
+---@return string|nil
+function GlobalStorageSiK.ItemTaxonomy.affinityKey(fullType, row)
+	if not fullType or fullType == "" then return nil end
+	return GlobalStorageSiK.ItemTaxonomy.affinityKeyFromResolved(
+		GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row or {}))
+end
+
+local _affinityKeyByFullType = {}
+
+---@param item InventoryItem|nil
+---@return string|nil
+function GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	if not item or not item.getFullType then return nil end
+	local fullType = item:getFullType()
+	local cached = _affinityKeyByFullType[fullType]
+	if cached ~= nil then return cached ~= false and cached or nil end
+	local mainKey, subKey = GlobalStorageSiK.ItemTaxonomy.keysFromItem(item)
+	local gsSubKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
+		and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
+	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKey(fullType, {
+		category = mainKey,
+		subCategory = subKey,
+		gsSubKeys = gsSubKeys,
+	})
+	_affinityKeyByFullType[fullType] = affinityKey or false
+	return affinityKey
+end
+
 --- Claves desde instancia viva (escaneo servidor / cliente).
 ---@param item any|nil
 ---@return string mainKey
