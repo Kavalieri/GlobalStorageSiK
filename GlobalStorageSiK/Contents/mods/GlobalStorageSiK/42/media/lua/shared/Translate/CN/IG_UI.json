@@ -782,6 +782,7 @@
 	"IGUI_GS_NetworkNotFoundMsg": "未找到网络",
 	"IGUI_GS_PermCharacterNameEmptyMsg": "角色名称为空",
 	"IGUI_GS_PermSelectionStale": "该玩家选择已失效。请刷新列表并重新选择玩家。",
+	"IGUI_GS_PermAlreadyMemberNoChange": "该角色已拥有访问权限；无需更改。",
 	"IGUI_GS_PermAlreadyOwnerMsg": "你已经是所有者",
 	"IGUI_GS_PermOnlyOwnerTransferMsg": "只有所有者可以转让网络",
 	"IGUI_GS_PermOwnershipTransferredMsg": "所有权已转让给 {1}",

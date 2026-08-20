@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Требует режима отладки. Сводка команд клиент/сервер, последовательности и синхронизации. Полные payload остаются в отдельном блоке >>> ДЕТАЛИ.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Доступ к терминалу",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Требует включённого Режима отладки. Каждая проверка близости/доступа к терминалу (манифест, реестр, оценка радиуса). Срабатывает многократно при попытке открыть терминал - очень многословно.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Идентификация и права доступа",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Требует режима отладки. Ограниченные записи UUID персонажа, объединения списков фракции/онлайн, идемпотентных изменений и правил идентичности. Имена используются только для диагностики и никогда для авторизации.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Рецепты и крафт",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Требует включённого Режима отладки. Ретроактивная выдача рецептов из уже прочитанных руководств и переопределения бесплатного крафта. Низкий объём - полезно, когда рецепт не появляется в меню крафта.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Инвентарь и переносы",

@@ -782,6 +782,7 @@
 	"IGUI_GS_NetworkNotFoundMsg": "Rete non trovata",
 	"IGUI_GS_PermCharacterNameEmptyMsg": "Il nome del personaggio è vuoto",
 	"IGUI_GS_PermSelectionStale": "La selezione del giocatore non è più valida. Aggiorna l'elenco e scegli di nuovo il giocatore.",
+	"IGUI_GS_PermAlreadyMemberNoChange": "Questo personaggio aveva già accesso; non erano necessarie modifiche.",
 	"IGUI_GS_PermAlreadyOwnerMsg": "Sei già il proprietario",
 	"IGUI_GS_PermOnlyOwnerTransferMsg": "Solo il proprietario può trasferire la rete",
 	"IGUI_GS_PermOwnershipTransferredMsg": "Proprietà trasferita a {1}",

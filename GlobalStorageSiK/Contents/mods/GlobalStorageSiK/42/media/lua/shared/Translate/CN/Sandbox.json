@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "需要调试模式。汇总客户端/服务器命令、序列和同步状态。完整 payload 仅在独立的 >>> 详细模块中输出。",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> 终端访问",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "需要先开启调试模式。记录每一次针对终端的邻近/访问检查（清单、注册表、范围评估）。在尝试打开终端时会反复触发 - 非常详细。",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> 身份与权限",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "需要调试模式。以有限日志记录角色 UUID 生命周期、阵营/在线名单合并、幂等成员变更和身份约束。名称仅用于诊断，绝不用于授权。",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> 配方与制作",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "需要先开启调试模式。记录已阅读说明书的追溯性配方授予，以及免费制作的覆盖情况。信息量较少 - 在配方未出现在制作菜单时很有用。",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> 库存与转移",

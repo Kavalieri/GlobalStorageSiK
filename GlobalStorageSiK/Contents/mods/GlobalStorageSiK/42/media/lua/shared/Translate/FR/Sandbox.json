@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Nécessite le mode débogage. Résume les commandes client/serveur, la séquence et la synchronisation. Les payloads complets restent dans le bloc >>> DÉTAIL séparé.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Accès au terminal",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Nécessite le mode débogage ACTIVÉ. Chaque vérification de proximité ou d'accès à un terminal (manifeste, registre, évaluation de portée). Se déclenche à répétition en essayant d'ouvrir un terminal, très détaillé.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identité et permissions",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Nécessite le mode débogage. Traces limitées du cycle UUID, de la fusion faction/joueurs en ligne, des changements idempotents et des invariants d'identité. Les noms servent au diagnostic, jamais à autoriser.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Recettes et fabrication",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Nécessite le mode débogage ACTIVÉ. Attributions rétroactives de recettes depuis des manuels déjà lus, et remplacements de fabrication libre. Volume faible, utile quand une recette n'apparaît pas dans le menu de fabrication.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Inventaire et transferts",

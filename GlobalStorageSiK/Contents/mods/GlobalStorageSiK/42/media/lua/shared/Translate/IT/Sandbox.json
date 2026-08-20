@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Richiede la modalità debug. Riassume comandi client/server, sequenza e sincronizzazione. I payload completi restano nel blocco >>> DETTAGLIO separato.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Accesso terminale",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Richiede Modalita debug ON. Ogni controllo di prossimita/accesso verso un terminale (manifest, registro, valutazione del raggio). Si attiva ripetutamente mentre si prova ad aprire un terminale - molto verboso.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identità e permessi",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Richiede la modalità debug. Log limitati del ciclo UUID, unione di fazione/giocatori online, modifiche idempotenti e invarianti d'identità. I nomi servono solo alla diagnosi e non autorizzano mai.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Ricette e crafting",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Richiede Modalita debug ON. Concessioni retroattive di ricette da manuali gia letti, e override del crafting gratuito. Volume basso - utile quando una ricetta non compare nel menu di crafting.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Inventario e trasferimenti",

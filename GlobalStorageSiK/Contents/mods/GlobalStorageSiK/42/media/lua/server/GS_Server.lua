@@ -3130,8 +3130,12 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		local ok, message = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
+		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		GlobalStorageSiK.Log.info("Permissions", "addFactionMembers",
+			"network=" .. tostring(networkId)
+				.. " ok=" .. tostring(ok)
+				.. " changed=" .. tostring(changed))
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
 			pushTerminalState(player, networkId, nil, searchQuery)
@@ -3154,30 +3158,46 @@ local function onClientCommand(module, command, player, args)
 		end
 		local target = GlobalStorageSiK.Permissions.findOnlineCharacter(args.characterId or "")
 		local ok = false
+		local changed = false
+		local reason = "invalid_or_stale_identity"
 		local failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_UserAlreadyExists")
 		local permissionSource = "legacy_name"
 		if target then
 			permissionSource = "online_character"
-			ok = GlobalStorageSiK.Permissions.addCharacter(networkId, target)
+			ok, changed, reason = GlobalStorageSiK.Permissions.addCharacter(networkId, target)
+		elseif args.characterId and args.characterId ~= "" then
+			-- Si el selector contenía un UUID, su desconexión invalida esa
+			-- selección completa. No degradar silenciosamente a permiso offline,
+			-- aunque también viniera factionUsername.
+			permissionSource = "invalid_character_id"
+			failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermSelectionStale")
 		elseif args.factionUsername and args.factionUsername ~= "" then
 			permissionSource = "offline_faction_member"
 			-- Miembro offline: Faction persiste usernames, no objetos IsoPlayer.
 			-- El servidor valida que siga perteneciendo a la facción del actor;
 			-- canAccess lo vinculará al ID del personaje al conectarse.
-			ok = GlobalStorageSiK.Permissions.addFactionUsername(
-				networkId, player, string.sub(tostring(args.factionUsername), 1, 64))
-		elseif args.characterId and args.characterId ~= "" then
-			-- Un selector moderno nunca degrada un ID caducado o manipulado a una
-			-- coincidencia por nombre. El roster debe refrescarse y elegirse de
-			-- nuevo; así dos nombres Unicode iguales no pueden cruzar permisos.
-			permissionSource = "invalid_character_id"
-			failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermSelectionStale")
+			local factionUsername = tostring(args.factionUsername)
+			if #factionUsername <= 256 then
+				ok, changed, reason = GlobalStorageSiK.Permissions.addFactionUsername(
+					networkId, player, factionUsername)
+			else
+				permissionSource = "invalid_faction_username"
+				failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermSelectionStale")
+			end
 		elseif not args.characterId or args.characterId == "" then
 			-- Compatibilidad con clientes anteriores durante la transición.
-			ok = GlobalStorageSiK.Permissions.addUser(networkId, args.characterName or args.username)
+			local legacyName = tostring(args.characterName or args.username or "")
+			if #legacyName > 256 then
+				failureMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermSelectionStale")
+			elseif GlobalStorageSiK.Permissions.addUser(networkId, legacyName) then
+				ok, changed, reason = true, true, "added_legacy"
+			elseif legacyName ~= "" then
+				ok, changed, reason = true, false, "already_member"
+			end
 		end
-		local loggedTarget = string.sub(tostring(
-			args.factionUsername or args.characterName or args.username or ""), 1, 64)
+		local loggedTarget = tostring(
+			args.factionUsername or args.characterName or args.username or "")
+		if #loggedTarget > 256 then loggedTarget = "<oversize:" .. tostring(#loggedTarget) .. ">" end
 		loggedTarget = string.gsub(loggedTarget, "[\r\n]", " ")
 		local loggedCharacterId = string.sub(tostring(args.characterId or ""), 1, 96)
 		loggedCharacterId = string.gsub(loggedCharacterId, "[\r\n]", " ")
@@ -3185,9 +3205,18 @@ local function onClientCommand(module, command, player, args)
 			"source=" .. permissionSource
 				.. " target=" .. loggedTarget
 				.. " characterId=" .. loggedCharacterId
-				.. " ok=" .. tostring(ok))
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or failureMessage })
+				.. " ok=" .. tostring(ok)
+				.. " changed=" .. tostring(changed)
+				.. " reason=" .. tostring(reason))
+		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		local resultMessage = failureMessage
+		if ok and changed then
+			resultMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded")
+		elseif ok then
+			resultMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_PermAlreadyMemberNoChange")
+		end
+		gsSendServerCommand(player, "actionResult", { ok = ok, changed = changed,
+			reason = reason, message = resultMessage })
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
 
@@ -3237,19 +3266,24 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole") })
 			return
 		end
-		-- Limpiar también de adminUsers si era admin
-		if net then
-			for i = #(net.adminUsers or {}), 1, -1 do
-				if net.adminUsers[i] == target then table.remove(net.adminUsers, i) end
-			end
-		end
 		local ok
 		if targetId ~= "" then
 			ok = GlobalStorageSiK.Permissions.removeCharacter(networkId, targetId)
 		else
 			ok = GlobalStorageSiK.Permissions.removeUser(networkId, target)
 		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		-- Una petición repetida o con selector obsoleto no debe mutar roles ni
+		-- retransmitir ModData. La limpieza legacy solo sucede tras una baja real.
+		if ok and net then
+			for i = #(net.adminUsers or {}), 1, -1 do
+				if net.adminUsers[i] == target then table.remove(net.adminUsers, i) end
+			end
+			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		end
+		GlobalStorageSiK.Log.info("Permissions", "removePermissionUser",
+			"network=" .. tostring(networkId)
+				.. " characterId=" .. string.sub(tostring(targetId), 1, 96)
+				.. " ok=" .. tostring(ok))
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserRemovedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserNotFoundToRemoveMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
@@ -3267,6 +3301,11 @@ local function onClientCommand(module, command, player, args)
 			ok = GlobalStorageSiK.Permissions.setUserRole(networkId, args.username or "", args.role or "member")
 		end
 		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		GlobalStorageSiK.Log.info("Permissions", "setMemberRole",
+			"network=" .. tostring(networkId)
+				.. " characterId=" .. string.sub(tostring(args.characterId or ""), 1, 96)
+				.. " role=" .. tostring(args.role or "member")
+				.. " ok=" .. tostring(ok))
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdatedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdateFailedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
@@ -3288,6 +3327,11 @@ local function onClientCommand(module, command, player, args)
 			tostring(args.username or ""),
 			deniedZoneIds)
 		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		GlobalStorageSiK.Log.info("Permissions", "setMemberZoneAccess",
+			"network=" .. tostring(networkId)
+				.. " characterId=" .. string.sub(tostring(args.characterId or ""), 1, 96)
+				.. " deniedZones=" .. tostring(#deniedZoneIds)
+				.. " ok=" .. tostring(ok))
 		gsSendServerCommand(player, "actionResult", {
 			ok = ok,
 			message = GlobalStorageSiK.I18n.remote(ok
@@ -3341,8 +3385,12 @@ local function onClientCommand(module, command, player, args)
 		-- addAllFactionMembers expande la facción del jugador que pulsa
 		-- "Añadir" a un acceso individual (net.allowedUsers) por cada
 		-- miembro, mismo mecanismo ya confirmado.
-		local ok, message = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
+		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		GlobalStorageSiK.Log.info("Permissions", "addPermissionFaction",
+			"network=" .. tostring(networkId)
+				.. " ok=" .. tostring(ok)
+				.. " changed=" .. tostring(changed))
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
@@ -3504,6 +3552,7 @@ if Events and Events.OnCreatePlayer then
 		if not player or not GlobalStorageSiK.isAuthoritative() then
 			return
 		end
+		GlobalStorageSiK.Permissions.initializeCharacterIdentity(player, "on_create_player")
 		-- Un personaje que acaba de entrar nunca hereda la suscripcion visual
 		-- que pudiera quedar de una conexion anterior interrumpida.
 		clearTerminalWatcher(player)

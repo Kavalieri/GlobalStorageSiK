@@ -35,8 +35,8 @@ local function vector(values)
 	}
 end
 
-local function player(username, forename, surname, displayName, descriptorId, persistentSqlId)
-	local modData = {}
+local function player(username, forename, surname, displayName, descriptorId, persistentSqlId, persistedModData)
+	local modData = persistedModData or {}
 	local descriptor = {
 		getID = function() return descriptorId end,
 		getForename = function() return forename end,
@@ -122,6 +122,12 @@ assert(fallbackId:match("^character:gsc_") ~= nil,
 	"every character must use a server-owned character UUID")
 assertEqual(Permissions.getCharacterId(uuidFallback), fallbackId,
 	"the generated character UUID must remain stable in player modData")
+local persistedIdentity = {}
+local firstWrapper = player("PersistedAccount", "Persisted", "One", "Persisted", 20, 920, persistedIdentity)
+local secondWrapper = player("PersistedAccount", "Persisted", "One", "Persisted", 21, 920, persistedIdentity)
+assertEqual(Permissions.initializeCharacterIdentity(firstWrapper, "test_first_load"),
+	Permissions.initializeCharacterIdentity(secondWrapper, "test_reload"),
+	"the UUID must survive a new IsoPlayer wrapper when character modData persists")
 
 -- Dedicated B42 may expose the account through getDisplayName(). The UI must
 -- still present the SurvivorDesc character name and keep the account internal.
@@ -300,6 +306,84 @@ assertEqual(fresh.characterPermissions[fresh.ownerCharacterId].displayName, "凯
 local unsafe = { id = "unsafe", allowedUsers = {}, adminUsers = {}, memberZoneDenials = {} }
 assertEqual(Permissions.initializeOwner(unsafe, noAccount), false,
 	"a new MP owner without an authoritative account must be rejected")
+
+-- Idempotent membership distinguishes a successful no-op from an invalid
+-- identity. Binding an online faction member also consumes its nominal
+-- offline row so the UI cannot display the same person twice.
+registry.networks.idempotent = {
+	id = "idempotent", owner = "Kava", ownerAccount = "KavaAccount",
+	ownerCharacterId = kavaId, allowedUsers = { "Sarini13" }, allowedFactions = {},
+	adminUsers = {}, memberZoneDenials = {}, characterPermissions = {
+		[kavaId] = { name = "Kava", displayName = "Kava", username = "KavaAccount", role = OWNER },
+	},
+}
+local addOk, addChanged, addReason = Permissions.addCharacter("idempotent", sarini)
+assertEqual(addOk, true, "first member add must succeed")
+assertEqual(addChanged, true, "first member add must mutate")
+assertEqual(addReason, "added", "first member add reason")
+assertEqual(#registry.networks.idempotent.allowedUsers, 0,
+	"online binding must consume the offline nominal membership")
+local againOk, againChanged, againReason = Permissions.addCharacter("idempotent", sarini)
+assertEqual(againOk, true, "repeated add must be a successful no-op")
+assertEqual(againChanged, false, "repeated add must not mutate")
+assertEqual(againReason, "already_member", "repeated add must explain idempotence")
+local invalidOk, invalidChanged, invalidReason = Permissions.addCharacter("idempotent", nil)
+assertEqual(invalidOk, false, "invalid identity must fail")
+assertEqual(invalidChanged, false, "invalid identity must not mutate")
+assertEqual(invalidReason, "invalid_or_stale_identity", "invalid identity reason")
+assertEqual(Permissions.removeCharacter("idempotent", sariniId), true,
+	"an existing UUID member must be removable")
+assertEqual(Permissions.removeCharacter("idempotent", sariniId), false,
+	"a repeated removal must be a harmless no-op")
+local readdOk, readdChanged = Permissions.addCharacter("idempotent", sarini)
+assertEqual(readdOk, true, "a removed member can be added again")
+assertEqual(readdChanged, true, "re-adding after removal must mutate once")
+
+-- The authoritative picker merges faction+online by exact UUID, preserves
+-- faction provenance and keeps true homonyms with distinct UUIDs.
+local candidateMembers = {
+	{ id = kavaId, characterId = kavaId, name = "Kava", characterName = "Kava", role = OWNER },
+}
+local candidateOnline = {
+	{ id = sariniId, characterId = sariniId, name = "同名", characterName = "同名",
+		username = "Sarini13", source = "online", online = true },
+	{ id = supernavosId, characterId = supernavosId, name = "同名", characterName = "同名",
+		username = "SuperAccount", source = "online", online = true },
+}
+local candidateFaction = {
+	{ id = sariniId, characterId = sariniId, name = "同名", characterName = "同名",
+		username = "Sarini13", factionUsername = "Sarini13", source = "faction", online = true },
+	{ id = "", characterId = "", name = "Оффлайн", characterName = "Оффлайн",
+		username = "OfflineCyrillic", factionUsername = "OfflineCyrillic", source = "faction", online = false },
+}
+local picker = Permissions.buildPickerCandidates(candidateMembers, candidateOnline, candidateFaction)
+assertEqual(#picker, 3, "faction+online duplicate must collapse while homonyms remain")
+local sariniCandidates = 0
+local homonymIds = {}
+for i = 1, #picker do
+	local entry = picker[i]
+	if entry.characterId == sariniId then
+		sariniCandidates = sariniCandidates + 1
+		assertEqual(entry.source, "faction", "faction provenance must win")
+		assertEqual(entry.factionUsername, "Sarini13", "faction username must survive")
+		assertEqual(entry.online, true, "faction candidate must retain online state")
+	end
+	if entry.characterName == "同名" then homonymIds[entry.characterId] = true end
+end
+assertEqual(sariniCandidates, 1, "the same UUID must appear once")
+assertEqual(homonymIds[sariniId], true, "first homonym must remain")
+assertEqual(homonymIds[supernavosId], true, "second homonym must remain")
+local projectionOk, projectionReason = Permissions.validatePermissionProjection(
+	kavaId, candidateMembers, picker)
+assertEqual(projectionOk, true, "valid permission projection must pass: " .. projectionReason)
+local duplicatedCandidate = nil
+for i = 1, #picker do
+	if picker[i].characterId ~= "" then duplicatedCandidate = picker[i]; break end
+end
+local duplicateProjectionOk = Permissions.validatePermissionProjection(kavaId, candidateMembers, {
+	duplicatedCandidate, duplicatedCandidate,
+})
+assertEqual(duplicateProjectionOk, false, "duplicate picker UUID must fail the invariant")
 
 assert(#migrationLogs >= 2, "owner and member migrations must emit diagnostics")
 print("permissions_identity_regression: OK")

@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Wymaga trybu debug. Podsumowuje komendy klient/serwer, sekwencję i synchronizację. Pełne payloady pozostają w osobnym bloku >>> SZCZEGÓŁY.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Dostęp do terminala",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Wymaga trybu debugowania WŁ. Każde sprawdzenie bliskości/dostępu do terminala (manifest, rejestr, ocena zasięgu). Uruchamia się wielokrotnie podczas próby otwarcia terminala, bardzo szczegółowe.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Tożsamość i uprawnienia",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Wymaga trybu debugowania. Ograniczone logi UUID postaci, łączenia list frakcji/online, idempotentnych zmian członkostwa i reguł tożsamości. Nazwy służą tylko diagnostyce i nigdy nie autoryzują.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Receptury i wytwarzanie",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Wymaga trybu debugowania WŁ. Wsteczne przyznawanie receptur z już przeczytanych instrukcji oraz nadpisania darmowego wytwarzania. Niska ilość, przydatne gdy receptura nie pojawia się w menu wytwarzania.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Ekwipunek i transfery",

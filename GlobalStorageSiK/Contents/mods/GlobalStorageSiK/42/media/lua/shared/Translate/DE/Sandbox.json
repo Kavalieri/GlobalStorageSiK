@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Benötigt Debug-Modus. Fasst Client/Server-Befehle, Sequenz und Synchronisation zusammen. Vollständige Payloads bleiben im separaten >>> DETAIL-Block.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Terminalzugriff",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Erfordert Debug Modus AN. Jede Nähe oder Zugriffsprüfung an einem Terminal (Manifest, Register, Reichweitenbewertung). Löst beim Versuch, ein Terminal zu öffnen, wiederholt aus, sehr ausführlich.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identität und Berechtigungen",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Erfordert Debug-Modus. Begrenzte Protokolle für Charakter-UUIDs, Zusammenführung von Fraktions-/Online-Listen, idempotente Mitgliederänderungen und Identitätsregeln. Namen dienen nur der Diagnose und autorisieren nie.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Rezepte und Herstellung",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Erfordert Debug Modus AN. Rückwirkende Rezeptvergaben aus bereits gelesenen Anleitungen und Freihandwerk Ausnahmen. Geringes Aufkommen, nützlich, wenn ein Rezept nicht im Herstellungsmenü erscheint.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Inventar und Übertragungen",

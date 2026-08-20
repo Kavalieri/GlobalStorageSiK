@@ -312,17 +312,26 @@ local function buildMemberRows(perms)
 	perms = perms or {}
 	local rows = {}
 	if perms.memberEntries and #perms.memberEntries > 0 then
+		local seenIds = {}
+		local ownerSeen = false
 		for i = 1, #perms.memberEntries do
 			local entry = perms.memberEntries[i]
-			rows[#rows + 1] = {
-				kind = entry.role == "member" and "user" or entry.role,
-				name = entry.name,
-				displayName = memberDisplayLabel(entry),
-				characterId = entry.id or "",
-				username = entry.username or "",
-				legacy = entry.legacy == true,
-				deniedZoneIds = entry.deniedZoneIds or {},
-			}
+			local id = tostring(entry.id or entry.characterId or "")
+			local isOwner = entry.role == "owner"
+			local duplicate = (id ~= "" and seenIds[id] == true) or (isOwner and ownerSeen)
+			if not duplicate then
+				if id ~= "" then seenIds[id] = true end
+				if isOwner then ownerSeen = true end
+				rows[#rows + 1] = {
+					kind = entry.role == "member" and "user" or entry.role,
+					name = entry.name,
+					displayName = memberDisplayLabel(entry),
+					characterId = id,
+					username = entry.username or "",
+					legacy = entry.legacy == true,
+					deniedZoneIds = entry.deniedZoneIds or {},
+				}
+			end
 		end
 		return rows
 	end
@@ -467,16 +476,61 @@ end
 ---@param ui table
 function GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 	if not ui or not ui.memberPickCombo then return end
-	local selected = ui.memberPickCombo.selected or 1
+	local selectedMeta = ui._memberPickMeta
+		and ui._memberPickMeta[ui.memberPickCombo.selected or 1] or nil
+	local selectedKey = selectedMeta and (tostring(selectedMeta.kind or "") .. ":"
+		.. tostring(selectedMeta.characterId or selectedMeta.factionUsername or selectedMeta.value or "")) or ""
 	ui.memberPickCombo:clear()
 	ui._memberPickMeta = {}
 
 	ui._memberPickMeta[1] = { kind = "none" }
 	ui.memberPickCombo:addOption(T("IGUI_GS_PickMember"))
 
-	-- Grupo: facción del jugador
 	local perms = ui._permStateRef and ui._permStateRef.permissions or {}
-	local factionOptions = GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions(perms)
+	local factionOptions = {}
+	local serverCharacters = {}
+	local pickerCandidates = perms.pickerCandidates
+	if pickerCandidates then
+		local labelCounts = {}
+		for i = 1, #pickerCandidates do
+			local entry = pickerCandidates[i]
+			local key = memberIdentityKey(memberDisplayLabel(entry))
+			labelCounts[key] = (labelCounts[key] or 0) + 1
+		end
+		for i = 1, #pickerCandidates do
+			local entry = pickerCandidates[i]
+			local label = memberDisplayLabel(entry)
+			local id = tostring(entry.characterId or entry.id or "")
+			if id ~= "" and (labelCounts[memberIdentityKey(label)] or 0) > 1 then
+				label = label .. " [" .. string.sub(id, -6) .. "]"
+			end
+			local option = {
+				kind = "member", value = entry.characterName or entry.name,
+				characterId = id,
+				factionUsername = entry.factionUsername or "",
+				label = label,
+			}
+			if entry.source == "faction" then
+				option.label = T("IGUI_GS_PermPickFactionMember", label)
+				factionOptions[#factionOptions + 1] = option
+			else
+				serverCharacters[#serverCharacters + 1] = option
+			end
+		end
+		if #factionOptions > 0 then
+			table.insert(factionOptions, 1, {
+				kind = "whole", value = perms.playerFactionName or "",
+				label = T("IGUI_GS_PermPickWholeFaction", perms.playerFactionName or ""),
+			})
+		end
+	else
+		-- Compatibilidad durante un despliegue escalonado con un servidor
+		-- anterior que todavía expone ambos rosters por separado.
+		factionOptions = GlobalStorageSiK.TerminalPermissions.collectFactionPickerOptions(perms)
+		serverCharacters = GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters(perms)
+	end
+
+	-- Grupo: facción del jugador
 	if #factionOptions > 0 then
 		ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "header" }
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupFaction") .. " ]")
@@ -492,14 +546,15 @@ function GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 	-- debajo del titulo, que en ventanas estrechas se salia del panel) -
 	-- nunca aparece en SP real (isMultiplayerActive() ya oculta toda la
 	-- pestaña en ese caso).
-	local serverCharacters = GlobalStorageSiK.TerminalPermissions.collectOnlineCharacters(perms)
 	if #serverCharacters > 0 then
 		ui._memberPickMeta[#ui._memberPickMeta + 1] = { kind = "header" }
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupServer") .. " ]")
 		for i = 1, #serverCharacters do
 			local entry = serverCharacters[i]
 			ui._memberPickMeta[#ui._memberPickMeta + 1] = {
-				kind = "player", value = entry.name, characterId = entry.id, label = entry.label,
+				kind = entry.kind or "player", value = entry.value or entry.name,
+				characterId = entry.characterId or entry.id,
+				factionUsername = entry.factionUsername or "", label = entry.label,
 			}
 			ui.memberPickCombo:addOption("  " .. entry.label)
 		end
@@ -509,7 +564,18 @@ function GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 		ui.memberPickCombo:addOption("[ " .. T("IGUI_GS_PickGroupServerEmpty") .. " ]")
 	end
 
-	ui.memberPickCombo.selected = math.min(selected, math.max(1, #ui._memberPickMeta))
+	ui.memberPickCombo.selected = 1
+	if selectedKey ~= "" then
+		for i = 1, #ui._memberPickMeta do
+			local meta = ui._memberPickMeta[i]
+			local key = tostring(meta.kind or "") .. ":"
+				.. tostring(meta.characterId or meta.factionUsername or meta.value or "")
+			if key == selectedKey then
+				ui.memberPickCombo.selected = i
+				break
+			end
+		end
+	end
 end
 
 -- Compatibilidad con llamadas antiguas
@@ -720,6 +786,16 @@ local function permListFingerprint(perms)
 		for j = 1, #(member.deniedZoneIds or {}) do
 			parts[#parts + 1] = "z:" .. tostring(member.id or member.name or "")
 				.. ":" .. tostring(member.deniedZoneIds[j])
+		end
+	end
+	for _, field in ipairs({ "onlineCharacters", "factionMembers", "pickerCandidates" }) do
+		for i = 1, #(perms[field] or {}) do
+			local entry = perms[field][i]
+			parts[#parts + 1] = field .. ":" .. tostring(entry.characterId or entry.id or "")
+				.. ":" .. tostring(entry.username or "")
+				.. ":" .. tostring(entry.characterName or entry.name or "")
+				.. ":" .. tostring(entry.source or "")
+				.. ":" .. tostring(entry.online == true)
 		end
 	end
 	return table.concat(parts, "|")

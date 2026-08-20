@@ -38,6 +38,14 @@ local function displayText(value)
 	return (tostring(value):gsub("^%s*(.-)%s*$", "%1"))
 end
 
+local function permissionLogText(value)
+	local text = tostring(value or "")
+	text = string.gsub(text, "[%c]", " ")
+	-- No cortar por bytes: Lua 5.1 no conoce límites UTF-8 y podría dejar una
+	-- secuencia china/cirílica inválida. El juego ya limita nombres/usuarios.
+	return text
+end
+
 --- Clave estable para las restricciones de zona. Los miembros ya vinculados
 --- usan el ID persistente del personaje; los permisos nominales/offline usan
 --- una clave legacy que se migra al ID en cuanto el personaje se conecta.
@@ -142,6 +150,8 @@ end
 
 local CHARACTER_UUID_KEY = "GS_CharacterUUID"
 local characterUuidSequence = 0
+local identityUuidSeen = {}
+local permissionRosterLogSignatures = {}
 
 --- Solo usa un getter público si alguna build lo expone. Nunca intenta acceder
 --- al campo ni usa reflexión: B42 lanza una IllegalStateException fuera de
@@ -154,6 +164,21 @@ local function getPersistentSqlId(player)
 		if value and value >= 0 then return math.floor(value) end
 	end
 	return nil
+end
+
+local function identityDiagnosticFields(player)
+	local onlineId = ""
+	if player and player.getOnlineID then
+		local ok, value = pcall(function() return player:getOnlineID() end)
+		if ok and value ~= nil then onlineId = tostring(value) end
+	end
+	return " characterName=" .. permissionLogText(
+		GlobalStorageSiK.Permissions.getCharacterName(player), 128)
+		.. " username=" .. permissionLogText(getPlayerUsername(player), 128)
+		.. " steamId=" .. permissionLogText(getSteamIdForUsername(
+			getPlayerUsername(player), player), 64)
+		.. " sqlId=" .. tostring(getPersistentSqlId(player) or "")
+		.. " onlineId=" .. permissionLogText(onlineId, 32)
 end
 
 local function validCharacterUuid(value)
@@ -175,23 +200,52 @@ end
 --- genera el UUID; player modData lo persiste dentro del BLOB del personaje y
 --- transmitModData intenta reflejarlo al cliente. Una ranura sqlId puede ser
 --- reutilizada al crear otro personaje, por lo que nunca autoriza por sí sola.
-local function getOrCreateCharacterUuid(player)
+local function getOrCreateCharacterUuid(player, reason)
 	if not player or not player.getModData then return "" end
 	local okData, data = pcall(function() return player:getModData() end)
 	if not okData or not data then return "" end
 	local existing = tostring(data[CHARACTER_UUID_KEY] or "")
-	if validCharacterUuid(existing) then return existing end
+	if validCharacterUuid(existing) then
+		if not identityUuidSeen[existing] then
+			identityUuidSeen[existing] = true
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.info("Identity", "characterUuidReused",
+					"reason=" .. tostring(reason or "lookup")
+						.. " characterId=character:" .. existing
+						.. identityDiagnosticFields(player))
+			end
+		end
+		return existing
+	end
 	if not GlobalStorageSiK.isAuthoritative() then return "" end
 	local value = generateCharacterUuid()
 	data[CHARACTER_UUID_KEY] = value
+	identityUuidSeen[value] = true
 	if player.transmitModData then
 		pcall(function() player:transmitModData() end)
+	end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.info("Identity", "characterUuidGenerated",
+			"reason=" .. tostring(reason or "lookup_fallback")
+				.. " characterId=character:" .. value
+				.. identityDiagnosticFields(player))
 	end
 	return value
 end
 
 local function getPersistentCharacterToken(player)
-	return getOrCreateCharacterUuid(player)
+	return getOrCreateCharacterUuid(player, "identity_lookup_fallback")
+end
+
+--- Inicializa explícitamente la identidad al crear/cargar el personaje. El
+--- lookup conserva un fallback seguro porque OnCreatePlayer no se entrega en
+--- todos los contextos de SP/host, pero el log permite detectar esa ruta.
+---@param player IsoPlayer|nil
+---@param reason string|nil
+---@return string characterId
+function GlobalStorageSiK.Permissions.initializeCharacterIdentity(player, reason)
+	local token = getOrCreateCharacterUuid(player, reason or "on_create_player")
+	return token ~= "" and ("character:" .. token) or ""
 end
 
 --- ID legacy usado entre 1.3.71 y 1.3.76. SurvivorDesc.ID procede de un
@@ -295,7 +349,7 @@ local function logIdentityMigration(net, kind, oldId, newId, username)
 	GlobalStorageSiK.Log.info("Permissions", "identityMigration",
 		tostring(kind or "member")
 			.. " network=" .. tostring(net and net.id or "")
-			.. " account=" .. tostring(username or "")
+			.. " account=" .. permissionLogText(username, 64)
 			.. " old=" .. tostring(oldId or "")
 			.. " new=" .. tostring(newId or ""))
 end
@@ -979,9 +1033,13 @@ local function collectOnlineCharacterRecords(requestingPlayer)
 				seen[id] = true
 				result[#result + 1] = {
 					id = id,
+					characterId = id,
 					name = GlobalStorageSiK.Permissions.getCharacterName(player),
+					characterName = GlobalStorageSiK.Permissions.getCharacterName(player),
 					displayName = GlobalStorageSiK.Permissions.getPlayerDisplayName(player),
 					username = player.getUsername and player:getUsername() or "",
+					source = "online",
+					online = true,
 					sameFaction = requestingPlayer and requestingPlayer.getUsername and player.getUsername
 						and GlobalStorageSiK.Permissions.sameFaction(
 							requestingPlayer:getUsername(), player:getUsername()) or false,
@@ -990,7 +1048,10 @@ local function collectOnlineCharacterRecords(requestingPlayer)
 		end
 	end
 	table.sort(result, function(a, b)
-		return normalizeName(a.displayName or a.name) < normalizeName(b.displayName or b.name)
+		local aName = normalizeName(a.characterName or a.name)
+		local bName = normalizeName(b.characterName or b.name)
+		if aName ~= bName then return aName < bName end
+		return tostring(a.characterId or a.id or "") < tostring(b.characterId or b.id or "")
 	end)
 	return result
 end
@@ -1018,13 +1079,144 @@ local function collectFactionCharacterRecords(requestingPlayer, onlineCharacters
 		local online = onlineByUsername[normalizeName(username)]
 		result[#result + 1] = {
 			id = online and online.id or "",
+			characterId = online and (online.characterId or online.id) or "",
 			name = online and online.name or username,
+			characterName = online and (online.characterName or online.name) or username,
 			displayName = online and online.displayName or username,
 			username = username,
+			factionUsername = username,
+			source = "faction",
 			online = online ~= nil,
 		}
 	end
+	table.sort(result, function(a, b)
+		local aName = normalizeName(a.characterName or a.name)
+		local bName = normalizeName(b.characterName or b.name)
+		if aName ~= bName then return aName < bName end
+		return tostring(a.characterId or a.id or a.username or "")
+			< tostring(b.characterId or b.id or b.username or "")
+	end)
 	return result
+end
+
+--- Construye el único roster seleccionable que consume la UI. Facción tiene
+--- precedencia de procedencia, pero conserva el UUID y nombre exactos de la
+--- entrada online. Solo un UUID repetido se deduplica; homónimos con UUID
+--- distintos permanecen como candidatos independientes.
+---@param memberEntries table[]|nil
+---@param onlineCharacters table[]|nil
+---@param factionMembers table[]|nil
+---@return table[]
+function GlobalStorageSiK.Permissions.buildPickerCandidates(memberEntries, onlineCharacters, factionMembers)
+	local memberIds = {}
+	local legacyKeys = {}
+	for i = 1, #(memberEntries or {}) do
+		local member = memberEntries[i]
+		local id = tostring(member and (member.characterId or member.id) or "")
+		if id ~= "" then
+			memberIds[id] = true
+		else
+			local nameKey = normalizeName(member and (member.characterName or member.name))
+			local usernameKey = normalizeName(member and member.username)
+			if nameKey ~= "" then legacyKeys[nameKey] = true end
+			if usernameKey ~= "" then legacyKeys[usernameKey] = true end
+		end
+	end
+
+	local result = {}
+	local seenIds = {}
+	local seenOffline = {}
+	local function addCandidate(entry, source)
+		if not entry then return end
+		local id = tostring(entry.characterId or entry.id or "")
+		local username = displayText(entry.factionUsername or entry.username)
+		local characterName = displayText(entry.characterName or entry.name)
+		if characterName == "" then characterName = username end
+		if id ~= "" then
+			if memberIds[id] or seenIds[id] then return end
+			seenIds[id] = true
+		else
+			local offlineKey = normalizeName(username)
+			if offlineKey == "" then offlineKey = normalizeName(characterName) end
+			if offlineKey == "" or legacyKeys[offlineKey] or seenOffline[offlineKey] then return end
+			seenOffline[offlineKey] = true
+		end
+		result[#result + 1] = {
+			id = id,
+			characterId = id,
+			name = characterName,
+			characterName = characterName,
+			displayName = displayText(entry.displayName) ~= ""
+				and displayText(entry.displayName) or characterName,
+			username = username,
+			factionUsername = source == "faction" and username or "",
+			source = source,
+			online = entry.online == true or source == "online",
+		}
+	end
+
+	-- Facción primero: una coincidencia faction+online conserva su UUID online
+	-- y no vuelve a aparecer en la sección Servidor.
+	for i = 1, #(factionMembers or {}) do addCandidate(factionMembers[i], "faction") end
+	for i = 1, #(onlineCharacters or {}) do addCandidate(onlineCharacters[i], "online") end
+
+	table.sort(result, function(a, b)
+		local aName = normalizeName(a.characterName or a.name)
+		local bName = normalizeName(b.characterName or b.name)
+		if aName ~= bName then return aName < bName end
+		local aId = tostring(a.characterId or a.username or "")
+		local bId = tostring(b.characterId or b.username or "")
+		if aId ~= bId then return aId < bId end
+		return tostring(a.source or "") < tostring(b.source or "")
+	end)
+	return result
+end
+
+--- Comprueba el contrato que recibe la UI sin intentar reparar históricos.
+--- La limpieza/fusión de identidades permanece fuera de DEV1.
+---@param ownerCharacterId string|nil
+---@param memberEntries table[]|nil
+---@param pickerCandidates table[]|nil
+---@return boolean ok
+---@return string reason
+function GlobalStorageSiK.Permissions.validatePermissionProjection(
+	ownerCharacterId, memberEntries, pickerCandidates)
+	ownerCharacterId = tostring(ownerCharacterId or "")
+	local memberIds = {}
+	local ownerRows = 0
+	for i = 1, #(memberEntries or {}) do
+		local entry = memberEntries[i]
+		local id = tostring(entry and (entry.characterId or entry.id) or "")
+		if entry and entry.role == GlobalStorageSiK.Permissions.ROLE_OWNER then
+			ownerRows = ownerRows + 1
+			if ownerCharacterId ~= "" and id ~= ownerCharacterId then
+				return false, "owner_id_mismatch"
+			end
+		elseif ownerCharacterId ~= "" and id == ownerCharacterId then
+			return false, "owner_repeated_as_member"
+		end
+		if id ~= "" then
+			if memberIds[id] then return false, "duplicate_member_uuid" end
+			memberIds[id] = true
+		end
+	end
+	if ownerCharacterId ~= "" and ownerRows ~= 1 then
+		return false, "owner_row_count_" .. tostring(ownerRows)
+	end
+	if ownerCharacterId == "" and ownerRows > 1 then
+		return false, "owner_row_count_" .. tostring(ownerRows)
+	end
+	local candidateIds = {}
+	for i = 1, #(pickerCandidates or {}) do
+		local entry = pickerCandidates[i]
+		local id = tostring(entry and (entry.characterId or entry.id) or "")
+		if id ~= "" then
+			if memberIds[id] then return false, "candidate_is_member" end
+			if candidateIds[id] then return false, "duplicate_candidate_uuid" end
+			candidateIds[id] = true
+		end
+	end
+	return true, "ok"
 end
 
 --- Resuelve en el proceso autoritativo un ID seleccionado por el cliente.
@@ -1049,18 +1241,21 @@ end
 --- solo en characterPermissions[UUID]; allowedUsers/adminUsers quedan como
 --- cola offline y compatibilidad legacy, nunca como segunda fuente moderna.
 function GlobalStorageSiK.Permissions.addCharacter(networkId, player)
-	if not player then return false end
+	if not player then return false, false, "invalid_or_stale_identity" end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	local name = GlobalStorageSiK.Permissions.getCharacterName(player)
-	if characterId == "" or name == "" then return false end
+	if characterId == "" or name == "" then
+		return false, false, "invalid_or_stale_identity"
+	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	local net = registry.networks[networkId]
 	if net.ownerCharacterId == characterId or net.characterPermissions[characterId] then
-		return false
+		return true, false, "already_member"
 	end
-	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_MEMBER)
-	return true
+	local record = bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_MEMBER)
+	consumeLegacyMembership(net, record.name, record.username)
+	return true, true, "added"
 end
 
 function GlobalStorageSiK.Permissions.setCharacterRole(networkId, characterId, role)
@@ -1137,27 +1332,39 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	end
 	local memberEntries = {}
 	local seenNames = {}
+	local seenMemberIds = {}
 	if net.owner and net.owner ~= "" then
 		local ownerRecord = net.characterPermissions
 			and net.ownerCharacterId and net.characterPermissions[net.ownerCharacterId] or nil
 		memberEntries[#memberEntries + 1] = {
 			id = net.ownerCharacterId or "",
+			characterId = net.ownerCharacterId or "",
 			name = net.owner,
+			characterName = net.owner,
 			displayName = ownerRecord and ownerRecord.displayName or net.owner,
 			username = ownerRecord and ownerRecord.username or net.ownerAccount or "",
 			role = GlobalStorageSiK.Permissions.ROLE_OWNER,
+			source = "member",
 			deniedZoneIds = {},
 		}
+		if net.ownerCharacterId and net.ownerCharacterId ~= "" then
+			seenMemberIds[net.ownerCharacterId] = true
+		end
 		seenNames[normalizeName(net.owner)] = true
 	end
 	for id, record in pairs(net.characterPermissions or {}) do
-		if id ~= net.ownerCharacterId and record and record.name and record.name ~= "" then
+		if id ~= net.ownerCharacterId and not seenMemberIds[id]
+			and record and record.name and record.name ~= "" then
+			seenMemberIds[id] = true
 			memberEntries[#memberEntries + 1] = {
 				id = id,
+				characterId = id,
 				name = record.name,
+				characterName = record.name,
 				displayName = record.displayName or record.name,
 				username = record.username or "",
 				role = record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER,
+				source = "member",
 				deniedZoneIds = deniedZoneIds(id, record.name),
 			}
 			seenNames[normalizeName(record.name)] = true
@@ -1178,13 +1385,95 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 				legacyUsername = name
 			end
 			memberEntries[#memberEntries + 1] = {
-				id = "", name = name, displayName = name, username = legacyUsername,
+				id = "", characterId = "", name = name, characterName = name,
+				displayName = name, username = legacyUsername,
 				role = role, legacy = true,
+				source = "legacy",
 				deniedZoneIds = deniedZoneIds(nil, name),
 			}
 		end
 	end
+	table.sort(memberEntries, function(a, b)
+		local aOwner = a.role == GlobalStorageSiK.Permissions.ROLE_OWNER
+		local bOwner = b.role == GlobalStorageSiK.Permissions.ROLE_OWNER
+		if aOwner ~= bOwner then return aOwner end
+		local aName = normalizeName(a.characterName or a.name)
+		local bName = normalizeName(b.characterName or b.name)
+		if aName ~= bName then return aName < bName end
+		return tostring(a.characterId or a.id or a.username or "")
+			< tostring(b.characterId or b.id or b.username or "")
+	end)
 	local onlineCharacters = collectOnlineCharacterRecords(resolvedPlayer)
+	local factionMembers = collectFactionCharacterRecords(resolvedPlayer, onlineCharacters)
+	local pickerCandidates = GlobalStorageSiK.Permissions.buildPickerCandidates(
+		memberEntries, onlineCharacters, factionMembers)
+	local projectionOk, projectionReason = GlobalStorageSiK.Permissions.validatePermissionProjection(
+		net.ownerCharacterId, memberEntries, pickerCandidates)
+
+	-- Diagnóstico acotado: solo imprime cuando cambia el roster lógico. Una
+	-- cuenta/nombre compartidos por UUID distintos son una posible rotación,
+	-- nunca una deduplicación ni una migración automática.
+	local rosterParts = {}
+	local identityGroups = {}
+	for i = 1, #memberEntries do
+		local entry = memberEntries[i]
+		local id = tostring(entry.characterId or entry.id or "")
+		rosterParts[#rosterParts + 1] = "m:" .. id .. ":" .. tostring(entry.role or "")
+			.. ":" .. tostring(entry.username or "")
+			.. ":" .. tostring(entry.characterName or entry.name or "")
+		if id ~= "" then
+			local groupKey = normalizeName(entry.username) .. "\31"
+				.. normalizeName(entry.characterName or entry.name)
+			if groupKey ~= "\31" then
+				local group = identityGroups[groupKey]
+				if not group then group = {}; identityGroups[groupKey] = group end
+				group[#group + 1] = id
+			end
+		end
+	end
+	for i = 1, #pickerCandidates do
+		local entry = pickerCandidates[i]
+		rosterParts[#rosterParts + 1] = "p:" .. tostring(entry.characterId or "")
+			.. ":" .. tostring(entry.source or "")
+			.. ":" .. tostring(entry.username or "")
+			.. ":" .. tostring(entry.characterName or entry.name or "")
+			.. ":" .. tostring(entry.online == true)
+		local id = tostring(entry.characterId or "")
+		if id ~= "" then
+			local groupKey = normalizeName(entry.username) .. "\31"
+				.. normalizeName(entry.characterName or entry.name)
+			if groupKey ~= "\31" then
+				local group = identityGroups[groupKey]
+				if not group then group = {}; identityGroups[groupKey] = group end
+				local alreadySeen = false
+				for j = 1, #group do
+					if group[j] == id then alreadySeen = true; break end
+				end
+				if not alreadySeen then group[#group + 1] = id end
+			end
+		end
+	end
+	local rosterSignature = table.concat(rosterParts, "|")
+	if permissionRosterLogSignatures[networkId] ~= rosterSignature then
+		permissionRosterLogSignatures[networkId] = rosterSignature
+		GlobalStorageSiK.Log.info("Permissions", "permissionRoster",
+			"network=" .. tostring(networkId)
+				.. " members=" .. tostring(#memberEntries)
+				.. " online=" .. tostring(#onlineCharacters)
+				.. " faction=" .. tostring(#factionMembers)
+				.. " candidates=" .. tostring(#pickerCandidates)
+				.. " invariantsOk=" .. tostring(projectionOk)
+				.. " invariantReason=" .. tostring(projectionReason))
+		for groupKey, ids in pairs(identityGroups) do
+			if #ids > 1 then
+				table.sort(ids)
+				GlobalStorageSiK.Log.info("Identity", "possibleIdentityRotation",
+					"network=" .. tostring(networkId)
+						.. " identityKey=" .. permissionLogText(string.gsub(groupKey, "\31", "/"), 160)
+						.. " characterIds=" .. table.concat(ids, ","))
+			end
+		end
+	end
 	return {
 		owner = net.owner or "",
 		ownerCharacterId = net.ownerCharacterId or "",
@@ -1199,7 +1488,8 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 			and GlobalStorageSiK.Permissions.hasNetworkAdminRole(resolvedPlayer, networkId) or false,
 		memberEntries = memberEntries,
 		onlineCharacters = onlineCharacters,
-		factionMembers = collectFactionCharacterRecords(resolvedPlayer, onlineCharacters),
+		factionMembers = factionMembers,
+		pickerCandidates = pickerCandidates,
 	}
 end
 
@@ -1418,7 +1708,7 @@ end
 ---@return boolean
 function GlobalStorageSiK.Permissions.addFactionUsername(networkId, requestingPlayer, username)
 	if not GlobalStorageSiK.Permissions.isFactionUsername(requestingPlayer, username) then
-		return false
+		return false, false, "invalid_or_stale_identity"
 	end
 	local onlinePlayer = nil
 	if getPlayerFromUsername then
@@ -1428,7 +1718,10 @@ function GlobalStorageSiK.Permissions.addFactionUsername(networkId, requestingPl
 	if onlinePlayer then
 		return GlobalStorageSiK.Permissions.addCharacter(networkId, onlinePlayer)
 	end
-	return GlobalStorageSiK.Permissions.addUser(networkId, username)
+	if GlobalStorageSiK.Permissions.addUser(networkId, username) then
+		return true, true, "added_offline"
+	end
+	return true, false, "already_member"
 end
 
 --- Quita personaje permitido.
@@ -1501,10 +1794,11 @@ end
 ---@param player IsoPlayer
 ---@return boolean ok
 ---@return string message
+---@return boolean changed
 function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 	local faction = GlobalStorageSiK.Permissions.getPlayerFaction(player)
 	if not faction then
-		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermNoFaction")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermNoFaction"), false
 	end
 	local added = 0
 	local seen = {}
@@ -1520,7 +1814,8 @@ function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 			if ok then onlinePlayer = value end
 		end
 		if onlinePlayer then
-			if GlobalStorageSiK.Permissions.addCharacter(networkId, onlinePlayer) then
+			local ok, changed = GlobalStorageSiK.Permissions.addCharacter(networkId, onlinePlayer)
+			if ok and changed then
 				added = added + 1
 			end
 			-- Si ya era owner/miembro no degradarlo a una entrada nominal.
@@ -1549,7 +1844,8 @@ function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 					local uname = p:getUsername()
 					if GlobalStorageSiK.Permissions.sameFaction(uname, player:getUsername()) then
 					local charName = GlobalStorageSiK.Permissions.getCharacterName(p)
-					if charName ~= "" and GlobalStorageSiK.Permissions.addCharacter(networkId, p) then
+					local addOk, changed = GlobalStorageSiK.Permissions.addCharacter(networkId, p)
+					if charName ~= "" and addOk and changed then
 							added = added + 1
 						end
 					end
@@ -1559,9 +1855,9 @@ function GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 	end
 
 	if added == 0 then
-		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedNone")
+		return true, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedNone"), false
 	end
-	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedMsg", added)
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_FactionMembersAddedMsg", added), true
 end
 
 --- Cuenta miembros de respaldo (admins + usuarios normales) de una red, sin

@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requiere Modo depuración. Resume comandos cliente/servidor, secuencia y estado de sincronización. Los payloads completos permanecen en el bloque >>> DETALLE independiente.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Acceso a terminal",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Requiere Modo depuración activado. Cada comprobación de proximidad/acceso a un terminal (manifiesto, registro, evaluación de rango). Se dispara repetidamente mientras se intenta abrir un terminal - muy detallado.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identidad y permisos",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Requiere Modo depuración. Trazas acotadas del ciclo de UUID de personaje, unión de listas de facción/servidor, cambios idempotentes e invariantes de identidad. Los nombres solo diagnostican y nunca autorizan acceso.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Recetas y crafteo",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Requiere Modo depuración activado. Concesión retroactiva de recetas de manuales ya leídos, y crafteo gratuito. Poco volumen - útil cuando una receta no aparece en el menú de crafteo.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Inventario y transferencias",

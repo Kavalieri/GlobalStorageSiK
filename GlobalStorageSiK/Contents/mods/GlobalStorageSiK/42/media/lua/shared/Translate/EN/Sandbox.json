@@ -70,6 +70,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requires Debug mode. Summarizes client/server commands, sequence and synchronization state. Full payloads remain in the separate >>> DETAIL block.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Terminal access",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Requires Debug mode ON. Every proximity/access check against a terminal (manifest, registry, range evaluation). Fires repeatedly while trying to open a terminal - very verbose.",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identity & permissions",
+	"Sandbox_GlobalStorageSiK_DebugCatPermissions_tooltip": "Requires Debug mode. Bounded traces for character UUID lifecycle, faction/online roster merging, idempotent member changes and identity invariants. Names are diagnostic only and never authorize access.",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft": "   >> Recipes & crafting",
 	"Sandbox_GlobalStorageSiK_DebugCatCraft_tooltip": "Requires Debug mode ON. Retroactive recipe grants from manuals already read, and free-crafting overrides. Low volume - useful when a recipe won't show up in the crafting menu.",
 	"Sandbox_GlobalStorageSiK_DebugCatInventory": "   >> Inventory & transfers",

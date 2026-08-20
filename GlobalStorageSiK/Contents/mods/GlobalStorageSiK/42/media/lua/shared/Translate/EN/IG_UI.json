@@ -782,6 +782,7 @@
 	"IGUI_GS_NetworkNotFoundMsg": "Network not found",
 	"IGUI_GS_PermCharacterNameEmptyMsg": "Character name is empty",
 	"IGUI_GS_PermSelectionStale": "That player selection is no longer valid. Refresh the roster and choose the player again.",
+	"IGUI_GS_PermAlreadyMemberNoChange": "That character already had access; no changes were needed.",
 	"IGUI_GS_PermAlreadyOwnerMsg": "You are already the owner",
 	"IGUI_GS_PermOnlyOwnerTransferMsg": "Only the owner can transfer the network",
 	"IGUI_GS_PermOwnershipTransferredMsg": "Ownership transferred to {1}",

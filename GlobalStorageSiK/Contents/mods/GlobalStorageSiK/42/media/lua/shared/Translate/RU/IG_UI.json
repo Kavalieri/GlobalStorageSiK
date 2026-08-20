@@ -782,6 +782,7 @@
 	"IGUI_GS_NetworkNotFoundMsg": "Сеть не найдена",
 	"IGUI_GS_PermCharacterNameEmptyMsg": "Имя персонажа пусто",
 	"IGUI_GS_PermSelectionStale": "Выбранный игрок больше недоступен. Обновите список и выберите игрока снова.",
+	"IGUI_GS_PermAlreadyMemberNoChange": "У этого персонажа уже был доступ; изменения не требуются.",
 	"IGUI_GS_PermAlreadyOwnerMsg": "Вы уже владелец",
 	"IGUI_GS_PermOnlyOwnerTransferMsg": "Только владелец может передать сеть",
 	"IGUI_GS_PermOwnershipTransferredMsg": "Право собственности передано {1}",

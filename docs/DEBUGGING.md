@@ -23,7 +23,7 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 
 ## Core
 
-`GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Craft, Inventory, Tooltip, UI y Router. `DebugModeUI` controla por separado volcados de árbol y solapes visuales. Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
+`GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, UI y Router. `DebugModeUI` controla por separado volcados de árbol y solapes visuales. Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
 
 ### Glosario de opciones del Core
 
@@ -35,6 +35,7 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 | `DebugCatNetwork` | `>> Trazas de red` / `>> Network traces` | Resumen de comandos y sincronización. |
 | `DebugDetailNetwork` | `>>> DETALLE: payloads completos de red` / `>>> DETAIL: full network payloads` | Payloads completos; alto volumen. |
 | `DebugCatTerminalAccess` | `>> Acceso a terminal` / `>> Terminal access` | Manifest, registro, permisos, alcance y apertura. |
+| `DebugCatPermissions` | `>> Identidad y permisos` / `>> Identity & permissions` | UUID de personaje, unión acotada de rosters, altas idempotentes y posibles rotaciones de identidad. |
 | `DebugCatCraft` | `>> Recetas y crafteo` / `>> Recipes & crafting` | Resumen de recetas y préstamos compartidos. |
 | `DebugDetailCraft` | `>>> DETALLE: recetas y préstamos de red` / `>>> DETAIL: recipes and network loans` | Probes y decisiones individuales; alto volumen. |
 | `DebugCatInventory` | `>> Inventario y transferencias` / `>> Inventory & transfers` | Depósitos, retiradas, snapshots y trabajos masivos resumidos. |
@@ -52,11 +53,23 @@ Los reescaneos incrementales de zonas emiten una sola línea `ZoneScanJob comple
 [12.3s][SRV] [GlobalStorageSiK:INFO:ZoneScanJob] complete network=... durationMs=42 zones=2 nodes=18 instances=530 distinctTypes=47 snapshotRows=82 squares=225 loadedSquares=225 added=1 updated=17 offline=0 cookingExcluded=3 removedIneligible=1 limitHit=false
 ```
 
-La migración de identidades MP antiguas pertenece a `Acceso a terminal / Terminal access` y emite una sola línea por vínculo reparado. El campo `account` procede del `IsoPlayer` autoritativo; los IDs se tratan como opacos y no deben editarse a mano:
+La identidad y sus migraciones pertenecen a `Identidad y permisos / Identity & permissions`. La inicialización, un cambio lógico del roster y cada vínculo reparado emiten líneas acotadas; nunca una línea por tick. El campo `account` procede del `IsoPlayer` autoritativo; los IDs se tratan como opacos y no deben editarse a mano:
 
 ```text
 [12.3s][SRV] [GlobalStorageSiK:INFO:Permissions] identityMigration | owner network=... account=KavaAccount old=character:7 new=character:gsc_...
+[12.4s][SRV] [GlobalStorageSiK:INFO:Permissions] permissionRoster | network=... members=3 online=7 faction=2 candidates=4
+[12.5s][SRV] [GlobalStorageSiK:INFO:Permissions] addPermissionUser | source=online_character ... ok=true changed=false reason=already_member
 ```
+
+`possibleIdentityRotation` significa únicamente que una cuenta/nombre aparece con UUID distintos. Puede representar dos personajes legítimos de la misma cuenta: se registra para revisión, pero jamás fusiona permisos, elimina filas ni transfiere al propietario.
+
+### Prueba DEV: identidades y permisos
+
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode`, `>> Identidad y permisos` / `>> Identity & permissions` y, en dedicado, `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`. No actives ningún sublog `DETALLE / DETAIL`.
+
+Comprueba en dedicado el propietario, un administrador y varios miembros con nombres latinos, chinos, cirílicos y homónimos. La fila visible conserva el nombre exacto del personaje, mientras `characterId` permanece opaco y único. Un miembro de facción conectado aparece una sola vez bajo Facción y conserva su UUID online; uno desconectado mantiene `factionUsername`. Los homónimos con UUID diferentes permanecen y muestran sufijo `[xxxxxx]`. Tras añadir, el UUID desaparece del selector y aparece una sola vez en miembros. Dos clics o dos administradores añadiendo el mismo UUID deben producir una sola mutación; la segunda respuesta será `ok=true changed=false reason=already_member`. Una selección que se desconecta antes del clic debe fallar con `invalid_or_stale_identity`. Conserva `console.txt` del cliente y dedicado.
+
+Repite la presentación y las operaciones esenciales cambiando solo el idioma del cliente entre español, inglés, chino y ruso; añade cualquier otro idioma instalado como pasada de humo. Los UUID, roles, número de candidatos y resultados `ok/changed/reason` deben ser idénticos: únicamente cambia el texto localizado. Reinicia el cliente después de cada cambio de idioma y no reutilices capturas de una sesión anterior.
 
 Si otro mod sustituye `ISToolTipInv.render` después de GS, el vigilante restaura el wrapper exterior y, con `DebugCatTooltip`, deja una única línea resumida:
 

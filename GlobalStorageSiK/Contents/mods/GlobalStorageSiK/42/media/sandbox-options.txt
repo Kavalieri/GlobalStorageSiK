@@ -192,6 +192,14 @@ option GlobalStorageSiK.DebugCatTerminalAccess
 	translation = GlobalStorageSiK_DebugCatTerminalAccess,
 }
 
+option GlobalStorageSiK.DebugCatPermissions
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatPermissions,
+}
+
 option GlobalStorageSiK.DebugCatCraft
 {
 	type = boolean,
