@@ -820,7 +820,7 @@
 	"IGUI_GS_PermRoleAdmin": "管理员",
 	"IGUI_GS_PermCtxMakeAdmin": "提升为管理员：{1}",
 	"IGUI_GS_PermCtxMakeMember": "降级为成员：{1}",
-	"IGUI_GS_PermRoleMember": "角色",
+	"IGUI_GS_PermRoleMember": "成员",
 	"IGUI_GS_PermRoleFaction": "阵营",
 	"IGUI_GS_PermCtxTransferOwnership": "将所有权转让给 {1}",
 	"IGUI_GS_PermCtxTransferOwnershipRevoke": "转让给 {1}（撤销原所有者权限）",

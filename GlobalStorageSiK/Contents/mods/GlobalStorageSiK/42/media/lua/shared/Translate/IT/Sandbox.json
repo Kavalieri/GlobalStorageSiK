@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Finestra terminale (apertura)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Richiede Modalita debug ON. Eventi di apertura/riutilizzo della finestra terminale e denominazione dei nodi. Diverso da \"UI: click e widget\" sopra (quella traccia click grezzi/layout dei widget; questa traccia la logica di apertura della nostra finestra).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Ricerca",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Richiede la modalità debug. Riassume la selezione della destinazione per depositi e Auto Sort. Le decisioni per nodo restano nel blocco >>> DETTAGLIO separato.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Trasferimento oggetti remoto",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permette di inserire e prelevare oggetti dalla rete tramite l'interfaccia del terminale senza camminare fisicamente fino al contenitore. Disattiva per un'esperienza piu realistica.",

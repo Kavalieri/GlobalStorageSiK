@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Fenêtre terminal (ouverture)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Nécessite le mode débogage ACTIVÉ. Événements d'ouverture ou de réutilisation de la fenêtre terminal et nommage des nœuds. Différent de 'Interface : clics et éléments' ci dessus (celle ci trace les clics et la mise en page bruts ; celle ci trace la logique d'ouverture de notre propre fenêtre).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Routeur",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Recherche",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Nécessite le mode débogage. Résume la sélection de destination pour les dépôts et Auto Sort. Les décisions par nœud restent dans le bloc >>> DÉTAIL séparé.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transfert d'objets à distance",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permet d'insérer et de retirer des objets du réseau via l'interface du terminal sans marcher physiquement jusqu'au conteneur. Désactivez pour une expérience plus réaliste.",

@@ -3552,6 +3552,23 @@ if Events and Events.OnCreatePlayer then
 		if not player or not GlobalStorageSiK.isAuthoritative() then
 			return
 		end
+		-- DIAGNOSTICO DIRIGIDO (2026-08-19, feedback comunidad china: entrada
+		-- de miembro duplicada en CADA reinicio del servidor, incluso para si
+		-- mismo, y nuevos miembros sin permiso real) - traza SIEMPRE visible
+		-- (no gateada por Modo depuracion, a proposito: el reinicio en si es
+		-- el evento que hay que capturar, no se puede pedir activar debug de
+		-- antemano cada vez) del UUID que YA tenia este personaje en su
+		-- modData ANTES de que initializeCharacterIdentity toque nada -
+		-- confirma o descarta de un vistazo si el problema es que el UUID
+		-- guardado no sobrevive entre reinicios (leeria vacio aqui pese a
+		-- que el personaje ya tenia uno asignado en una sesion anterior).
+		if GlobalStorageSiK.Log and player.getModData then
+			local okPre, preData = pcall(function() return player:getModData() end)
+			local preUuid = okPre and preData
+				and tostring(preData[GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY] or "") or "<sin_modData>"
+			GlobalStorageSiK.Log.warn("Identity", "onCreatePlayer preExistingUuid=" .. preUuid
+				.. " username=" .. tostring(player.getUsername and player:getUsername() or "?"))
+		end
 		GlobalStorageSiK.Permissions.initializeCharacterIdentity(player, "on_create_player")
 		-- Un personaje que acaba de entrar nunca hereda la suscripcion visual
 		-- que pudiera quedar de una conexion anterior interrumpida.

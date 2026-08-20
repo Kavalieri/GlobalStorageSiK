@@ -149,6 +149,10 @@ local function getSteamIdForUsername(username, player)
 end
 
 local CHARACTER_UUID_KEY = "GS_CharacterUUID"
+-- Expuesta para diagnostico externo puntual (GS_Server.lua, OnCreatePlayer) -
+-- sin esto, la unica forma de leer el UUID crudo desde otro fichero seria
+-- duplicar el literal, con riesgo real de que diverjan si esta clave cambia.
+GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY = CHARACTER_UUID_KEY
 local characterUuidSequence = 0
 local identityUuidSeen = {}
 local permissionRosterLogSignatures = {}
@@ -201,6 +205,17 @@ end
 --- transmitModData intenta reflejarlo al cliente. Una ranura sqlId puede ser
 --- reutilizada al crear otro personaje, por lo que nunca autoriza por sí sola.
 local function getOrCreateCharacterUuid(player, reason)
+	-- DIAGNOSTICO DIRIGIDO (2026-08-20): traza SIEMPRE visible de CADA
+	-- llamada a esta funcion, antes de cualquier logica - las trazas
+	-- characterUuidReused/Generated de mas abajo NO aparecieron ni una vez
+	-- en un log real de servidor donde el admin claramente se conecto y
+	-- abrio el terminal con exito (accessCheck ok=true), lo que sugiere que
+	-- esta funcion no se esta llamando en absoluto en ese flujo, no que el
+	-- UUID se regenere. Esta linea confirma o descarta eso de un vistazo.
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.warn("Identity", "getOrCreateCharacterUuid CALLED reason=" .. tostring(reason or "?")
+			.. " hasPlayer=" .. tostring(player ~= nil) .. " hasGetModData=" .. tostring(player and player.getModData ~= nil))
+	end
 	if not player or not player.getModData then return "" end
 	local okData, data = pcall(function() return player:getModData() end)
 	if not okData or not data then return "" end
@@ -228,6 +243,27 @@ local function getOrCreateCharacterUuid(player, reason)
 		GlobalStorageSiK.Log.info("Identity", "characterUuidGenerated",
 			"reason=" .. tostring(reason or "lookup_fallback")
 				.. " characterId=character:" .. value
+				.. identityDiagnosticFields(player))
+	end
+	-- DIAGNOSTICO DIRIGIDO (2026-08-19, feedback comunidad china: "cada
+	-- reinicio del servidor me duplica la entrada de miembro, incluso a mi
+	-- mismo, y los nuevos no reciben permiso") - sospecha concreta: la
+	-- escritura de arriba (data[CHARACTER_UUID_KEY] = value) NO esta
+	-- sobreviviendo hasta el siguiente arranque del proceso, asi que cada
+	-- reinicio regenera un UUID nuevo para el MISMO personaje en vez de
+	-- reutilizar el guardado. Relectura inmediata de getModData() (una
+	-- llamada nueva, no la tabla "data" ya en mano, para descartar que sea
+	-- solo un problema de referencia local) - si no coincide, error SIEMPRE
+	-- visible (no gateado por Modo depuracion) para poder confirmarlo en el
+	-- primer log que mande el usuario tras el proximo reinicio, sin tener
+	-- que pedirle que active nada de antemano. No cambia ningun
+	-- comportamiento, solo diagnostica.
+	local okVerify, verifyData = pcall(function() return player:getModData() end)
+	local verified = okVerify and verifyData and tostring(verifyData[CHARACTER_UUID_KEY] or "") or ""
+	if verified ~= value and GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.error("Identity", "characterUuidWriteMismatch",
+			"expected=" .. value .. " readback=" .. tostring(verified)
+				.. " reason=" .. tostring(reason or "lookup_fallback")
 				.. identityDiagnosticFields(player))
 	end
 	return value
@@ -1134,6 +1170,22 @@ function GlobalStorageSiK.Permissions.buildPickerCandidates(memberEntries, onlin
 		if characterName == "" then characterName = username end
 		if id ~= "" then
 			if memberIds[id] or seenIds[id] then return end
+			-- BUG REAL (reportado 2026-08-18, capturado en screenshot: "Omar
+			-- Icon" seguia en el desplegable "Añadir acceso" pese a ya ser
+			-- miembro): un permiso legacy (concedido por NOMBRE, antes del
+			-- cambio a UUID) solo puebla legacyKeys, nunca memberIds - y esta
+			-- rama (candidato CON UUID real, el caso normal de un jugador
+			-- online) solo miraba memberIds, sin cruzar nunca contra
+			-- legacyKeys. Resultado: cualquier miembro legado seguia
+			-- ofreciendose para "añadir" en cuanto aparecia online con su
+			-- UUID real, aunque ya tuviera acceso via el nombre. Se cruza
+			-- tambien por nombre/usuario normalizado, igual que ya hacia la
+			-- rama "sin UUID" de abajo para candidatos offline.
+			local nameKey = normalizeName(characterName)
+			local usernameKey = normalizeName(username)
+			if (nameKey ~= "" and legacyKeys[nameKey]) or (usernameKey ~= "" and legacyKeys[usernameKey]) then
+				return
+			end
 			seenIds[id] = true
 		else
 			local offlineKey = normalizeName(username)

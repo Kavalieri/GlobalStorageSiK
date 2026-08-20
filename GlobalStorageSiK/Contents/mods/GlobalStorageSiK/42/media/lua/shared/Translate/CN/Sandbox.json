@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> 终端窗口（打开）",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "需要先开启调试模式。记录终端窗口的打开/复用事件以及节点命名。与上方“界面：点击与控件”不同（那项追踪原始点击/控件布局；此项追踪我们自己窗口的打开逻辑）。",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> 路由器",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> 搜索",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "需要调试模式。汇总存入与 Auto Sort 的目标选择。逐节点判断仅在独立的 >>> 详细模块中输出。",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "远程物品转移",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "允许通过终端界面存取网络中的物品，而无需实际走到容器旁。关闭以获得更真实的体验。",

@@ -82,6 +82,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Requiere Modo depuración activado. Eventos de apertura/reutilización de la ventana del terminal y nombrado de nodos. Distinto de \"Interfaz: clics y widgets\" de más arriba (esa traza clics/capas en bruto; esta traza la lógica propia de nuestra ventana).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requiere Modo depuración. Resume la selección de destino para depósitos y Auto Sort. Las decisiones por nodo permanecen en el bloque >>> DETALLE independiente.",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Búsqueda",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch_tooltip": "Requiere Modo depuración activado. Traza cada cambio en el cuadro de búsqueda de la pestaña Items: longitud en bytes y en caracteres UTF-8 reales, y el texto recibido. Pensado para diagnosticar búsqueda en idiomas no-ASCII (chino, japonés, coreano...).",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transferencia remota de ítems",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permite insertar y extraer ítems desde la UI del terminal sin que el jugador tenga que caminar hasta el contenedor físico. Desactivar para una experiencia más realista.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Auto-ordenar al depositar",

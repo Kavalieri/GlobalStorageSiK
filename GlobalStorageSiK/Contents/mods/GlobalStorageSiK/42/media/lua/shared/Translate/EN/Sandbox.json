@@ -82,6 +82,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Requires Debug mode ON. Terminal window open/reuse events and node naming. Different from \"UI: clicks & widgets\" above (that one traces raw clicks/widget layout; this one traces our own window's opening logic).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requires Debug mode. Summarizes destination selection for deposits and Auto Sort. Per-node decisions remain in the separate >>> DETAIL block.",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Search",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch_tooltip": "Requires Debug mode ON. Traces every change in the Items tab search box: byte length vs real UTF-8 character length, and the received text. Meant for diagnosing search in non-ASCII languages (Chinese, Japanese, Korean...).",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Remote item transfer",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Allows inserting and withdrawing items from the network via the terminal UI without physically walking to the container. Turn OFF for a more realistic experience.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Auto-sort on deposit",

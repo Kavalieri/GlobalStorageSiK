@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Janela do terminal (abertura)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Requer Modo de depuração LIGADO. Eventos de abertura/reuso da janela do terminal e nomeação de nós. Diferente de \"Interface: cliques e elementos\" acima (essa rastreia cliques e layout brutos; essa rastreia a lógica de abertura da nossa própria janela).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Roteador",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Busca",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requer modo de depuração. Resume a seleção de destino para depósitos e Auto Sort. Decisões por nó ficam no bloco >>> DETALHE separado.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transferência remota de itens",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permite inserir e retirar itens da rede pela interface do terminal sem andar fisicamente até o contêiner. Desligue para uma experiência mais realista.",

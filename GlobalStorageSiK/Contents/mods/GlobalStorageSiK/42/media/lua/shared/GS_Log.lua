@@ -65,6 +65,11 @@ local AREA_CATEGORY = {
 	Router = "Router",
 	NodeNaming = "UI",
 	TerminalUI = "UI",
+	-- Categoria propia (pedido explicito 2026-08-18): antes SearchDiag no
+	-- tenia entrada aqui, asi que solo dependia del interruptor maestro
+	-- Modo depuracion y no se podia apagar por separado sin tocar tambien
+	-- cualquier otra traza activa en ese momento.
+	SearchDiag = "Search",
 }
 
 --- Escribe línea en consola del juego.

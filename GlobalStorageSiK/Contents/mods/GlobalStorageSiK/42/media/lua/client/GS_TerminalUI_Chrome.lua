@@ -1134,6 +1134,36 @@ end
 --- Enlaza Enter y búsqueda en tiempo real en el buscador de ítems.
 ---@param panel GS_TerminalUI
 ---@param searchEntry ISTextEntryBox
+--- Cuenta caracteres UTF-8 reales (no bytes) de un string - cada caracter
+--- chino/CJK ocupa 3 bytes en UTF-8, asi que usar #text (longitud en BYTES)
+--- como si fueran caracteres es incorrecto para cualquier idioma no-ASCII.
+--- Solo cuenta bytes de inicio de caracter (que no son continuacion 0x80-0xBF),
+--- sin necesidad de trocear el string entero como utf8Chars() mas abajo.
+--- Devuelve tambien "wide" (true si el texto contiene algun caracter de 3+
+--- bytes) para poder relajar el umbral minimo en CJK (ver bindSearchEntry) -
+--- los acentos latinos (a/e/i/o/u con tilde, n con virgulilla, etc.) son
+--- SIEMPRE de 2 bytes en UTF-8 (rango Latin-1 Supplement), mientras que
+--- chino/japones/coreano son SIEMPRE de 3 bytes - basta mirar el byte lider
+--- (>=0xE0) para distinguir "occidental con acentos" de "CJK" sin necesitar
+--- detectar el idioma de la UI ni mantener una lista de idiomas.
+---@param str string
+---@return number length
+---@return boolean wide
+local function utf8Length(str)
+	local count = 0
+	local wide = false
+	for i = 1, #str do
+		local b = string.byte(str, i)
+		if b < 0x80 or b >= 0xC0 then
+			count = count + 1
+		end
+		if b >= 0xE0 then
+			wide = true
+		end
+	end
+	return count, wide
+end
+
 function GlobalStorageSiK.TerminalChrome.bindSearchEntry(panel, searchEntry)
 	if not searchEntry then
 		return
@@ -1142,6 +1172,12 @@ function GlobalStorageSiK.TerminalChrome.bindSearchEntry(panel, searchEntry)
 		searchEntry:setPlaceholderText(T("IGUI_GS_SearchPlaceholder"))
 	end
 
+	-- Se mantiene en 3, pero medido en CARACTERES UTF-8 REALES (utf8Length),
+	-- no en bytes como antes - ese es el bug real que se corrige aqui, no el
+	-- numero en si. Con el bug (#text = bytes), un solo caracter chino (3
+	-- bytes) ya colaba el umbral de "3" por accidente; con el fix, "3" es
+	-- ahora 3 caracteres de verdad en CUALQUIER alfabeto (chino incluido),
+	-- igual de estricto para todos los idiomas en vez de una coincidencia.
 	local SEARCH_MIN_CHARS = 3
 	local DEBOUNCE_MS = 180
 	local pendingTick = nil
@@ -1171,7 +1207,34 @@ function GlobalStorageSiK.TerminalChrome.bindSearchEntry(panel, searchEntry)
 	searchEntry.onTextChange = function()
 		local text = searchEntry:getText() or ""
 		cancelPending()
-		if text == "" or #text < SEARCH_MIN_CHARS then
+		local charCount, wide = utf8Length(text)
+		-- FASE DEV busqueda en idiomas no-ASCII (2026-08-17, feedback comunidad
+		-- china: "buscar en chino no da ninguna reaccion"): traza gateada por
+		-- Modo Debug (sandbox) del texto recibido crudo en bytes y en
+		-- caracteres UTF-8 reales - unica forma de saber, sin poder probar
+		-- nosotros mismos con IME chino, si el cuadro de texto SIQUIERA recibe
+		-- los caracteres compuestos por el IME antes de sospechar del resto de
+		-- la cadena de busqueda (filtro/lower/etc, ya revisados y blindados).
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.debug("SearchDiag", "onTextChange bytes=" .. tostring(#text)
+				.. " chars=" .. tostring(charCount) .. " wide=" .. tostring(wide) .. " text=" .. tostring(text))
+		end
+		-- CJK (chino/japones/coreano, pedido explicito): palabras de 1-2
+		-- caracteres son la norma, un umbral de 3 caracteres reales sigue
+		-- siendo demasiado exigente pese al fix de bytes->caracteres de
+		-- arriba. "wide" (algun caracter de 3+ bytes UTF-8) distingue CJK de
+		-- acentos latinos (siempre 2 bytes) sin depender del idioma de la UI.
+		local minChars = wide and 2 or SEARCH_MIN_CHARS
+		-- Compensacion empirica de un desfase de una pulsacion (reportado
+		-- 2026-08-18: "empieza a buscar en el 4º caracter, no en el 3º" -
+		-- osea, con minChars=3 la busqueda no arrancaba hasta charCount=4).
+		-- Sin poder probarlo en vivo no se puede confirmar la causa exacta
+		-- dentro del motor (sospecha: onTextChange se dispara con el texto
+		-- DE ANTES de aplicar la pulsacion que lo disparo, no con el ya
+		-- actualizado), pero el efecto observado es reproducible y
+		-- consistente - se compensa aqui restando 1 al umbral efectivo en
+		-- vez de dejar el gate a ciegas del texto que reporte el motor.
+		if text == "" or charCount < minChars - 1 then
 			runSearch(false)
 			return
 		end

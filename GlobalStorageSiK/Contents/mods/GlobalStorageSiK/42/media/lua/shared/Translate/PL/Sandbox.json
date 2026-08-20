@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Okno terminala (otwieranie)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Wymaga trybu debugowania WŁ. Zdarzenia otwierania/ponownego użycia okna terminala i nazywania węzłów. Inne niż 'Interfejs: kliknięcia i elementy' powyżej (to śledzi surowe kliknięcia i układ elementów; to śledzi logikę otwierania naszego własnego okna).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Wyszukiwanie",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Wymaga trybu debug. Podsumowuje wybór celu dla depozytu i Auto Sort. Decyzje dla każdego węzła pozostają w osobnym bloku >>> SZCZEGÓŁY.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Zdalny transfer przedmiotów",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Pozwala wkładać i wyjmować przedmioty z sieci przez interfejs terminala bez fizycznego dochodzenia do pojemnika. Wyłącz dla bardziej realistycznego doświadczenia.",

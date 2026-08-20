@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Terminalfenster (Öffnen)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Erfordert Debug Modus AN. Ereignisse beim Öffnen oder Wiederverwenden des Terminalfensters und Knotenbenennung. Anders als 'Oberfläche: Klicks und Elemente' oben (das verfolgt rohe Klicks und das Elementlayout; dies verfolgt die Öffnungslogik unseres eigenen Fensters).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Suche",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Benötigt Debug-Modus. Fasst die Zielauswahl für Einlagerung und Auto Sort zusammen. Entscheidungen je Knoten bleiben im separaten >>> DETAIL-Block.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Fernübertragung von Gegenständen",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Erlaubt das Einlagern und Entnehmen von Gegenständen im Netzwerk über die Terminaloberfläche, ohne physisch zum Behälter zu gehen. Für ein realistischeres Erlebnis AUS schalten.",

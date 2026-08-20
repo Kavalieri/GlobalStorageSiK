@@ -669,11 +669,6 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		self:drawText(T("IGUI_GS_PermColMemberName"), COL_NAME_X, 2,
 			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		local actionsLabel = T("IGUI_GS_PermColActions")
-		local tw = getTextManager():MeasureStringX(UIFont.Small, actionsLabel)
-		local ax = math.max(COL_NAME_X + 40, self.width - 2 - tw)
-		self:drawText(actionsLabel, ax, 2,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 	end
 	ui.permTableHost:addChild(ui.permTableHeader)
 

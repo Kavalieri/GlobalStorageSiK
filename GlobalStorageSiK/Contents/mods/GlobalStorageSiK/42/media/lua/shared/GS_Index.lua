@@ -273,13 +273,14 @@ function GlobalStorageSiK.Index.filterRows(rows, query)
 	if not query or query == "" then
 		return rows
 	end
-	local q = string.lower(query)
+	local asciiLower = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.asciiLower or string.lower
+	local q = asciiLower(query)
 	local filtered = {}
 	for i = 1, #rows do
 		local row = rows[i]
-		local name = string.lower(row.displayName or "")
-		local cat = string.lower(row.category or "")
-		local typ = string.lower(row.fullType or "")
+		local name = asciiLower(row.displayName or "")
+		local cat = asciiLower(row.category or "")
+		local typ = asciiLower(row.fullType or "")
 		if string.find(name, q, 1, true) or string.find(cat, q, 1, true) or string.find(typ, q, 1, true) then
 			table.insert(filtered, row)
 		end

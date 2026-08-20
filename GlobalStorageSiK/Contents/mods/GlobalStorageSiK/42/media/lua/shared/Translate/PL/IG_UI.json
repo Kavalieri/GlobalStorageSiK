@@ -820,7 +820,7 @@
 	"IGUI_GS_PermRoleAdmin": "Admin",
 	"IGUI_GS_PermCtxMakeAdmin": "Awansuj na Admina: {1}",
 	"IGUI_GS_PermCtxMakeMember": "Degraduj do Członka: {1}",
-	"IGUI_GS_PermRoleMember": "Postać",
+	"IGUI_GS_PermRoleMember": "Członek",
 	"IGUI_GS_PermRoleFaction": "Frakcja",
 	"IGUI_GS_PermCtxTransferOwnership": "Przenieś własność na {1}",
 	"IGUI_GS_PermCtxTransferOwnershipRevoke": "Przenieś na {1} (odwołaj byłego właściciela)",

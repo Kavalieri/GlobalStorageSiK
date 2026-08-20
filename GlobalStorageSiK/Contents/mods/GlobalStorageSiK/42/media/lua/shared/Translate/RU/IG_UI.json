@@ -820,7 +820,7 @@
 	"IGUI_GS_PermRoleAdmin": "Админ",
 	"IGUI_GS_PermCtxMakeAdmin": "Повысить до Админа: {1}",
 	"IGUI_GS_PermCtxMakeMember": "Понизить до Участника: {1}",
-	"IGUI_GS_PermRoleMember": "Персонаж",
+	"IGUI_GS_PermRoleMember": "Участник",
 	"IGUI_GS_PermRoleFaction": "Фракция",
 	"IGUI_GS_PermCtxTransferOwnership": "Передать право собственности {1}",
 	"IGUI_GS_PermCtxTransferOwnershipRevoke": "Передать {1} (отозвать у прежнего владельца)",

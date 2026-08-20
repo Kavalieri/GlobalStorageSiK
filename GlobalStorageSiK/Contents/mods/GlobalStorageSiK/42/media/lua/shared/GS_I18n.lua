@@ -7,6 +7,52 @@
 
 GlobalStorageSiK.I18n = GlobalStorageSiK.I18n or {}
 
+--- Vocales/consonantes acentuadas latinas mas comunes (ES/FR/DE/PT/IT) ->
+--- su base ASCII. Pedido explicito (2026-08-17): la busqueda debe ser "por
+--- mejor aproximacion", sin distinguir mayus/minus NI tildes/dieresis/cedilla
+--- - un jugador que escribe "pocion" debe encontrar "Poción" igual. Cada
+--- clave es un caracter UTF-8 literal (2 bytes, rango Latin-1 Supplement) -
+--- los patrones de Lua tratan estos bytes como literales normales (ninguno es
+--- caracter magico de patron), no hace falta escapar nada.
+local ACCENT_MAP = {
+	["á"] = "a", ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["ã"] = "a",
+	["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e",
+	["í"] = "i", ["ì"] = "i", ["î"] = "i", ["ï"] = "i",
+	["ó"] = "o", ["ò"] = "o", ["ô"] = "o", ["ö"] = "o", ["õ"] = "o",
+	["ú"] = "u", ["ù"] = "u", ["û"] = "u", ["ü"] = "u",
+	["ñ"] = "n", ["ç"] = "c", ["ý"] = "y",
+	["Á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a", ["Ã"] = "a",
+	["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
+	["Í"] = "i", ["Ì"] = "i", ["Î"] = "i", ["Ï"] = "i",
+	["Ó"] = "o", ["Ò"] = "o", ["Ô"] = "o", ["Ö"] = "o", ["Õ"] = "o",
+	["Ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
+	["Ñ"] = "n", ["Ç"] = "c", ["Ý"] = "y",
+}
+
+--- Normaliza texto de busqueda para comparacion "por mejor aproximacion":
+--- minusculas ASCII + tildes/dieresis/cedilla latinas plegadas a su base,
+--- CUALQUIER otro byte (chino, cirilico, etc.) intacto. Sustituye a
+--- string.lower estandar, que delega en la tabla tolower() de la libc del
+--- proceso - locale-dependiente byte a byte, sin garantia de que un byte
+--- >=0x80 de una secuencia UTF-8 salga intacto en todos los entornos
+--- (servidor dedicado con locale distinto al cliente, por ejemplo). Fase dev
+--- busqueda no-ASCII (2026-08-17, feedback comunidad china: busqueda en
+--- chino sin resultados) - blindaje preventivo, coste minimo, elimina esta
+--- via de corrupcion en vez de confiar en que el comportamiento actual ya
+--- fuera seguro.
+---@param s string
+---@return string
+function GlobalStorageSiK.I18n.asciiLower(s)
+	if not s or s == "" then
+		return s or ""
+	end
+	s = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
+	for accented, base in pairs(ACCENT_MAP) do
+		s = s:gsub(accented, base)
+	end
+	return s
+end
+
 GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_OpenTerminal = "Open Global Storage",
 	IGUI_GS_TerminalTitle = "Global Storage SiK",
@@ -936,7 +982,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		if not text or text == "" then
 			return
 		end
-		local key = string.lower(text)
+		local key = GlobalStorageSiK.I18n.asciiLower(text)
 		if seen[key] then
 			return
 		end
@@ -964,7 +1010,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		addPart(shortName)
 	end
 
-	return string.lower(table.concat(parts, " "))
+	return GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
 end
 
 --- Filtra filas de ítems por consulta (cliente: nombres localizados + inglés).
@@ -975,7 +1021,7 @@ function GlobalStorageSiK.I18n.filterItemRows(rows, query)
 	if not query or query == "" then
 		return rows
 	end
-	local q = string.lower(query)
+	local q = GlobalStorageSiK.I18n.asciiLower(query)
 	local filtered = {}
 	for i = 1, #rows do
 		local row = rows[i]

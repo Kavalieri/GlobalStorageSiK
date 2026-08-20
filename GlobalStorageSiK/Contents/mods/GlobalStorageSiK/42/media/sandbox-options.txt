@@ -256,6 +256,14 @@ option GlobalStorageSiK.DebugCatRouter
 	translation = GlobalStorageSiK_DebugCatRouter,
 }
 
+option GlobalStorageSiK.DebugCatSearch
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSearch,
+}
+
 option GlobalStorageSiK.DebugDetailRouter
 {
 	type = boolean,

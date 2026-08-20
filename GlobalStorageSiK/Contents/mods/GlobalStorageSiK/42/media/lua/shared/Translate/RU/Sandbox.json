@@ -81,6 +81,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatUI": "   >> Окно терминала (открытие)",
 	"Sandbox_GlobalStorageSiK_DebugCatUI_tooltip": "Требует включённого Режима отладки. События открытия/повторного использования окна терминала и именование узлов. Отличается от \"UI: клики и виджеты\" выше (та опция трассирует сырые клики/раскладку виджетов; эта трассирует логику открытия нашего окна).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Маршрутизатор",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch": "   >> Поиск",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Требует режима отладки. Сводка выбора назначения для внесения и Auto Sort. Решения по узлам остаются в отдельном блоке >>> ДЕТАЛИ.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Удалённый перенос предметов",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Позволяет добавлять и забирать предметы из сети через интерфейс терминала без физического похода к контейнеру. Отключите для более реалистичного опыта.",

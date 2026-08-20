@@ -820,7 +820,7 @@
 	"IGUI_GS_PermRoleAdmin": "Admin",
 	"IGUI_GS_PermCtxMakeAdmin": "Promuovi ad Admin: {1}",
 	"IGUI_GS_PermCtxMakeMember": "Retrocedi a Membro: {1}",
-	"IGUI_GS_PermRoleMember": "Personaggio",
+	"IGUI_GS_PermRoleMember": "Membro",
 	"IGUI_GS_PermRoleFaction": "Fazione",
 	"IGUI_GS_PermCtxTransferOwnership": "Trasferisci proprietà a {1}",
 	"IGUI_GS_PermCtxTransferOwnershipRevoke": "Trasferisci a {1} (revoca al vecchio proprietario)",

@@ -908,6 +908,24 @@ function GS_TerminalUI:applyRefreshIfNeeded(force)
 	end
 end
 
+--- Atajo habitual de ventana en videojuegos (pedido explicito, 2026-08-17):
+--- Escape cierra el terminal, igual que cualquier otra ventana del mod
+--- (editores modales, ventana de bloqueo, etc. - todas ya lo hacian, esta
+--- era la unica que no). Los modales propios (TerminalEditor, NodeEditor,
+--- MemberEditor, ZoneEditor...) son ventanas de UIManager INDEPENDIENTES,
+--- no hijas de este panel, y ya consumen su propio Escape (return true) -
+--- cuando hay uno abierto encima, este handler ni se llega a invocar, sin
+--- conflicto entre ambos.
+---@param key number
+---@return boolean
+function GS_TerminalUI:onKeyRelease(key)
+	if key == Keyboard.KEY_ESCAPE then
+		self:onClose()
+		return true
+	end
+	return ISPanel.onKeyRelease(self, key)
+end
+
 function GS_TerminalUI:onClose()
 	if self._closing then return end
 	self._closing = true

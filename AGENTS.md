@@ -22,6 +22,7 @@ Leer también las instrucciones del workspace y el `CLAUDE.md` más cercano ante
 - Cada prueba DEV enumera el debug mínimo con los nombres sandbox exactos en español e inglés, el evento esperado y los logs a conservar. `>>> DETALLE / >>> DETAIL` solo se activa de forma dirigida.
 - Toda línea indica `[CLI]`, `[SRV]`, `[HOST]` o `[SP]`. El relé neutral del dedicado se mantiene acotado y documentado; un addon decide sus categorías y solo solicita la suscripción mediante la API pública.
 - Actualizar `docs/DEBUGGING.md` cuando cambien opciones, niveles, orígenes o ejemplos.
+- Toda traza de diagnóstico nueva recibe su propia categoría de sandbox activable por separado desde el momento en que se escribe, nunca dependiendo solo del interruptor maestro: entrada en `AREA_CATEGORY` (Core `GS_Log.lua` o mapa propio del addon), `option DebugCat<Nombre>` en `sandbox-options.txt`, traducción en los 10 idiomas. Nunca asumir que una traza es temporal.
 - Versiones, metadata, patchnotes, JSON y Lua se validan antes de deploy. Steam y GitHub se publican solo con autorización explícita.
 - Para sintaxis, invocar el ejecutable Lua local por ruta absoluta y pasar cada ruta normalizada directamente a `-e "assert(loadfile('<ruta>'))"`. No usar `arg[1]` con `-e`: ese runtime no lo define y genera falsos fallos masivos sin evaluar archivos. Confirmar además que el binario arrancó; un error de ruta de PowerShell no cuenta como `FAILED=0`.
 
