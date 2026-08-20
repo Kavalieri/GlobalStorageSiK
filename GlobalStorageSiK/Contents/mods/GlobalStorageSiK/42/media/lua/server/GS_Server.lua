@@ -2186,6 +2186,7 @@ local function onClientCommand(module, command, player, args)
 		})
 
 	elseif command == "deleteSuspendedNetwork" then
+		return (function()
 		-- `networkId` sigue siendo la red del terminal desde el que se administra;
 		-- targetNetworkId es la red suspendida a eliminar. Asi se conserva la
 		-- validacion de acceso fisico/tableta a una red activa sin pretender abrir
@@ -2230,8 +2231,10 @@ local function onClientCommand(module, command, player, args)
 				deleted and deleted.name or targetId,
 				deleted and deleted.zones or 0, deleted and deleted.nodes or 0),
 		})
+		end)()
 
 	elseif command == "setActiveNetwork" then
+		return (function()
 		local ok, reason = false, "error"
 		local requestedId = GlobalStorageSiK.Network.resolveNetworkId(args.networkId)
 		local requestedRegistry = GlobalStorageSiK.Network.getRegistry()
@@ -2251,6 +2254,7 @@ local function onClientCommand(module, command, player, args)
 			networkId = args.networkId,
 			reason = reason,
 		})
+		end)()
 
 	elseif command == "createNetwork" then
 		local nid, err = nil, "error"
@@ -2637,7 +2641,11 @@ local function onClientCommand(module, command, player, args)
 			})
 		end)
 
+	-- Kahlua usa un vector interno fijo de 200 indices para locales activas.
+	-- Algunas builds agotan ese vector de forma distinta en dispatchers grandes,
+	-- por lo que estos handlers se aislan: no volver a inlinearlos aqui.
 	elseif command == "rescanZone" then
+		return (function()
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
@@ -2651,8 +2659,10 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		startIncrementalScan(player, networkId, searchQuery, zoneId)
+		end)()
 
 	elseif command == "redistributeNetwork" then
+		return (function()
 		if not requireAutoSortAccess(player, networkId, {
 			jobType = "redistribute",
 			jobState = "finished",
@@ -2679,8 +2689,10 @@ local function onClientCommand(module, command, player, args)
 				jobState = "running",
 			})
 		end
+		end)()
 
 	elseif command == "renameZone" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2695,8 +2707,10 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneRenamedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "deleteZone" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2716,8 +2730,10 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "updateNode" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2817,8 +2833,10 @@ local function onClientCommand(module, command, player, args)
 		-- de nombre/categoria/prioridad de OTRO jugador no se veia hasta que
 		-- el resto tocara algo que disparase su propio refresco.
 		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
+		end)()
 
 	elseif command == "applyNodeTemplateToZone" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then return end
 		if not requireNetworkConfigIdle(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
@@ -2863,8 +2881,10 @@ local function onClientCommand(module, command, player, args)
 		})
 		pushTerminalState(player, networkId, nil, searchQuery)
 		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
+		end)()
 
 	elseif command == "createZoneRoom" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2889,8 +2909,10 @@ local function onClientCommand(module, command, player, args)
 			startIncrementalScan(player, networkId, searchQuery, zone.id)
 			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
+		end)()
 
 	elseif command == "moveZonePriority" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2902,8 +2924,10 @@ local function onClientCommand(module, command, player, args)
 		else
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg") })
 		end
+		end)()
 
 	elseif command == "setZonePriority" then
+		return (function()
 		-- Escala libre 1-100 (ver GS_Zones.setPriority), sustituye al sistema
 		-- de posicion secuencial - usado por el modal de edicion de zona.
 		if not requireAdminAccess(player, networkId) then
@@ -2917,8 +2941,10 @@ local function onClientCommand(module, command, player, args)
 		else
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 		end
+		end)()
 
 	elseif command == "createZoneStructure" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2938,8 +2964,10 @@ local function onClientCommand(module, command, player, args)
 			startIncrementalScan(player, networkId, searchQuery, zone.id)
 			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
+		end)()
 
 	elseif command == "createZoneBuilding" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2957,8 +2985,10 @@ local function onClientCommand(module, command, player, args)
 			startIncrementalScan(player, networkId, searchQuery, zone.id)
 			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
+		end)()
 
 	elseif command == "createZoneSafehouse" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -2995,8 +3025,10 @@ local function onClientCommand(module, command, player, args)
 			startIncrementalScan(player, networkId, searchQuery, zone.id)
 			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
+		end)()
 
 	elseif command == "createZoneSelection" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -3027,6 +3059,7 @@ local function onClientCommand(module, command, player, args)
 			startIncrementalScan(player, networkId, searchQuery, zone.id)
 			pushTerminalState(player, networkId, { running = true, _freshSnapshotScope = "network" }, searchQuery)
 		end
+		end)()
 
 	elseif command == "probeCraft" then
 		local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
@@ -3050,6 +3083,7 @@ local function onClientCommand(module, command, player, args)
 		pushTerminalState(player, networkId, nil, searchQuery, probe)
 
 	elseif command == "transferOwnership" then
+		return (function()
 		if not requireTerminalAccess(player, networkId) then
 			return
 		end
@@ -3090,6 +3124,7 @@ local function onClientCommand(module, command, player, args)
 		if ok then
 			pushTerminalState(player, networkId, nil, searchQuery)
 		end
+		end)()
 
 	elseif command == "addFactionMembers" then
 		if not requireAdminAccess(player, networkId) then
@@ -3113,6 +3148,7 @@ local function onClientCommand(module, command, player, args)
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "addPermissionUser" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
@@ -3153,6 +3189,7 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded") or failureMessage })
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "leaveNetwork" then
 		-- Abandonar la propia fila esta siempre permitido sin importar el
@@ -3172,6 +3209,7 @@ local function onClientCommand(module, command, player, args)
 		end
 
 	elseif command == "removePermissionUser" then
+		return (function()
 		if not requireNetworkPermission(player, networkId) then
 			return
 		end
@@ -3214,8 +3252,10 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_UserRemovedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_UserNotFoundToRemoveMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "setMemberRole" then
+		return (function()
 		if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerChangeRolesMsg") })
 			return
@@ -3229,8 +3269,10 @@ local function onClientCommand(module, command, player, args)
 		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdatedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_RoleUpdateFailedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "setMemberZoneAccess" then
+		return (function()
 		if not requireAdminAccess(player, networkId) then return end
 		local deniedZoneIds = type(args.deniedZoneIds) == "table" and args.deniedZoneIds or {}
 		if #deniedZoneIds > 512 then
@@ -3253,6 +3295,7 @@ local function onClientCommand(module, command, player, args)
 				or "IGUI_GS_MemberZoneAccessFailed"),
 		})
 		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
 
 	elseif command == "setFactionOnly" then
 		if not requireAdminAccess(player, networkId) then
