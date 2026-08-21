@@ -1,5 +1,6 @@
 {
 	"IGUI_GS_ProgramBuilderDiskMenu": "Write Builder disk",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Adds the GS Digital Blueprint peripheral to a terminal in this network: network-inventory building.",
 	"IGUI_GS_TabBuilder": "Build",
 	"IGUI_GS_AddonBuilderTitle": "Builder",
 	"IGUI_GS_AddonBuilderDesc": "Builder add-on: magazine required (Electricity 5). Craft and install module from Add-ons tab.",

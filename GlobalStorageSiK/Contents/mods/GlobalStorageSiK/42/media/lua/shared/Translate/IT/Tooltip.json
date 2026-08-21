@@ -10,11 +10,11 @@
 	"Tooltip_GS_Motherboard": "Tiene insieme tutte le altre parti del computer e non riceve mai un ringraziamento.",
 	"Tooltip_GS_IODevice": "Traduce pulsanti e cavi in qualcosa che il computer capisce. Un piccolo poliglotta silenzioso.",
 	"Tooltip_GS_Keyboard": "Abbastanza tasti per digitare password che ormai nessuno controllerà più.",
-	"Tooltip_GS_Manual_TerminalUnit": "\"GS Network Monthly\": l'unica rivista ancora pubblicata puntualmente, anche quando non c'è più nessuno a cui consegnarla.",
-	"Tooltip_GS_Manual_PCBuild": "\"Home Computing Digest\": costruisci il tuo PC con pezzi di ricambio e cieca fiducia in un'elettronica vecchia vent'anni.",
-	"Tooltip_GS_Manual_DiskPrograms": "\"GS Disk Tools\": istruzioni passo passo per scrivere un programma su un floppy vuoto. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_Manual_TerminalUnit": "\"GS Mensile di Rete\": l'unica rivista ancora pubblicata puntualmente, anche quando non c'è più nessuno a cui consegnarla.",
+	"Tooltip_GS_Manual_PCBuild": "\"Compendio di Informatica Domestica\": costruisci il tuo PC con pezzi di ricambio e cieca fiducia in un'elettronica vecchia vent'anni.",
+	"Tooltip_GS_Manual_DiskPrograms": "\"GS Programmazione\": istruzioni passo passo per scrivere un programma su un floppy vuoto. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
 	"Tooltip_GS_FloppyDisk_DriveInstall": "Un programma, uno scopo: insegnare a un terminale a tenere collegato il proprio Floppy Drive, così la smette di stare in tasca.",
-	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Disk Tools\": istruzioni passo passo per scrivere il floppy che installa il Floppy Drive nella rete di un terminale. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
-	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Disk Tools\": istruzioni passo passo per scrivere il floppy che contiene il sistema operativo della rete GS stessa. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Programmazione\": istruzioni passo passo per scrivere il floppy che installa il Floppy Drive nella rete di un terminale. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
+	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Programmazione\": istruzioni passo passo per scrivere il floppy che contiene il sistema operativo della rete GS stessa. Serve stare abbastanza vicino a un terminale perché ne valga la pena.",
 	"Tooltip_GS_Manual_SolderingIron": "Una guida improvvisata per costruirsi un saldatore con pezzi di recupero. Leggerla da sola non porta a nulla - qualcuno deve prima aver sbloccato questa scorciatoia."
 }

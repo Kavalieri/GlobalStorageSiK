@@ -24,6 +24,56 @@ local function extendedCategoriesActive()
 	return rawget(_G, "CAEC_Global") ~= nil
 end
 
+--- Better Sorting (BetterSortCC, Workshop 2313387159) fija BScats = BScats or
+--- {} al cargar su shared file. Chequeo directo por el mismo motivo que
+--- extendedCategoriesActive(): fichero de carga muy temprana.
+---@return boolean
+local function betterSortingActive()
+	return rawget(_G, "BScats") ~= nil
+end
+
+-- Better Sorting reescribe getDisplayCategory() a ~79 codigos propios y
+-- PLANOS (sin nivel 2/3, ver estudio de compatibilidad 2026-08-21) en
+-- Events.OnGameBoot. A diferencia de Extended Categories, NO desactivamos
+-- nuestro motor de subcategorias para el: normalizamos su codigo de vuelta a
+-- la raiz vanilla ANTES de comparar (canonicalDisplayCat, definida mas abajo
+-- una vez existe displayCat()), asi que catIs/catIsAny siguen reconociendo
+-- Food/Weapon/Accessory/Material/FirstAid/Gardening exactamente igual que
+-- sin ningun mod de categorias instalado. Solo se listan los codigos que
+-- alimentan subcategorias GS reales (parentCategory abajo); el resto de
+-- codigos de Better Sorting (ropa por slot, munición, furniture,
+-- literatura...) no tiene equivalente GS y se deja tal cual, sin mapear (no
+-- afecta a ningun matcher existente).
+local BETTER_SORTING_CANON = {
+	-- Alimentos: BS ya separa perecedero/no, pero isPerishableFood() usa
+	-- getDaysFresh() (propiedad estable), no el texto de categoria - con
+	-- normalizar a "Food" el propio motor GS vuelve a decidir bien.
+	FoodA = "Food", FoodB = "Food", FoodN = "Food", FoodP = "Food",
+	CookIng = "Food", CookIngP = "Food", CookBev = "Food", CookBevP = "Food",
+	-- Jardineria: herramientas/insumos de granja (estiercol, pulverizador,
+	-- pienso, esquiladora...). BS no parece tocar semillas (siguen "Gardening"
+	-- vanilla), asi que gs_food_seed sigue funcionando sin mapear nada mas.
+	SurFarm = "Gardening",
+	-- Primeros auxilios: BS colapsa Bandage+FirstAid en estos 3 codigos.
+	MedI = "FirstAid", MedM = "FirstAid", MedT = "FirstAid",
+	-- Armas: isFirearm()/weaponMeleeTypeKey() usan propiedades del script item
+	-- (isRanged/WeaponCategory), no el texto - normalizar a "Weapon" basta
+	-- para que gs_weapon_firearm/gs_weapon_melee vuelvan a diferenciar bien.
+	-- WepAmmo/WepAmmoMag/WepBomb/WepPart quedan fuera a proposito: no son el
+	-- arma en si y GS no tiene subcategoria propia para ellos.
+	WepFire = "Weapon", WepMelee = "Weapon",
+	WepMAxe = "Weapon", WepMBluntL = "Weapon", WepMBluntS = "Weapon",
+	WepMBladeL = "Weapon", WepMBladeS = "Weapon", WepMSpear = "Weapon",
+	-- Accesorios: BS ya separa reloj/otros (ClothAcc) de joyeria (ClothJew),
+	-- pero GS re-deriva joyeria real via BodyLocation (mas fino, ver
+	-- JEWELRY_BODY_LOCATIONS) - basta con normalizar ambos a "Accessory".
+	ClothAcc = "Accessory", ClothJew = "Accessory",
+	-- Materiales: hasMetal() (tag) y el nombre "leather/hide/pelt" deciden el
+	-- tipo real, no el texto de categoria - normalizar a "Material" basta.
+	CraftBlack = "Material", CraftCarv = "Material", CraftG = "Material",
+	CraftMas = "Material", CraftTailor = "Material",
+}
+
 -- ---------------------------------------------------------------------------
 -- Helpers internos de clasificación
 -- ---------------------------------------------------------------------------
@@ -67,12 +117,35 @@ local function displayCat(si)
 	return (si and safeGet(function() return si:getDisplayCategory() end)) or ""
 end
 
+--- DisplayCategory ya normalizada: si Better Sorting esta activo y el codigo
+--- tiene equivalente conocido (BETTER_SORTING_CANON), devuelve la raiz
+--- vanilla; si no, el valor crudo. displayCat() se deja intacta (sin
+--- normalizar) para cualquier otro consumidor que quiera el codigo real.
+---@param si table script item
+---@return string
+local function canonicalDisplayCat(si)
+	local raw = displayCat(si)
+	if betterSortingActive() then
+		local mapped = BETTER_SORTING_CANON[raw]
+		if mapped then
+			-- Log.detail: esto se llama por item/por refresco de Almacen, no
+			-- por accion del jugador - volumen demasiado alto para Log.debug
+			-- normal. Requiere activar tanto DebugCatCompatCategories como
+			-- DebugDetailCompatCategories (AREA_CATEGORY CompatCategories =
+			-- "CompatCategories" en GS_Log.lua).
+			GlobalStorageSiK.Log.detail("CompatCategories", "canonicalDisplayCat | BetterSorting raw=" .. tostring(raw) .. " -> " .. mapped)
+			return mapped
+		end
+	end
+	return raw
+end
+
 local function catIs(si, cat)
-	return string.lower(displayCat(si)) == string.lower(cat)
+	return string.lower(canonicalDisplayCat(si)) == string.lower(cat)
 end
 
 local function catIsAny(si, list)
-	local dc = string.lower(displayCat(si))
+	local dc = string.lower(canonicalDisplayCat(si))
 	for i = 1, #list do
 		if dc == string.lower(list[i]) then return true end
 	end

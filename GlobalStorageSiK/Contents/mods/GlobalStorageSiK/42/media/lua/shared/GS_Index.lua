@@ -35,6 +35,9 @@ local function mergeLiveContainer(byType, container, nodeId)
 				subCategory = row.subCategory,
 				gsSubKeys = row.gsSubKeys or {},
 				gsSubKeysStr = row.gsSubKeysStr or "",
+				learnedRecipeNames = row.learnedRecipeNames,
+				numberOfPages = row.numberOfPages,
+				literatureTitle = row.literatureTitle,
 				count = row.count,
 				nodeId = nodeId,
 			}
@@ -62,6 +65,9 @@ local function mergeNodeSnapshot(byType, node)
 				subCategory = row.subCategory,
 				gsSubKeys = row.gsSubKeys or {},
 				gsSubKeysStr = row.gsSubKeysStr or "",
+				learnedRecipeNames = row.learnedRecipeNames,
+				numberOfPages = row.numberOfPages,
+				literatureTitle = row.literatureTitle,
 				count = row.count or 0,
 				nodeId = node.id,
 			}
@@ -116,7 +122,35 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	return GlobalStorageSiK.ItemSnapshot.toRows(byType)
 end
 
---- Actualiza itemSnapshot de nodos con contenedores vivos (servidor tras transferencias).
+--- Refresca el itemSnapshot de UN nodo concreto ya resuelto por la propia
+--- operacion (deposito/retirada), sin recorrer el resto de la red. Mas barato
+--- y preciso que syncLiveSnapshots: la llamante ya tiene entry+container en
+--- la mano en el momento exacto del movimiento (Transfer.depositItem /
+--- withdrawUnits), asi que no hace falta un segundo getLiveContainers() ni
+--- resolver el objeto de mundo de nuevo.
+---@param entry table nodo del registro (registry.nodes[id], referencia real)
+---@param container ItemContainer contenedor ya resuelto de ese nodo
+function GlobalStorageSiK.Index.syncNodeSnapshot(entry, container)
+	if not GlobalStorageSiK.isAuthoritative() then
+		return
+	end
+	if not entry or not container then
+		return
+	end
+	local ok, snap = pcall(GlobalStorageSiK.ItemSnapshot.fromContainer, container)
+	if ok and snap then
+		entry.itemSnapshot = snap
+	end
+end
+
+--- Actualiza itemSnapshot de TODOS los nodos activos con contenedor vivo de
+--- una red (barrido completo de getActiveNodes, hasta MAX_CONTAINERS_PER_NETWORK).
+--- NO usar tras un deposito/retirada individual - eso ya lo cubre, mas barato
+--- y preciso, GlobalStorageSiK.Index.syncNodeSnapshot (ver arriba) llamado
+--- directamente desde GS_Transfer.lua sobre el nodo exacto tocado. Reservada
+--- para un refresco deliberado de red completa (p.ej. tras reabrir el
+--- terminal o una consolidacion manual), no para el camino caliente de cada
+--- transferencia.
 ---@param networkId string|nil
 function GlobalStorageSiK.Index.syncLiveSnapshots(networkId)
 	-- En SP real la autoridad vive en este proceso aunque isServer() sea

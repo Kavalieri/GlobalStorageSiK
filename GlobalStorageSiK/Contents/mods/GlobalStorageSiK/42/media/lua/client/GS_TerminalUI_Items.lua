@@ -226,6 +226,282 @@ local function itemTexture(row)
 	return nil
 end
 
+-- Cache de respaldo cliente (ver clientLearnedRecipeNames abajo): solo se
+-- escribe en exito, nunca en fallo, para no envenenar la entrada como paso
+-- el bug ya corregido de -dev17.
+local CLIENT_LEARNED_RECIPES_CACHE = {}
+
+-- Cache de respaldo cliente para NumberOfPages (ver numberOfPagesFromItem en
+-- GS_ItemSnapshot.lua para la explicacion completa de por que este dato NO
+-- esta en el script de una revista de receta, solo en la instancia real).
+local CLIENT_NUMBER_OF_PAGES_CACHE = {}
+
+--- Respaldo INSTANTANEO en cliente del numero real de paginas de una revista
+--- de receta (row.numberOfPages, capturado por el servidor, puede tardar
+--- hasta el proximo reescaneo de zona en llegar). instanceItem() SI dispara
+--- OnCreate (ItemCodeOnCreate.onCreateRecipeMagazine es un hook de
+--- construccion del motor, no un evento scripted que dependa de estar en el
+--- mundo), asi que da el mismo NumberOfPages real que tendria cualquier
+--- instancia del mismo fullType.
+---@param fullType string
+---@return integer|nil
+local function clientNumberOfPages(fullType)
+	local cached = CLIENT_NUMBER_OF_PAGES_CACHE[fullType]
+	if cached then return cached end
+	if not instanceItem then return nil end
+	local ok, probe = pcall(instanceItem, fullType)
+	if not ok or not probe or not probe.getNumberOfPages then return nil end
+	local okPages, pages = pcall(function() return probe:getNumberOfPages() end)
+	if not okPages or not pages or pages <= 0 then return nil end
+	CLIENT_NUMBER_OF_PAGES_CACHE[fullType] = pages
+	return pages
+end
+
+--- Respaldo INSTANTANEO en cliente cuando la fila todavia no trae
+--- learnedRecipeNames del servidor (nodo sin reescanear desde -dev19).
+--- Pedido explicito (2026-08-21): "da igual la recarga, si lo acabo de leer
+--- debe marchar el check YA" - el vanilla de verdad es instantaneo, asi que
+--- nuestro respaldo tambien debe serlo.
+---
+--- BUG REAL corregido (2026-08-21, log real: "ok=true known=false" siempre,
+--- para 3 revistas confirmadas leidas por el propio tick de vanilla): la
+--- sonda SI funcionaba, el fallo estaba en convertir la lista a texto Lua
+--- (tostring) y comparar luego contra getKnownRecipes(). Vanilla NUNCA hace
+--- esa conversion (ISInventoryPane.lua:2597, ISLiteratureUI.lua:391) -
+--- siempre pasa la lista/valor Java ORIGINAL, sin tocar, a containsAll()/
+--- contains(). Aqui SI tenemos ese valor original (probe:getLearnedRecipes()
+--- es la lista Java real) - se cachea y se compara TAL CUAL, igual que
+--- vanilla, sin convertir a string en ningun punto.
+---@param fullType string
+---@return any|nil recipes lista Java original, o nil si no aplica
+local function clientLearnedRecipesRaw(fullType)
+	local cached = CLIENT_LEARNED_RECIPES_CACHE[fullType]
+	if cached then return cached end
+	local debugOn = GlobalStorageSiK.Sandbox.debugMode() and GlobalStorageSiK.Sandbox.debugCategoryEnabled("LiteratureRead")
+	if not instanceItem then
+		if debugOn then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "clientLearnedRecipesRaw",
+				"fullType=" .. tostring(fullType) .. " SIN instanceItem global en este cliente")
+		end
+		return nil
+	end
+	local ok, probe = pcall(instanceItem, fullType)
+	if not ok or not probe or not probe.getLearnedRecipes then
+		if debugOn then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "clientLearnedRecipesRaw",
+				"fullType=" .. tostring(fullType) .. " instanceItem FALLO ok=" .. tostring(ok)
+					.. " probe=" .. tostring(probe ~= nil) .. " err=" .. tostring(not ok and probe or nil))
+		end
+		return nil
+	end
+	local okRecipes, recipes = pcall(function() return probe:getLearnedRecipes() end)
+	local size = okRecipes and recipes and recipes.size and recipes:size() or -1
+	if debugOn then
+		GlobalStorageSiK.Log.debug("LiteratureRead", "clientLearnedRecipesRaw",
+			"fullType=" .. tostring(fullType) .. " instanceItem OK getLearnedRecipesOk=" .. tostring(okRecipes)
+				.. " size=" .. tostring(size))
+	end
+	if not okRecipes or not recipes or size <= 0 then return nil end
+	CLIENT_LEARNED_RECIPES_CACHE[fullType] = recipes
+	return recipes
+end
+
+-- Tick de "ya leído" en el Almacen (pedido explicito 2026-08-21): ahora que
+-- se puede leer directamente desde la red (GS_NetworkReadAction.lua), saber
+-- de un vistazo cual ya se leyo evita reservarlo/pedirlo prestado sin falta.
+-- Replica ISInventoryPane:isLiteratureRead (vanilla, ISUI/ISInventoryPane.lua)
+-- - nuestras propias revistas (GS_Manual_*) son literatura vanilla real
+-- (ItemType=base:literature, LearnedRecipes en su script), deben funcionar
+-- exactamente igual que cualquier revista del juego, no con un mecanismo aparte.
+---@param player IsoPlayer|nil
+---@param row table|nil fila del Almacén (fullType + learnedRecipeNames del snapshot)
+---@return boolean
+local function isLiteratureReadSafe(player, row)
+	local fullType = row and row.fullType
+	if not player or not fullType then return false end
+	local debugOn0 = GlobalStorageSiK.Sandbox.debugMode() and GlobalStorageSiK.Sandbox.debugCategoryEnabled("LiteratureRead")
+
+	-- Camino REAL de vanilla (ISInventoryPane.lua:2585-2599, leido del .lua
+	-- real del juego instalado, no supuesto): el PRIMER chequeo, antes que
+	-- cualquier receta o pagina, es item:getModData().literatureTitle contra
+	-- playerObj:isLiteratureRead(literatureTitle). Es el mecanismo que usa
+	-- tambien ContextMenu_RecentlyRead (ISInventoryPaneContextMenu.lua:1079).
+	-- Las recetas/paginas de mas abajo son solo los FALLBACKS que vanilla
+	-- prueba despues si esto no aplica - no el camino principal como se
+	-- asumio en rondas anteriores.
+	if row.literatureTitle and player.isLiteratureRead then
+		local ok, read = pcall(function() return player:isLiteratureRead(row.literatureTitle) end)
+		if debugOn0 then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (literatureTitle)",
+				"fullType=" .. tostring(fullType) .. " literatureTitle=" .. tostring(row.literatureTitle)
+					.. " ok=" .. tostring(ok) .. " read=" .. tostring(read))
+		end
+		if ok and read == true then return true end
+	elseif debugOn0 then
+		GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (literatureTitle)",
+			"fullType=" .. tostring(fullType) .. " SIN literatureTitle en la fila (nodo sin reescanear tras leer)")
+	end
+
+	local si = scriptItem(fullType)
+	if si then
+		local ok1, isBook = pcall(function()
+			if si.getSkillTrained then
+				local skill = si:getSkillTrained()
+				local skillBook = skill and SkillBook and SkillBook[skill]
+				if skillBook and si.getMaxLevelTrained and player.getPerkLevel
+					and si:getMaxLevelTrained() < player:getPerkLevel(skillBook.perk) + 1 then
+					return true
+				end
+			end
+			if si.getNumberOfPages and si:getNumberOfPages() > 0 and player.getAlreadyReadPages then
+				if player:getAlreadyReadPages(fullType) == si:getNumberOfPages() then return true end
+			end
+			return false
+		end)
+		if ok1 and isBook == true then return true end
+	end
+	local debugOn = GlobalStorageSiK.Sandbox.debugMode() and GlobalStorageSiK.Sandbox.debugCategoryEnabled("LiteratureRead")
+
+	-- Revistas de receta (Base.HuntingMag*, GS_Manual_*, etc.): mismo
+	-- mecanismo de "paginas ya leidas" que el chequeo de libro de arriba, NO
+	-- las recetas - la diferencia real encontrada 2026-08-21: su
+	-- NumberOfPages lo asigna el motor en tiempo de ejecucion via OnCreate
+	-- (ItemCodeOnCreate.onCreateRecipeMagazine), no esta en el script como en
+	-- un libro de habilidad, asi que scriptItem():getNumberOfPages() daba
+	-- siempre 0 y el chequeo de arriba nunca se disparaba para ellas. row.
+	-- numberOfPages es el valor real, capturado por el servidor desde una
+	-- instancia viva (GS_ItemSnapshot.lua); clientNumberOfPages() es el
+	-- respaldo instantaneo via instanceItem() (que SI dispara OnCreate) para
+	-- cuando el nodo todavia no trajo ese dato del servidor.
+	if player.getAlreadyReadPages then
+		local pages = row.numberOfPages or clientNumberOfPages(fullType)
+		if pages and pages > 0 then
+			local ok, alreadyRead = pcall(function() return player:getAlreadyReadPages(fullType) end)
+			if debugOn then
+				GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (paginas revista)",
+					"fullType=" .. tostring(fullType) .. " pages=" .. tostring(pages)
+						.. " fromRow=" .. tostring(row.numberOfPages ~= nil)
+						.. " ok=" .. tostring(ok) .. " alreadyRead=" .. tostring(alreadyRead))
+			end
+			if ok and alreadyRead == pages then return true end
+		end
+	end
+
+	-- Camino 0 (el que de verdad prueba vanilla, ISLiteratureUI.lua:363-374):
+	-- getLearnedRecipes() llamado sobre el ITEM DE SCRIPT (getScriptManager():
+	-- getAllItems()), NO sobre una instancia sintetica de instanceItem(). Los
+	-- caminos A/B de abajo (anteriores a este) daban "ok=true known=false"
+	-- SIEMPRE pese a nombres correctos - la sospecha real: instanceItem()
+	-- genera un objeto Receta con identidad propia cada vez que se llama, que
+	-- containsAll() nunca reconoce como igual al de player:getKnownRecipes(),
+	-- aunque su texto se imprima igual. El item de script (si, ya resuelto
+	-- arriba para el chequeo de skill book) es el ÚNICO patron que vanilla
+	-- usa de verdad para esto - probarlo primero.
+	if si and si.getLearnedRecipes and player.getKnownRecipes then
+		local ok0, known0, diag0 = pcall(function()
+			local recipes0 = si:getLearnedRecipes()
+			local kr = player:getKnownRecipes()
+			local krSize = kr and kr.size and kr:size() or -1
+			local r0Size = recipes0 and recipes0.size and recipes0:size() or -1
+			local sample = ""
+			if kr and krSize and krSize > 0 then
+				for i = 0, math.min(krSize, 5) - 1 do
+					sample = sample .. (i > 0 and "," or "") .. tostring(kr:get(i))
+				end
+			end
+			local isok = recipes0 ~= nil and kr:containsAll(recipes0)
+			-- Diagnostico pedido explicitamente (2026-08-21, ultima ronda):
+			-- contains() POR RECETA INDIVIDUAL, con su nombre real, en vez de
+			-- solo el agregado containsAll() + una muestra de 5 no relacionada.
+			-- Esto aisla definitivamente si falta UNA receta concreta o si
+			-- TODAS las recetas de este item fallan el contains().
+			local perRecipe = ""
+			if recipes0 and r0Size and r0Size > 0 and kr then
+				for i = 0, r0Size - 1 do
+					local rec = recipes0:get(i)
+					local okContains, contains = pcall(function() return kr:contains(rec) end)
+					-- BUG REAL en esta misma linea de diagnostico (corregido):
+					-- "okContains and contains or 'ERR'" colapsa a 'ERR' cuando
+					-- contains() devuelve false LIMPIO (false es falsy en Lua),
+					-- no solo cuando pcall falla de verdad. Result != nil
+					-- distingue "hubo respuesta real" de "pcall exploto".
+					local label
+					if not okContains then
+						label = "EXCEPCION:" .. tostring(contains)
+					else
+						label = tostring(contains)
+					end
+					perRecipe = perRecipe .. (i > 0 and " | " or "") .. tostring(rec) .. "=" .. label
+				end
+			end
+			return isok, "playerUsername=" .. tostring(player.getUsername and player:getUsername() or "?")
+				.. " isLocal=" .. tostring(player == getSpecificPlayer(0))
+				.. " knownSize=" .. tostring(krSize) .. " recipeSize=" .. tostring(r0Size)
+				.. " knownSample=" .. sample .. " perRecipe=[" .. perRecipe .. "]"
+		end)
+		if debugOn then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (script item)",
+				"fullType=" .. tostring(fullType) .. " ok=" .. tostring(ok0) .. " known=" .. tostring(known0)
+					.. " " .. tostring(diag0))
+		end
+		if ok0 and known0 == true then return true end
+	end
+
+	-- Camino A (preferido cuando existe): recetas capturadas por el SERVIDOR
+	-- desde un item REAL durante el escaneo (GS_ItemSnapshot.lua), pero
+	-- viajaron por red como texto Lua (un valor Java vivo no se puede
+	-- serializar) - se comparan normalizando AMBOS lados con tostring(),
+	-- nunca mezclando un string reconstruido contra un valor Java sin
+	-- convertir (eso fue justo el bug real de mas abajo, para el camino B).
+	if row.learnedRecipeNames and #row.learnedRecipeNames > 0 and player.getKnownRecipes then
+		local recipes = row.learnedRecipeNames
+		local ok, known = pcall(function()
+			local knownSet = {}
+			local knownRecipes = player:getKnownRecipes()
+			for i = 0, knownRecipes:size() - 1 do
+				knownSet[tostring(knownRecipes:get(i))] = true
+			end
+			for i = 1, #recipes do
+				if not knownSet[tostring(recipes[i])] then
+					return false
+				end
+			end
+			return true
+		end)
+		if debugOn then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (red)",
+				"fullType=" .. tostring(fullType) .. " recipes=" .. table.concat(recipes, ",")
+					.. " ok=" .. tostring(ok) .. " known=" .. tostring(known))
+		end
+		if ok and known == true then return true end
+	end
+
+	-- Camino B: respaldo instantaneo en cliente cuando la fila todavia no
+	-- trae el dato del servidor (nodo sin reescanear desde -dev19).
+	-- BUG REAL corregido (2026-08-21, log real: "ok=true known=false" SIEMPRE
+	-- para 3 revistas confirmadas leidas por el propio tick de vanilla): la
+	-- sonda SI funcionaba, el fallo estaba en convertir la lista de
+	-- getLearnedRecipes() a texto Lua y comparar contra getKnownRecipes()
+	-- via .contains(stringReconstruido). Vanilla NUNCA hace esa conversion
+	-- (ISInventoryPane.lua:2597, ISLiteratureUI.lua:391-392) - siempre pasa
+	-- el valor/lista Java ORIGINAL, sin tocar, a containsAll()/contains().
+	-- Aqui SI tenemos ese valor original (clientLearnedRecipesRaw devuelve
+	-- la lista Java real, sin convertir) - se compara TAL CUAL, igual que
+	-- vanilla, sin ningun tostring() de por medio.
+	local rawRecipes = clientLearnedRecipesRaw(fullType)
+	if rawRecipes and player.getKnownRecipes then
+		local ok, known = pcall(function()
+			return player:getKnownRecipes():containsAll(rawRecipes)
+		end)
+		if debugOn then
+			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (cliente, sin convertir)",
+				"fullType=" .. tostring(fullType) .. " ok=" .. tostring(ok) .. " known=" .. tostring(known))
+		end
+		if ok and known == true then return true end
+	end
+	return false
+end
+
 --- Ordena filas según clave y dirección.
 ---@param rows table[]
 ---@param sortKey string
@@ -645,8 +921,20 @@ local function createItemRow(scroll, listPanel, terminal)
 		if data then
 			local pal = GlobalStorageSiK.TerminalChrome.PALETTE
 			local tex = itemTexture(data)
+			local iconY = math.floor((self.height - ICON_SIZE) / 2)
 			if tex then
-				self:drawTextureScaledAspect(tex, 6, math.floor((self.height - ICON_SIZE) / 2), ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
+				self:drawTextureScaledAspect(tex, 6, iconY, ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
+			end
+			-- Mismo tick vanilla (media/ui/Tick_Mark-10.png) que ISInventoryPane
+			-- dibuja sobre un libro/revista ya leido - reconocible al instante,
+			-- sin inventar un icono propio para lo mismo.
+			local player = self.terminal and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
+				or getSpecificPlayer(0)
+			if isLiteratureReadSafe(player, data) then
+				local tick = getTexture("media/ui/Tick_Mark-10.png")
+				if tick then
+					self:drawTexture(tick, 6, iconY - 1, 1, 1, 1, 1)
+				end
 			end
 			local textX = 6 + ICON_SIZE + 8
 			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)

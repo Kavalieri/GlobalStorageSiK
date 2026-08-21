@@ -35,6 +35,73 @@ local function readWorldSprite(item)
 	return sprite
 end
 
+--- Nombres de receta que enseña este ítem (para el tick de "ya leído" del
+--- Almacén), leídos de un item REAL, tal cual hace vanilla (ISInventoryPane.lua,
+--- ISReadABook.lua: siempre item:getLearnedRecipes() sobre un item vivo, nunca
+--- un script ni una sonda instanceItem()). Aquí SÍ tenemos items reales -
+--- ItemSnapshot.fromContainer/addItem se llama durante el escaneo de zona
+--- sobre instancias genuinas del contenedor, no sobre nada sintético. Capturar
+--- esto aquí (una vez por fullType, dato invariante del tipo) y mandarlo al
+--- cliente evita depender de instanceItem() en el terminal - que nunca se
+--- confirmó funcionando ni para revistas propias ni vanilla, tras varias
+--- rondas de intentos (bug real 2026-08-21, señalado por el usuario: "si el
+--- juego puede validar su lectura, nosotros también debemos poder").
+---@param item InventoryItem|nil
+---@return string[]|nil
+local function learnedRecipeNamesFromItem(item)
+	if not item or not item.getLearnedRecipes then return nil end
+	local ok, recipes = pcall(function() return item:getLearnedRecipes() end)
+	if not ok or not recipes or not recipes.size or recipes:size() == 0 then return nil end
+	local names = {}
+	local okNames = pcall(function()
+		for i = 0, recipes:size() - 1 do
+			names[#names + 1] = tostring(recipes:get(i))
+		end
+	end)
+	if not okNames or #names == 0 then return nil end
+	return names
+end
+
+--- Revistas de receta (OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine) NO
+--- llevan NumberOfPages en el script como los libros de habilidad - lo asigna
+--- el motor en tiempo de ejecucion sobre la instancia real al crearla. Un
+--- scriptItem()/instanceItem() sin esa instanciacion real da NumberOfPages=0,
+--- por lo que el check "paginas ya leidas == paginas totales" (el mismo que
+--- YA funciona para libros de habilidad, ISInventoryPane:isLiteratureRead)
+--- nunca se disparaba para revistas - no es un problema de recetas en
+--- absoluto. Aqui SI tenemos una instancia real (escaneo de zona), se captura
+--- una vez por fullType igual que learnedRecipeNamesFromItem.
+---@param item InventoryItem|nil
+---@return integer|nil
+local function numberOfPagesFromItem(item)
+	if not item or not item.getNumberOfPages then return nil end
+	local ok, pages = pcall(function() return item:getNumberOfPages() end)
+	if not ok or not pages or pages <= 0 then return nil end
+	return pages
+end
+
+--- Mecanismo REAL del tick "ya leido" de vanilla (ISInventoryPane.lua:2585-2599,
+--- confirmado leyendo el .lua real del juego instalado, no supuesto): NO es
+--- getKnownRecipes() ni las paginas - esos son solo fallbacks al final de la
+--- funcion vanilla. El camino PRINCIPAL, primero en el orden vanilla, es
+--- item:getModData().literatureTitle comparado con
+--- playerObj:isLiteratureRead(literatureTitle). El titulo es un valor
+--- ALEATORIO POR COPIA asignado por el motor al crear la instancia (por eso
+--- NO se puede meter en metadataByFullType como learnedRecipeNames/
+--- numberOfPages, que si son invariantes de tipo - cachearlo por fullType
+--- aplicaria el titulo de la PRIMERA copia vista a todas las demas). Se lee
+--- fresco en cada llamada, directo del item real de esta instancia concreta.
+---@param item InventoryItem|nil
+---@return string|nil
+local function literatureTitleFromItem(item)
+	if not item or not item.hasModData or not item:hasModData() then return nil end
+	local ok, modData = pcall(function() return item:getModData() end)
+	if not ok or not modData then return nil end
+	local title = modData.literatureTitle
+	if not title or title == "" then return nil end
+	return title
+end
+
 local function metadataForItem(item, fullType)
 	local worldSprite = readWorldSprite(item)
 	local cacheKey = fullType .. "\31" .. tostring(worldSprite or "")
@@ -53,6 +120,8 @@ local function metadataForItem(item, fullType)
 		subCategory = GlobalStorageSiK.Router.getItemSubCategory(item),
 		gsSubKeys = gsKeysList,
 		gsSubKeysStr = table.concat(gsKeysList, "|"),
+		learnedRecipeNames = learnedRecipeNamesFromItem(item),
+		numberOfPages = numberOfPagesFromItem(item),
 	}
 	metadataByFullType[cacheKey] = cached
 	return cached
@@ -85,6 +154,9 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			subCategory = metadata.subCategory,
 			gsSubKeys = metadata.gsSubKeys,
 			gsSubKeysStr = metadata.gsSubKeysStr,
+			learnedRecipeNames = metadata.learnedRecipeNames,
+			numberOfPages = metadata.numberOfPages,
+			literatureTitle = literatureTitleFromItem(item),
 			count = 0,
 		}
 		byType[fullType] = row
@@ -128,6 +200,9 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				subCategory = row.subCategory,
 				gsSubKeys = row.gsSubKeys or {},
 				gsSubKeysStr = row.gsSubKeysStr or "",
+				learnedRecipeNames = row.learnedRecipeNames,
+				numberOfPages = row.numberOfPages,
+				literatureTitle = row.literatureTitle,
 				count = row.count or 0,
 			}
 		else

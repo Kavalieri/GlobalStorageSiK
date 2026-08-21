@@ -683,6 +683,16 @@ function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 	local scriptItem = scriptForFullType(fullType)
 
 	local mainCanon = GlobalStorageSiK.ItemTaxonomy.readMainKey(nil, scriptItem, row.category) or ""
+	-- DIAGNOSTICO DIRIGIDO (2026-08-21, reportado con Better Sorting activo:
+	-- fila "Caja de madera" con columna Categoria totalmente vacia, sin
+	-- ningun texto ni siquiera "-"). mainCanon="" es la unica via conocida a
+	-- una columna vacia (translateMainKey(nil) devuelve "-", no vacio, asi
+	-- que si el jugador ve blanco de verdad, mainCanon es "" antes de llegar
+	-- ahi). Traza dirigida en vez de adivinar mas la causa raiz sin datos.
+	if mainCanon == "" and GlobalStorageSiK.Sandbox.debugCategoryEnabled("CompatCategories") then
+		GlobalStorageSiK.Log.debug("CompatCategories", "resolve | mainCanon vacio fullType=" .. tostring(fullType)
+			.. " row.category=" .. tostring(row.category) .. " hasScriptItem=" .. tostring(scriptItem ~= nil))
+	end
 	local subCanon = GlobalStorageSiK.ItemTaxonomy.readSubKey(nil, scriptItem, mainCanon, row.subCategory) or ""
 	local mainLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(mainCanon ~= "" and mainCanon or nil)
 	local subLabel = GlobalStorageSiK.ItemTaxonomy.translateSubKey(subCanon ~= "" and subCanon or nil, mainCanon, scriptItem) or ""

@@ -45,6 +45,8 @@ GlobalStorageSiK.DiskProgramming.registerProgram("craft", {
 	manualItem = "GSSiK_Addon_Craft.GS_Manual_Craft_DiskProgram",
 	outputItem = "GSSiK_Addon_Craft.GS_FloppyDisk_Craft",
 	menuTextKey = "IGUI_GS_ProgramCraftDiskMenu",
+	iconPath = "media/textures/Item_GS_FloppyDisk_Craft.png",
+	descKey = "IGUI_GS_ProgramCraftDiskDesc",
 })
 
 GlobalStorageSiK.AddonRegistry.register({

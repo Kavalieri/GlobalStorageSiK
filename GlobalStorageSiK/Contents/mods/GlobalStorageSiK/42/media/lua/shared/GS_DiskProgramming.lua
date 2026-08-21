@@ -34,6 +34,8 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_NetworkDisk_DiskProgram",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk",
 		menuTextKey = "IGUI_GS_ProgramNetworkDiskMenu",
+		iconPath = "media/textures/Item_GS_FloppyDisk.png",
+		descKey = "IGUI_GS_ProgramNetworkDiskDesc",
 	},
 	uninstall = {
 		id = "uninstall",
@@ -41,6 +43,8 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_DiskPrograms",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk_Uninstall",
 		menuTextKey = "IGUI_GS_ProgramUninstallDiskMenu",
+		iconPath = "media/textures/Item_GS_UninstallDisk.png",
+		descKey = "IGUI_GS_ProgramUninstallDiskDesc",
 	},
 	driveinstall = {
 		id = "driveinstall",
@@ -48,14 +52,17 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_DriveInstall_DiskProgram",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk_DriveInstall",
 		menuTextKey = "IGUI_GS_ProgramDriveInstallDiskMenu",
+		iconPath = "media/textures/Item_GS_FloppyDisk_DriveInstall.png",
+		descKey = "IGUI_GS_ProgramDriveInstallDiskDesc",
 	},
 }
 
 --- Punto de registro para que cada addon aporte su propio disco programable
---- (mismos 5 campos que las entradas de arriba) sin que el Core tenga que
---- conocer sus nombres de antemano.
+--- (mismos campos que las entradas de arriba, incluidos iconPath/descKey
+--- para la tarjeta visual de la pestaña Programación) sin que el Core tenga
+--- que conocer sus nombres de antemano.
 ---@param id string
----@param def table { recipeName, manualItem, outputItem, menuTextKey }
+---@param def table { recipeName, manualItem, outputItem, menuTextKey, iconPath, descKey }
 function GlobalStorageSiK.DiskProgramming.registerProgram(id, def)
 	if not id or not def then
 		return

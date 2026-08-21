@@ -70,6 +70,21 @@ local AREA_CATEGORY = {
 	-- Modo depuracion y no se podia apagar por separado sin tocar tambien
 	-- cualquier otra traza activa en ese momento.
 	SearchDiag = "Search",
+	-- Categoria propia (pedido explicito 2026-08-21, fase dev Better Sorting):
+	-- traza de normalizacion de categorias por item, alto volumen (Log.detail),
+	-- debe poder apagarse sin tocar el resto de diagnosticos activos.
+	CompatCategories = "CompatCategories",
+	-- Categoria propia (pedido explicito 2026-08-21, prueba de bonus de
+	-- capacidad por rasgo tipo Organizado): confirma si/cuanto bonus personal
+	-- se detecto por contenedor durante la prueba, sin depender del
+	-- interruptor maestro ni mezclarse con otro diagnostico activo.
+	CapacityBonus = "CapacityBonus",
+	-- Categoria propia (pedido explicito 2026-08-21, diagnostico del tick de
+	-- "ya leido" en manuales GS): confirma con datos reales si la sonda de
+	-- receta (instanceItem + getLearnedRecipes) tiene exito o falla, en vez
+	-- de seguir adivinando a ciegas por que un manual con receta fija de
+	-- script nunca marcaba el tick pese a estar ya aprendida.
+	LiteratureRead = "LiteratureRead",
 }
 
 --- Escribe línea en consola del juego.

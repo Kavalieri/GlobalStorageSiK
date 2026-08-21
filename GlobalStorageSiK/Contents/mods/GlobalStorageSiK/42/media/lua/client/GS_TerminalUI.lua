@@ -668,7 +668,16 @@ function GS_TerminalUI:applyCapacityState(cap)
 		return
 	end
 	local used = string.format("%.1f", tonumber(cap.usedWeight) or 0)
-	local total = string.format("%.1f", tonumber(cap.totalCapacity) or 0)
+	-- effectiveCapacity (base + bonus personal real de rasgos como Organizado,
+	-- ver GS_NetworkCapacity.compute) es el mismo limite que el motor ya
+	-- aplica para decidir si un deposito de ESTE jugador cabe de verdad - el
+	-- porcentaje/estado ya vienen calculados sobre ese numero desde el
+	-- servidor, asi que el total mostrado tiene que coincidir con el mismo
+	-- para que la cuenta cuadre visualmente. Sin bonus, effectiveCapacity ==
+	-- totalCapacity y no cambia nada respecto a antes.
+	local personalBonus = tonumber(cap.personalBonus) or 0
+	local effectiveCapacityNum = tonumber(cap.effectiveCapacity) or tonumber(cap.totalCapacity) or 0
+	local total = string.format("%.1f", effectiveCapacityNum)
 	local pct = tonumber(cap.percent) or 0
 	local status = cap.status or "ok"
 	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
@@ -681,10 +690,13 @@ function GS_TerminalUI:applyCapacityState(cap)
 
 	local pctText = tostring(pct) .. "%"
 	local weightText
-	if (cap.totalCapacity or 0) > 0 then
+	if effectiveCapacityNum > 0 then
 		weightText = T("IGUI_GS_WeightUsage", used, total, pctText)
 	else
 		weightText = T("IGUI_GS_WeightUsedOnly", used)
+	end
+	if personalBonus > 0 then
+		weightText = weightText .. " " .. T("IGUI_GS_WeightPersonalBonus", string.format("%.1f", personalBonus))
 	end
 
 	-- Los widgets de estado (statWeight, weightBar) viven en la sub-pestaña "red"

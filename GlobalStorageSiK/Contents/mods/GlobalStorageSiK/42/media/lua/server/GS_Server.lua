@@ -507,7 +507,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 		craftProbe = craftProbe,
 
 		capacity = GlobalStorageSiK.NetworkCapacity.serialize(
-			GlobalStorageSiK.NetworkCapacity.compute(networkId)
+			GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 		),
 
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
@@ -1303,7 +1303,7 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 			itemTypeCount = #rows,
 			nodeTypeCounts = buildLiveNodeTypeCounts(networkId, player),
 			capacity = GlobalStorageSiK.NetworkCapacity.serialize(
-				GlobalStorageSiK.NetworkCapacity.compute(networkId)
+				GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			),
 			inventorySync = true,
 			openUi = false,
@@ -1385,13 +1385,46 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 			"network=" .. tostring(networkId) .. " ui=suppressed")
 		return
 	end
-	-- El resultado de la operación ya se informa por actionResult. El catálogo
-	-- completo se enviará una sola vez al terminar el snapshot incremental de
-	-- fondo; reconstruirlo aquí recorría de nuevo miles de instancias y repetía
-	-- el mismo payload para cada lote.
+	-- El catálogo COMPLETO (world rescan) sigue siendo deferred_incremental
+	-- (ZoneScanJob, caro, ~12s en redes grandes) - eso NO cambia. Pero sin
+	-- ningun aviso inmediato, el jugador que acaba de depositar veia su
+	-- propia lista desactualizada hasta el siguiente escaneo completo (bug
+	-- real reportado 2026-08-21: "deposito 2 libros y no aparecen ni se
+	-- pueden buscar"). pushTerminalInventorySync ya existe para esto (lo usa
+	-- network_read_return) y es barato: reconstruye rows() desde el snapshot
+	-- YA EN MEMORIA (nada de recorrer el mundo de nuevo), una sola vez por
+	-- ACCION de deposito (no por microlote interno), y el cliente la aplica
+	-- fusionando sobre su estado ya cacheado (GS_Client.lua
+	-- mergeInventorySyncState) sin resetear scroll/busqueda/filtros. Solo al
+	-- actor: los demas watchers de la red siguen recibiendo la actualizacion
+	-- via el mecanismo diferido existente, sin ampliar el alcance del fix.
+	if actor then
+		-- BUG REAL encontrado 2026-08-21: pushTerminalInventorySync ->
+		-- buildRows() lee node.itemSnapshot (la CACHE en memoria), no el
+		-- contenedor en vivo, y esa cache solo se refrescaba en el
+		-- ZoneScanJob completo (~12s). Sin refrescarla antes, el push
+		-- inmediato de arriba podia seguir mostrando datos desactualizados
+		-- (sin el item recien depositado) pese a llegar al instante.
+		--
+		-- Primer intento (dev11 inicial): llamar aqui a
+		-- GlobalStorageSiK.Index.syncLiveSnapshots(networkId), que existia
+		-- para esto ("servidor tras transferencias") pero nadie llamaba.
+		-- Descartado tras revision: ese barrido recorre TODOS los nodos
+		-- activos de la red (getActiveNodes, hasta MAX_CONTAINERS_PER_NETWORK
+		-- = 64) para volver a encontrar el mismo nodo que Transfer ya habia
+		-- resuelto segundos antes al elegir destino/origen - duplicaba ese
+		-- coste una vez por accion.
+		--
+		-- Fix real: GS_Transfer.lua (depositItem/withdrawUnits) ya escribe el
+		-- itemSnapshot del nodo exacto tocado, en el mismo punto donde ya
+		-- tiene entry+container resueltos (GlobalStorageSiK.Index.
+		-- syncNodeSnapshot), sin ningun barrido adicional. Aqui ya no hace
+		-- falta refrescar nada, solo empujar el estado ya actualizado.
+		pushTerminalInventorySync(actor, networkId, searchQuery)
+	end
 	GlobalStorageSiK.Log.detail("Server", "afterTransferSync",
 		"network=" .. tostring(networkId)
-			.. " refresh=deferred_incremental")
+			.. " refresh=inventory_sync_immediate+deferred_incremental")
 end
 
 --- Envía estado del terminal al cliente.

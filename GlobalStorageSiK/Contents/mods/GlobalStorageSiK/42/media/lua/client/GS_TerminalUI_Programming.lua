@@ -64,6 +64,26 @@ local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
 	return y
 end
 
+-- Icono grande de la tarjeta de cada programa (pedido explicito 2026-08-21:
+-- "tarjetas" visuales con el icono de su disquete correspondiente). Panel
+-- propio con prerender, mismo patron que GS_TerminalUI_AddonBay.lua para el
+-- icono del periferico - drawTextureScaledAspect conserva proporcion, nunca
+-- deforma un icono cuadrado en un hueco no cuadrado.
+local ICON_SIZE = 40
+local function addProgramIcon(scroll, x, y, iconPath)
+	local icon = ISPanel:new(x, y, ICON_SIZE, ICON_SIZE)
+	icon:initialise()
+	icon.drawBackground = false
+	icon.prerender = function(panel)
+		ISPanel.prerender(panel)
+		local tex = iconPath and getTexture(iconPath) or nil
+		if tex then
+			panel:drawTextureScaledAspect(tex, 0, 0, panel.width, panel.height, 1, 1, 1, 1)
+		end
+	end
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, icon)
+end
+
 local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	local title = T(titleKey)
 	local titleH = FONT_HGT_SMALL + 8
@@ -142,12 +162,27 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
 	local btnW = math.min(280, cardW)
+	local textX = pad + ICON_SIZE + 8
+	local textW = math.max(80, cardW - ICON_SIZE - 8)
 	local ids = orderedProgramIds()
 	for i = 1, #ids do
 		local id = ids[i]
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
+		local blockTop = y
+
+		addProgramIcon(scroll, pad, y, def.iconPath)
+
+		local textY = y
 		local title = T(def.menuTextKey or id)
-		y = addWrappedLabel(scroll, pad, y, title, cardW, 0.88, 0.9, 0.94)
+		textY = addWrappedLabel(scroll, textX, textY, title, textW, 0.88, 0.9, 0.94)
+		if def.descKey then
+			textY = addWrappedLabel(scroll, textX, textY, T(def.descKey), textW, 0.62, 0.68, 0.72)
+		end
+
+		-- La tarjeta baja hasta lo mas alto entre el bloque de texto y el
+		-- icono (un texto largo puede superar los 40px del icono; un icono
+		-- sin descripcion nunca debe dejar la tarjeta mas corta que el).
+		y = math.max(textY, blockTop + ICON_SIZE) + 4
 
 		local known, hasDisk = programReadiness(player, id)
 		local statusKey, sr, sg, sb

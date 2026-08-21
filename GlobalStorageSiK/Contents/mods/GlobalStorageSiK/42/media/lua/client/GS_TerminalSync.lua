@@ -108,16 +108,47 @@ function GlobalStorageSiK.TerminalSync.finishManagedTransfer(owner, searchQuery,
 	local uiVisible = ui and (not ui.isVisible or ui:isVisible())
 	local uiNetworkId = ui and ui.terminalState and ui.terminalState.networkId
 	local sameNetwork = not managed.networkId or not uiNetworkId or managed.networkId == uiNetworkId
-	if managed.networkId and expectedRevision then
+	-- BUG REAL (2026-08-21, reportado: "pulso F9 y el terminal ya no abre,
+	-- el servidor confirma acceso una y otra vez pero el cliente nunca
+	-- muestra nada"): este flag SOLO se limpia mas abajo dentro de la rama
+	-- "pendingIsFresh and uiVisible" - pero se ESCRIBIA aqui de forma
+	-- incondicional, sin importar si habia UI visible que proteger. Si una
+	-- transferencia gestionada terminaba con el terminal CERRADO (p.ej. leer
+	-- una revista de red sin tener el terminal abierto, o cerrarlo mientras
+	-- un deposito seguia en cola), el flag quedaba escrito y NUNCA se
+	-- limpiaba - onTerminalState() lo comprueba en CUALQUIER terminalState
+	-- futuro (linea ~263), incluida una apertura normal por F9, y la
+	-- descarta indefinidamente hasta que el snapshotRevision del siguiente
+	-- ZoneScanJob completo alcance ese valor por pura casualidad. El
+	-- proposito real de este flag es proteger una UI QUE YA ESTA ABIERTA de
+	-- un envio tardio con datos viejos - si no hay UI abierta no hay nada
+	-- que proteger, asi que ahora solo se escribe cuando uiVisible es
+	-- cierto, evitando dejarlo huerfano para siempre.
+	if managed.networkId and expectedRevision and uiVisible and sameNetwork then
 		_requiredSnapshotRevision[managed.networkId] = math.max(
 			_requiredSnapshotRevision[managed.networkId] or 0, expectedRevision)
 	end
-	local pendingRevision = managed.pendingState and managed.pendingState.snapshotRevision or 0
+	-- BUG REAL (2026-08-21): expectedRevision viene de operation.lastRevision,
+	-- que se rellena con inventoryRevision (sube en CADA transferencia). Antes
+	-- se comparaba contra pendingState.snapshotRevision - un contador DISTINTO
+	-- que solo avanza al terminar el ZoneScanJob completo (~12s). Al ser
+	-- incompatibles, pendingIsFresh daba practicamente siempre false: el
+	-- estado fresco que pushTerminalInventorySync ya entregaba correctamente
+	-- (ver GS_Server.lua/GS_Transfer.lua, fix "-dev11" del snapshot preciso
+	-- por nodo) se descartaba sin aplicarse, y solo se repintaba el
+	-- ui.terminalState VIEJO via refreshItemsTab() - de ahi que pareciera que
+	-- el deposito/retorno "no refrescaba" hasta el siguiente scan de 12s.
+	-- Fix: comparar inventoryRevision contra inventoryRevision (misma
+	-- familia de contador que expectedRevision), conservando snapshotRevision
+	-- solo para markRevision/_requiredSnapshotRevision, que SI son sobre el
+	-- contador de snapshot y no deben mezclarse con este.
+	local pendingInventoryRevision = managed.pendingState and managed.pendingState.inventoryRevision or 0
+	local pendingSnapshotRevision = managed.pendingState and managed.pendingState.snapshotRevision or 0
 	local pendingIsFresh = managed.pendingState
-		and (not expectedRevision or pendingRevision >= expectedRevision)
+		and (not expectedRevision or pendingInventoryRevision >= expectedRevision)
 	if pendingIsFresh and uiVisible and sameNetwork and GlobalStorageSiK.TerminalUI
 		and type(GlobalStorageSiK.TerminalUI.show) == "function" then
-		markRevision(managed.networkId or managed.pendingState.networkId, pendingRevision)
+		markRevision(managed.networkId or managed.pendingState.networkId, pendingSnapshotRevision)
 		if managed.networkId then _requiredSnapshotRevision[managed.networkId] = nil end
 		GlobalStorageSiK.TerminalUI.show(managed.pendingState)
 	elseif uiVisible and sameNetwork then
@@ -261,7 +292,16 @@ function GlobalStorageSiK.TerminalSync.onTerminalState(state, inventorySync)
 		return true
 	end
 	local requiredRevision = networkId and _requiredSnapshotRevision[networkId] or 0
-	if requiredRevision > 0 and snapshotRevision < requiredRevision then
+	-- Cinturon de seguridad ademas del fix de arriba (finishManagedTransfer ya
+	-- no deja este flag huerfano si no habia UI visible al terminar) - una
+	-- apertura EXPLICITA del terminal (F9/interaccion directa del jugador,
+	-- state.openUi == true) nunca debe poder quedar descartada por este
+	-- mecanismo pensado solo para no pisar una UI ya abierta con datos
+	-- viejos. Si igualmente quedara un flag huerfano por cualquier otra via
+	-- no prevista, esto evita que bloquee indefinidamente el propio boton
+	-- de abrir - la sincronizacion fina de cantidades ya la cubre el push
+	-- normal nada mas abrir.
+	if requiredRevision > 0 and snapshotRevision < requiredRevision and state.openUi ~= true then
 		-- Una búsqueda o reapertura puede responder antes que el escaneo de fondo.
 		-- No permitir que ese snapshot anterior restaure cantidades confirmadas.
 		return true

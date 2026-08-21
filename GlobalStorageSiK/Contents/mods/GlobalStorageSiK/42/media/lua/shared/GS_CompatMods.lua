@@ -10,6 +10,21 @@
 	  el valor que el haya puesto. hasExtendedCategories() se deja aqui como
 	  punto de deteccion reutilizable (p.ej. para diagnostico/debug).
 
+	- Better Sorting (BetterSortCC, Workshop 2313387159): a diferencia de
+	  Extended Categories, NO tiene jerarquia de 3 niveles ni API publica -
+	  solo reescribe getDisplayCategory() a ~79 codigos propios y planos
+	  (FoodA/FoodB/FoodN/FoodP, WepMAxe/WepFire, ClothAcc/ClothJew,
+	  CraftBlack/CraftG/CraftMas/CraftTailor/CraftCarv, MedI/MedM/MedT,
+	  SurFarm...) en Events.OnGameBoot, el MISMO evento que usa
+	  GS_CategoryRewrite.lua. Por eso GS_Subcategories.lua normaliza esos
+	  codigos de vuelta a su raiz vanilla (tabla BETTER_SORTING_CANON, local a
+	  ese fichero por el mismo motivo que extendedCategoriesActive() no pasa
+	  por aqui: carga muy temprana) ANTES de comparar, en vez de desactivar su
+	  propio motor de subcategorias como con EC - Better Sorting no aporta ese
+	  detalle, asi que apagarnos seria una perdida neta. hasBetterSorting() se
+	  deja aqui como punto de deteccion reutilizable (diagnostico/debug y para
+	  que GS_CategoryRewrite.lua evite competir por el mismo campo/evento).
+
 	- Customizable Containers (CustomizableBackpacks): expone su registro de
 	  etiquetas de contenedor en la tabla global CCLabelRegistry. Leemos su
 	  API publica (getWorldObjectKey/getFactionName) y su ModData conocido
@@ -37,6 +52,12 @@ end
 ---@return boolean
 function GlobalStorageSiK.CompatMods.hasCustomizableContainers()
 	return rawget(_G, "CCLabelRegistry") ~= nil
+end
+
+--- Better Sorting fija BScats = BScats or {} al cargar su shared file BaseCategories.lua.
+---@return boolean
+function GlobalStorageSiK.CompatMods.hasBetterSorting()
+	return rawget(_G, "BScats") ~= nil
 end
 
 --- Busca la etiqueta (personal o de faccion) que Customizable Containers tenga puesta

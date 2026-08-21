@@ -264,6 +264,46 @@ option GlobalStorageSiK.DebugCatSearch
 	translation = GlobalStorageSiK_DebugCatSearch,
 }
 
+option GlobalStorageSiK.DebugCatCompatCategories
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatCompatCategories,
+}
+
+option GlobalStorageSiK.DebugDetailCompatCategories
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailCompatCategories,
+}
+
+option GlobalStorageSiK.DebugCatCapacityBonus
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatCapacityBonus,
+}
+
+option GlobalStorageSiK.DebugDetailCapacityBonus
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugDetailCapacityBonus,
+}
+
+option GlobalStorageSiK.DebugCatLiteratureRead
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatLiteratureRead,
+}
+
 option GlobalStorageSiK.DebugDetailRouter
 {
 	type = boolean,

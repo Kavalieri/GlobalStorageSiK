@@ -187,6 +187,10 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 	local lastReason = nil
 
+	-- Nodos realmente tocados en este micro-lote, para refrescar su
+	-- itemSnapshot UNA sola vez cada uno al final (no por item movido).
+	local touchedNodes = {}
+
 	for i = 1, #live do
 
 		if moved >= units then
@@ -251,6 +255,10 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 							sourceNodeIds[#sourceNodeIds + 1] = sourceNodeId and tostring(sourceNodeId) or ""
 
+							if sourceNodeId and not touchedNodes[sourceNodeId] then
+								touchedNodes[sourceNodeId] = { entry = live[i].entry, container = container }
+							end
+
 						end
 
 					else
@@ -267,6 +275,13 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 		end
 
+	end
+
+	-- Refresco preciso (2026-08-21), igual que en depositItem: solo los nodos
+	-- realmente afectados en este micro-lote, una vez cada uno (no por item),
+	-- sin repetir getLiveContainers() para toda la red en afterTransferSync.
+	for _, touched in pairs(touchedNodes) do
+		GlobalStorageSiK.Index.syncNodeSnapshot(touched.entry, touched.container)
 	end
 
 	if moved > 0 then
@@ -399,6 +414,12 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 		local units = 1
 
 		notifyInventoryChanged(networkId, units)
+
+		-- Refresco preciso (2026-08-21): actualiza SOLO el snapshot de este
+		-- nodo, ya resuelto aqui mismo - evita repetir el barrido de
+		-- getLiveContainers() que afterTransferSync hacia antes para toda la
+		-- red (hasta 64 nodos) solo para volver a encontrar este mismo nodo.
+		GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container)
 
 		return true, nil
 

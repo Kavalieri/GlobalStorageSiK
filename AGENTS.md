@@ -24,6 +24,8 @@ Leer también las instrucciones del workspace y el `CLAUDE.md` más cercano ante
 - Actualizar `docs/DEBUGGING.md` cuando cambien opciones, niveles, orígenes o ejemplos.
 - Toda traza de diagnóstico nueva recibe su propia categoría de sandbox activable por separado desde el momento en que se escribe, nunca dependiendo solo del interruptor maestro: entrada en `AREA_CATEGORY` (Core `GS_Log.lua` o mapa propio del addon), `option DebugCat<Nombre>` en `sandbox-options.txt`, traducción en los 10 idiomas. Nunca asumir que una traza es temporal.
 - Versiones, metadata, patchnotes, JSON y Lua se validan antes de deploy. Steam y GitHub se publican solo con autorización explícita.
+- Corregir una descripción (`description_<lang>.bbcode`) no exige una release de contenido: `deploy.ps1 -Mod <target> -Describe` (ver detalle en `../AGENTS.md`) sube solo descripción/título/tags, sin tocar contenido ni avisar de actualización a los suscriptores; es un proceso aparte de DEV/PROD/HOTFIX, con su propia confirmación explícita antes de ejecutar.
+- `latam` nunca se traduce ni redacta aparte (ni descripción ni patchnote): reutiliza siempre spanish, el script ya lo construye solo (ver `../AGENTS.md`). Las notas de PROD/HOTFIX solo se redactan en spanish y english — el resto de idiomas vive solo en la descripción, actualizada aparte con `-Describe`.
 - Para sintaxis, invocar el ejecutable Lua local por ruta absoluta y pasar cada ruta normalizada directamente a `-e "assert(loadfile('<ruta>'))"`. No usar `arg[1]` con `-e`: ese runtime no lo define y genera falsos fallos masivos sin evaluar archivos. Confirmar además que el binario arrancó; un error de ruta de PowerShell no cuenta como `FAILED=0`.
 
 ## Transferencias y trabajos incrementales

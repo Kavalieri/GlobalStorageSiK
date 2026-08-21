@@ -132,6 +132,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NetRangeWireless = "Tablet range: {1} tiles",
 	IGUI_GS_WeightUsage = "Weight: {1} / {2} kg ({3})",
 	IGUI_GS_WeightUsedOnly = "Weight used: {1} kg (capacity unknown — rescan)",
+	IGUI_GS_WeightPersonalBonus = "(+{1} kg personal)",
 	IGUI_GS_WeightWarn = "Storage almost full ({1})! Add crates, rescan zones, or create a new zone.",
 	IGUI_GS_WeightCritical = "Storage critical ({1})! Expand soon: place more boxes and rescan.",
 	IGUI_GS_WeightFull = "Network storage full. Add capacity before depositing more items.",

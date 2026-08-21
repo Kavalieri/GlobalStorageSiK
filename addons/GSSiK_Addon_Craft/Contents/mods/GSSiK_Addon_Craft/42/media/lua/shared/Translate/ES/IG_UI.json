@@ -1,5 +1,6 @@
 {
 	"IGUI_GS_ProgramCraftDiskMenu": "Grabar disco Craft",
+	"IGUI_GS_ProgramCraftDiskDesc": "Añade el periférico Impresora 3D GS a un terminal de esta red: crafteo con inventario de red.",
 	"IGUI_GS_AddonCraftTitle": "Craft",
 	"IGUI_GS_AddonCraftDesc": "Addon Craft: revista obligatoria (Electricidad 5). Instala el módulo en este terminal.",
 	"IGUI_GS_SectionCraftRemote": "Crafteo con inventario de red",

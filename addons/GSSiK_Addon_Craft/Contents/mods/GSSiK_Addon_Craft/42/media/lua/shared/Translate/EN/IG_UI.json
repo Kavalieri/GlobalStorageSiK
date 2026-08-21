@@ -1,5 +1,6 @@
 {
 	"IGUI_GS_ProgramCraftDiskMenu": "Write Craft disk",
+	"IGUI_GS_ProgramCraftDiskDesc": "Adds the GS 3D Printer peripheral to a terminal in this network: network-inventory crafting.",
 	"IGUI_GS_AddonCraftTitle": "Craft",
 	"IGUI_GS_AddonCraftDesc": "Craft add-on: magazine required (Electricity 5). Install module on this terminal.",
 	"IGUI_GS_SectionCraftRemote": "Network inventory crafting",

@@ -156,7 +156,6 @@ local function drawZoneAccessRow(list, y, item, alt)
 	list:drawRectBorder(6, boxY, box, box, 1, 0.55, 0.58, 0.62)
 	if item.item and item.item.allowed == true then
 		list:drawRect(9, boxY + 3, box - 6, box - 6, 0.9, 0.2, 0.75, 0.35)
-		list:drawText("X", 10, boxY - 1, 0.95, 0.98, 0.95, 1, UIFont.Small)
 	end
 	local label = item.text or "?"
 	list:drawText(label, 6 + box + 8, y + math.floor((item.height - FONT_HGT_SMALL) / 2),

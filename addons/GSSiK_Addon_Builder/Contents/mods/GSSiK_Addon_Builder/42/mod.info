@@ -4,6 +4,6 @@ description=Build 42.20+ v1.0.4. Construye con toda tu red GS: Pizarra Digital G
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.0.4
+modversion=1.0.5-dev4
 versionMin=42.19.0
 require=\GlobalStorageSiK,\NeatUI_Framework

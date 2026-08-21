@@ -155,6 +155,23 @@ local CHARACTER_UUID_KEY = "GS_CharacterUUID"
 GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY = CHARACTER_UUID_KEY
 local characterUuidSequence = 0
 local identityUuidSeen = {}
+
+-- Cache de UUID por sesion (2026-08-21, segundo intento tras revertir la
+-- version que escribia un campo nuevo sobre el objeto IsoPlayer - eso
+-- coincidio con un bloqueo total del terminal y se revirtio sin poder
+-- confirmar al 100% la causa exacta). Este intento NO toca el objeto del
+-- motor en absoluto: usa el propio `player` como CLAVE de una tabla Lua
+-- nuestra (mismo patron ya probado y en uso real en GS_ContainerTargets.lua,
+-- sessionTargets[player] = ...), nunca como valor a mutar. No es la SteamID
+-- (cambia con reinstalaciones/comparticion familiar), ni el indice dinamico
+-- de jugador (se reutiliza entre reconexiones), ni el nombre (puede
+-- duplicarse/cambiar) - sigue siendo nuestro propio UUID persistente
+-- (GS_CharacterUUID en modData), solo que ahora el resultado YA resuelto se
+-- guarda en memoria para no releer modData innecesariamente muchas veces
+-- por la misma peticion. Claves debiles (__mode="k"): si el objeto IsoPlayer
+-- deja de existir (desconexion), su entrada puede recolectarse sola sin
+-- dejar basura acumulandose en un servidor dedicado de larga duracion.
+local characterUuidCache = setmetatable({}, { __mode = "k" })
 local permissionRosterLogSignatures = {}
 
 --- Solo usa un getter público si alguna build lo expone. Nunca intenta acceder
@@ -205,15 +222,22 @@ end
 --- transmitModData intenta reflejarlo al cliente. Una ranura sqlId puede ser
 --- reutilizada al crear otro personaje, por lo que nunca autoriza por sí sola.
 local function getOrCreateCharacterUuid(player, reason)
-	-- DIAGNOSTICO DIRIGIDO (2026-08-20): traza SIEMPRE visible de CADA
-	-- llamada a esta funcion, antes de cualquier logica - las trazas
-	-- characterUuidReused/Generated de mas abajo NO aparecieron ni una vez
-	-- en un log real de servidor donde el admin claramente se conecto y
-	-- abrio el terminal con exito (accessCheck ok=true), lo que sugiere que
-	-- esta funcion no se esta llamando en absoluto en ese flujo, no que el
-	-- UUID se regenere. Esta linea confirma o descarta eso de un vistazo.
+	-- Cache por sesion (ver characterUuidCache arriba): el jugador es la
+	-- CLAVE de una tabla Lua nuestra, nunca se escribe nada sobre el objeto
+	-- IsoPlayer en si. Corta aqui el resto de la funcion (log de diagnostico,
+	-- lectura de modData, validacion) para el caso comun de "ya resuelto en
+	-- esta sesion".
+	if player and characterUuidCache[player] ~= nil then
+		return characterUuidCache[player]
+	end
+	-- DIAGNOSTICO DIRIGIDO (2026-08-20, degradado a Log.debug 2026-08-21): esta
+	-- traza confirmo que la funcion SI se llama en el flujo normal de
+	-- conexion+apertura de terminal (duda original ya resuelta, ver
+	-- pending-work.md) - degradada de Log.warn (siempre visible) a
+	-- Log.debug (categoria Permissions) porque en producción se dispara
+	-- decenas de veces por accion y ya no aporta nada sin gatear, solo ruido.
 	if GlobalStorageSiK.Log then
-		GlobalStorageSiK.Log.warn("Identity", "getOrCreateCharacterUuid CALLED reason=" .. tostring(reason or "?")
+		GlobalStorageSiK.Log.debug("Identity", "getOrCreateCharacterUuid CALLED reason=" .. tostring(reason or "?")
 			.. " hasPlayer=" .. tostring(player ~= nil) .. " hasGetModData=" .. tostring(player and player.getModData ~= nil))
 	end
 	if not player or not player.getModData then return "" end
@@ -221,6 +245,7 @@ local function getOrCreateCharacterUuid(player, reason)
 	if not okData or not data then return "" end
 	local existing = tostring(data[CHARACTER_UUID_KEY] or "")
 	if validCharacterUuid(existing) then
+		if player then characterUuidCache[player] = existing end
 		if not identityUuidSeen[existing] then
 			identityUuidSeen[existing] = true
 			if GlobalStorageSiK.Log then
@@ -235,6 +260,7 @@ local function getOrCreateCharacterUuid(player, reason)
 	if not GlobalStorageSiK.isAuthoritative() then return "" end
 	local value = generateCharacterUuid()
 	data[CHARACTER_UUID_KEY] = value
+	if player then characterUuidCache[player] = value end
 	identityUuidSeen[value] = true
 	if player.transmitModData then
 		pcall(function() player:transmitModData() end)
@@ -270,7 +296,16 @@ local function getOrCreateCharacterUuid(player, reason)
 end
 
 local function getPersistentCharacterToken(player)
-	return getOrCreateCharacterUuid(player, "identity_lookup_fallback")
+	-- BUG REAL de nombre, no de logica (2026-08-21, señalado por comunidad
+	-- china via log analizado con IA, y confirmado al leer el codigo): este
+	-- "reason" se pasaba SIEMPRE, incondicionalmente, en la ruta PRINCIPAL de
+	-- resolucion de identidad (getCharacterId -> aqui, usada por
+	-- canAccessZone/isOwnerPlayer/etc en cada comprobacion de permisos
+	-- normal) - nunca fue una rama de emergencia. El nombre "fallback" hacia
+	-- parecer una ruta de error disparandose sin parar en el log, cuando es
+	-- el camino principal funcionando tal como esta diseñado. Renombrado
+	-- para que el log describa lo que de verdad pasa.
+	return getOrCreateCharacterUuid(player, "runtime_lookup")
 end
 
 --- Inicializa explícitamente la identidad al crear/cargar el personaje. El
