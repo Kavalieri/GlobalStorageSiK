@@ -211,22 +211,22 @@ function GlobalStorageSiK.Network.createNetwork(player)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local id = GlobalStorageSiK.NetworkId.generate(registry)
-	local owner = player and GlobalStorageSiK.Permissions.getCharacterName(player) or ""
-	local ownerAccount = player and player.getUsername and player:getUsername() or ""
 	local suffix = string.sub(id, -6)
+	-- Solo datos OPERATIVOS aqui (contenedores/terminales/addons) - identidad
+	-- y propiedad viven exclusivamente en la ModData de permisos propia
+	-- (GlobalStorageSiK.Permissions.getPermNet), nunca duplicadas aqui.
 	registry.networks[id] = {
 		id = id,
 		name = "Red " .. suffix,
-		owner = owner,
-		ownerAccount = ownerAccount,
 		terminals = {},
 		containers = {},
 		addonInstalls = {},
 		createdMs = (getTimestampMs and getTimestampMs()) or 0,
 	}
-	GlobalStorageSiK.Permissions.ensure(registry, id, owner)
-	if player and not GlobalStorageSiK.Permissions.initializeOwner(registry.networks[id], player) then
+	local permNet = GlobalStorageSiK.Permissions.getPermNet(id)
+	if player and not GlobalStorageSiK.Permissions.initializeOwner(permNet, player) then
 		registry.networks[id] = nil
+		GlobalStorageSiK.Permissions.deletePermNet(id)
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.error("Permissions", "createNetwork rejected",
 				"authoritative account/character identity unavailable")
@@ -235,6 +235,7 @@ function GlobalStorageSiK.Network.createNetwork(player)
 	end
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
 	end
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()

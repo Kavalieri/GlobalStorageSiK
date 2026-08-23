@@ -33,6 +33,28 @@ function GlobalStorageSiK.Sandbox.getTerminalProximityRange()
 	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.TerminalProximityRange or 2
 end
 
+--- Dias sin conectarse antes de que un admin/miembro deje de "bloquear" la
+--- escalada de nivel de reclamo de una red vacante (diseño "herencia de
+--- red", 2026-08-21) - ver GS_Permissions.lua:inactivityThresholdMs().
+---@return number
+function GlobalStorageSiK.Sandbox.getNetworkInactivityDays()
+	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.NetworkInactivityDays or 14
+end
+
+--- Dias sin conectarse del PROPIETARIO antes de que un admin VIVO de la red
+--- pueda reclamar la propiedad el mismo, sin esperar a que muera ni a que la
+--- red quede formalmente vacante (pedido explicito 2026-08-23: "el admin...
+--- debe poder reclamar la propiedad si hace mas de 3 dias que el viejo
+--- propietario no se conecta"). DISTINTO de NetworkInactivityDays de arriba
+--- a proposito - son dos decisiones de politica de servidor separadas (esta
+--- es sobre cuanto tarda un admin en poder sustituir a un dueño ausente; la
+--- otra es sobre cuando alguien deja de "bloquear" la cascada de reclamo de
+--- una red ya vacante) - ver GS_Permissions.lua:ownerInactivityThresholdMs().
+---@return number
+function GlobalStorageSiK.Sandbox.getOwnerInactivityClaimDays()
+	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.OwnerInactivityClaimDays or 3
+end
+
 --- Rango de "cobertura" de una red: distancia horizontal (en baldosas) máxima
 --- desde el terminal principal de una red (ver GS_TerminalRecord.getPrimaryAnchor,
 --- el primero colocado salvo que se marque otro como principal) dentro de la

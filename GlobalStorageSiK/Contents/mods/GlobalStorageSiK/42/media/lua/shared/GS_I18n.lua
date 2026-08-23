@@ -721,6 +721,72 @@ local function moveableDisplayName(shortName)
 	return nil
 end
 
+--- Heuristica barata para reconocer, ANTES de preguntarle a ScriptManager,
+--- que un fullType tiene la forma de un identificador de sprite de Moveable
+--- (p. ej. "Base.carpentry_01_16": nombre de hoja en minusculas + indice de
+--- hoja + indice de frame, ambos numericos) y NO la de un ScriptItem real
+--- vanilla/moddeado (que siempre usan PascalCase/camelCase sin guiones bajos
+--- numericos, p.ej. "CarpentryMagazine", "Hammer"). Mismo patron ya usado y
+--- validado en isLowQualityDisplayName/moveableDisplayNameFromSprite (mas
+--- abajo) para nombres de sprite reales - aqui se aplica al FULLTYPE mismo,
+--- no a un nombre ya resuelto.
+---@param fullType string|nil
+---@return boolean
+local function looksLikeMoveableSpriteFullType(fullType)
+	local localName = fullType and fullType:match("^[^%.]+%.(.+)$")
+	if not localName then return false end
+	return localName:match("^[%a]+_%d+_%d+$") ~= nil
+end
+
+-- Cache de sesion (2026-08-22, spam real en pruebas; ampliado 2026-08-23 -
+-- ver looksLikeMoveableSpriteFullType arriba): sm:getItem(fullType) imprime
+-- "Couldn't find item X" en el log VANILLA de forma incondicional cuando
+-- fullType no es un ScriptItem real - independiente de pcall, no es una
+-- excepcion Lua que se pueda silenciar. Cachear el resultado (incluido el
+-- "no existe", como `false`) evita que se repita, PERO la primera consulta a
+-- ScriptManager para un fullType nuevo seguia ocurriendo siempre, aunque ya
+-- supieramos por su forma que iba a fallar - esa primera consulta, no
+-- evitable solo con cache, es justo la que provoca la linea de log incluso
+-- con todo cacheado. Para el patron conocido de sprite de Moveable evitamos
+-- la consulta CONDENADA A FALLAR directamente: nunca se llega a preguntar,
+-- ni una sola vez, en vez de preguntar una vez y recordar la respuesta.
+local _scriptItemLookupCache = {}
+local function cachedScriptItem(fullType)
+	local cached = _scriptItemLookupCache[fullType]
+	if cached ~= nil then
+		return cached or nil
+	end
+	if looksLikeMoveableSpriteFullType(fullType) then
+		_scriptItemLookupCache[fullType] = false
+		return nil
+	end
+	local sm = getScriptManager and getScriptManager()
+	local script = nil
+	if sm and sm.getItem then
+		local ok, value = pcall(function() return sm:getItem(fullType) end)
+		script = ok and value or nil
+	end
+	_scriptItemLookupCache[fullType] = script or false
+	return script
+end
+
+--- Version PUBLICA de cachedScriptItem, para cualquier otro fichero que
+--- necesite preguntar "es este fullType un ScriptItem real" sin volver a
+--- pagar el coste (ni el log vanilla) de una consulta directa a
+--- ScriptManager:getItem() - mismo cache de sesion que ya usan
+--- typeDisplayName/nameFromItemInstance. Usar SIEMPRE esto en vez de llamar
+--- a sm:getItem(fullType) a pelo desde otro modulo (bug real cerrado
+--- 2026-08-22: GS_Categories.lua:collectFromNetworkItems lo hacia sin cache,
+--- una vez por cada tipo de item distinto de la red en CADA refresco de
+--- estado del terminal - la fuente real del spam de "Couldn't find item"
+--- que persistia pese a cachear ya typeDisplayName/nameFromItemInstance).
+---@param fullType string|nil
+---@return table|nil script item, o nil si no existe/no es un ScriptItem real
+function GlobalStorageSiK.I18n.getScriptItem(fullType)
+	if not fullType or fullType == "" then return nil end
+	return cachedScriptItem(fullType)
+end
+
 --- Nombre estable por tipo (sin variaciones de instancia: botellas, contenido, etc.).
 ---@param fullType string|nil
 ---@return string
@@ -728,14 +794,8 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if not fullType or fullType == "" then
 		return "?"
 	end
-	local hasScript = false
-	local smEarly = getScriptManager and getScriptManager()
-	if smEarly and smEarly.getItem then
-		local okScript, script = pcall(function()
-			return smEarly:getItem(fullType)
-		end)
-		hasScript = okScript and script ~= nil
-	end
+	local earlyScript = cachedScriptItem(fullType)
+	local hasScript = earlyScript ~= nil
 	-- getItemNameFromFullType imprime un error Java aunque esté dentro de pcall
 	-- cuando recibe el identificador de sprite de un Moveable (p. ej.
 	-- Base.carpentry_01_16). Consultarlo sólo para ScriptItems reales.
@@ -766,12 +826,12 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 			end
 		end
 	end
-	local sm = getScriptManager and getScriptManager()
-	if sm and sm.getItem then
-		local okItem, script = pcall(function()
-			return sm:getItem(fullType)
-		end)
-		if okItem and script then
+	-- Reutiliza el mismo resultado cacheado de arriba en vez de repetir la
+	-- consulta a ScriptManager (antes era una llamada SEPARADA e
+	-- incondicional a sm:getItem, doblando el spam de "Couldn't find item").
+	do
+		local script = earlyScript
+		if script then
 			if script.getDisplayName then
 				local ok, name = pcall(function()
 					return script:getDisplayName()
@@ -790,6 +850,24 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 			end
 		end
 	end
+	return GlobalStorageSiK.I18n.humanizeFallbackName(fullType)
+end
+
+--- Cola de typeDisplayName SIN tocar ScriptManager/instanceItem - solo
+--- traducciones de moveable + humanizado del token. Expuesta aparte
+--- (2026-08-22) para llamantes que YA SABEN que este fullType no es un
+--- ScriptItem real (p. ej. GS_ItemSnapshot.lua tras fallar
+--- moveableDisplayNameFromSprite con el worldSprite disponible) y por tanto
+--- no deben ni intentar la consulta a ScriptManager - va a fallar siempre y
+--- el motor imprime "Couldn't find item X" de forma incondicional cada vez
+--- (ver comentario de cachedScriptItem, mas arriba). No es una decision de
+--- rendimiento menor: sin esto, cualquier moveable de mundo escaneado que
+--- moveableDisplayNameFromSprite no sepa resolver directamente vuelve a
+--- pasar por typeDisplayName y dispara la consulta (aunque quede cacheada
+--- tras la primera vez).
+---@param fullType string
+---@return string
+function GlobalStorageSiK.I18n.humanizeFallbackName(fullType)
 	local shortName = fullType:match("^[^.]+%.(.+)$") or fullType
 	local moveable = moveableDisplayName(shortName)
 	if moveable and not GlobalStorageSiK.I18n.isLowQualityDisplayName(moveable) then
@@ -865,7 +943,25 @@ function GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
 			return resolved(localized)
 		end
 	end
-	if props.instanceItem then
+	-- BUG REAL cerrado (2026-08-22, spam en console.txt confirmado en pruebas
+	-- reales: "Couldn't find item Base.carpentry_01_16" x2 por sprite,
+	-- decenas de veces tras un solo evento de muerte): props:instanceItem()
+	-- intenta construir una InventoryItem real a partir del sprite del
+	-- moveable - si el codigo del sprite (rawName, p.ej. "carpentry_01_16")
+	-- ya tiene toda la pinta de ser un identificador interno sin traduccion
+	-- (mismo patron que isLowQualityDisplayName ya usa para descartarlo como
+	-- nombre final), intentarlo de todos modos es casi siempre un tiro al
+	-- aire: el motor imprime ese log de forma INCONDICIONAL (ni pcall ni
+	-- cache lo evitan, es un log Java, no una excepcion Lua) la PRIMERA vez
+	-- que ve cada worldSprite distinto, y un solo evento de muerte puede
+	-- reescanear docenas de moveables cercanos de golpe. Se prioriza un
+	-- console.txt limpio y diagnosticable sobre el nombre ligeramente mejor
+	-- que instanceItem() habria podido sacar en el puñado de casos donde de
+	-- verdad tenia un item real detras - GS_ItemSnapshot.lua ya cae a
+	-- humanizeFallbackName cuando esto devuelve nil, sigue habiendo un
+	-- nombre legible, solo que menos preciso.
+	local rawNameLooksBogus = rawName and GlobalStorageSiK.I18n.isLowQualityDisplayName(rawName)
+	if props.instanceItem and not rawNameLooksBogus then
 		local okItem, probe = pcall(function()
 			return props:instanceItem(worldSprite)
 		end)
@@ -874,7 +970,7 @@ function GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
 			if name then return resolved(name) end
 		end
 	end
-	if rawName and not GlobalStorageSiK.I18n.isLowQualityDisplayName(rawName) then
+	if rawName and not rawNameLooksBogus then
 		return resolved(rawName)
 	end
 	return resolved(nil)
@@ -905,7 +1001,25 @@ function GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 			return custom
 		end
 	end
-	if item.getName then
+	-- BUG REAL cerrado (2026-08-22, spam en console.txt confirmado en pruebas
+	-- reales - "Couldn't find item Base.carpentry_01_16" repetido en CADA
+	-- ronda de ZoneScanJob, no solo tras morir: un item guardado con un
+	-- fullType corrupto/no-registrado, p.ej. de una deuda tecnica antigua de
+	-- categoria/icono, dispara esto cada vez que se reescanea): la caza
+	-- anterior (moveableDisplayNameFromSprite) solo cerro UNA fuente del
+	-- mismo log, esta es la fuente PRINCIPAL - InventoryItem:getName() y
+	-- :getDisplayName() vanilla resuelven internamente contra ScriptManager
+	-- cuando el item no tiene nombre personalizado, e imprimen el mismo log
+	-- incondicional (ni pcall lo evita, es un log Java) si el fullType no
+	-- esta registrado como ScriptItem real. Se reutiliza el cache ya
+	-- existente de ScriptManager:getItem() (cachedScriptItem, mas arriba en
+	-- este fichero, el mismo que usa typeDisplayName) para nunca llamar a
+	-- estos dos metodos sobre un fullType que YA sabemos que no es real -
+	-- cachea la NO-existencia tambien, asi que como mucho aparece una vez
+	-- por fullType distinto en toda la sesion del proceso, nunca una vez por
+	-- instancia/escaneo.
+	local isRealScriptItem = typ and typ ~= "" and cachedScriptItem(typ) ~= nil
+	if isRealScriptItem and item.getName then
 		local okName, name = pcall(function()
 			return item:getName()
 		end)
@@ -914,7 +1028,7 @@ function GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 			return name
 		end
 	end
-	if item.getDisplayName then
+	if isRealScriptItem and item.getDisplayName then
 		local okDisp, disp = pcall(function()
 			return item:getDisplayName()
 		end)

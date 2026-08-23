@@ -39,6 +39,13 @@ local COL_ROLE_W = math.max(
 	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_PermRoleFaction"))
 ) + 14
 local COL_NAME_X = COL_ROLE_X + COL_ROLE_W + 12
+-- Columna "Conexion", a la derecha del todo - pedido explicito 2026-08-22:
+-- "Conectado" en verde para quien sigue en linea, "Desconectado hace X" para
+-- el resto. Medida con el peor caso ("99d") igual criterio que COL_ROLE_W.
+local COL_SEEN_W = math.max(
+	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOnline")),
+	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOffline", "99d"))
+) + 14
 local ADD_W = 72
 -- v20: fila de miembro simplificada (sin botones "Quitar"/"Roles" inline) -
 -- un clic en la fila abre GS_TerminalUI_MemberEditor.lua, igual patron que
@@ -318,8 +325,15 @@ local function buildMemberRows(perms)
 			local entry = perms.memberEntries[i]
 			local id = tostring(entry.id or entry.characterId or "")
 			local isOwner = entry.role == "owner"
+			local isDead = entry.role == GlobalStorageSiK.Permissions.ROLE_DEAD
 			local duplicate = (id ~= "" and seenIds[id] == true) or (isOwner and ownerSeen)
-			if not duplicate then
+			-- Un miembro fallecido ya no gestiona ni accede a nada - no pinta
+			-- nada en la pestaña normal de gestion (pedido explicito
+			-- 2026-08-22: "desde la pestaña de admin no debemos verlo, ya no
+			-- es miembro de la red"). Sigue visible con su marca en el panel
+			-- de soporte de staff (GS_AdminDashboard.lua), que si necesita
+			-- verlo para gestionar/auditar.
+			if not duplicate and not isDead then
 				if id ~= "" then seenIds[id] = true end
 				if isOwner then ownerSeen = true end
 				rows[#rows + 1] = {
@@ -330,6 +344,9 @@ local function buildMemberRows(perms)
 					username = entry.username or "",
 					legacy = entry.legacy == true,
 					deniedZoneIds = entry.deniedZoneIds or {},
+					diedAt = entry.diedAt,
+					lastSeenAt = entry.lastSeenAt,
+					online = entry.online == true,
 				}
 			end
 		end
@@ -394,14 +411,29 @@ local function createMemberRow(host, terminal, ui)
 		local data = self.memberData
 		if not data then return end
 		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
-		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
 		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
 		local rr, rg, rb = roleColor(data.kind)
-		local nameMaxW = math.max(40, self.width - COL_NAME_X - 4)
+		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
+		local nameMaxW = math.max(40, self.width - COL_NAME_X - COL_SEEN_W - 8)
 		self:drawText(truncate(memberRoleLabel(data.kind), COL_ROLE_W), COL_ROLE_X, yMid,
 			rr, rg, rb, 1, UIFont.Small)
-		self:drawText(truncate(data.displayName or data.name or "?", nameMaxW), COL_NAME_X, yMid,
-			pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		local nameText = data.displayName or data.name or "?"
+		local nr, ng, nb = pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3]
+		self:drawText(truncate(nameText, nameMaxW), COL_NAME_X, yMid, nr, ng, nb, 1, UIFont.Small)
+		-- Columna "Conexion": puramente informativa (pedido explicito
+		-- 2026-08-22), nunca se usa para inferir ni marcar nada - "Conectado"
+		-- en verde para quien sigue en linea ahora mismo, "Desconectado hace
+		-- X" para el resto. Solo ayuda a detectar a simple vista un caso
+		-- "colgado" que un fallecido normal.
+		local seenX = math.max(COL_NAME_X + nameMaxW + 4, self.width - COL_SEEN_W)
+		if data.online then
+			local gr, gg, gb = pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
+			self:drawText(truncate(T("IGUI_GS_AdminOnline"), COL_SEEN_W), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
+		elseif data.lastSeenAt then
+			local seenText = T("IGUI_GS_AdminOffline", GlobalStorageSiK.TerminalChrome.relativeAge(data.lastSeenAt))
+			self:drawText(truncate(seenText, COL_SEEN_W), seenX, yMid,
+				pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+		end
 	end
 	row.onMouseDown = function(self, x, y)
 		if self.memberData and self.memberData.kind ~= "empty" then return true end
@@ -669,6 +701,8 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		self:drawText(T("IGUI_GS_PermColMemberName"), COL_NAME_X, 2,
 			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		self:drawText(T("IGUI_GS_PermColConnection"), math.max(COL_NAME_X, self.width - COL_SEEN_W), 2,
+			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 	end
 	ui.permTableHost:addChild(ui.permTableHeader)
 
@@ -695,6 +729,16 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.noBackupWarnLbl:initialise()
 	addPermWidget(scroll, ui, ui.noBackupWarnLbl)
 	y = y + FONT_HGT_SMALL + BLOCK_GAP
+
+	-- Boton "Reclamar propiedad" para un admin VIVO cuyo propietario lleva
+	-- demasiado inactivo, o la red esta vacante (2026-08-23, ver
+	-- GS_TerminalUI:onClaimAsAdmin / canAdminClaimOwnership) - solo visible
+	-- para admin, nunca para member (syncPermsData controla su visibilidad
+	-- via perms.canClaimAsAdmin, ya calculado en servidor).
+	ui.claimAsAdminBtn = createRowButton(pad, y, 220, ENTRY_H, T("IGUI_GS_ClaimOwnershipButton"), scroll, function()
+		terminal:onClaimAsAdmin()
+	end)
+	addPermWidget(scroll, ui, ui.claimAsAdminBtn)
 
 	ui.addBlockTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_PermAddBlockTitle"), _ppal.textPrimary[1], _ppal.textPrimary[2], _ppal.textPrimary[3], 1, UIFont.Small, true)
 	ui.addBlockTitle:initialise()
@@ -826,6 +870,10 @@ local function syncPermsData(scroll, terminal, ui, state)
 	local backupCount = #(perms.allowedUsers or {})
 	if ui.successionHintLbl then ui.successionHintLbl:setVisible(isOwner) end
 	if ui.noBackupWarnLbl then ui.noBackupWarnLbl:setVisible(isOwner and backupCount == 0) end
+	-- Calculado SIEMPRE en servidor (GlobalStorageSiK.Permissions.
+	-- canAdminClaimOwnership, ver GS_Permissions.lua:serialize) - el cliente
+	-- solo pinta el boton segun lo que se le diga, nunca decide por su cuenta.
+	if ui.claimAsAdminBtn then ui.claimAsAdminBtn:setVisible(perms.canClaimAsAdmin == true) end
 
 	if isAdmin then
 		GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
@@ -896,6 +944,10 @@ local function layoutPermsBlock(scroll, ui, startY)
 	end
 	if ui.noBackupWarnLbl and ui.noBackupWarnLbl.isVisible and ui.noBackupWarnLbl:isVisible() then
 		col:place(ui.noBackupWarnLbl, titleH)
+	end
+	if ui.claimAsAdminBtn and ui.claimAsAdminBtn.isVisible and ui.claimAsAdminBtn:isVisible() then
+		GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.claimAsAdminBtn)
+		col:place(ui.claimAsAdminBtn, ENTRY_H + ROW_GAP)
 	end
 
 	-- Bloque "Añadir acceso": SIEMPRE recolocado fresco bajo la tabla (si es visible).

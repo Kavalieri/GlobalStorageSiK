@@ -424,12 +424,25 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 		b = tostring(b or ""):lower():gsub("^%s*(.-)%s*$", "%1")
 		return a ~= "" and a == b
 	end
-	local isSelf = data.kind ~= "faction"
-		and ((data.characterId and data.characterId ~= "" and data.characterId == myId)
-			or sameIdentityText(data.username, myUsername)
-			or ((not data.characterId or data.characterId == "")
-				and (not data.username or data.username == "")
-				and sameIdentityText(data.name, myName)))
+	-- BUG REAL cerrado (2026-08-22, confirmado con dos personajes de la MISMA
+	-- cuenta - Kalva muerta, Kava viva): antes esto comparaba por username
+	-- (cuenta) como alternativa AUNQUE ya hubiera un characterId (UUID) real
+	-- en la ficha, así que una fila de un personaje distinto pero de la
+	-- MISMA cuenta se detectaba como "tú mismo" (mostraba "Abandonar red" en
+	-- vez de "Quitar acceso"). El UUID es la identidad autoritativa siempre
+	-- que exista en la ficha - la cuenta/username SOLO es el fallback para
+	-- fichas legacy sin UUID en absoluto, nunca una alternativa cuando ya
+	-- hay un UUID que no coincide.
+	local isSelf
+	if data.kind == "faction" then
+		isSelf = false
+	elseif data.characterId and data.characterId ~= "" then
+		isSelf = data.characterId == myId
+	elseif data.username and data.username ~= "" then
+		isSelf = sameIdentityText(data.username, myUsername)
+	else
+		isSelf = sameIdentityText(data.name, myName)
+	end
 
 	-- Posicion/alto provisionales - buildLayout() recalcula el alto real
 	-- segun el contenido (numero de lineas envueltas, botones visibles) y

@@ -12,11 +12,92 @@ GlobalStorageSiK.Permissions = {}
 GlobalStorageSiK.Permissions.ROLE_OWNER  = "owner"
 GlobalStorageSiK.Permissions.ROLE_ADMIN  = "admin"
 GlobalStorageSiK.Permissions.ROLE_MEMBER = "member"
+-- Rediseño 2026-08-22 ("de hecho, podemos usar la columna rol... rol de un
+-- pj muerto sea 'muerto' y listo"): un personaje fallecido pasa a valer
+-- ROLE_DEAD en su propio campo role, la MISMA fuente unica de verdad que ya
+-- decide owner/admin/member para cualquier consumidor. No es un cuarto rol
+-- "activo" mas: ROLE_DEAD nunca coincide con ninguna comparacion role==owner/
+-- admin/member de todo el fichero, asi que el vaciado de permisos, acceso y
+-- escalada de reclamo (Nivel 1/2 de canClaimVacantOwnership) ocurre gratis,
+-- en el origen, sin tener que tocar cada punto de codigo que ya comprueba
+-- role. record.priorRole guarda el rol que tenia justo antes de morir - lo
+-- necesita el Nivel 3 (herencia por cuenta) para seguir identificando "esto
+-- fue un admin de esta red", que de otra forma dejaria de encontrarlo.
+GlobalStorageSiK.Permissions.ROLE_DEAD = "dead"
 
 --- Indica si deben aplicarse permisos (no en SP solo).
 ---@return boolean
 function GlobalStorageSiK.Permissions.shouldEnforce()
 	return GlobalStorageSiK.isMultiplayerActive()
+end
+
+-- ============================================================================
+-- Registro de permisos, ModData PROPIA (2026-08-22, separacion de
+-- responsabilidades pedida explicitamente - ver comentario de
+-- PERMISSIONS_MODDATA_KEY en GS_Config.lua). Antes estos campos vivian
+-- mezclados dentro de registry.networks[id] (GlobalStorageSiK.Network.
+-- getRegistry(), MODDATA_KEY) junto con containers/terminals/addonInstalls -
+-- identidad/permisos y datos operativos del almacen en el mismo objeto. A
+-- partir de aqui, TODO este fichero opera sobre su PROPIA tabla por red
+-- (getPermNet), nunca sobre registry.networks[id] directamente - es la unica
+-- fuente de verdad para "quien tiene acceso, con que rol, quien es el
+-- propietario" para cualquier consumidor (UI normal, servidor, panel de
+-- soporte de staff).
+-- ============================================================================
+
+local function getPermissionsStore()
+	if not ModData or not ModData.getOrCreate then return {} end
+	local data = ModData.getOrCreate(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	data.networks = data.networks or {}
+	return data.networks
+end
+
+--- Migracion retroactiva UNA sola vez por red: si una red ya existia en el
+--- registro operativo (creada antes de esta separacion) y todavia no tiene
+--- entrada en la ModData de permisos, se trae su estado de permisos de ahi.
+--- Nunca se ejecuta si la red ya tiene entrada propia - no pisa datos ya
+--- migrados. Red genuinamente nueva: legacyNet es nil, se crean campos vacios.
+---@param legacyNet table|nil
+---@return table
+local function buildPermNetFromLegacy(legacyNet)
+	legacyNet = legacyNet or {}
+	return {
+		characterPermissions = legacyNet.characterPermissions or {},
+		allowedUsers = legacyNet.allowedUsers or {},
+		allowedFactions = legacyNet.allowedFactions or {},
+		adminUsers = legacyNet.adminUsers or {},
+		memberZoneDenials = legacyNet.memberZoneDenials or {},
+		factionOnly = legacyNet.factionOnly == true,
+		owner = legacyNet.owner or "",
+		ownerCharacterId = legacyNet.ownerCharacterId,
+		ownerAccountLogin = legacyNet.ownerAccountLogin,
+		ownerSteamId = legacyNet.ownerSteamId,
+	}
+end
+
+--- UNICO punto de entrada a la tabla de permisos de una red. Sustituye a
+--- "registry.networks[networkId]" en todo este fichero.
+---@param networkId string
+---@return table|nil
+function GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not networkId or networkId == "" then return nil end
+	local store = getPermissionsStore()
+	local permNet = store[networkId]
+	if not permNet then
+		local registry = GlobalStorageSiK.Network.getRegistry()
+		local legacyNet = registry and registry.networks and registry.networks[networkId]
+		permNet = buildPermNetFromLegacy(legacyNet)
+		store[networkId] = permNet
+	end
+	return permNet
+end
+
+--- Borra la entrada de permisos de una red (usado solo por adminDeleteNetwork,
+--- que borra la red por completo).
+---@param networkId string
+function GlobalStorageSiK.Permissions.deletePermNet(networkId)
+	local store = getPermissionsStore()
+	store[networkId] = nil
 end
 
 --- Normaliza un nombre para comparación.
@@ -377,6 +458,18 @@ local function getDev4CharacterIds(net, player)
 	return result
 end
 
+--- Rango de servidor (admin/moderator/overseer/gm) del jugador. DEUDA TECNICA
+--- cerrada (2026-08-22): hasta dev3 esta funcion se usaba para saltarse TODA
+--- la logica de permisos de red (canAccess, canAccessZone, isAdminPlayer,
+--- requireAdminAccess) en cuanto el jugador tenia rango de staff - error de
+--- diseno del sistema de permisos original, que confundio rango del SERVIDOR
+--- con rol dentro de UNA red del mod (jugador puede ser admin del servidor y
+--- no tener ningun rol en una red concreta, o vicecersa). Confirmado en
+--- pruebas reales: bloqueaba probar el flujo de "red vacante/reclamar
+--- propiedad" porque el admin de pruebas nunca llegaba a evaluarse contra esa
+--- logica. Ya NO se usa en ninguna puerta operativa del mod - se conserva
+--- solo como primitiva reservada para un futuro panel de soporte dedicado
+--- (herramientas de GM/moderacion para redes ajenas, pendiente de diseno).
 ---@param player IsoPlayer|nil
 ---@return boolean
 function GlobalStorageSiK.Permissions.isServerStaff(player)
@@ -425,6 +518,73 @@ local function logIdentityMigration(net, kind, oldId, newId, username)
 			.. " new=" .. tostring(newId or ""))
 end
 
+--- Marca de tiempo estable para auditoria (joinedAt/diedAt/lastSeenAt).
+--- Mismo patron que generateCharacterUuid() (GS_Permissions.lua:210-218):
+--- getTimestampMs() si existe (motor), si no os.time()*1000, nunca falla.
+---@return number
+local function nowMs()
+	return (getTimestampMs and getTimestampMs()) or (os and os.time and os.time() * 1000) or 0
+end
+
+-- Historico de auditoria por red (2026-08-22, ver comentario de
+-- HISTORY_MODDATA_KEY en GS_Config.lua). Cada entrada: {ts, type, detail}.
+-- Acotado a HISTORY_MAX_ENTRIES por red - descarta las mas antiguas al
+-- superar el limite, nunca crece sin fin.
+local HISTORY_MAX_ENTRIES = 40
+
+local function getHistoryRegistry()
+	if not ModData or not ModData.getOrCreate then return {} end
+	local data = ModData.getOrCreate(GlobalStorageSiK.HISTORY_MODDATA_KEY)
+	data.networks = data.networks or {}
+	return data.networks
+end
+
+--- Añade una entrada al historico de una red. NUNCA llama a ModData.transmit
+--- - esta ModData es deliberadamente propia del proceso autoritativo, se
+--- persiste en disco igual (ModData.getOrCreate ya lo garantiza) pero no se
+--- difunde a los clientes. Solo se lee para responder al comando
+--- adminGetNetworkHistory.
+---@param networkId string
+---@param eventType string
+---@param detail string
+local function recordNetworkHistoryEvent(networkId, eventType, detail)
+	if not networkId or networkId == "" then return end
+	local historyByNetwork = getHistoryRegistry()
+	local list = historyByNetwork[networkId]
+	if not list then
+		list = {}
+		historyByNetwork[networkId] = list
+	end
+	list[#list + 1] = { ts = nowMs(), type = tostring(eventType or "?"), detail = tostring(detail or "") }
+	while #list > HISTORY_MAX_ENTRIES do
+		table.remove(list, 1)
+	end
+end
+
+--- Wrapper publico de recordNetworkHistoryEvent - para llamantes fuera de
+--- este fichero (GS_Server.lua: acciones del panel de soporte, donde el
+--- jugador que actua ya esta a mano en el dispatcher de comandos).
+---@param networkId string
+---@param eventType string
+---@param detail string
+function GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, eventType, detail)
+	recordNetworkHistoryEvent(networkId, eventType, detail)
+end
+
+--- Lee el historico de una red para el panel de soporte. Copia superficial
+--- (nunca la tabla interna) para que el llamante pueda serializarla en un
+--- payload de red sin arriesgar mutarla por accidente.
+---@param networkId string
+---@return table[]
+function GlobalStorageSiK.Permissions.adminGetNetworkHistory(networkId)
+	local list = getHistoryRegistry()[networkId] or {}
+	local out = {}
+	for i = 1, #list do
+		out[i] = { ts = list[i].ts, type = list[i].type, detail = list[i].detail }
+	end
+	return out
+end
+
 local function bindCharacter(net, player, role)
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	if characterId == "" then return nil end
@@ -439,6 +599,15 @@ local function bindCharacter(net, player, role)
 	record.displayName = record.characterName
 	record.username = record.accountUsername
 	record.role = role or record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER
+	-- Auditoria (2026-08-21, diseño "herencia de red"): joinedAt se fija UNA
+	-- sola vez (primera alta real de este UUID en esta red); lastSeenAt se
+	-- refresca en cada bind (cualquier interaccion normal del personaje vivo
+	-- pasa por aqui). diedAt NUNCA se toca aqui - solo lo escribe
+	-- handleOwnerDeath cuando el personaje muere de verdad; un bind normal de
+	-- un personaje vivo no debe borrar por accidente una muerte ya registrada
+	-- de un UUID reciclado (no deberia pasar, pero mejor no asumir).
+	record.joinedAt = record.joinedAt or nowMs()
+	record.lastSeenAt = nowMs()
 	net.characterPermissions[characterId] = record
 	-- Un miembro de faccion puede haberse añadido estando desconectado. Mover
 	-- sus excepciones nominales al ID del personaje sin perder ninguna.
@@ -460,7 +629,64 @@ local function bindCharacter(net, player, role)
 		end
 	end
 	if target then net.memberZoneDenials[characterId] = target end
+	-- FUENTE UNICA DE VERDAD para "quien es el dueño" (rediseño 2026-08-22,
+	-- pedido explicito tras un bug real de propietario duplicado en
+	-- produccion): role="owner" en ESTE registro es la unica condicion que
+	-- importa, para cualquier consumidor, desde cualquier camino. bindCharacter
+	-- es la funcion mas usada y mas probada de todo el fichero - se convierte
+	-- aqui en el UNICO sitio que puede conceder role=owner, y automaticamente
+	-- hace cumplir "como mucho un owner vivo por red": si esta ficha pasa a
+	-- ser owner, cualquier OTRA ficha que todavia dijera owner baja a member
+	-- (nunca se borra, nunca se pierde el historico - solo deja de decir algo
+	-- que ya no es cierto). net.owner/ownerCharacterId/ownerAccountLogin/
+	-- ownerSteamId pasan a ser una CACHE derivada de este registro, escrita
+	-- SOLO aqui - ningun otro punto del fichero los asigna a mano nunca mas.
+	if record.role == GlobalStorageSiK.Permissions.ROLE_OWNER then
+		for otherId, otherRecord in pairs(net.characterPermissions) do
+			if otherId ~= characterId and otherRecord and otherRecord.role == GlobalStorageSiK.Permissions.ROLE_OWNER then
+				otherRecord.role = GlobalStorageSiK.Permissions.ROLE_MEMBER
+			end
+		end
+		net.owner = record.characterName
+		net.ownerCharacterId = characterId
+		net.ownerAccountLogin = record.accountUsername
+		net.ownerSteamId = record.steamId
+	end
 	return record
+end
+
+--- Version de bindCharacter para fichas SIN IsoPlayer vivo (panel de soporte:
+--- adminSetOwner puede reasignar a alguien desconectado). Mismo invariante,
+--- mismo unico escritor de la cache net.owner* - solo cambia de donde saca
+--- los datos (la propia ficha ya almacenada, no un jugador en vivo).
+---@param net table
+---@param characterId string
+---@param record table
+local function applyOwnerRoleToRecord(net, characterId, record)
+	record.role = GlobalStorageSiK.Permissions.ROLE_OWNER
+	for otherId, otherRecord in pairs(net.characterPermissions or {}) do
+		if otherId ~= characterId and otherRecord and otherRecord.role == GlobalStorageSiK.Permissions.ROLE_OWNER then
+			otherRecord.role = GlobalStorageSiK.Permissions.ROLE_MEMBER
+		end
+	end
+	net.owner = record.characterName or record.name or ""
+	net.ownerCharacterId = characterId
+	net.ownerAccountLogin = record.accountUsername or record.username or ""
+	net.ownerSteamId = record.steamId or ""
+end
+
+--- Unico escritor de "muerte" de una ficha (handleOwnerDeath y la
+--- reconciliacion automatica de propietario en canAccess). Mueve el rol
+--- vigente a priorRole y deja role=ROLE_DEAD - ver comentario junto a la
+--- constante para el porque. Idempotente: si ya estaba muerta no pisa un
+--- priorRole ya guardado con "dead" otra vez.
+---@param record table|nil
+---@param whenMs number|nil
+local function markRecordDead(record, whenMs)
+	if not record or record.role == GlobalStorageSiK.Permissions.ROLE_DEAD then return end
+	record.priorRole = record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER
+	record.role = GlobalStorageSiK.Permissions.ROLE_DEAD
+	record.diedAt = whenMs or nowMs()
 end
 
 local function consumeLegacyMembership(net, name, username)
@@ -504,7 +730,8 @@ local function migrateLegacyCharacterRecord(net, player)
 			string.sub(candidateId, 1, 8) ~= "account:"
 			or normalizeName(candidate.name) == normalizeName(characterName))
 		if accountMatches and dev4MatchesCharacter
-			and candidate.role ~= GlobalStorageSiK.Permissions.ROLE_OWNER then
+			and candidate.role ~= GlobalStorageSiK.Permissions.ROLE_OWNER
+			and candidate.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
 			local nominallyAllowed = listContainsIdentity(net.allowedUsers, candidate.name, username)
 				or listContainsIdentity(net.adminUsers, candidate.name, username)
 			if nominallyAllowed then
@@ -533,17 +760,36 @@ local function bindOwnerIdentity(net, player)
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	if characterId == "" then return false end
 	if net.ownerCharacterId == characterId then
-		net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
-		net.ownerAccount = getPlayerUsername(player)
-		net.ownerSteamId = getSteamIdForUsername(net.ownerAccount, player)
+		-- bindCharacter con ROLE_OWNER ya actualiza net.owner/ownerAccountLogin/
+		-- ownerSteamId internamente (fuente unica de verdad) - no hace falta
+		-- repetirlo aqui a mano.
 		bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
 		return true
 	end
 	local storedId = tostring(net.ownerCharacterId or "")
 	if isModernCharacterId(storedId) then return false end
+	-- BUG REAL DE SEGURIDAD cerrado (2026-08-22, confirmado en pruebas
+	-- reales: "tenemos acceso directamente... nos permite trabajar como
+	-- propietario como si nada" nada mas conectar con el personaje nuevo,
+	-- sin pasar por ningun terminal ni pulsar "Reclamar propiedad"):
+	-- storedId=="" describe DOS situaciones que este camino legacy no
+	-- distinguia - una red GENUINAMENTE nunca migrada (storedId siempre
+	-- vacio Y ownerAccountLogin tambien vacio, caso legitimo de este bloque,
+	-- pensado para mundos anteriores al sistema de cuentas/UUID) y una red
+	-- VACANTE por el sistema moderno (ownerCharacterId limpiado a proposito
+	-- tras una reconciliacion de propietario o una muerte - ver canAccess -
+	-- pero ownerAccountLogin SI conservado a proposito, es el ancla de la
+	-- cascada de herencia). El segundo caso NUNCA debe poder saltarse aqui
+	-- la cascada de reclamo explicito (canClaimVacantOwnership/
+	-- claimVacantOwnership) solo porque la cuenta coincida - es exactamente
+	-- el atajo que el diseño "herencia de red" (dev21) queria cerrar, y que
+	-- isOwnerPlayer() comparte por el mismo motivo (ver su propio comentario).
+	if storedId == "" and displayText(net.ownerAccountLogin) ~= "" then
+		return false
+	end
 	local username = getPlayerUsername(player)
-	local accountMatches = normalizeName(net.ownerAccount) ~= ""
-		and normalizeName(net.ownerAccount) == normalizeName(username)
+	local accountMatches = normalizeName(net.ownerAccountLogin) ~= ""
+		and normalizeName(net.ownerAccountLogin) == normalizeName(username)
 	local currentSteamId = getSteamIdForUsername(username, player)
 	if accountMatches and displayText(net.ownerSteamId) ~= ""
 		and currentSteamId ~= "" and displayText(net.ownerSteamId) ~= currentSteamId then
@@ -564,7 +810,7 @@ local function bindOwnerIdentity(net, player)
 	elseif not isDescriptorLegacy and not isNameLegacy then
 		return false
 	end
-	if not accountMatches and normalizeName(net.ownerAccount) == "" and isNameLegacy then
+	if not accountMatches and normalizeName(net.ownerAccountLogin) == "" and isNameLegacy then
 		local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
 		accountMatches = not isCharacterNameAmbiguous(characterName)
 			and GlobalStorageSiK.Permissions.identityMatches(player, net.owner)
@@ -575,10 +821,8 @@ local function bindOwnerIdentity(net, player)
 		net.characterPermissions[storedId] = nil
 		if net.memberZoneDenials then net.memberZoneDenials[storedId] = nil end
 	end
-	net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
-	net.ownerAccount = username
-	net.ownerSteamId = currentSteamId
-	net.ownerCharacterId = characterId
+	-- bindCharacter con ROLE_OWNER ya actualiza los 4 campos de red - no hace
+	-- falta repetirlo aqui a mano (fuente unica de verdad).
 	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
 	logIdentityMigration(net, "owner", storedId, characterId, username)
 	return true
@@ -629,22 +873,36 @@ function GlobalStorageSiK.Permissions.identityMatches(player, stored)
 	return false
 end
 
---- Inicializa permisos de red.
+--- Inicializa la estructura de permisos de una red (tablas vacías si no
+--- existen todavia). NUNCA toca net.owner/ownerCharacterId/ownerAccountLogin/
+--- ownerSteamId - esos 4 campos tienen un unico escritor atomico
+--- (bindCharacter/applyOwnerRoleToRecord, ver su comentario) y nada mas debe
+--- asignarlos nunca.
+--- BUG REAL DE SEGURIDAD cerrado (2026-08-22, confirmado en pruebas reales:
+--- panel de staff mostrando "Kava 4" como propietario con
+--- ownerCharacterId=nil, "desconectado" pese a estar jugando en ese mismo
+--- momento): el parametro ownerCharacter que tenia esta funcion escribia
+--- net.owner en SOLITARIO (sin los otros 3 campos) cada vez que canAccess()
+--- se llamaba sobre una red VACANTE (ownerAccountLogin conservado tras una
+--- reconciliacion/muerte) - literalmente el nombre de personaje de QUIEN
+--- FUERA que preguntara primero, contaminando el estado de la red sin pasar
+--- nunca por bindCharacter ni por la cascada de reclamo. Bug de la misma
+--- clase que el ya cerrado en isOwnerPlayer()/bindOwnerIdentity() esta misma
+--- ronda - una tercera funcion con el mismo agujero. El parametro se
+--- elimina por completo: una red genuinamente nueva ya se inicializa de
+--- forma atomica via initializeOwner()/bindCharacter en su propio call site
+--- (ver GS_TerminalRegistry.lua), esta funcion no necesita ni debe hacerlo.
 ---@param registry table
 ---@param networkId string
----@param ownerCharacter string|nil
-function GlobalStorageSiK.Permissions.ensure(registry, networkId, ownerCharacter)
+function GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	GlobalStorageSiK.Network.ensureRegistry(registry)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	net.allowedUsers = net.allowedUsers or {}
 	net.allowedFactions = net.allowedFactions or {}
 	net.adminUsers = net.adminUsers or {}
 	net.characterPermissions = net.characterPermissions or {}
 	net.memberZoneDenials = net.memberZoneDenials or {}
 	net.factionOnly = net.factionOnly == true
-	if ownerCharacter and ownerCharacter ~= "" and (not net.owner or net.owner == "") then
-		net.owner = ownerCharacter
-	end
 end
 
 --- Inicializa la propiedad de una red nueva en una sola operación. Evita que
@@ -660,19 +918,17 @@ function GlobalStorageSiK.Permissions.initializeOwner(net, player)
 		and (username == "" or characterId == "") then
 		return false
 	end
-	net.owner = GlobalStorageSiK.Permissions.getCharacterName(player)
-	net.ownerAccount = username
-	net.ownerSteamId = getSteamIdForUsername(username, player)
-	net.ownerCharacterId = characterId
+	-- bindCharacter con ROLE_OWNER ya actualiza los 4 campos de red - no hace
+	-- falta repetirlo aqui a mano (fuente unica de verdad).
 	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
-	return net.ownerCharacterId ~= ""
+	return net.ownerCharacterId ~= nil and net.ownerCharacterId ~= ""
 end
 
 --- Elimina referencias a zonas que ya no existen o pertenecen a otra red.
 --- Las zonas nuevas no se añaden: ausencia significa acceso permitido.
 function GlobalStorageSiK.Permissions.cleanupZoneDenials(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return end
 	net.memberZoneDenials = net.memberZoneDenials or {}
 	local memberKeys = {}
@@ -691,18 +947,19 @@ function GlobalStorageSiK.Permissions.cleanupZoneDenials(networkId)
 	end
 end
 
---- Devuelve si el jugador puede usar los contenedores de una zona. Owner,
---- admins de red y staff conservan acceso total. En SP no se aplican permisos.
+--- Devuelve si el jugador puede usar los contenedores de una zona. Owner y
+--- admins de LA RED conservan acceso total (el rango de staff del servidor ya
+--- no concede bypass aqui, ver comentario de isServerStaff). En SP no se
+--- aplican permisos.
 function GlobalStorageSiK.Permissions.canAccessZone(player, networkId, zoneId)
 	if not player then return false end
 	if not GlobalStorageSiK.Permissions.shouldEnforce() then return true end
-	if GlobalStorageSiK.Permissions.isServerStaff(player)
-		or GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
+	if GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
 		or GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return true
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return false end
 	local key = zoneMemberKey(
 		GlobalStorageSiK.Permissions.getCharacterId(player),
@@ -729,7 +986,7 @@ end
 function GlobalStorageSiK.Permissions.setMemberZoneDenials(networkId, characterId, characterName, zoneIds)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	local key = zoneMemberKey(characterId, characterName)
 	if key == "" then return false, "invalid_member" end
 	local role = nil
@@ -757,17 +1014,24 @@ function GlobalStorageSiK.Permissions.setMemberZoneDenials(networkId, characterI
 	return true
 end
 
---- Indica si el personaje tiene rol propietario o administrador DENTRO de
---- esta red. No concede acceso por rango global del servidor.
+--- Indica si el personaje tiene rol admin O SUPERIOR (admin u owner) DENTRO
+--- de esta red - pese al nombre "isAdminPlayer" (paralelo a isOwnerPlayer,
+--- mismo patron is<Rol>Player), esto es un UMBRAL ("admin o superior"), no
+--- una igualdad exacta de rol - igual que "requireAdminAccess" en
+--- GS_Server.lua tambien deja pasar al propietario. No concede acceso por
+--- rango global del servidor (ver comentario de isServerStaff).
+--- Unificado 2026-08-22 (auditoria de naming): antes existian DOS nombres
+--- para esta misma funcion (isAdminPlayer llamaba a hasNetworkAdminRole,
+--- identicas) - se deja un unico nombre, canonico, en la familia is<Rol>Player.
 ---@param player IsoPlayer
 ---@param networkId string
 ---@return boolean
-function GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
+function GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId)
 	if GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return true
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return false end
 	local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
@@ -789,18 +1053,6 @@ function GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
 		end
 	end
 	return false
-end
-
---- Indica si el jugador puede administrar la red. Conserva el override de
---- staff global para las herramientas generales de moderación.
----@param player IsoPlayer
----@param networkId string
----@return boolean
-function GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId)
-	if GlobalStorageSiK.Permissions.isServerStaff(player) then
-		return true
-	end
-	return GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId)
 end
 
 --- Devuelve el rol del jugador en la red: "owner" | "admin" | "member".
@@ -828,7 +1080,7 @@ function GlobalStorageSiK.Permissions.setUserRole(networkId, characterName, role
 	if characterKey == "" then return false end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if net.owner and normalizeName(net.owner) == characterKey then
 		return false  -- no se puede cambiar el rol del owner
 	end
@@ -1008,28 +1260,129 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	if not GlobalStorageSiK.Permissions.shouldEnforce() then
 		return true
 	end
-	if GlobalStorageSiK.Permissions.isServerStaff(player) then
-		return true
-	end
+	-- El rango de staff del servidor ya NO concede bypass aqui (deuda tecnica
+	-- cerrada 2026-08-22, ver comentario de isServerStaff) - un admin del
+	-- servidor sigue la misma logica de acceso/reclamacion que cualquier
+	-- jugador dentro del sistema de permisos propio del mod.
 	local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
 	local username = player:getUsername()
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	GlobalStorageSiK.Permissions.ensure(registry, networkId, characterName)
-	local net = registry.networks[networkId]
-	if not net.owner or net.owner == "" then
-		local initialized = GlobalStorageSiK.Permissions.initializeOwner(net, player)
-		if initialized and ModData and ModData.transmit then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		end
-		return initialized, initialized and nil or "identity_unavailable"
-	end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	GlobalStorageSiK.Permissions.ensure(registry, networkId)
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	-- RECONCILIACION QUIRURGICA (2026-08-22): red de pruebas real confirmo
+	-- que Events.OnPlayerDeath puede no dejar net.owner limpio (motivo exacto
+	-- aun sin confirmar - ver traza siempre visible añadida en el propio
+	-- handler de GS_Server.lua) - eso deja la red "atascada" para siempre,
+	-- ni el propio dueño puede reclamarla porque canAccess nunca llega a la
+	-- rama de red vacante. Se dispara SOLO cuando hay evidencia fuerte, no
+	-- una suposicion: la CUENTA que aparece como dueña (ownerAccountLogin)
+	-- esta accediendo ahora mismo con un characterId DISTINTO al guardado
+	-- (`net.ownerCharacterId`) - como el UUID es por-vida-de-personaje y
+	-- nunca se reutiliza, una cuenta con un UUID nuevo solo puede significar
+	-- que su vida anterior termino (murio o fue reseteada), nunca que sigue
+	-- viva en otro sitio. Deliberadamente NO se intenta detectar esto para
+	-- CUALQUIER otro jugador que se acerque (sarini, etc.) - no hay señal
+	-- fiable de que el dueño este muerto desde fuera de su propia cuenta, y
+	-- adivinarlo (ej. por inactividad prolongada) seria especulativo. Ese
+	-- caso (dueño que nunca vuelve, admin/member necesitan entrar) sigue
+	-- dependiendo del panel de soporte GM/moderacion (accion humana
+	-- explicita), a proposito - no hay forma segura de automatizarlo sin
+	-- arriesgar un falso positivo que expulse a un dueño realmente activo.
+	if net.owner and net.owner ~= "" and net.ownerCharacterId and net.ownerCharacterId ~= ""
+		and net.ownerCharacterId ~= characterId then
+		local ownerAccountKey = normalizeName(net.ownerAccountLogin)
+		local myAccountKey = normalizeName(username)
+		if ownerAccountKey ~= "" and ownerAccountKey == myAccountKey and characterId ~= "" then
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.warn("Permissions", "ownerReconciled",
+					networkId .. ": cuenta " .. tostring(username) .. " vuelve con characterId nuevo ("
+						.. characterId .. ", antes " .. tostring(net.ownerCharacterId)
+						.. ") - vida anterior de " .. tostring(net.owner)
+						.. " se da por terminada, red pasa a vacante para reclamo explicito")
+			end
+			recordNetworkHistoryEvent(networkId, "owner_reconciled",
+				tostring(net.owner) .. " (cuenta " .. tostring(username) .. ") reconciliado automaticamente: "
+					.. "vida anterior terminada sin evento de muerte procesado, red pasa a vacante")
+			-- BUG REAL cerrado (2026-08-22, confirmado: "no tengo modo de ver la
+			-- marca Muerto"): esta rama nunca marcaba la ficha del personaje como
+			-- fallecida, solo limpiaba el puntero de red - la ficha se quedaba
+			-- viva-en-apariencia para siempre, indistinguible de un miembro
+			-- activo en la UI. Se marca aqui tambien (mismo escritor unico que
+			-- handleOwnerDeath, ver markRecordDead).
+			local staleRecord = net.characterPermissions and net.characterPermissions[net.ownerCharacterId]
+			markRecordDead(staleRecord)
+			net.owner = ""
+			net.ownerCharacterId = nil
+			if ModData and ModData.transmit then
+				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			end
+		end
+	end
+	-- REDISEÑO explicito (2026-08-23, feedback directo del usuario: "los
+	-- miembros y administradores que queden en una red cuyo propietario
+	-- muere, no deben perder el acceso... nadie lo ha solicitado, es una
+	-- decision equivocada"): un admin/member YA vinculado bajo su
+	-- characterId ACTUAL conserva su propio acceso sin importar si la red
+	-- tiene dueño ahora mismo - la vacante de OTRO puesto (el owner) nunca
+	-- debe expulsar a alguien que ya tiene su propio puesto vigente. Antes,
+	-- el gate de "red vacante" (mas abajo) cortaba el paso a CUALQUIERA,
+	-- admin/member incluido, antes de mirar siquiera si tenian su propia
+	-- ficha viva - la pantalla de bloqueo/reclamo es correcta SOLO para
+	-- quien no tiene puesto propio (personaje nuevo, o su propio personaje
+	-- murio - ver canRecoverOwnRole mas abajo), nunca para quien ya lo tiene.
+	local ownRecord = net.characterPermissions and net.characterPermissions[characterId]
+	if ownRecord and ownRecord.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
+		bindCharacter(net, player, ownRecord.role)
+		return true
+	end
+	if not net.owner or net.owner == "" then
+		-- BUG REAL DE SEGURIDAD cerrado (2026-08-21, diseño "herencia de red"):
+		-- esto concedia la propiedad al PRIMER jugador que se acercara/abriera
+		-- este terminal, sin comprobar cuenta - en un servidor compartido,
+		-- cualquiera que llegase antes que el heredero legitimo a una red
+		-- vacante por muerte del dueño se la quedaba. Se distingue ahora entre
+		-- dos casos reales, distintos:
+		--   (a) Red NUEVA de verdad (nunca tuvo dueño - net.ownerAccountLogin
+		--       vacio): mismo comportamiento de siempre, el primero que la usa
+		--       la reclama - no romper el flujo de "primer terminal instalado".
+		--   (b) Red VACANTE por muerte de un dueño anterior
+		--       (net.ownerAccountLogin ya tiene algo guardado, ver
+		--       handleOwnerDeath): NUNCA se auto-reclama aqui. Se deniega con
+		--       un motivo especifico para que la UI ofrezca el boton de
+		--       reclamo explicito (ver GlobalStorageSiK.Permissions.
+		--       canClaimVacantOwnership/claimVacantOwnership) solo a quien
+		--       corresponda segun la cascada admin vivo -> miembro vivo ->
+		--       herencia por cuenta.
+		if displayText(net.ownerAccountLogin) == "" then
+			local initialized = GlobalStorageSiK.Permissions.initializeOwner(net, player)
+			if initialized and ModData and ModData.transmit then
+				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			end
+			return initialized, initialized and nil or "identity_unavailable"
+		end
+		return false, "network_vacant"
+	end
 	if bindOwnerIdentity(net, player) then
 		return true
 	end
-	local characterRecord = net.characterPermissions and net.characterPermissions[characterId]
-		or migrateLegacyCharacterRecord(net, player)
+	-- ownRecord aqui, si existe, solo puede estar ROLE_DEAD (el caso vivo ya
+	-- devolvio true arriba) - conserva intacta la revivificacion "mismo
+	-- characterId vuelve muerto" de mas abajo, sin repetir la busqueda.
+	local characterRecord = ownRecord or migrateLegacyCharacterRecord(net, player)
 	if characterRecord then
+		if characterRecord.role == GlobalStorageSiK.Permissions.ROLE_DEAD then
+			-- Evidencia dura de que sigue vivo: esta rama solo mira el propio
+			-- characterId de QUIEN esta pidiendo acceso ahora mismo, nunca el de
+			-- otro jugador. Como el UUID es por-vida-y-nunca-se-reutiliza esto no
+			-- deberia poder pasar en juego normal, pero si pasara (bug, migracion
+			-- rara) no debe quedar atascado en "dead" para siempre - se revive
+			-- con su rol previo, igual de explicito y no especulativo que el
+			-- resto de esta funcion.
+			characterRecord.role = characterRecord.priorRole or GlobalStorageSiK.Permissions.ROLE_MEMBER
+			characterRecord.priorRole = nil
+			characterRecord.diedAt = nil
+		end
 		bindCharacter(net, player, characterRecord.role)
 		return true
 	end
@@ -1073,13 +1426,25 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 		end
 	end
 	if net.factionOnly then
-		local ownerUser = net.ownerAccount
+		local ownerUser = net.ownerAccountLogin
 		if not ownerUser or ownerUser == "" then
 			ownerUser = GlobalStorageSiK.Permissions.resolveUsernameFromCharacter(net.owner or "")
 		end
 		if ownerUser and ownerUser ~= "" and GlobalStorageSiK.Permissions.sameFaction(username, ownerUser) then
 			return true
 		end
+	end
+	-- Traza dirigida (2026-08-22): un "denied" generico sin esto obligaba a
+	-- reconstruir a ciegas por que fallo cada rama anterior (visto en pruebas
+	-- reales del flujo de herencia). Vuelca el estado relevante de la red y
+	-- del jugador en el momento exacto del rechazo final.
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("Permissions", "canAccessDenied",
+			"networkId=" .. tostring(networkId)
+				.. " owner=" .. tostring(net.owner) .. " ownerCharacterId=" .. tostring(net.ownerCharacterId)
+				.. " ownerAccountLogin=" .. tostring(net.ownerAccountLogin)
+				.. " characterId=" .. tostring(characterId) .. " characterName=" .. tostring(characterName)
+				.. " username=" .. tostring(username))
 	end
 	return false, "denied"
 end
@@ -1336,7 +1701,7 @@ function GlobalStorageSiK.Permissions.addCharacter(networkId, player)
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if net.ownerCharacterId == characterId or net.characterPermissions[characterId] then
 		return true, false, "already_member"
 	end
@@ -1347,9 +1712,14 @@ end
 
 function GlobalStorageSiK.Permissions.setCharacterRole(networkId, characterId, role)
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	local record = net and net.characterPermissions and net.characterPermissions[characterId]
 	if not record or characterId == net.ownerCharacterId then return false end
+	-- Un miembro fallecido no se "revive" con un simple cambio de rol desde
+	-- el panel de staff (ese boton ya no se ofrece para fichas con
+	-- role=ROLE_DEAD, ver GS_AdminDashboard.lua) - se rechaza tambien aqui,
+	-- nunca confiar solo en que el cliente oculte el boton.
+	if record.role == GlobalStorageSiK.Permissions.ROLE_DEAD then return false end
 	if role ~= GlobalStorageSiK.Permissions.ROLE_ADMIN then
 		role = GlobalStorageSiK.Permissions.ROLE_MEMBER
 	end
@@ -1359,7 +1729,7 @@ end
 
 function GlobalStorageSiK.Permissions.removeCharacter(networkId, characterId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	local record = net and net.characterPermissions and net.characterPermissions[characterId]
 	if not record or characterId == net.ownerCharacterId then return false end
 	net.characterPermissions[characterId] = nil
@@ -1382,13 +1752,196 @@ function GlobalStorageSiK.Permissions.removeCharacter(networkId, characterId)
 	return true
 end
 
+-- ============================================================================
+-- Panel de soporte GM/moderacion (2026-08-22): gestion TECNICA de miembros,
+-- roles y propietario de CUALQUIER red - nunca acceso al almacen/inventario
+-- de la red. Estas funciones son pura mutacion de datos; la comprobacion de
+-- isServerStaff(player) vive UNA sola vez en el dispatcher de comandos
+-- (GS_Server.lua), nunca aqui, para que quede clara la frontera "quien puede
+-- llamar esto" vs "que hace esto". Todas registran auditoria SIEMPRE VISIBLE
+-- (Log.warn, no gateada por Modo depuracion) via el propio dispatcher.
+-- ============================================================================
+
+--- Resumen de TODAS las redes del registro, para el selector del panel.
+---@return table[] { networkId, label, owner, ownerAccountLogin, memberCount, terminalCount, vacant }
+function GlobalStorageSiK.Permissions.adminListNetworks()
+	-- Cruce entre las dos ModData (operativa para nombre/terminales, propia
+	-- de permisos para identidad/miembros - separacion de responsabilidades,
+	-- 2026-08-22). BUG REAL cerrado aqui: este bucle leia net.characterPermissions/
+	-- net.owner directamente del registro OPERATIVO, no lo capturo el
+	-- reemplazo automatico del resto del fichero porque usa "for ... in
+	-- pairs(registry.networks)" en vez de una unica asignacion "local net =".
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local out = {}
+	for networkId, net in pairs(registry.networks or {}) do
+		local permNet = GlobalStorageSiK.Permissions.getPermNet(networkId)
+		local memberCount = 0
+		for _ in pairs((permNet and permNet.characterPermissions) or {}) do memberCount = memberCount + 1 end
+		local terminalCount = 0
+		if GlobalStorageSiK.TerminalRecord and GlobalStorageSiK.TerminalRecord.countActive then
+			terminalCount = GlobalStorageSiK.TerminalRecord.countActive(net) or 0
+		end
+		local owner = (permNet and permNet.owner) or ""
+		local ownerAccountLogin = (permNet and permNet.ownerAccountLogin) or ""
+		local vacant = owner == ""
+		-- Formato pedido explicito (2026-08-22): "nombre (cuenta del
+		-- propietario)(id interno)" - la cuenta identifica sin ambiguedad a que
+		-- jugador pertenece cada red en el desplegable, sin depender del
+		-- nombre de personaje (puede repetirse/traducirse mal, ver
+		-- IGUI_GS_AdminMarkDeceased).
+		local baseName = (net.name and net.name ~= "") and net.name or networkId
+		local accountTag = (ownerAccountLogin ~= "" and ownerAccountLogin) or GlobalStorageSiK.I18n.text("IGUI_GS_AdminNetworkVacantTag")
+		out[#out + 1] = {
+			networkId = networkId,
+			label = baseName .. " (" .. accountTag .. ") (" .. string.sub(networkId, -8) .. ")",
+			owner = owner,
+			ownerAccountLogin = ownerAccountLogin,
+			memberCount = memberCount,
+			terminalCount = terminalCount,
+			vacant = vacant,
+		}
+	end
+	table.sort(out, function(a, b) return a.networkId < b.networkId end)
+	return out
+end
+
+--- Lista de miembros de UNA red para el panel de soporte - mismo shape que
+--- memberEntries de serialize(), reutilizado directamente mas abajo.
+---@param networkId string
+---@return table[]
+function GlobalStorageSiK.Permissions.adminGetNetworkMembers(networkId)
+	local serialized = GlobalStorageSiK.Permissions.serialize(networkId, nil)
+	return serialized and serialized.memberEntries or {}
+end
+
+--- Jugadores CONECTADOS ahora mismo, para el desplegable "Añadir miembro"
+--- del panel de soporte de staff - pedido explicito (2026-08-22): igual que
+--- el desplegable de la pestaña normal de admin, pero SIN tener en cuenta
+--- facción (el staff gestiona cualquier red, no solo la suya) - solo gente
+--- conectada. Reutiliza collectOnlineCharacterRecords tal cual, ya usado
+--- para el mismo fin en serialize().
+---@return table[] { characterId, name, username }
+function GlobalStorageSiK.Permissions.adminListOnlinePlayers()
+	local online = collectOnlineCharacterRecords(nil)
+	local out = {}
+	for i = 1, #online do
+		local entry = online[i]
+		out[#out + 1] = {
+			characterId = entry.characterId,
+			name = entry.characterName or entry.name or "",
+			username = entry.username or "",
+		}
+	end
+	return out
+end
+
+--- Añade un jugador CONECTADO a una red como miembro, desde el panel de
+--- soporte de staff. Nunca actua sobre facciones (a proposito, ver
+--- adminListOnlinePlayers) ni sobre jugadores offline - el staff gestiona
+--- identidades resueltas ahora mismo, no nombres nominales sin verificar.
+---@param networkId string
+---@param characterId string
+---@return boolean ok
+---@return string reason
+function GlobalStorageSiK.Permissions.adminAddMember(networkId, characterId)
+	local target = GlobalStorageSiK.Permissions.findOnlineCharacter(characterId or "")
+	if not target then
+		return false, "not_online"
+	end
+	local ok, changed, reason = GlobalStorageSiK.Permissions.addCharacter(networkId, target)
+	if not ok then
+		return false, reason or "failed"
+	end
+	return true, changed and "added" or "already_member"
+end
+
+--- Cambia el rol admin/member de un personaje YA existente en la red.
+--- No actua sobre el propietario - usar adminSetOwner/adminReleaseOwnership.
+---@param networkId string
+---@param characterId string
+---@param role string
+---@return boolean
+function GlobalStorageSiK.Permissions.adminSetMemberRole(networkId, characterId, role)
+	return GlobalStorageSiK.Permissions.setCharacterRole(networkId, characterId, role)
+end
+
+--- Quita a un miembro/admin de la red. No actua sobre el propietario.
+---@param networkId string
+---@param characterId string
+---@return boolean
+function GlobalStorageSiK.Permissions.adminRemoveMember(networkId, characterId)
+	return GlobalStorageSiK.Permissions.removeCharacter(networkId, characterId)
+end
+
+--- Fuerza al propietario de la red a ser un personaje YA presente en
+--- characterPermissions (con o sin conexion). Uso: reasignar una red con
+--- propietario fantasma/roto sin depender de que alguien la reclame por el
+--- flujo normal de herencia.
+---@param networkId string
+---@param characterId string
+---@return boolean ok
+---@return string|nil reason
+function GlobalStorageSiK.Permissions.adminSetOwner(networkId, characterId)
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then return false, "network_not_found" end
+	local record = net.characterPermissions and net.characterPermissions[characterId]
+	if not record then return false, "character_not_member" end
+	record.diedAt = nil
+	record.priorRole = nil
+	applyOwnerRoleToRecord(net, characterId, record)
+	return true, nil
+end
+
+--- Libera la propiedad de la red SIN asignar un nuevo dueño - mismo estado
+--- final que handleOwnerDeath para el caso normal (owner/ownerCharacterId
+--- vacios, ownerAccountLogin conservado), asi el flujo de reclamacion normal
+--- sigue funcionando para quien corresponda despues.
+---@param networkId string
+---@return boolean
+function GlobalStorageSiK.Permissions.adminReleaseOwnership(networkId)
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then return false end
+	net.owner = ""
+	net.ownerCharacterId = nil
+	return true
+end
+
+--- Borra la red del registro por completo (permisos, miembros, zonas propias)
+--- - NUNCA toca objetos fisicos del mundo. Cualquier GS_TerminalUnit que
+--- apuntara a este networkId queda "desvinculado" (mismo estado ya soportado
+--- hoy, motivo "terminal_unlinked": el jugador ve el panel de bloqueo con la
+--- tarjeta de "instalar aqui" para re-vincularlo a una red nueva o existente,
+--- sin perder el mueble). No es una accion reversible.
+---@param networkId string
+---@return boolean
+function GlobalStorageSiK.Permissions.adminDeleteNetwork(networkId)
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local existsOperational = registry.networks and registry.networks[networkId] ~= nil
+	local existsPerms = getPermissionsStore()[networkId] ~= nil
+	if not existsOperational and not existsPerms then return false end
+	if existsOperational then registry.networks[networkId] = nil end
+	GlobalStorageSiK.Permissions.deletePermNet(networkId)
+	for zoneId, zone in pairs(registry.zones or {}) do
+		if zone and zone.networkId == networkId then
+			registry.zones[zoneId] = nil
+			for nodeId, node in pairs(registry.nodes or {}) do
+				if node and node.zoneId == zoneId then
+					registry.nodes[nodeId] = nil
+				end
+			end
+		end
+	end
+	return true
+end
+
 --- Serializa permisos para el cliente.
 ---@param networkId string
 ---@return table
 function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	GlobalStorageSiK.Permissions.cleanupZoneDenials(networkId)
 	local function deniedZoneIds(characterId, name)
 		local key = zoneMemberKey(characterId, name)
@@ -1417,6 +1970,16 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	if resolvedPlayer then
 		playerRole = GlobalStorageSiK.Permissions.getPlayerRole(resolvedPlayer, networkId)
 	end
+	-- Calculado antes de construir memberEntries (en vez de mas abajo, donde
+	-- ya se usaba solo para el combo de "Añadir acceso") para poder anotar
+	-- online=true/false por miembro - pedido explicito 2026-08-22: "Conectado"
+	-- en verde en vez de "hace 28s" para quien sigue en linea ahora mismo.
+	local onlineCharacters = collectOnlineCharacterRecords(resolvedPlayer)
+	local onlineIds = {}
+	for i = 1, #onlineCharacters do
+		local oc = onlineCharacters[i]
+		if oc.characterId and oc.characterId ~= "" then onlineIds[oc.characterId] = true end
+	end
 	local memberEntries = {}
 	local seenNames = {}
 	local seenMemberIds = {}
@@ -1429,10 +1992,13 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 			name = net.owner,
 			characterName = net.owner,
 			displayName = ownerRecord and ownerRecord.displayName or net.owner,
-			username = ownerRecord and ownerRecord.username or net.ownerAccount or "",
+			username = ownerRecord and ownerRecord.username or net.ownerAccountLogin or "",
 			role = GlobalStorageSiK.Permissions.ROLE_OWNER,
 			source = "member",
 			deniedZoneIds = {},
+			diedAt = ownerRecord and ownerRecord.diedAt or nil,
+			lastSeenAt = ownerRecord and ownerRecord.lastSeenAt or nil,
+			online = net.ownerCharacterId ~= nil and onlineIds[net.ownerCharacterId] or false,
 		}
 		if net.ownerCharacterId and net.ownerCharacterId ~= "" then
 			seenMemberIds[net.ownerCharacterId] = true
@@ -1453,6 +2019,9 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 				role = record.role or GlobalStorageSiK.Permissions.ROLE_MEMBER,
 				source = "member",
 				deniedZoneIds = deniedZoneIds(id, record.name),
+				diedAt = record.diedAt,
+				lastSeenAt = record.lastSeenAt,
+				online = onlineIds[id] or false,
 			}
 			seenNames[normalizeName(record.name)] = true
 		end
@@ -1490,7 +2059,7 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 		return tostring(a.characterId or a.id or a.username or "")
 			< tostring(b.characterId or b.id or b.username or "")
 	end)
-	local onlineCharacters = collectOnlineCharacterRecords(resolvedPlayer)
+	-- onlineCharacters ya se calculo arriba (antes de construir memberEntries).
 	local factionMembers = collectFactionCharacterRecords(resolvedPlayer, onlineCharacters)
 	local pickerCandidates = GlobalStorageSiK.Permissions.buildPickerCandidates(
 		memberEntries, onlineCharacters, factionMembers)
@@ -1572,7 +2141,13 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 		playerFactionName = playerFactionName,
 		playerRole = playerRole,
 		canAutoSort = resolvedPlayer ~= nil
-			and GlobalStorageSiK.Permissions.hasNetworkAdminRole(resolvedPlayer, networkId) or false,
+			and GlobalStorageSiK.Permissions.isAdminPlayer(resolvedPlayer, networkId) or false,
+		-- Boton "Reclamar propiedad" en la propia pestaña de admin (2026-08-23,
+		-- ver GlobalStorageSiK.Permissions.canAdminClaimOwnership): calculado
+		-- SIEMPRE en servidor, igual que canAutoSort de arriba - el cliente
+		-- solo pinta el boton segun lo que se le diga.
+		canClaimAsAdmin = resolvedPlayer ~= nil
+			and GlobalStorageSiK.Permissions.canAdminClaimOwnership(resolvedPlayer, networkId) or false,
 		memberEntries = memberEntries,
 		onlineCharacters = onlineCharacters,
 		factionMembers = factionMembers,
@@ -1658,18 +2233,24 @@ local function applyOwnerTransfer(networkId, net, player, target, keepFormerOwne
 		net.memberZoneDenials[zoneMemberKey(targetId, targetName)] = nil
 		net.memberZoneDenials[zoneMemberKey(nil, targetUsername)] = nil
 	end
-	net.owner = targetName
-	net.ownerAccount = targetUsername
-	net.ownerSteamId = getSteamIdForUsername(targetUsername, nil)
-	net.ownerCharacterId = targetId
 	if target.record then
 		target.record.characterName = targetName
 		target.record.accountUsername = targetUsername
 		target.record.name = targetName
 		target.record.displayName = targetName
 		target.record.username = targetUsername
-		target.record.role = GlobalStorageSiK.Permissions.ROLE_OWNER
 		net.characterPermissions[targetId] = target.record
+		applyOwnerRoleToRecord(net, targetId, target.record)
+	else
+		-- Legacy sin ficha moderna (personaje nunca visto, solo nombre/cuenta) -
+		-- se vinculara a una ficha real la proxima vez que conecte (ver
+		-- bindOwnerIdentity). Sin ficha que usar, se asignan los 4 campos de
+		-- red directamente - unico sitio fuera de bindCharacter/
+		-- applyOwnerRoleToRecord donde esto sigue pasando, por falta de datos.
+		net.owner = targetName
+		net.ownerAccountLogin = targetUsername
+		net.ownerSteamId = getSteamIdForUsername(targetUsername, nil)
+		net.ownerCharacterId = targetId
 	end
 	return true
 end
@@ -1693,7 +2274,7 @@ function GlobalStorageSiK.Permissions.transferOwner(networkId, player, toCharact
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
@@ -1721,7 +2302,7 @@ function GlobalStorageSiK.Permissions.transferOwnerToCharacter(networkId, player
 	end
 	local targetName = GlobalStorageSiK.Permissions.getCharacterName(targetPlayer)
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net or not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOnlyOwnerTransferMsg")
 	end
@@ -1749,17 +2330,35 @@ function GlobalStorageSiK.Permissions.transferOwnerToCharacter(networkId, player
 end
 
 --- Indica si el jugador es propietario de la red.
+--- BUG REAL DE SEGURIDAD cerrado (2026-08-22, confirmado en pruebas reales:
+--- "tenemos acceso directamente... nos permite trabajar como propietario
+--- como si nada", nada mas conectar con un personaje nuevo, sin pasar por
+--- ningun terminal ni pulsar "Reclamar propiedad"): esta funcion llamaba a
+--- bindOwnerIdentity()/initializeOwner() - funciones que ESCRIBEN (migran
+--- fichas legacy, inicializan redes) - desde lo que deberia ser una simple
+--- CONSULTA de solo lectura. Cualquier sitio que llamara a isOwnerPlayer
+--- (listar botones de la UI, comprobar permisos de admin, etc.) podia acabar
+--- asignando la propiedad como efecto secundario de preguntar, saltandose
+--- por completo la cascada de reclamo explicito (canClaimVacantOwnership/
+--- claimVacantOwnership) para una red vacante por muerte/reconciliacion.
+--- Decision final (pedido explicito): isOwnerPlayer() es cierto SI Y SOLO SI
+--- el jugador es owner en la fuente unica de verdad (net.ownerCharacterId,
+--- la cache que bindCharacter/applyOwnerRoleToRecord mantienen sincronizada
+--- con characterPermissions[id].role=="owner", ver comentario en
+--- bindCharacter) - nunca vuelve a escribir nada, nunca migra nada, nunca
+--- inicializa nada por su cuenta. La migracion de fichas legacy y la
+--- inicializacion de redes nuevas siguen ocurriendo, pero SOLO a traves de
+--- canAccess()/bindOwnerIdentity() cuando corresponde - no como efecto
+--- colateral de una simple pregunta "¿eres el dueño?".
 ---@param player IsoPlayer
 ---@param networkId string
 ---@return boolean
 function GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
-	if not net then return false end
-	if not net.owner or net.owner == "" then
-		return player ~= nil and GlobalStorageSiK.Permissions.initializeOwner(net, player) or false
-	end
-	return bindOwnerIdentity(net, player)
+	if not player then return false end
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net or not net.ownerCharacterId or net.ownerCharacterId == "" then return false end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	return characterId ~= "" and characterId == net.ownerCharacterId
 end
 
 ---@param networkId string
@@ -1771,9 +2370,8 @@ function GlobalStorageSiK.Permissions.addUser(networkId, characterName)
 	if characterKey == "" then
 		return false
 	end
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local list = registry.networks[networkId].allowedUsers
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	local list = net.allowedUsers
 	for i = 1, #list do
 		if normalizeName(list[i]) == characterKey then
 			list[i] = displayName
@@ -1817,15 +2415,14 @@ end
 ---@return boolean
 function GlobalStorageSiK.Permissions.removeUser(networkId, characterName)
 	characterName = normalizeName(characterName)
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	local list = registry.networks[networkId] and registry.networks[networkId].allowedUsers
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	local list = net and net.allowedUsers
 	if not list then
 		return false
 	end
 	for i = #list, 1, -1 do
 		if normalizeName(list[i]) == characterName then
 			table.remove(list, i)
-			local net = registry.networks[networkId]
 			if net.memberZoneDenials then
 				net.memberZoneDenials[zoneMemberKey(nil, characterName)] = nil
 			end
@@ -1844,9 +2441,8 @@ function GlobalStorageSiK.Permissions.addFaction(networkId, factionName)
 	if factionName == "" then
 		return false
 	end
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	GlobalStorageSiK.Permissions.ensure(registry, networkId)
-	local list = registry.networks[networkId].allowedFactions
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	local list = net.allowedFactions
 	for i = 1, #list do
 		if list[i] == factionName then
 			return false
@@ -1862,8 +2458,8 @@ end
 ---@return boolean
 function GlobalStorageSiK.Permissions.removeFaction(networkId, factionName)
 	factionName = normalizeName(factionName)
-	local registry = GlobalStorageSiK.Network.getRegistry()
-	local list = registry.networks[networkId] and registry.networks[networkId].allowedFactions
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	local list = net and net.allowedFactions
 	if not list then
 		return false
 	end
@@ -1954,7 +2550,7 @@ end
 ---@return number
 function GlobalStorageSiK.Permissions.countBackupMembers(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return 0 end
 	local count = 0
 	local seen = {}
@@ -2017,17 +2613,17 @@ local function promoteOrClearOwner(networkId, net, leavingCharacterName, leaving
 		promoted = net.allowedUsers[1]
 	end
 	if promoted and promoted ~= "" then
-		net.owner = promoted
-		net.ownerCharacterId = promotedId or ""
 		if promotedId and net.characterPermissions[promotedId] then
-			net.characterPermissions[promotedId].role = GlobalStorageSiK.Permissions.ROLE_OWNER
+			applyOwnerRoleToRecord(net, promotedId, net.characterPermissions[promotedId])
+		else
+			-- Fallback nominal (sin ficha moderna, solo nombre en las listas
+			-- legacy allowedUsers/adminUsers) - se vinculara a una ficha real la
+			-- proxima vez que ese personaje conecte (ver bindOwnerIdentity).
+			net.owner = promoted
+			net.ownerCharacterId = promotedId or ""
+			net.ownerAccountLogin = displayText(promoted)
+			net.ownerSteamId = getSteamIdForUsername(net.ownerAccountLogin)
 		end
-		-- Un registro persistente ya contiene la cuenta autoritativa exacta. Los
-		-- fallbacks nominales solo pueden conservar el valor existente y quedan
-		-- pendientes de vinculación; nunca se resuelven por un nombre ajeno.
-		net.ownerAccount = promotedRecord and displayText(promotedRecord.username)
-			or displayText(promoted)
-		net.ownerSteamId = getSteamIdForUsername(net.ownerAccount)
 		local promotedNorm = normalizeName(promoted)
 		if net.adminUsers then
 			for i = #net.adminUsers, 1, -1 do
@@ -2050,7 +2646,7 @@ local function promoteOrClearOwner(networkId, net, leavingCharacterName, leaving
 	else
 		net.owner = ""
 		net.ownerCharacterId = nil
-		net.ownerAccount = nil
+		net.ownerAccountLogin = nil
 		net.ownerSteamId = nil
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.info("Permissions", "ownerSuccession",
@@ -2079,7 +2675,7 @@ function GlobalStorageSiK.Permissions.leaveNetwork(networkId, characterName)
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
@@ -2108,7 +2704,7 @@ function GlobalStorageSiK.Permissions.leaveNetworkPlayer(networkId, player)
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	local net = registry.networks and registry.networks[networkId]
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
 	end
@@ -2127,14 +2723,32 @@ function GlobalStorageSiK.Permissions.leaveNetworkPlayer(networkId, player)
 	return GlobalStorageSiK.Permissions.leaveNetwork(networkId, characterName)
 end
 
---- Sucesión de propiedad al morir un personaje: si era propietario de
---- alguna red, promociona automáticamente al primer admin disponible (o, si
---- no hay ningún admin, al primer miembro normal) para que la red nunca
---- quede con miembros pero sin dueño. Si era el único miembro, revierte al
---- mismo fallback que ya existía para una red recién creada (owner vacío =
---- cualquiera es owner). Debe llamarse solo en el proceso autoritativo
---- (servidor dedicado, host o SP real) - GS_Server.lua la engancha a
---- Events.OnPlayerDeath gateado por GlobalStorageSiK.isAuthoritative().
+--- Sucesión de propiedad al morir un personaje (rediseñado 2026-08-21,
+--- "herencia de red" — reporte comunidad china: dueño muere, personaje
+--- nuevo sin permisos, sin forma de recuperar la base). YA NO promociona a
+--- nadie automáticamente: la vieja promoteOrClearOwner() decidía por
+--- pairs() (orden NO garantizado en Lua, contradice "el admin más antiguo
+--- hereda") y además podía asignar la propiedad a alguien desconectado que
+--- quizá nunca vuelva. En su lugar:
+---   1. Marca `diedAt` en la ficha de este personaje en TODAS las redes
+---      donde tuviera cualquier rol (no solo donde era dueño) — necesario
+---      para que la cascada de reclamo (canClaimVacantOwnership) y el modo
+---      herencia sepan que ya no puede volver con ESE UUID.
+---   2. Si era el dueño, la red pasa a VACANTE (`ownerCharacterId=nil`,
+---      `owner=""`) — sin asignar a nadie. `ownerAccountLogin`/`ownerSteamId`
+--- NUNCA se tocan aquí: son el ancla de herencia, deben sobrevivir a la
+--- muerte indefinidamente (antes se borraban justo aquí, el hueco real que
+--- impedía cualquier recuperación posterior).
+--- El reclamo real (quién se queda la red) es una acción explícita y
+--- posterior de quien aparezca (ver canClaimVacantOwnership/
+--- claimVacantOwnership más abajo), nunca una decisión tomada en ausencia
+--- de nadie. promoteOrClearOwner() sigue existiendo tal cual para el
+--- abandono VOLUNTARIO (leaveNetwork/leaveNetworkPlayer) — ahí sí tiene
+--- sentido promocionar de inmediato, es un caso distinto (decisión activa
+--- de alguien presente, no una muerte).
+--- Debe llamarse solo en el proceso autoritativo (servidor dedicado, host o
+--- SP real) - GS_Server.lua la engancha a Events.OnPlayerDeath gateado por
+--- GlobalStorageSiK.isAuthoritative().
 ---@param deadPlayerOrName IsoPlayer|string
 function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 	local deadPlayer = type(deadPlayerOrName) == "string" and nil or deadPlayerOrName
@@ -2143,6 +2757,18 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 	local deadCharacterId = deadPlayer and GlobalStorageSiK.Permissions.getCharacterId(deadPlayer) or ""
 	local deadCharacterKey = normalizeName(deadCharacterName)
 	if deadCharacterKey == "" then
+		-- BUG REAL posible (2026-08-21, sospecha ante reporte de red "fantasma"
+		-- sin sucesion procesada): antes este return era silencioso. Si el
+		-- nombre viniera vacio justo en el instante de morir, la vacante nunca
+		-- se marcaria y la red quedaria con un ownerCharacterId de un UUID
+		-- muerto para siempre, sin activar ningun camino de recuperacion.
+		-- Log SIEMPRE visible (no gateado por Modo depuracion) para poder
+		-- confirmar si esto llega a pasar de verdad.
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.error("Permissions", "handleOwnerDeath",
+				"nombre de personaje vacio al morir - vacante NO procesada para ninguna red, characterId="
+					.. tostring(deadCharacterId))
+		end
 		return
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -2150,16 +2776,442 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 	if not networks then
 		return
 	end
-	for networkId, net in pairs(networks) do
+	local deathTimestamp = nowMs()
+	-- Se enumeran los IDs desde el registro OPERATIVO (es quien sabe que
+	-- redes existen) pero TODA mutacion de aqui en adelante es sobre la
+	-- ModData de permisos propia (getPermNet) - BUG CRITICO cerrado
+	-- (2026-08-22, separacion de responsabilidades): esta funcion escribia
+	-- directamente sobre el objeto operativo, que ya no contiene
+	-- characterPermissions/owner* desde la separacion - la muerte de un
+	-- personaje dejaba de vaciar ninguna red de verdad, silenciosamente.
+	for networkId in pairs(networks) do
+		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 		if deadPlayer then bindOwnerIdentity(net, deadPlayer) end
+		if deadCharacterId ~= "" and net.characterPermissions and net.characterPermissions[deadCharacterId] then
+			markRecordDead(net.characterPermissions[deadCharacterId], deathTimestamp)
+		end
 		local ownsById = deadCharacterId ~= "" and net.ownerCharacterId == deadCharacterId
 		local ownsLegacy = (not net.ownerCharacterId or net.ownerCharacterId == "")
 			and net.owner and net.owner ~= "" and normalizeName(net.owner) == deadCharacterKey
 		if ownsById or ownsLegacy then
-			promoteOrClearOwner(networkId, net, deadCharacterName, deadCharacterId)
+			net.ownerCharacterId = nil
+			net.owner = ""
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.info("Permissions", "networkVacant",
+					networkId .. ": " .. deadCharacterName
+						.. " murio, red vacante (reclamo pendiente, ownerAccountLogin conservado="
+						.. tostring(net.ownerAccountLogin or "") .. ")")
+			end
+			recordNetworkHistoryEvent(networkId, "owner_died",
+				deadCharacterName .. " murio - red vacante, ownerAccountLogin conservado="
+					.. tostring(net.ownerAccountLogin or ""))
+		end
+		-- NUNCA se borra la ficha al morir (decision final 2026-08-22, tras
+		-- discutir "el miembro que ha muerto, ¿desaparece o lo mantienes?" y
+		-- llegar a la conclusion correcta): el campo role de
+		-- characterPermissions es la UNICA fuente de verdad para cualquier
+		-- rango de cualquier miembro, para cualquier consumidor - y eso incluye
+		-- ahora tambien "esta muerto" (ROLE_DEAD, ver markRecordDead arriba):
+		-- reutilizar el mismo campo, en vez de un diedAt aislado que cada
+		-- consumidor tenia que acordarse de comprobar aparte, es lo que vacia
+		-- el acceso/escalada de reclamo automaticamente en todo el fichero sin
+		-- tocar cada punto de codigo. record.priorRole conserva el rol de antes
+		-- de morir para el Nivel 3 de canClaimVacantOwnership (herencia por
+		-- cuenta). Conservar la ficha tal cual es el registro
+		-- reutilizable/consultable pedido explicitamente ("mantener registro
+		-- que debamos reutilizar... marcar como muerto, guardamos el
+		-- historico, podemos consultarlo si se requiere"). El riesgo de
+		-- "propietario duplicado" que motivo borrar en un intento anterior ya
+		-- esta cerrado en el ORIGEN por bindCharacter/applyOwnerRoleToRecord
+		-- (unico escritor de role=owner, demota automaticamente a cualquier
+		-- otra ficha que lo dijera) - no hace falta borrar nada aqui para
+		-- evitarlo.
+	end
+	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	end
+end
+
+--- Umbral de inactividad (ms) para dejar de "bloquear" la escalada a un
+--- reclamo de rango inferior o al modo herencia. Un admin/miembro que nunca
+--- muere pero deja de jugar bloquearia una red vacante para siempre sin
+--- esto (caso real señalado: "red huerfana en el aire" con un miembro que
+--- abandono el juego sin que su personaje llegara a morir). Sandbox
+--- GS_NetworkInactivityDays (GS_Sandbox.lua) - fallback de 14 dias si la
+--- opcion todavia no esta cableada, para que esta funcion nunca falle
+--- aunque se despliegue antes que el resto del sandbox.
+---@return number ms
+local function inactivityThresholdMs()
+	local days = 14
+	if GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getNetworkInactivityDays then
+		local ok, value = pcall(GlobalStorageSiK.Sandbox.getNetworkInactivityDays)
+		if ok and type(value) == "number" and value > 0 then days = value end
+	end
+	return days * 24 * 60 * 60 * 1000
+end
+
+--- Indica si una ficha de personaje sigue "bloqueando" la escalada de nivel
+--- de reclamo: vivo (sin diedAt) Y visto recientemente (dentro del umbral de
+--- inactividad). Confirmado muerto, o inactivo mas alla del umbral, deja de
+--- bloquear - pero SIN perder su rol real si vuelve antes de que otro reclame.
+---@param record table
+---@param nowTs number
+---@return boolean
+local function recordBlocksEscalation(record, nowTs)
+	if not record then return false end
+	if record.diedAt and record.diedAt > 0 then return false end
+	local lastSeen = record.lastSeenAt
+	if lastSeen and lastSeen > 0 and (nowTs - lastSeen) > inactivityThresholdMs() then
+		return false
+	end
+	return true
+end
+
+--- Evalua si ESTE jugador puede reclamar la propiedad de una red VACANTE
+--- (dueño muerto, sin dueño vivo desde entonces). Cascada explicita, nunca
+--- decidida en ausencia de nadie (diseño "herencia de red", 2026-08-21;
+--- nivel 0 añadido 2026-08-22 tras revisar en pruebas reales que un member
+--- con custodia temporal dejaba fuera al propio dueño original sin motivo).
+---
+--- IMPORTANTE - "admin" aqui SIEMPRE significa ROLE_ADMIN, el rol DENTRO de
+--- ESTA red (member vs admin vs owner, ver GlobalStorageSiK.Permissions.
+--- ROLE_ADMIN), NUNCA el rango de staff del servidor (isServerStaff:
+--- admin/moderator/overseer/gm). Son dos conceptos deliberadamente separados
+--- desde que se cerro esa confusion como deuda tecnica (ver comentario de
+--- isServerStaff, mas arriba en este fichero) - esta funcion NO llama a
+--- isServerStaff en ningun punto, un rango de servidor no adelanta a nadie
+--- aqui ni pinta nada en esta cascada.
+---
+---   Nivel 0 (dueño original DE LA RED, SIEMPRE, sin esperar a nadie): si la
+---     cuenta de login de quien pregunta coincide con `ownerAccountLogin`,
+---     reclama de inmediato - es SU red, ningun admin/member DE RED con
+---     custodia temporal puede retenerla ni un instante, no hace falta que
+---     nadie deje de "bloquear" primero.
+---   Nivel 1 (admin DE RED vivo, cualquier OTRA cuenta): si el propio
+---     personaje VIVO del jugador ya tiene ROLE_ADMIN registrado en esta
+---     red, puede reclamar.
+---   Nivel 2 (member DE RED vivo, cualquier OTRA cuenta): se abre SOLO si
+---     ningun admin DE RED registrado sigue "bloqueando"
+---     (recordBlocksEscalation) - entonces cualquier member vivo, incluido
+---     este jugador si lo es, puede reclamar.
+---   Nivel 3 (herencia por cuenta de un antiguo admin DE RED): se abre SOLO
+---     si NADIE con rol DE RED (admin o member) sigue bloqueando - entonces
+---     la cuenta de cualquier antiguo admin DE RED puede reclamar con un
+---     personaje nuevo, aunque su UUID anterior haya desaparecido con la
+---     muerte. El propietario original ya no pasa por aqui, se resuelve en
+---     el nivel 0.
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean canClaim
+---@return string|nil tier "owner"|"admin"|"member"|"heir"|nil
+function GlobalStorageSiK.Permissions.canClaimVacantOwnership(player, networkId)
+	if not player then return false, nil end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then return false, nil end
+	if net.ownerCharacterId and net.ownerCharacterId ~= "" then return false, nil end
+	if displayText(net.ownerAccountLogin) == "" then return false, nil end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	local myRecord = characterId ~= "" and net.characterPermissions and net.characterPermissions[characterId] or nil
+	local nowTs = nowMs()
+	-- Nivel 0 (prioridad maxima, SIN esperar a que nadie deje de bloquear):
+	-- la cuenta que era propietaria ORIGINAL DE LA RED siempre puede
+	-- reclamar su propia red, la tenga quien la tenga en custodia temporal.
+	-- Decision explicita (2026-08-22): un member DE RED (o incluso un admin
+	-- DE RED) con custodia temporal NO deberia poder dejar fuera para
+	-- siempre - o durante un umbral de inactividad arbitrario - al dueño
+	-- real solo por seguir "activo". Los niveles 1-3 de abajo son para
+	-- CUALQUIER OTRA cuenta (antiguos admins DE RED, nadie), nunca para el
+	-- propietario original, que ya queda resuelto aqui. Mismo
+	-- anti-suplantacion que bindOwnerIdentity: si hay steamId guardado, debe
+	-- coincidir con el actual, el username solo no basta.
+	local myAccount = normalizeName(getPlayerUsername(player))
+	if myAccount ~= "" and myAccount == normalizeName(net.ownerAccountLogin) then
+		local currentSteamId = getSteamIdForUsername(getPlayerUsername(player), player)
+		local steamOk = displayText(net.ownerSteamId) == "" or currentSteamId == ""
+			or displayText(net.ownerSteamId) == currentSteamId
+		if steamOk then
+			return true, "owner"
 		end
 	end
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	local blockingAdminExists = false
+	local blockingMemberExists = false
+	for _, record in pairs(net.characterPermissions or {}) do
+		if record and recordBlocksEscalation(record, nowTs) then
+			if record.role == GlobalStorageSiK.Permissions.ROLE_ADMIN then
+				blockingAdminExists = true
+			elseif record.role == GlobalStorageSiK.Permissions.ROLE_MEMBER then
+				blockingMemberExists = true
+			end
+		end
 	end
+	-- Nivel 1: este jugador YA tiene ROLE_ADMIN (rol DE RED) vivo registrado.
+	if myRecord and myRecord.role == GlobalStorageSiK.Permissions.ROLE_ADMIN
+		and recordBlocksEscalation(myRecord, nowTs) then
+		return true, "admin"
+	end
+	if blockingAdminExists then
+		-- Hay OTRO admin DE RED que todavia podria volver - no se abre nada mas.
+		return false, nil
+	end
+	-- Nivel 2: sin admin DE RED vivo que bloquee, cualquier member vivo puede.
+	if myRecord and myRecord.role == GlobalStorageSiK.Permissions.ROLE_MEMBER
+		and recordBlocksEscalation(myRecord, nowTs) then
+		return true, "member"
+	end
+	if blockingMemberExists then
+		return false, nil
+	end
+	-- Nivel 3: nadie con rol DE RED sigue bloqueando - herencia por cuenta
+	-- de un antiguo admin DE RED (el propietario original ya se resolvio
+	-- con prioridad maxima al principio de esta funcion, sin esperar a este
+	-- punto). Si ningun admin/member DE RED activo bloquea, la cuenta de un
+	-- antiguo admin DE RED de confianza tampoco debe quedar bloqueada para
+	-- siempre. Un antiguo admin normalmente llega aqui ya con role=ROLE_DEAD
+	-- (markRecordDead) - se comprueba priorRole en ese caso, que es donde
+	-- queda guardado el rol que tenia justo antes de morir.
+	if myAccount ~= "" then
+		for _, record in pairs(net.characterPermissions or {}) do
+			local effectiveRole = record and record.role
+			if effectiveRole == GlobalStorageSiK.Permissions.ROLE_DEAD then
+				effectiveRole = record.priorRole
+			end
+			if record and effectiveRole == GlobalStorageSiK.Permissions.ROLE_ADMIN
+				and normalizeName(record.accountUsername) == myAccount then
+				return true, "heir"
+			end
+		end
+	end
+	return false, nil
+end
+
+--- Ejecuta el reclamo de una red vacante, REVALIDANDO en servidor la misma
+--- condicion que canClaimVacantOwnership (nunca confiar en que un boton
+--- mostrado antes siga siendo valido en el momento de pulsarlo). Vincula al
+--- jugador como nuevo dueño con su UUID actual; nunca toca
+--- ownerAccountLogin (sigue siendo el ancla real, se sobreescribe solo con
+--- la cuenta de quien reclama, coherente con quien es el dueño ahora).
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean ok
+---@return string message
+function GlobalStorageSiK.Permissions.claimVacantOwnership(player, networkId)
+	if not player then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	local canClaim, tier = GlobalStorageSiK.Permissions.canClaimVacantOwnership(player, networkId)
+	if not canClaim then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCannotClaimMsg")
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
+	end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if characterId == "" then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	-- bindCharacter con ROLE_OWNER es AHORA el unico escritor de
+	-- net.owner/ownerCharacterId/ownerAccountLogin/ownerSteamId (fuente unica
+	-- de verdad, ver comentario en bindCharacter) - hace cumplir solo tambien
+	-- que ninguna otra ficha se quede diciendo "owner" por error.
+	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.info("Permissions", "ownershipClaimed",
+			networkId .. ": " .. net.owner .. " reclamo la red (nivel=" .. tostring(tier) .. ")")
+	end
+	recordNetworkHistoryEvent(networkId, "claimed",
+		net.owner .. " (cuenta " .. tostring(net.ownerAccountLogin) .. ") reclamo la red - nivel=" .. tostring(tier))
+	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	end
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipClaimedMsg")
+end
+
+--- Evalua si ESTE jugador puede recuperar su PROPIO rol anterior (admin o
+--- member - NUNCA owner, que ya tiene su propia cascada completa arriba,
+--- Nivel 0-3) en una red donde su CUENTA tuvo una ficha marcada muerta.
+--- Decision de diseño explicita (2026-08-23, feedback directo del usuario:
+--- "los miembros y administradores que queden en una red cuyo propietario
+--- muere, no deben perder el acceso... el miembro tambien debe poder
+--- recuperar, eran huecos existentes que obligaban a volver a invitar a los
+--- jugadores que ya eran miembros"): a diferencia de canClaimVacantOwnership
+--- (que decide QUIEN se convierte en el nuevo propietario de una red SIN
+--- dueño, con prioridad entre varios candidatos posibles compitiendo por un
+--- puesto vacante), esto no es una cascada ni una competicion - es
+--- simplemente "esta cuenta ya tenia acceso aqui, con este rol, antes de que
+--- su personaje muriera, se lo devolvemos a su personaje nuevo". Por eso NO
+--- depende de que la red este vacante (net.owner=="") en absoluto: un admin
+--- vivo puede seguir accediendo con normalidad aunque el propietario haya
+--- muerto (ver reordenacion de canAccess, mas abajo en este fichero) - el
+--- unico motivo por el que alguien llega a necesitar ESTO es que su PROPIO
+--- personaje murio, sea cual sea el estado del resto de la red.
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean canRecover
+---@return string|nil role rol a recuperar (admin/member), o nil si no aplica
+function GlobalStorageSiK.Permissions.canRecoverOwnRole(player, networkId)
+	if not player then return false, nil end
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then return false, nil end
+	local myAccount = normalizeName(getPlayerUsername(player))
+	if myAccount == "" then return false, nil end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	-- Si el characterId ACTUAL ya tiene ficha propia (viva o muerta bajo este
+	-- mismo UUID), este no es el caso de "personaje nuevo" que cubre esta
+	-- funcion - canAccess ya resuelve esos casos por su cuenta (acceso normal
+	-- o revivido, ver mas abajo).
+	if characterId ~= "" and net.characterPermissions and net.characterPermissions[characterId] then
+		return false, nil
+	end
+	local bestRole, bestDiedAt = nil, -1
+	for _, record in pairs(net.characterPermissions or {}) do
+		if record and record.role == GlobalStorageSiK.Permissions.ROLE_DEAD
+			and (record.priorRole == GlobalStorageSiK.Permissions.ROLE_ADMIN
+				or record.priorRole == GlobalStorageSiK.Permissions.ROLE_MEMBER)
+			and normalizeName(record.accountUsername) == myAccount then
+			local diedAt = record.diedAt or 0
+			if diedAt >= bestDiedAt then
+				bestDiedAt = diedAt
+				bestRole = record.priorRole
+			end
+		end
+	end
+	if bestRole then return true, bestRole end
+	return false, nil
+end
+
+--- Ejecuta la recuperacion (ver canRecoverOwnRole) - revalida en servidor,
+--- nunca confia en que el boton mostrado antes siga siendo valido. Vincula
+--- el characterId ACTUAL con el rol recuperado; la ficha muerta antigua se
+--- queda tal cual, como historico (mismo criterio que el resto del fichero:
+--- nunca se borra nada al morir).
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean ok
+---@return string message
+function GlobalStorageSiK.Permissions.recoverOwnRole(player, networkId)
+	if not player then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	local canRecover, role = GlobalStorageSiK.Permissions.canRecoverOwnRole(player, networkId)
+	if not canRecover then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCannotClaimMsg")
+	end
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
+	end
+	local record = bindCharacter(net, player, role)
+	if not record then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.info("Permissions", "roleRecovered",
+			networkId .. ": " .. tostring(record.characterName) .. " recupero su rol anterior (" .. tostring(role) .. ")")
+	end
+	recordNetworkHistoryEvent(networkId, "role_recovered",
+		tostring(record.characterName) .. " (cuenta " .. tostring(record.accountUsername)
+			.. ") recupero su rol anterior: " .. tostring(role))
+	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	end
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermRoleRecoveredMsg")
+end
+
+--- Umbral de inactividad del PROPIETARIO antes de que un admin VIVO de la
+--- red pueda reclamar la propiedad el mismo (auto-promocion) - sandbox
+--- configurable, DISTINTO de inactivityThresholdMs() de arriba a proposito
+--- (dos decisiones de politica de servidor separadas, ver comentario de
+--- GS_Sandbox.getOwnerInactivityClaimDays). Pedido explicito (2026-08-23):
+--- "el admin... debe poder reclamar la propiedad si hace mas de 3 dias que
+--- el viejo propietario no se conecta".
+---@return number ms
+local function ownerInactivityThresholdMs()
+	local days = 3
+	if GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getOwnerInactivityClaimDays then
+		local ok, value = pcall(GlobalStorageSiK.Sandbox.getOwnerInactivityClaimDays)
+		if ok and type(value) == "number" and value > 0 then days = value end
+	end
+	return days * 24 * 60 * 60 * 1000
+end
+
+--- Evalua si un admin VIVO de esta red puede reclamar la propiedad EL MISMO,
+--- sin pasar nunca por la pantalla de bloqueo - a diferencia de
+--- canClaimVacantOwnership/canRecoverOwnRole (pensadas para alguien que
+--- ACTUALMENTE no tiene acceso), un admin vivo ya tiene acceso normal
+--- (ver reordenacion de canAccess: la vacante de owner nunca se lo quita) y
+--- esta accion vive en su propia pestaña de administracion. Dos motivos
+--- validos, cualquiera de los dos:
+---   (a) La red esta genuinamente vacante (net.owner=="") - propietario
+---       muerto o red que nunca tuvo uno con este admin ya vinculado.
+---   (b) La red SI tiene un propietario registrado, pero su propia ficha
+---       lleva mas de ownerInactivityThresholdMs() sin conectarse
+---       (lastSeenAt) - "propietario en paradero desconocido", distinto de
+---       "propietario muerto" (eso ya vacia net.owner via handleOwnerDeath,
+---       cae en el caso (a) de todos modos).
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean canClaim
+function GlobalStorageSiK.Permissions.canAdminClaimOwnership(player, networkId)
+	if not player then return false end
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then return false end
+	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
+	if characterId == "" then return false end
+	local myRecord = net.characterPermissions and net.characterPermissions[characterId]
+	if not myRecord or myRecord.role ~= GlobalStorageSiK.Permissions.ROLE_ADMIN then
+		return false
+	end
+	if not net.owner or net.owner == "" then
+		return true
+	end
+	if net.ownerCharacterId == characterId then
+		return false
+	end
+	local ownerRecord = net.ownerCharacterId ~= "" and net.characterPermissions
+		and net.characterPermissions[net.ownerCharacterId]
+	local ownerLastSeen = ownerRecord and ownerRecord.lastSeenAt
+	if not ownerLastSeen or ownerLastSeen <= 0 then
+		-- Sin dato de actividad del propietario (ficha antigua/migrada): no
+		-- asumir inactividad sin evidencia, mejor no ofrecer el reclamo.
+		return false
+	end
+	return (nowMs() - ownerLastSeen) > ownerInactivityThresholdMs()
+end
+
+--- Ejecuta la auto-promocion de un admin VIVO a propietario por inactividad
+--- del dueño (ver canAdminClaimOwnership) - revalida en servidor, nunca
+--- confia en que el boton mostrado antes siga siendo valido.
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean ok
+---@return string message
+function GlobalStorageSiK.Permissions.adminClaimOwnership(player, networkId)
+	if not player then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCharacterNameEmptyMsg")
+	end
+	if not GlobalStorageSiK.Permissions.canAdminClaimOwnership(player, networkId) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_PermCannotClaimMsg")
+	end
+	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	if not net then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NetworkNotFoundMsg")
+	end
+	local previousOwner = net.owner
+	bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.info("Permissions", "ownershipClaimedByAdmin",
+			networkId .. ": " .. tostring(net.owner)
+				.. " reclamo la propiedad como admin activo (dueño anterior inactivo: "
+				.. tostring(previousOwner) .. ")")
+	end
+	recordNetworkHistoryEvent(networkId, "claimed_by_admin",
+		tostring(net.owner) .. " (cuenta " .. tostring(net.ownerAccountLogin)
+			.. ") reclamo la propiedad como admin activo - dueño anterior inactivo: " .. tostring(previousOwner))
+	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	end
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipClaimedMsg")
 end

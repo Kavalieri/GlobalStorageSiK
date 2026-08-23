@@ -8,6 +8,7 @@ require "GS_Network"
 require "GS_Zones"
 require "GS_Index"
 require "GS_ItemTaxonomy"
+require "GS_I18n"
 
 GlobalStorageSiK.Categories = {}
 
@@ -82,13 +83,16 @@ function GlobalStorageSiK.Categories.collectFromNetworkItems(networkId)
 	local rows = GlobalStorageSiK.Index.buildRows(networkId)
 	for i = 1, #rows do
 		local row = rows[i]
-		local scriptItem = nil
-		if getScriptManager then
-			local sm = getScriptManager()
-			if sm and sm.getItem and row.fullType then
-				scriptItem = sm:getItem(row.fullType)
-			end
-		end
+		-- BUG REAL cerrado (2026-08-22, spam confirmado en pruebas reales de
+		-- "Couldn't find item X" persistiendo pese a cachear typeDisplayName/
+		-- nameFromItemInstance en GS_I18n.lua): esto llamaba a
+		-- sm:getItem(row.fullType) SIN CACHE, una vez por cada tipo de item
+		-- distinto de la red, en CADA refresco de estado del terminal
+		-- (GS_Server.lua, Categories.serialize dentro de pushTerminalState) -
+		-- la fuente real y persistente del spam, nunca antes cacheada. Usar
+		-- GlobalStorageSiK.I18n.getScriptItem() (mismo cache de sesion que
+		-- usa el resto del fichero de i18n).
+		local scriptItem = GlobalStorageSiK.I18n.getScriptItem(row.fullType)
 		local cat = GlobalStorageSiK.ItemTaxonomy.readMainKey(nil, scriptItem, row.category)
 		if cat and cat ~= "" and GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(cat)
 			and not seen[string.lower(cat)] then

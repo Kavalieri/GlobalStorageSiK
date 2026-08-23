@@ -78,11 +78,14 @@ function GlobalStorageSiK.TerminalRecovery.buildNetworksForPlayer(player)
 			-- servidor va a rechazar de todos modos al instalar de verdad
 			-- (ver handleInstallTerminalReader en GS_Server.lua, chequeo autoritativo).
 			if not anchor or GlobalStorageSiK.Sandbox.isWithinNetworkRange(anchor, px, py, pz) then
+				-- Propiedad ya no vive en el registro operativo (separacion de
+				-- responsabilidades, 2026-08-22) - se lee de su ModData propia.
+				local permNet = GlobalStorageSiK.Permissions.getPermNet(networkId)
 				out[#out + 1] = {
 					networkId = networkId,
 					name = net.name or "",
 					label = networkLabel(net, networkId),
-					owner = net.owner or "",
+					owner = (permNet and permNet.owner) or "",
 					isOwner = GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId),
 					terminalCount = activeCount,
 					activeTerminals = activeCount,

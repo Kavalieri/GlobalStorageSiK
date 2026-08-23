@@ -133,6 +133,9 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
 		end
+		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onActionResult then
+			GlobalStorageSiK.AdminDashboard.onActionResult(args)
+		end
 		-- Cada cola consume exclusivamente su operation ID. Una respuesta de
 		-- otra acción nunca libera ni hace avanzar depósitos o retiradas.
 		if not continuing then
@@ -576,6 +579,11 @@ local function onServerCommand(module, command, args)
 				enriched.reason = payload.reason or enriched.reason
 				enriched.proximityRange = payload.proximityRange or enriched.proximityRange
 				enriched.wirelessRange = payload.wirelessRange or enriched.wirelessRange
+				enriched.networkId = payload.networkId or enriched.networkId
+				enriched.canClaimOwnership = payload.canClaimOwnership
+				enriched.claimTier = payload.claimTier
+				enriched.canRecoverRole = payload.canRecoverRole
+				enriched.recoverableRole = payload.recoverableRole
 				payload = enriched
 			end
 		end
@@ -599,6 +607,22 @@ local function onServerCommand(module, command, args)
 			count = count + 1
 		end
 		showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ItemTypes", count))
+	elseif command == "adminNetworkList" then
+		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNetworkList then
+			GlobalStorageSiK.AdminDashboard.onNetworkList(args and args.networks or {})
+		end
+	elseif command == "adminNetworkMembers" then
+		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNetworkMembers then
+			GlobalStorageSiK.AdminDashboard.onNetworkMembers(args and args.networkId, args and args.members or {})
+		end
+	elseif command == "adminOnlinePlayers" then
+		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onOnlinePlayers then
+			GlobalStorageSiK.AdminDashboard.onOnlinePlayers(args and args.players or {})
+		end
+	elseif command == "adminNetworkHistory" then
+		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNetworkHistory then
+			GlobalStorageSiK.AdminDashboard.onNetworkHistory(args and args.networkId, args and args.events or {})
+		end
 	end
 end
 

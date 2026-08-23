@@ -219,10 +219,6 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 	end
 
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
-	local isOwner = true
-	if player and GlobalStorageSiK.Permissions.isOwnerPlayer then
-		isOwner = GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
-	end
 
 	local defs = GlobalStorageSiK.AddonRegistry.listSorted()
 	if #defs == 0 then
@@ -240,7 +236,6 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 			player = player,
 			installed = installed,
 			terminal = terminal,
-			isOwner = isOwner,
 			networkId = networkId,
 			anchor = anchor,
 		})

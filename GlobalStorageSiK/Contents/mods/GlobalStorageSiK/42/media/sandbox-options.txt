@@ -114,6 +114,26 @@ option GlobalStorageSiK.RescanOnTerminalOpen
 	translation = GlobalStorageSiK_RescanOnTerminalOpen,
 }
 
+option GlobalStorageSiK.NetworkInactivityDays
+{
+	type = integer,
+	default = 14,
+	min = 1,
+	max = 180,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_NetworkInactivityDays,
+}
+
+option GlobalStorageSiK.OwnerInactivityClaimDays
+{
+	type = integer,
+	default = 3,
+	min = 1,
+	max = 180,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_OwnerInactivityClaimDays,
+}
+
 option GlobalStorageSiK.ReaderAcquireCraftTime
 {
 	type = integer,

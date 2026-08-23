@@ -48,11 +48,15 @@ function GlobalStorageSiK.RegistryStore.saveNow()
 		writeLine(writer, "")
 		writeLine(writer, "[network:" .. tostring(networkId) .. "]")
 		writeLine(writer, "name=" .. tostring(net.name or ""))
-		writeLine(writer, "owner=" .. tostring(net.owner or ""))
-		writeLine(writer, "ownerCharacterId=" .. tostring(net.ownerCharacterId or ""))
-		writeLine(writer, "ownerAccount=" .. tostring(net.ownerAccount or ""))
+		-- Identidad/propiedad ya no vive en el registro operativo (separacion
+		-- de responsabilidades, 2026-08-22) - se lee de su ModData propia.
+		local permNet = GlobalStorageSiK.Permissions and GlobalStorageSiK.Permissions.getPermNet
+			and GlobalStorageSiK.Permissions.getPermNet(networkId)
+		writeLine(writer, "owner=" .. tostring(permNet and permNet.owner or ""))
+		writeLine(writer, "ownerCharacterId=" .. tostring(permNet and permNet.ownerCharacterId or ""))
+		writeLine(writer, "ownerAccountLogin=" .. tostring(permNet and permNet.ownerAccountLogin or ""))
 		local permissionIndex = 0
-		for characterId, record in pairs(net.characterPermissions or {}) do
+		for characterId, record in pairs((permNet and permNet.characterPermissions) or {}) do
 			permissionIndex = permissionIndex + 1
 			writeLine(writer, string.format("permission_%d=%s,%s,%s",
 				permissionIndex, tostring(characterId), tostring(record.role or "member"),
@@ -60,7 +64,7 @@ function GlobalStorageSiK.RegistryStore.saveNow()
 		end
 		writeLine(writer, "permissionCount=" .. tostring(permissionIndex))
 		local zoneDenialCount = 0
-		for memberKey, denied in pairs(net.memberZoneDenials or {}) do
+		for memberKey, denied in pairs((permNet and permNet.memberZoneDenials) or {}) do
 			for zoneId, value in pairs(denied or {}) do
 				if value == true then
 					zoneDenialCount = zoneDenialCount + 1

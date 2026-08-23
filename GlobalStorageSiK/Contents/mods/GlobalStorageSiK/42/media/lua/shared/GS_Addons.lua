@@ -253,7 +253,15 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 		-- para otros mensajes (ver GS_Server.lua, IGUI_GS_PCAcquireFailBook).
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonStatusNeedMagazine")
 	end
-	if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
+	-- BUG REAL cerrado (2026-08-22, reportado en Steam Workshop y confirmado
+	-- en auditoria: "un admin debe poder instalar addons, configurar
+	-- contenedores, etc." - politica explicita del usuario): esto exigia
+	-- SOLO propietario, contradiciendo el gate de GS_Server.lua
+	-- (requireAdminAccess, propietario O admin) - un admin de red nunca
+	-- podia instalar un addon aunque el servidor le fuera a dejar. Se ajusta
+	-- al mismo nivel que el resto de herramientas de gestion (zonas,
+	-- contenedores): admin O propietario.
+	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerInstallAddonsMsg")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)
@@ -326,7 +334,9 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	if not def then
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonUnknownMsg")
 	end
-	if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
+	-- Mismo criterio y mismo bug real que install() arriba - admin O
+	-- propietario, no solo propietario.
+	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerRemoveAddonsMsg")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)

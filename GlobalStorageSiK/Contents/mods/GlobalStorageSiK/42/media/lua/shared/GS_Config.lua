@@ -10,6 +10,27 @@ GlobalStorageSiK = GlobalStorageSiK or {}
 GlobalStorageSiK.MOD_ID = "GlobalStorageSiK"
 GlobalStorageSiK.MODDATA_KEY = "GlobalStorageSiK_Network"
 GlobalStorageSiK.CONTAINER_MODDATA_KEY = "GlobalStorageSiK"
+-- Historico de auditoria por red (2026-08-22, panel de soporte GM/moderacion):
+-- ModData PROPIA, deliberadamente NUNCA pasada a ModData.transmit() - vive
+-- solo en memoria/disco del proceso autoritativo, se persiste igual entre
+-- reinicios (ModData.getOrCreate ya la guarda en el fichero del mundo), pero
+-- jamas se difunde a los clientes normales. Solo el servidor la lee para
+-- responder al comando adminGetNetworkHistory (un envio 1-a-1 al staff que
+-- lo pide, no una emision general) - separa el coste de "quien quiere ver
+-- el historico completo de una red" del coste de sincronizar el registro
+-- operativo (MODDATA_KEY) que SI necesita llegar a todos los clientes en
+-- tiempo real.
+GlobalStorageSiK.HISTORY_MODDATA_KEY = "GlobalStorageSiK_History"
+-- Registro de permisos/identidad por red (2026-08-22, separacion de
+-- responsabilidades pedida explicitamente: "no podemos mezclar deteccion,
+-- almacenamiento, tooltips con permisos" - ronda 1 de esa separacion, solo
+-- permisos). ModData PROPIA, distinta de MODDATA_KEY (que sigue siendo solo
+-- datos operativos: containers/terminals/addonInstalls/floppyDriveInstalls).
+-- SI se transmite a todos los clientes (a diferencia de HISTORY_MODDATA_KEY)
+-- porque los permisos SI necesitan llegar en tiempo real a todo el mundo
+-- (saber si tienes acceso, tu rol, etc.) - solo se separa de los datos
+-- operativos, no se deja de sincronizar.
+GlobalStorageSiK.PERMISSIONS_MODDATA_KEY = "GlobalStorageSiK_Permissions"
 
 --- CRITICO: en singleplayer real de PZ B42 (partida "Solo", sin hosting),
 --- isClient() E isServer() devuelven AMBOS false - no "ambos true" como
@@ -71,7 +92,7 @@ GlobalStorageSiK.Config = {
 	-- Unificada con modversion de mod.info (antes llevaba un esquema interno
 	-- 0.10.x-preprod aparte, lo que dificultaba saber que build produjo un
 	-- error en el log). A partir de aqui suben siempre juntas.
-	MOD_VERSION = "1.3.82",
+	MOD_VERSION = "1.3.83",
 	ADDON_ID_TABLET = "TabletLink",
 	ADDON_ID_CRAFT = "Craft",
 	WEIGHT_WARN_PERCENT = 80,

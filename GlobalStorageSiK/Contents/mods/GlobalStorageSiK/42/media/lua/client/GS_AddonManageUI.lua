@@ -127,7 +127,28 @@ end
 ---@param canUninstall boolean
 ---@return number newY
 local function createAddonActionButton(self, y, def, isInstalled, canInstall, canUninstall)
-	if not (def and self.isOwner) then
+	-- BUG REAL cerrado (2026-08-22, reportado en Steam Workshop: "requisitos
+	-- en verde pero el boton nunca aparece" - un jugador incluso publico un
+	-- parche no oficial para esto): esto exigia self.isOwner, una lectura de
+	-- solo-propietario calculada EN EL CLIENTE (ver
+	-- GlobalStorageSiK.AddonManageUI.show, isOwnerPlayer(player, networkId))
+	-- - doblemente incorrecto. Primero, el gate del servidor para instalar/
+	-- desinstalar (requireAdminAccess en GS_Server.lua) es propietario O
+	-- ADMIN de la red, nunca solo propietario - un admin de red nunca podia
+	-- ver este boton aunque el servidor SI le fuera a dejar pulsarlo.
+	-- Segundo, incluso para el propietario real, una lectura de permisos
+	-- calculada en el cliente puede llegar desincronizada frente al servidor
+	-- (mismo problema de fondo que motivo cerrar isOwnerPlayer() como
+	-- consulta pura de solo lectura esta misma ronda, ver GS_Permissions.lua)
+	-- - la UI no tiene por que confiar en su propia copia para decidir si
+	-- ENSEÑAR el boton. El servidor sigue siendo la unica autoridad real:
+	-- el propio boton ya revalida en el momento del clic
+	-- (canInstallModule/canUninstall, mas abajo) y el comando
+	-- installAddon/uninstallAddon vuelve a revalidar en servidor antes de
+	-- hacer nada - exactamente igual que canInstall/canUninstall (abajo) ya
+	-- se calculan y se usan solo para habilitar/deshabilitar el boton, nunca
+	-- para decidir si existe.
+	if not def then
 		return y
 	end
 	local pad = self.padding
@@ -458,10 +479,9 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	if GlobalStorageSiK.AddonManageUI.instance then
 		GlobalStorageSiK.AddonManageUI.instance:destroy()
 	end
-	local isOwner = true
-	if GlobalStorageSiK.Permissions and GlobalStorageSiK.Permissions.isOwnerPlayer then
-		isOwner = GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId)
-	end
+	-- self.isOwner ya no existe (bug real cerrado, ver comentario en
+	-- createAddonActionButton mas arriba) - el boton de instalar/desinstalar
+	-- ya no depende de una lectura de permisos calculada en el cliente.
 	local ui = GS_AddonManageUI:new(0, 0, PANEL_W, 200)
 	ui.player = player
 	ui.addonId = addonId
@@ -469,7 +489,6 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.anchor = anchor
 	ui.terminal = terminal
 	ui.installed = installed or {}
-	ui.isOwner = isOwner
 	ui:initialise()
 	ui:addToUIManager()
 	GlobalStorageSiK.TerminalChrome.centerModal(ui)

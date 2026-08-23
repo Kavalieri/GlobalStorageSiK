@@ -10,6 +10,7 @@ require "GS_Network"
 require "GS_Zones"
 require "GS_ItemSnapshot"
 require "GS_Log"
+require "GS_I18n"
 
 GlobalStorageSiK.NetworkCapacity = {}
 
@@ -89,9 +90,14 @@ function GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(snapshot)
 	for fullType, row in pairs(snapshot) do
 		local count = row.count or 1
 		local unit = 0.1
-		if getScriptManager then
+		-- BUG REAL cerrado (2026-08-22, misma clase que GS_Categories.lua -
+		-- sm:getItem(fullType) SIN CACHE por cada tipo distinto de un
+		-- snapshot, en cada calculo de capacidad): usar el cache de sesion
+		-- compartido (GlobalStorageSiK.I18n.getScriptItem) en vez de
+		-- consultar ScriptManager a pelo.
+		if GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.getScriptItem then
 			local ok, w = pcall(function()
-				local script = getScriptManager():getItem(fullType)
+				local script = GlobalStorageSiK.I18n.getScriptItem(fullType)
 				if script and script.getActualWeight then
 					return script:getActualWeight()
 				end

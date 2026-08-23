@@ -162,11 +162,15 @@ function GlobalStorageSiK.NetTrace.buildCatalogSnapshot()
 			end
 		end
 		local rel = net.relocation
+		-- Identidad/propiedad ya no vive en el registro operativo (separacion
+		-- de responsabilidades, 2026-08-22) - se lee de su ModData propia.
+		local permNet = GlobalStorageSiK.Permissions and GlobalStorageSiK.Permissions.getPermNet
+			and GlobalStorageSiK.Permissions.getPermNet(networkId)
 		out[#out + 1] = {
 			networkId = networkId,
 			name = net.name or "",
-			owner = net.owner or "",
-			ownerAccount = net.ownerAccount or "",
+			owner = (permNet and permNet.owner) or "",
+			ownerAccount = (permNet and permNet.ownerAccountLogin) or "",
 			terminalCount = #terminals,
 			terminals = terminals,
 			relocation = rel and {

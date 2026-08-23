@@ -10,6 +10,7 @@
 
 require "GS_Sandbox"
 require "GS_Log"
+require "GS_CompatMods"
 
 GlobalStorageSiK.Subcategories = {}
 
@@ -31,6 +32,13 @@ end
 local function betterSortingActive()
 	return rawget(_G, "BScats") ~= nil
 end
+
+-- Organized Categories: Core (Workshop 3370707195, mod id
+-- "organizedCategories_core"): a diferencia de Extended Categories/Better
+-- Sorting arriba, su deteccion vive SOLO en GS_CompatMods.hasOrganizedCategoriesCore()
+-- (via getActivatedMods(), API del motor, sin el problema de carga temprana
+-- que tienen las otras dos) - este fichero la reutiliza desde ahi en vez de
+-- mantener una segunda copia del mismo chequeo con otro nombre.
 
 -- Better Sorting reescribe getDisplayCategory() a ~79 codigos propios y
 -- PLANOS (sin nivel 2/3, ver estudio de compatibilidad 2026-08-21) en
@@ -73,6 +81,139 @@ local BETTER_SORTING_CANON = {
 	CraftBlack = "Material", CraftCarv = "Material", CraftG = "Material",
 	CraftMas = "Material", CraftTailor = "Material",
 }
+
+-- Organized Categories: Core (Workshop 3370707195) reescribe getDisplayCategory()
+-- a codigos JERARQUICOS propios via TweakItem (su libreria "Item Tweaker Core"),
+-- confirmados leyendo su .lua real instalado (organizedCategories_core.lua,
+-- ~6000 lineas), no supuestos. Patron real, verificado con ejemplos concretos
+-- del propio fichero:
+--   - La mayoria de raices usan el PREFIJO camelCase antes de la primera
+--     mayuscula: "weaponAxe"/"weaponAxe_crafted" -> weapon, "foodPerishable_meat"
+--     -> food, "medicalFirstAid" -> medical, "farmingSeed" -> farming.
+--   - EXCEPCION real (comprobada con items reales: Base.Plank/Log/Nails ->
+--     "craftingCarpentry_material", Base.MetalBar -> "craftingWelding_material",
+--     Base.RippedSheets -> "craftingTailoring_cloth"): los materiales EN BRUTO
+--     no viven bajo un prefijo propio - viven como SUFIJO "_material"/"_cloth"/
+--     "_leather"/"_denim"/"_vinyl" de cualquier categoria "crafting*" (que en
+--     su mayoria son herramientas/estaciones, NO materiales, de ahi que haga
+--     falta esta regla aparte en vez de mapear "crafting" entero a Material).
+-- Solo se resuelven las raices que alimentan una subcategoria GS real
+-- (Food/Weapon/FirstAid/Gardening/Accessory/Material) - el resto (Clothing,
+-- Furniture, Tool, Security, Literature...) ya son categorias vanilla reales
+-- o quedan sin equivalente GS, y se dejan tal cual, sin mapear (misma
+-- filosofia que BETTER_SORTING_CANON arriba).
+local OC_CORE_PREFIX_CANON = {
+	weapon = "Weapon",
+	food = "Food",
+	medical = "FirstAid",
+	farming = "Gardening",
+}
+-- "clothingAccessory*" es la unica excepcion de dos palabras: OC:Core anida
+-- los accesorios (pendientes/collares/anillos) bajo su propio prefijo
+-- "clothing", pero para GS deben resolver a la categoria vanilla real
+-- "Accessory" (distinta de "Clothing"), para que gs_accessory_jewelry siga
+-- funcionando (JEWELRY_BODY_LOCATIONS ya hace la distincion joyeria/otros).
+local OC_CORE_EXACT_PREFIX_CANON = {
+	clothingAccessory = "Accessory",
+}
+local OC_CORE_MATERIAL_SUFFIXES = {
+	material = true, cloth = true, leather = true, denim = true, vinyl = true,
+}
+-- Los codigos "weaponPart_*"/"weaponAttachment_*"/"weaponBomb_*" existen en
+-- OC:Core pero NO son el arma en si (piezas/adjuntos/explosivos) - GS no
+-- tiene subcategoria propia para ellos, igual que WepAmmo/WepPart en Better
+-- Sorting arriba. Se excluyen a proposito de OC_CORE_PREFIX_CANON.weapon.
+local OC_CORE_WEAPON_EXCLUDE_PREFIX = {
+	weaponPart = true, weaponAttachment = true, weaponBomb = true,
+}
+
+--- Deriva la raiz vanilla (Food/Weapon/FirstAid/Gardening/Accessory/Material)
+--- de un codigo de Organized Categories: Core, o nil si no hay equivalente GS.
+---@param raw string
+---@return string|nil
+local function organizedCategoriesCoreCanon(raw)
+	if not raw or raw == "" then return nil end
+	local suffix = raw:match("_([%a]+)$")
+	if suffix and OC_CORE_MATERIAL_SUFFIXES[suffix] then
+		return "Material"
+	end
+	local firstSegment = raw:match("^([^_]+)")
+	if not firstSegment then return nil end
+	if OC_CORE_EXACT_PREFIX_CANON[firstSegment] then
+		return OC_CORE_EXACT_PREFIX_CANON[firstSegment]
+	end
+	if OC_CORE_WEAPON_EXCLUDE_PREFIX[firstSegment] then
+		return nil
+	end
+	local prefix = firstSegment:match("^(%l+)")
+	if prefix and OC_CORE_PREFIX_CANON[prefix] then
+		return OC_CORE_PREFIX_CANON[prefix]
+	end
+	return nil
+end
+-- Expuesta: GS_ItemTaxonomy.canonicalHierarchy() la reutiliza para resolver
+-- su propio groupKey de Nivel 1 en vez de mantener una segunda tabla de
+-- alias por separado - una sola fuente de verdad para "que raiz vanilla
+-- corresponde a este codigo de Organized Categories: Core".
+GlobalStorageSiK.Subcategories.organizedCategoriesCoreCanon = organizedCategoriesCoreCanon
+
+--- Etiqueta humana para una raiz SIN equivalente GS/vanilla conocido
+--- (Coleccionable, Colocable, Contenedor...). OC:Core no publica una
+--- traduccion para el prefijo solo (solo para el codigo compuesto completo,
+--- p.ej. "collectableMemento") - se capitaliza el propio prefijo como
+--- fallback estable, igual criterio que humanizeToken() en GS_I18n.lua para
+--- cualquier otra clave sin traduccion.
+---@param prefix string
+---@return string
+local function capitalizeToken(prefix)
+	return prefix:sub(1, 1):upper() .. prefix:sub(2)
+end
+
+--- BUG REAL encontrado (2026-08-21, capturas reales): reutilizar
+--- CAEC_THREE_LEVEL_PARENT (tabla de GS_ItemTaxonomy.lua que codifica
+--- SOLO la gramatica de Extended Categories, nombrada "CAEC" por su id
+--- interno "CAExtendedCategories" - no es codigo ajeno, es nuestra, pero
+--- describe UN mod concreto) para decidir si un codigo de Organized
+--- Categories: Core podia tener Nivel 3 provocaba que "foodNonPerishable_
+--- spice" colapsara entero en Nivel 2 (le faltaba FoodNonPerishable en esa
+--- lista) Y que el "No perecedero" propio de GS se colase duplicado como 4º
+--- trozo. Organized Categories: Core tiene su PROPIA gramatica, siempre
+--- estructurada (confirmado con ~266 traducciones reales del mod, no
+--- supuesto): "<prefijoMinuscula><RestoConMayuscula>[_<hoja>]" - por
+--- ejemplo weaponAxe_crafted, foodNonPerishable_spice, collectableMemento,
+--- placeablePower. Esta funcion resuelve los 3 niveles DIRECTAMENTE de esa
+--- estructura, sin tocar ninguna tabla pensada para Extended Categories:
+---   Nivel 1 (groupKey): raiz vanilla conocida via organizedCategoriesCoreCanon()
+---     si aplica (Food/Weapon/FirstAid/Gardening/Accessory/Material); si no,
+---     el propio prefijo camelCase capitalizado (p.ej. "Collectable") - GS no
+---     tiene opinion sobre esa familia, pero se sigue dividiendo en niveles
+---     en vez de quedar todo el codigo como una sola opcion plana.
+---   Nivel 2 (subGroupKey): el primer segmento completo, tal cual (p.ej.
+---     "weaponAxe", "foodNonPerishable", "collectableMemento") - identidad
+---     estable e independiente del idioma, nunca el texto traducido.
+---   Nivel 3 (categoryLeafKey): el codigo completo original, SOLO si trae
+---     sufijo "_algo" distinto del segmento 1 (p.ej. "foodNonPerishable_
+---     spice") - nil si el codigo no tiene mas detalle que ofrecer.
+---@param raw string
+---@return string groupKey
+---@return string|nil subGroupKey
+---@return string|nil categoryLeafKey
+local function organizedCategoriesCoreHierarchy(raw)
+	if not raw or raw == "" then return raw or "", nil, nil end
+	local groupKey = organizedCategoriesCoreCanon(raw)
+	local firstSegment = raw:match("^([^_]+)") or raw
+	if not groupKey then
+		local prefix = firstSegment:match("^(%l+)")
+		groupKey = prefix and capitalizeToken(prefix) or firstSegment
+	end
+	local subGroupKey = firstSegment
+	local categoryLeafKey = (string.lower(subGroupKey) ~= string.lower(raw)) and raw or nil
+	return groupKey, subGroupKey, categoryLeafKey
+end
+-- Expuesta: GS_ItemTaxonomy.canonicalHierarchy() la usa COMPLETA (los 3
+-- niveles a la vez) para codigos de Organized Categories: Core, en vez de
+-- reutilizar el motor generico pensado para Extended Categories.
+GlobalStorageSiK.Subcategories.organizedCategoriesCoreHierarchy = organizedCategoriesCoreHierarchy
 
 -- ---------------------------------------------------------------------------
 -- Helpers internos de clasificación
@@ -134,6 +275,13 @@ local function canonicalDisplayCat(si)
 			-- DebugDetailCompatCategories (AREA_CATEGORY CompatCategories =
 			-- "CompatCategories" en GS_Log.lua).
 			GlobalStorageSiK.Log.detail("CompatCategories", "canonicalDisplayCat | BetterSorting raw=" .. tostring(raw) .. " -> " .. mapped)
+			return mapped
+		end
+	end
+	if GlobalStorageSiK.CompatMods.hasOrganizedCategoriesCore() then
+		local mapped = organizedCategoriesCoreCanon(raw)
+		if mapped then
+			GlobalStorageSiK.Log.detail("CompatCategories", "canonicalDisplayCat | OrganizedCategoriesCore raw=" .. tostring(raw) .. " -> " .. mapped)
 			return mapped
 		end
 	end
@@ -461,11 +609,26 @@ GlobalStorageSiK.Subcategories.LIST = {
 			return isPerishableFood(item)
 		end,
 	},
-	-- No existe una categoria "no perecedero": la comida estable conserva la
-	-- DisplayCategory general Food. Asi, FoodPerishable (tier 2) gana cuando
-	-- corresponde y Food (tier 3) actua como fallback para toda la comida.
-	-- Las claves gs_food_dry/FoodNonPerishable se conservan solo en migracion e
-	-- i18n para datos antiguos; no se generan ni aparecen en filtros nuevos.
+	-- gs_food_dry / FoodNonPerishable (2026-08-21): reactivado - existia solo
+	-- como alias de migracion (GS_Router.lua) e i18n (traducciones ya
+	-- presentes en los 10 idiomas desde antes), pero nunca se generaba. Igual
+	-- que gs_food_cold arriba: solo se aplica cuando NINGUN mod de categorias
+	-- de terceros esta activo (Extended Categories, Organized Categories:
+	-- Core...) - ensureCategoryOverrides() (GS_CategoryRewrite.lua) ya
+	-- devuelve sin hacer nada en ese caso, asi que este matcher nunca compite
+	-- con la organizacion que el jugador eligio instalar; solo enriquece
+	-- nuestra propia base (comida perecedero/no perecedero) cuando el
+	-- jugador usa el Almacen "a pelo", sin ningun mod de categorias.
+	{
+		key            = "gs_food_dry",
+		parentCategory = "Food",
+		labelKey       = "IGUI_GS_SubCat_FoodDry",
+		override       = "FoodNonPerishable",
+		matches        = function(item)
+			if not catIs(item, "Food") then return false end
+			return not isPerishableFood(item)
+		end,
+	},
 
 	-- ── Gardening (semillas vs herramientas) ─────────────────────────────
 	{

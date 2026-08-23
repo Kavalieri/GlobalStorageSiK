@@ -24,6 +24,24 @@ local function resolveNetworkId()
 	if state and state.networkId then
 		return state.networkId
 	end
+	-- BUG REAL cerrado (2026-08-22, confirmado en pruebas reales: la ventana
+	-- de "Reclamar propiedad" cambiaba sola a "sin acceso" al cabo de unos
+	-- segundos, sin moverse del sitio): en modo bloqueado, sendTerminalBlocked
+	-- (servidor) ya manda el networkId EXACTO del terminal que el jugador
+	-- tiene delante - ui.blockedState.networkId lo guarda (ver
+	-- GS_TerminalUI_Blocked.lua:refresh) - pero el propio handler de
+	-- "terminalBlocked" en GS_Client.lua limpia Client.cachedTerminalState a
+	-- la vez, asi que la SIGUIENTE reprueba periodica (GS_TerminalAccessGuard,
+	-- cada pocos segundos) caia al fallback Client.activeNetworkId - que
+	-- puede apuntar a una red COMPLETAMENTE DISTINTA (la ultima gestionada
+	-- activamente en cualquier otro momento de la sesion, sin relacion con el
+	-- terminal actual) - reevaluando y sobreescribiendo el panel con el
+	-- resultado de una red equivocada. Mientras el panel de bloqueo este
+	-- activo, su propio blockedState.networkId es SIEMPRE la fuente correcta,
+	-- prioridad maxima justo despues del tab principal abierto.
+	if ui and ui.blockedState and ui.blockedState.networkId then
+		return ui.blockedState.networkId
+	end
 	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.cachedTerminalState and GlobalStorageSiK.Client.cachedTerminalState.networkId then
 		return GlobalStorageSiK.Client.cachedTerminalState.networkId
 	end

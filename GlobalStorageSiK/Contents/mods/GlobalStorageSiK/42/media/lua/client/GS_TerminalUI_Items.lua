@@ -143,15 +143,30 @@ end
 
 GlobalStorageSiK.TerminalItems.ROW_H = ROW_H
 
+-- BUG REAL cerrado (2026-08-22, misma clase que GS_Categories.lua/
+-- GS_NetworkCapacity.lua/GS_ItemTaxonomy.lua - sm:getItem(fullType) SIN
+-- CACHE, aqui llamado al construir cada fila de la tabla de items del
+-- terminal): usar el cache de sesion compartido en vez de consultar
+-- ScriptManager a pelo.
 ---@param fullType string|nil
 ---@return any|nil
 local function scriptItem(fullType)
-	if not fullType then return nil end
-	local sm = getScriptManager and getScriptManager()
-	if not sm or not sm.getItem then return nil end
-	local ok, script = pcall(function() return sm:getItem(fullType) end)
-	return ok and script or nil
+	if not fullType or not GlobalStorageSiK.I18n or not GlobalStorageSiK.I18n.getScriptItem then return nil end
+	return GlobalStorageSiK.I18n.getScriptItem(fullType)
 end
+
+-- BUG REAL cerrado (2026-08-22, "crece sin parar" - spam de "Couldn't find
+-- item X" confirmado en pruebas reales mientras el raton quedaba sobre una
+-- fila con fullType corrupto): itemProbe() nunca cacheaba el caso de
+-- fallo - para un item que NUNCA logra resolverse (nuestro caso real,
+-- "Base.carpentry_01_16"), tanto itemTexture() como el tooltip de
+-- GS_TerminalUI_Items.lua (mas abajo, prerender de la fila) volvian a
+-- llamar a props:instanceItem()/instanceItem() EN CADA FRAME mientras la
+-- fila seguia dibujandose/bajo el raton - sin cache posible de exito
+-- porque nunca habia exito, el intento (y el log vanilla incondicional que
+-- dispara) se repetia sin limite. Cachear tambien el fallo, una vez por
+-- fila distinta (fullType+worldSprite) durante toda la sesion.
+local PROBE_FAIL_CACHE = {}
 
 --- Crea una instancia de tooltip válida sin consultar como ScriptItem los
 --- tokens de muebles recogidos.
@@ -159,6 +174,10 @@ end
 ---@return InventoryItem|nil
 local function itemProbe(row)
 	if not row then return nil end
+	local probeCacheKey = tostring(row.fullType or "") .. "\31" .. tostring(row.worldSprite or "")
+	if PROBE_FAIL_CACHE[probeCacheKey] then
+		return nil
+	end
 	-- Los muebles recogidos suelen compartir un fullType generico. Vanilla
 	-- reconstruye el InventoryItem desde el sprite del mundo; hacerlo primero
 	-- conserva su icono de inventario, nombre y propiedades reales.
@@ -176,8 +195,9 @@ local function itemProbe(row)
 	end
 	if scriptItem(row.fullType) and instanceItem then
 		local ok, probe = pcall(instanceItem, row.fullType)
-		if ok then return probe end
+		if ok and probe then return probe end
 	end
+	PROBE_FAIL_CACHE[probeCacheKey] = true
 	return nil
 end
 
@@ -192,8 +212,8 @@ local function itemTexture(row)
 	end
 	local cacheKey = tostring(row.fullType) .. "\31" .. tostring(row.worldSprite or "")
 	local cached = ITEM_TEXTURE_CACHE[cacheKey]
-	if cached then
-		return cached
+	if cached ~= nil then
+		return cached or nil
 	end
 
 	local probe = itemProbe(row)
@@ -223,8 +243,23 @@ local function itemTexture(row)
 			return tex
 		end
 	end
+	ITEM_TEXTURE_CACHE[cacheKey] = false
 	return nil
 end
+
+--- Version PUBLICA de itemTexture, para cualquier otro fichero que necesite
+--- el icono real de una fila del Almacen (fullType + worldSprite) - unica
+--- ruta "robusta" del mod: reconstruye el item real desde el worldSprite via
+--- ISMoveableSpriteProps antes de caer a ScriptItem/sprite crudo, para que
+--- items derivados de un Moveable (p.ej. una caja recogida) muestren su
+--- icono de inventario real, no un "?" (bug real cerrado 2026-08-23: el
+--- "fantasma" de arrastre de GS_TerminalWithdrawDrag.lua mantenia su PROPIA
+--- cadena de fallback, mas corta, que nunca llegaba a ISMoveableSpriteProps -
+--- unificado aqui, la unica fuente, en vez de mantener dos caminos que
+--- pueden divergir).
+---@param row table|nil
+---@return Texture|nil
+GlobalStorageSiK.TerminalItems.textureForRow = itemTexture
 
 -- Cache de respaldo cliente (ver clientLearnedRecipeNames abajo): solo se
 -- escribe en exito, nunca en fallo, para no envenenar la entrada como paso
@@ -247,12 +282,33 @@ local CLIENT_NUMBER_OF_PAGES_CACHE = {}
 ---@return integer|nil
 local function clientNumberOfPages(fullType)
 	local cached = CLIENT_NUMBER_OF_PAGES_CACHE[fullType]
-	if cached then return cached end
-	if not instanceItem then return nil end
+	if cached ~= nil then return cached or nil end
+	-- BUG REAL cerrado (2026-08-23, misma clase exacta que itemProbe en este
+	-- mismo fichero - ver comentario mas abajo, "2026-08-22"): esta funcion
+	-- SOLO cacheaba el EXITO. Para un fullType que nunca resuelve (item
+	-- corrupto/movable mal escaneado), instanceItem(fullType) - funcion
+	-- vanilla que imprime su propio log incondicional si el fullType no
+	-- existe - se repetia SIN CACHE en cada llamada. isLiteratureReadSafe
+	-- (mas abajo) llama a esta funcion desde el render() de CADA fila del
+	-- Almacen, en CADA fotograma - con una fila rota simplemente VISIBLE en
+	-- la lista (sin necesidad de pasar el raton ni arrastrarla), el fallo se
+	-- repetia 30-60 veces/segundo de forma continua. Cachear tambien el
+	-- fallo (como `false`) para que la consulta ocurra como mucho una vez
+	-- por fullType distinto.
+	if not instanceItem then
+		CLIENT_NUMBER_OF_PAGES_CACHE[fullType] = false
+		return nil
+	end
 	local ok, probe = pcall(instanceItem, fullType)
-	if not ok or not probe or not probe.getNumberOfPages then return nil end
+	if not ok or not probe or not probe.getNumberOfPages then
+		CLIENT_NUMBER_OF_PAGES_CACHE[fullType] = false
+		return nil
+	end
 	local okPages, pages = pcall(function() return probe:getNumberOfPages() end)
-	if not okPages or not pages or pages <= 0 then return nil end
+	if not okPages or not pages or pages <= 0 then
+		CLIENT_NUMBER_OF_PAGES_CACHE[fullType] = false
+		return nil
+	end
 	CLIENT_NUMBER_OF_PAGES_CACHE[fullType] = pages
 	return pages
 end
@@ -276,13 +332,19 @@ end
 ---@return any|nil recipes lista Java original, o nil si no aplica
 local function clientLearnedRecipesRaw(fullType)
 	local cached = CLIENT_LEARNED_RECIPES_CACHE[fullType]
-	if cached then return cached end
+	if cached ~= nil then return cached or nil end
 	local debugOn = GlobalStorageSiK.Sandbox.debugMode() and GlobalStorageSiK.Sandbox.debugCategoryEnabled("LiteratureRead")
+	-- BUG REAL cerrado (2026-08-23, misma clase exacta que clientNumberOfPages
+	-- arriba y que itemProbe mas abajo): SOLO se cacheaba el EXITO. Para un
+	-- fullType que nunca resuelve, instanceItem() se repetia sin cache en
+	-- cada llamada de isLiteratureReadSafe - una vez por fotograma por cada
+	-- fila visible del Almacen, sin necesitar interaccion del jugador.
 	if not instanceItem then
 		if debugOn then
 			GlobalStorageSiK.Log.debug("LiteratureRead", "clientLearnedRecipesRaw",
 				"fullType=" .. tostring(fullType) .. " SIN instanceItem global en este cliente")
 		end
+		CLIENT_LEARNED_RECIPES_CACHE[fullType] = false
 		return nil
 	end
 	local ok, probe = pcall(instanceItem, fullType)
@@ -292,6 +354,7 @@ local function clientLearnedRecipesRaw(fullType)
 				"fullType=" .. tostring(fullType) .. " instanceItem FALLO ok=" .. tostring(ok)
 					.. " probe=" .. tostring(probe ~= nil) .. " err=" .. tostring(not ok and probe or nil))
 		end
+		CLIENT_LEARNED_RECIPES_CACHE[fullType] = false
 		return nil
 	end
 	local okRecipes, recipes = pcall(function() return probe:getLearnedRecipes() end)
@@ -301,7 +364,10 @@ local function clientLearnedRecipesRaw(fullType)
 			"fullType=" .. tostring(fullType) .. " instanceItem OK getLearnedRecipesOk=" .. tostring(okRecipes)
 				.. " size=" .. tostring(size))
 	end
-	if not okRecipes or not recipes or size <= 0 then return nil end
+	if not okRecipes or not recipes or size <= 0 then
+		CLIENT_LEARNED_RECIPES_CACHE[fullType] = false
+		return nil
+	end
 	CLIENT_LEARNED_RECIPES_CACHE[fullType] = recipes
 	return recipes
 end
@@ -387,72 +453,30 @@ local function isLiteratureReadSafe(player, row)
 		end
 	end
 
-	-- Camino 0 (el que de verdad prueba vanilla, ISLiteratureUI.lua:363-374):
-	-- getLearnedRecipes() llamado sobre el ITEM DE SCRIPT (getScriptManager():
-	-- getAllItems()), NO sobre una instancia sintetica de instanceItem(). Los
-	-- caminos A/B de abajo (anteriores a este) daban "ok=true known=false"
-	-- SIEMPRE pese a nombres correctos - la sospecha real: instanceItem()
-	-- genera un objeto Receta con identidad propia cada vez que se llama, que
-	-- containsAll() nunca reconoce como igual al de player:getKnownRecipes(),
-	-- aunque su texto se imprima igual. El item de script (si, ya resuelto
-	-- arriba para el chequeo de skill book) es el ÚNICO patron que vanilla
-	-- usa de verdad para esto - probarlo primero.
-	if si and si.getLearnedRecipes and player.getKnownRecipes then
-		local ok0, known0, diag0 = pcall(function()
-			local recipes0 = si:getLearnedRecipes()
-			local kr = player:getKnownRecipes()
-			local krSize = kr and kr.size and kr:size() or -1
-			local r0Size = recipes0 and recipes0.size and recipes0:size() or -1
-			local sample = ""
-			if kr and krSize and krSize > 0 then
-				for i = 0, math.min(krSize, 5) - 1 do
-					sample = sample .. (i > 0 and "," or "") .. tostring(kr:get(i))
-				end
-			end
-			local isok = recipes0 ~= nil and kr:containsAll(recipes0)
-			-- Diagnostico pedido explicitamente (2026-08-21, ultima ronda):
-			-- contains() POR RECETA INDIVIDUAL, con su nombre real, en vez de
-			-- solo el agregado containsAll() + una muestra de 5 no relacionada.
-			-- Esto aisla definitivamente si falta UNA receta concreta o si
-			-- TODAS las recetas de este item fallan el contains().
-			local perRecipe = ""
-			if recipes0 and r0Size and r0Size > 0 and kr then
-				for i = 0, r0Size - 1 do
-					local rec = recipes0:get(i)
-					local okContains, contains = pcall(function() return kr:contains(rec) end)
-					-- BUG REAL en esta misma linea de diagnostico (corregido):
-					-- "okContains and contains or 'ERR'" colapsa a 'ERR' cuando
-					-- contains() devuelve false LIMPIO (false es falsy en Lua),
-					-- no solo cuando pcall falla de verdad. Result != nil
-					-- distingue "hubo respuesta real" de "pcall exploto".
-					local label
-					if not okContains then
-						label = "EXCEPCION:" .. tostring(contains)
-					else
-						label = tostring(contains)
-					end
-					perRecipe = perRecipe .. (i > 0 and " | " or "") .. tostring(rec) .. "=" .. label
-				end
-			end
-			return isok, "playerUsername=" .. tostring(player.getUsername and player:getUsername() or "?")
-				.. " isLocal=" .. tostring(player == getSpecificPlayer(0))
-				.. " knownSize=" .. tostring(krSize) .. " recipeSize=" .. tostring(r0Size)
-				.. " knownSample=" .. sample .. " perRecipe=[" .. perRecipe .. "]"
-		end)
-		if debugOn then
-			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (script item)",
-				"fullType=" .. tostring(fullType) .. " ok=" .. tostring(ok0) .. " known=" .. tostring(known0)
-					.. " " .. tostring(diag0))
-		end
-		if ok0 and known0 == true then return true end
-	end
+	-- "Camino 0" (comparar scriptItem(fullType):getLearnedRecipes() contra
+	-- player:getKnownRecipes() via containsAll()/contains(), SIN convertir a
+	-- string) ELIMINADO (2026-08-21) - causa raiz real, encontrada leyendo el
+	-- .lua real de vanilla instalado: ISInventoryPane.lua:2597 e
+	-- ISLiteratureUI.lua:373-374/391 NUNCA llaman getLearnedRecipes() sobre un
+	-- scriptItem (plantilla de definicion), SIEMPRE sobre la INSTANCIA REAL
+	-- del item mostrado/leido. Un scriptItem() es una plantilla distinta -
+	-- comparar sus objetos Receta en bruto contra getKnownRecipes() (misma
+	-- familia de bug que el intento anterior con instanceItem(), tambien
+	-- descartado) daba "ok=true known=false" SIEMPRE pese a nombres
+	-- correctos, confirmado con log real en produccion (build -dev27:
+	-- perRecipe=[Program GS Floppy Drive Network Disk=false] pese a que esa
+	-- receta la enseña justo ese manual). La comparacion en bruto (sin
+	-- tostring) solo es fiable cuando el objeto Receta viene de la instancia
+	-- real igual que hace vanilla - los caminos A/B de abajo ya cubren esto,
+	-- comparando por NOMBRE (tostring) en vez de por identidad de objeto,
+	-- que es robusto sea cual sea el origen del objeto Receta.
 
 	-- Camino A (preferido cuando existe): recetas capturadas por el SERVIDOR
 	-- desde un item REAL durante el escaneo (GS_ItemSnapshot.lua), pero
 	-- viajaron por red como texto Lua (un valor Java vivo no se puede
-	-- serializar) - se comparan normalizando AMBOS lados con tostring(),
-	-- nunca mezclando un string reconstruido contra un valor Java sin
-	-- convertir (eso fue justo el bug real de mas abajo, para el camino B).
+	-- serializar) - se comparan normalizando AMBOS lados con tostring().
+	-- El camino B de abajo usa el mismo patron por nombre, sobre una fuente
+	-- distinta (sonda cliente en vez de captura de servidor).
 	if row.learnedRecipeNames and #row.learnedRecipeNames > 0 and player.getKnownRecipes then
 		local recipes = row.learnedRecipeNames
 		local ok, known = pcall(function()
@@ -477,24 +501,32 @@ local function isLiteratureReadSafe(player, row)
 	end
 
 	-- Camino B: respaldo instantaneo en cliente cuando la fila todavia no
-	-- trae el dato del servidor (nodo sin reescanear desde -dev19).
-	-- BUG REAL corregido (2026-08-21, log real: "ok=true known=false" SIEMPRE
-	-- para 3 revistas confirmadas leidas por el propio tick de vanilla): la
-	-- sonda SI funcionaba, el fallo estaba en convertir la lista de
-	-- getLearnedRecipes() a texto Lua y comparar contra getKnownRecipes()
-	-- via .contains(stringReconstruido). Vanilla NUNCA hace esa conversion
-	-- (ISInventoryPane.lua:2597, ISLiteratureUI.lua:391-392) - siempre pasa
-	-- el valor/lista Java ORIGINAL, sin tocar, a containsAll()/contains().
-	-- Aqui SI tenemos ese valor original (clientLearnedRecipesRaw devuelve
-	-- la lista Java real, sin convertir) - se compara TAL CUAL, igual que
-	-- vanilla, sin ningun tostring() de por medio.
+	-- trae el dato del servidor (nodo sin reescanear desde -dev19). Fuente:
+	-- instanceItem(fullType) - una sonda SINTETICA, no la instancia real que
+	-- el jugador tiene/lee. Por eso NO se compara en bruto con containsAll()/
+	-- contains() (bug real encontrado 2026-08-21, misma familia que el
+	-- "Camino 0" ya eliminado mas arriba: un objeto Receta obtenido de una
+	-- fuente que no es la instancia real del item mostrado/leido no es
+	-- reconocido como igual por Java aunque su nombre imprima identico) -
+	-- se compara por NOMBRE (tostring), igual que el Camino A, que es
+	-- robusto sea cual sea el origen del objeto Receta.
 	local rawRecipes = clientLearnedRecipesRaw(fullType)
 	if rawRecipes and player.getKnownRecipes then
 		local ok, known = pcall(function()
-			return player:getKnownRecipes():containsAll(rawRecipes)
+			local knownSet = {}
+			local knownRecipes = player:getKnownRecipes()
+			for i = 0, knownRecipes:size() - 1 do
+				knownSet[tostring(knownRecipes:get(i))] = true
+			end
+			for i = 0, rawRecipes:size() - 1 do
+				if not knownSet[tostring(rawRecipes:get(i))] then
+					return false
+				end
+			end
+			return true
 		end)
 		if debugOn then
-			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (cliente, sin convertir)",
+			GlobalStorageSiK.Log.debug("LiteratureRead", "isLiteratureReadSafe (cliente, por nombre)",
 				"fullType=" .. tostring(fullType) .. " ok=" .. tostring(ok) .. " known=" .. tostring(known))
 		end
 		if ok and known == true then return true end
@@ -746,9 +778,12 @@ local function buildItemDetailLines(fullType, data)
 	-- Igual que GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight: prueba
 	-- getActualWeight() primero, getWeight() como respaldo (en 42.20 no todos
 	-- los script items resuelven getWeight() de forma fiable).
-	if getScriptManager then
+	-- Cache de sesion compartido (GlobalStorageSiK.I18n.getScriptItem) en vez
+	-- de sm:getItem() a pelo - mismo bug de spam ya cerrado en los demas
+	-- sitios de este fichero.
+	if GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.getScriptItem then
 		local ok, w = pcall(function()
-			local script = getScriptManager():getItem(fullType)
+			local script = GlobalStorageSiK.I18n.getScriptItem(fullType)
 			if script and script.getActualWeight then
 				return script:getActualWeight()
 			end

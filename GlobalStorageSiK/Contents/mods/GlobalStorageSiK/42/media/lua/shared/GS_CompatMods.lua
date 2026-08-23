@@ -10,6 +10,22 @@
 	  el valor que el haya puesto. hasExtendedCategories() se deja aqui como
 	  punto de deteccion reutilizable (p.ej. para diagnostico/debug).
 
+	- Organized Categories: Core (organizedCategories_core, Workshop 3370707195):
+	  igual que Extended Categories, no una accion. Reescribe DisplayCategory via
+	  su propia libreria "Item Tweaker Core" (TweakItem, en OnGameBoot) con
+	  jerarquia PROPIA rica (p.ej. Food: foodPerishable, foodNonPerishable,
+	  foodNonPerishable_condiment/spice/candy/canned/ingredient...) - mas
+	  detallada que nuestra propia base (solo Perishable/NonPerishable), asi
+	  que no aporta nada competir: GS_CategoryRewrite.lua debe DEJAR DE escribir
+	  por completo cuando este mod esta activo (2026-08-21, pedido explicito:
+	  "cualquier mod de categorias debe pasar por encima de nuestras
+	  categorias"). GS_ItemTaxonomy.isDisplayCategoryKey() ya reconoce sus
+	  categorias solas via IGUI_ItemCat_<codigo> (mismo mecanismo que EC), asi
+	  que el filtro del Almacen las muestra sin codigo extra. Deteccion via
+	  getActivatedMods() (no hay tabla global propia fiable: TweakItem/
+	  ItemTweaker son de una libreria compartida que otros mods tambien pueden
+	  embeber, detectar solo esa presencia daria falsos positivos).
+
 	- Better Sorting (BetterSortCC, Workshop 2313387159): a diferencia de
 	  Extended Categories, NO tiene jerarquia de 3 niveles ni API publica -
 	  solo reescribe getDisplayCategory() a ~79 codigos propios y planos
@@ -58,6 +74,27 @@ end
 ---@return boolean
 function GlobalStorageSiK.CompatMods.hasBetterSorting()
 	return rawget(_G, "BScats") ~= nil
+end
+
+--- Organized Categories: Core, Workshop 3370707195, mod id "organizedCategories_core".
+--- Via getActivatedMods() (no tabla global propia fiable, ver comentario de
+--- cabecera): funciona en cualquier proceso (cliente/servidor/SP) igual que
+--- el resto de detecciones de este fichero. UNICA fuente de esta deteccion en
+--- todo el mod - GS_Subcategories.lua y GS_ItemTaxonomy.lua la llaman desde
+--- aqui, nunca reimplementan su propia copia (evita el mismo mod ID como
+--- literal repetido en varios ficheros que puedan desincronizarse). Cacheado
+--- tras la primera llamada: la lista de mods activos no cambia durante la
+--- sesion, y se consulta por item (potencialmente miles de veces por
+--- refresco del Almacen) - repetir :contains() cada vez seria coste puro.
+---@return boolean
+local _hasOrganizedCategoriesCoreCache = nil
+function GlobalStorageSiK.CompatMods.hasOrganizedCategoriesCore()
+	if _hasOrganizedCategoriesCoreCache ~= nil then
+		return _hasOrganizedCategoriesCoreCache
+	end
+	_hasOrganizedCategoriesCoreCache = getActivatedMods ~= nil
+		and safeGet(function() return getActivatedMods():contains("organizedCategories_core") end) == true
+	return _hasOrganizedCategoriesCoreCache
 end
 
 --- Busca la etiqueta (personal o de faccion) que Customizable Containers tenga puesta

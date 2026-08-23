@@ -70,6 +70,7 @@ local function stateSignature(state)
 		tostring(rs.hasReader),
 		tostring(rs.hasDisk),
 		tostring(rs.computerState),
+		tostring(state.canClaimOwnership),
 	}, "|")
 end
 
@@ -85,6 +86,11 @@ local function buildClientBlockedState(ui, player)
 	state.reason = prev.reason
 	state.proximityRange = prev.proximityRange or state.proximityRange
 	state.wirelessRange = prev.wirelessRange or state.wirelessRange
+	state.networkId = prev.networkId
+	state.canClaimOwnership = prev.canClaimOwnership
+	state.claimTier = prev.claimTier
+	state.canRecoverRole = prev.canRecoverRole
+	state.recoverableRole = prev.recoverableRole
 	return state
 end
 
@@ -120,6 +126,10 @@ local function introApproachHintLines(panelWidth, state)
 		hintKey = "IGUI_GS_BlockedTerminalUnlinked"
 	elseif state and state.reason == "terminal_missing_here" then
 		hintKey = "IGUI_GS_BlockedTerminalMissingHere"
+	elseif state and state.reason == "network_vacant" then
+		hintKey = "IGUI_GS_NetworkVacantBlocked"
+	elseif state and (state.reason == "denied" or state.reason == "no_permission") then
+		hintKey = "IGUI_GS_BlockedNoAccess"
 	end
 	local wrapW = math.max(260, panelWidth - INTRO_PAD * 2)
 	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T(hintKey, prox), wrapW, UIFont.Small)
@@ -676,14 +686,52 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, intro)
 	y = y + introH + CARD_GAP
 
+	if terminal.blockedState and terminal.blockedState.reason == "network_vacant" and terminal.blockedState.canClaimOwnership then
+		local claimNetworkId = terminal.blockedState.networkId
+		local claimBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, T("IGUI_GS_ClaimOwnershipButton"), scroll, function()
+				if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and claimNetworkId then
+					GlobalStorageSiK.NetClient.sendCommand("reclaimOwnership", { networkId = claimNetworkId })
+				end
+			end)
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, claimBtn)
+		y = y + CRAFT_BTN_H + CARD_GAP
+	end
+
+	-- Diseño "recuperacion de rol propio" (2026-08-23): independiente del
+	-- boton de arriba (canClaimOwnership decide QUIEN se convierte en el
+	-- nuevo propietario; esto es "esta cuenta ya tenia SU PROPIO rol aqui,
+	-- se lo devolvemos") - no depende de reason=="network_vacant", un
+	-- ex-admin/member muerto ante una red que SIGUE teniendo dueño (reason
+	-- =="denied") tambien debe poder recuperar su acceso. Pueden aparecer
+	-- los dos botones a la vez si el jugador es elegible para ambos.
+	if terminal.blockedState and terminal.blockedState.canRecoverRole then
+		local recoverNetworkId = terminal.blockedState.networkId
+		local recoverBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, T("IGUI_GS_RecoverRoleButton"), scroll, function()
+				if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and recoverNetworkId then
+					GlobalStorageSiK.NetClient.sendCommand("recoverOwnRole", { networkId = recoverNetworkId })
+				end
+			end)
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, recoverBtn)
+		y = y + CRAFT_BTN_H + CARD_GAP
+	end
+
 	-- Unico camino para conseguir un terminal: lector + disquete sobre un
 	-- ordenador ya en el mapa. Si no hay ninguno detectado cerca, se ofrece
 	-- ademas "Conseguir PC" (ventana propia, ver GS_PCAcquireUI.lua) para
 	-- fabricar uno sin depender de encontrarlo por el mundo.
+	-- Motivos de PERMISOS (ya hay terminal, ya estas cerca - lo que falta es
+	-- acceso, no hardware): ofrecer "instalar terminal aqui"/"conseguir PC" es
+	-- enganoso, ya existe un terminal funcional al lado. Excluidos junto con
+	-- los de proximidad/hardware de siempre.
 	local readerStatus = nil
 	if terminal.blockedState and terminal.blockedState.reason ~= "tablet_out_of_range"
 		and terminal.blockedState.reason ~= "antenna_out_of_range"
-		and terminal.blockedState.reason ~= "tablet_addon_required" then
+		and terminal.blockedState.reason ~= "tablet_addon_required"
+		and terminal.blockedState.reason ~= "network_vacant"
+		and terminal.blockedState.reason ~= "denied"
+		and terminal.blockedState.reason ~= "no_permission" then
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 		readerStatus = installReaderStatus(player)
 		local cardH = buildInstallReaderCard(scroll, terminal, y, cardW)

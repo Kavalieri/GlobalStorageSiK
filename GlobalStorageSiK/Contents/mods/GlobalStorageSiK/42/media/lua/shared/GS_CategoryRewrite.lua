@@ -1,46 +1,52 @@
 --[[
 	GlobalStorageSiK - Reescritura de DisplayCategory en el arranque
 	Autor: SiK
-	Fecha: 2026-08-02
+	Fecha: 2026-08-02 (politica de compatibilidad revisada 2026-08-21)
 	Descripcion: para nuestras subcategorias que distinguen items dentro de una
 	misma categoria vanilla compartida (comida perecedera, joyeria/
 	otros accesorios, armas de fuego/cuerpo a cuerpo, material metal/cuero/madera...),
 	fijamos una DisplayCategory REAL sobre el script item, con la misma tecnica
 	que usa Extended Categories (item:DoParam("DisplayCategory", ...)).
 
-	IMPORTANTE - nunca duplicamos ni pisamos un mod de categorias extendidas ya
-	instalado: si detectamos Extended Categories (CAEC_Global, ver GS_CompatMods.lua),
-	esta reescritura NO SE EJECUTA. El probablemente ya tiene su propia categoria
-	para "comida perecedera" etc., y nosotros solo LEEMOS la que haya puesto -
-	reutilizamos sus mismas claves cuando existen (ver GS_Subcategories.lua) para
-	que el resultado sea identico este el instalado o no.
+	POLITICA FIRME (2026-08-21, sin excepciones): si el jugador ha instalado
+	CUALQUIER mod de categorias, es porque quiere usar SU organizacion en su
+	partida - nosotros NUNCA reescribimos DisplayCategory encima de lo que
+	ese mod ya puso, sea cual sea (Extended Categories, Organized Categories:
+	Core, Better Sorting, o cualquier otro detectado en el futuro). Esta
+	reescritura NO SE EJECUTA si se detecta ninguno de ellos. Solo cubrimos,
+	por LECTURA (nunca escritura), los huecos que ese mod deje para que
+	nuestro propio entorno (3 niveles de filtro del Almacen, distincion de
+	joyeria, etc.) siga funcionando sobre la categoria que el ya puso - ver
+	canonicalDisplayCat()/BETTER_SORTING_CANON en GS_Subcategories.lua para
+	Better Sorting, e isDisplayCategoryKey() en GS_ItemTaxonomy.lua (recoge
+	solo IGUI_ItemCat_<codigo> de cualquier mod activo) para Extended
+	Categories y Organized Categories: Core.
 
-	Better Sorting (ver GS_CompatMods.hasBetterSorting) es distinto: SI se
-	ejecuta esta reescritura con el activo, porque sin escribir nuestro
-	"override" real sobre el item, el desplegable de filtros y "Categorias
-	aceptadas" de un contenedor (que enumeran el DisplayCategory REAL ya
-	almacenado en cada item, no un valor recalculado al vuelo) nunca ofrecen
-	nuestras subcategorias (bug real 2026-08-21: "Comida" sin opcion
-	"Perecedero", "Arma - cuerpo a cuerpo" duplicado 4 veces sin dividir por
-	tipo). overrideForScriptItem() ya normaliza el codigo de Better Sorting via
-	BETTER_SORTING_CANON (GS_Subcategories.lua) antes de decidir el override,
-	asi que el resultado es el mismo que sin ningun mod de categorias. Solo
-	toca los items que caen en una de las 6 categorias con subcategoria GS real
-	(Accessory/Food/Gardening/FirstAid/Weapon/Material) - la ropa por hueco
-	(ClothHead/ClothArm/...) ya la divide bien Better Sorting solo, y no forma
-	parte de BETTER_SORTING_CANON, asi que esta reescritura la deja intacta sin
-	necesitar logica aparte.
+	Limitacion aceptada como consecuencia directa de esta politica: el
+	desplegable de "Categorias aceptadas" de un contenedor nuestro (que
+	enumera el DisplayCategory REAL ya almacenado en cada item, no un valor
+	recalculado al vuelo) no podra ofrecer las subcategorias PROPIAS de GS
+	para items ya retagueados por el mod de categorias del jugador - solo
+	ofrecera las que ESE mod haya expuesto. Es el mismo compromiso que ya
+	aceptabamos con Extended Categories desde el principio; ahora se aplica
+	por igual a los tres.
 
-	Better Sorting engancha el MISMO evento (OnGameBoot) para su propia
-	escritura - si su handler se registra despues del nuestro, su codigo plano
-	gana la carrera y pisa nuestro override. Por eso, SOLO si se detecta
-	Better Sorting, se programa ademas una reaplicacion diferida un frame
-	despues via OnTick (una vez, se autoelimina) para garantizar la ultima
-	palabra sin depender del orden de carga de mods.
+	[Historico, ya no aplica] Hasta 2026-08-21 esta reescritura SI competia
+	deliberadamente con Better Sorting (incluso con una reaplicacion diferida
+	via OnTick para ganar la carrera de OnGameBoot), justificado por un bug
+	real donde el propio desplegable de GS salia incompleto/duplicado sin
+	ese override. Se revirtio por decision explicita: "no debemos reescribir
+	NUESTRAS categorias encima. Solo aplicaremos los ajustes necesarios para
+	cubrir los huecos... por lectura" - el jugador que instala Better Sorting
+	tiene el mismo derecho a que se respete su eleccion que con cualquier
+	otro mod de categorias, aunque eso signifique aceptar la limitacion del
+	parrafo anterior tambien para el.
 
 	El hueco de joyeria (collar/anillo/muñeca/pendiente) NO se gestiona aqui -
 	ver GS_ItemTaxonomy.lua: ya se detecta solo via BodyLocation vanilla
-	(subcategoria real, sin inventar una DisplayCategory nueva para ello).
+	(subcategoria real, sin inventar una DisplayCategory nueva para ello) -
+	funciona igual haya o no un mod de categorias instalado, porque nunca
+	dependio de escribir DisplayCategory.
 
 	Se ejecuta en TODOS los procesos (cliente, servidor dedicado, servidor local
 	en SP) porque cada uno carga su propio ScriptManager de forma independiente.
@@ -54,11 +60,18 @@
 require "GS_Subcategories"
 require "GS_CompatMods"
 
+--- Cualquier mod de categorias detectado deja de escribir esta funcion por
+--- completo - lista unica, sin distinguir "cuales sí compiten"; ver politica
+--- firme en la cabecera del fichero.
+---@return boolean
+local function anyCategoryModActive()
+	return GlobalStorageSiK.CompatMods.hasExtendedCategories()
+		or GlobalStorageSiK.CompatMods.hasOrganizedCategoriesCore()
+		or GlobalStorageSiK.CompatMods.hasBetterSorting()
+end
+
 local function ensureCategoryOverrides()
-	if GlobalStorageSiK.CompatMods.hasExtendedCategories() then
-		-- Extended Categories (u otro mod de categorias extendidas detectado
-		-- en el futuro) ya gestiona esto - no duplicar ni competir por el
-		-- mismo campo.
+	if anyCategoryModActive() then
 		return
 	end
 	if not getAllItems then
@@ -80,32 +93,8 @@ local function ensureCategoryOverrides()
 	end
 end
 
---- BUG REAL encontrado (2026-08-21, primera prueba DEV de Better Sorting): la
---- deteccion `hasBetterSorting()` para programar la reaplicacion diferida
---- estaba como sentencia de nivel superior de este fichero, evaluada al
---- CARGAR el fichero (require), no al disparar OnGameBoot. Como BScats lo fija
---- el propio shared file de Better Sorting al cargarse, si el orden de carga
---- de mods evaluaba este fichero ANTES de que el de Better Sorting hubiera
---- terminado, la deteccion daba (falso) negativo, la reaplicacion nunca se
---- programaba y el override de GS quedaba a merced de que orden ganara la
---- carrera - exactamente lo que "evitar que el orden de carga importe" pide
---- no depender. Ahora TODO (rewrite inicial + deteccion + programar el
---- reintento) vive dentro de la MISMA funcion, disparada por OnGameBoot: para
---- ese momento, los shared files de TODOS los mods (incluido BScats) ya han
---- terminado de cargar, sea cual sea el orden.
 local function onGameBoot()
 	ensureCategoryOverrides()
-	if GlobalStorageSiK.CompatMods.hasBetterSorting() then
-		-- Aviso siempre visible (no depende de DebugMode) para confirmar en
-		-- pruebas DEV que la capa de compatibilidad se activo; detalle por
-		-- item bajo DebugCatCompatCategories + DebugDetailCompatCategories.
-		GlobalStorageSiK.Log.warn("Compat", "Better Sorting detectado - reescritura de subcategorias GS reaplicada con retardo para ganar la carrera de OnGameBoot (ver DebugCatCompatCategories)")
-		local function reapplyOnceAfterBoot()
-			Events.OnTick.Remove(reapplyOnceAfterBoot)
-			ensureCategoryOverrides()
-		end
-		Events.OnTick.Add(reapplyOnceAfterBoot)
-	end
 end
 
 Events.OnGameBoot.Add(onGameBoot)

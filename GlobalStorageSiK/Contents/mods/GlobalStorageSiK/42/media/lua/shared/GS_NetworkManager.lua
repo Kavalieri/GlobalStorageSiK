@@ -83,10 +83,13 @@ function GlobalStorageSiK.NetworkManager.buildSummary(player, networkId, net)
 	end
 	local reloc = net.relocation
 	local last = GlobalStorageSiK.TerminalRecord.getLastKnownLocation(net)
+	-- Propiedad ya no vive en el registro operativo (separacion de
+	-- responsabilidades, 2026-08-22) - se lee de su ModData propia.
+	local permNet = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	return {
 		networkId = networkId,
 		name = net.name or "",
-		owner = net.owner or "",
+		owner = (permNet and permNet.owner) or "",
 		isOwner = GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId),
 		activeTerminals = activeCount,
 		suspendedTerminals = suspendedCount,
@@ -249,6 +252,7 @@ function GlobalStorageSiK.NetworkManager.deleteSuspendedNetwork(player, networkI
 
 	local suspendedTerminals = #(net.terminals or {})
 	registry.networks[resolved] = nil
+	GlobalStorageSiK.Permissions.deletePermNet(resolved)
 	if registry.defaultNetworkId == resolved then registry.defaultNetworkId = nil end
 	if registry._inventoryRevision then registry._inventoryRevision[resolved] = nil end
 	if registry._snapshotRevision then registry._snapshotRevision[resolved] = nil end

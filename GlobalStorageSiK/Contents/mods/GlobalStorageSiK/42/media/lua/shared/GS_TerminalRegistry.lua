@@ -850,20 +850,30 @@ function GlobalStorageSiK.TerminalRegistry.register(networkId, x, y, z, player, 
 	end
 
 	if networkId and networkId ~= "" and not registry.networks[networkId] and opts.createIfMissing then
+		-- BUG REAL cerrado (2026-08-22, confirmado en pruebas reales: panel de
+		-- staff mostrando un propietario con ownerCharacterId=nil, "desconectado"
+		-- pese a estar jugando en ese mismo momento): esta tabla es el registro
+		-- OPERATIVO (containers/terminals/addonInstalls, MODDATA_KEY) - desde la
+		-- separacion de permisos (dev12) ya no debe llevar owner/ownerAccount
+		-- (mismo criterio que GS_Network.createNetwork()), y initializeOwner()
+		-- de abajo debe escribir sobre la ModData de permisos real
+		-- (getPermNet), nunca sobre este objeto - antes lo hacia, dejando la
+		-- ModData de permisos cacheada con el nombre de personaje pero sin
+		-- ownerCharacterId/ownerAccountLogin/ownerSteamId para siempre.
 		registry.networks[networkId] = {
 			id = networkId,
 			name = "Red " .. string.sub(networkId, -6),
-			owner = player and GlobalStorageSiK.Permissions and GlobalStorageSiK.Permissions.getCharacterName(player) or "",
-			ownerAccount = player and player.getUsername and player:getUsername() or "",
 			terminals = {},
 			containers = {},
 			addonInstalls = {},
 			createdMs = (getTimestampMs and getTimestampMs()) or 0,
 		}
 		if GlobalStorageSiK.Permissions and player then
-			GlobalStorageSiK.Permissions.ensure(registry, networkId, GlobalStorageSiK.Permissions.getCharacterName(player))
-			if not GlobalStorageSiK.Permissions.initializeOwner(registry.networks[networkId], player) then
+			GlobalStorageSiK.Permissions.ensure(registry, networkId)
+			if not GlobalStorageSiK.Permissions.initializeOwner(
+				GlobalStorageSiK.Permissions.getPermNet(networkId), player) then
 				registry.networks[networkId] = nil
+				GlobalStorageSiK.Permissions.deletePermNet(networkId)
 				if GlobalStorageSiK.Log then
 					GlobalStorageSiK.Log.error("Permissions", "reactivateNetwork rejected",
 						"authoritative account/character identity unavailable")

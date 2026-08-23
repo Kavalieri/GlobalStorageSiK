@@ -17,6 +17,8 @@ require "GS_TerminalUI_Api"
 require "GS_TerminalUI_Blocked"
 require "GS_TerminalAccess"
 require "GS_TerminalRecipes"
+require "GS_Permissions"
+require "GS_AdminDashboard"
 
 GlobalStorageSiK.UIHook = GlobalStorageSiK.UIHook or {}
 
@@ -65,6 +67,24 @@ local function getInventoryAnchor(panel)
 	return nil
 end
 
+--- Tercer icono del sidebar (panel de soporte GM/moderacion), solo visible
+--- para rango de staff del servidor - unico sitio del CLIENTE donde se
+--- consulta isServerStaff, y solo para decidir si DIBUJAR el icono. La
+--- autorizacion real se revalida siempre en servidor (requireServerMod),
+--- esto es pura UX: nadie deberia ver un boton que el servidor le va a
+--- rechazar. Ademas exige shouldEnforce() (isMultiplayerActive() real): en SP
+--- real el sistema de permisos ya esta inerte para TODO (nadie recibe
+--- network_vacant/denied, el propio jugador suele tener rango "admin" de su
+--- propia partida) - el panel de soporte no tiene nada que gestionar ahi, asi
+--- que ni se ofrece, para no mostrar un icono sin uso real (pedido explicito
+--- 2026-08-22: "de todo esto, en SP, no usaremos nada por ahora").
+---@param chr IsoPlayer|nil
+---@return boolean
+local function isPlayerStaff(chr)
+	return chr ~= nil and GlobalStorageSiK.Permissions.shouldEnforce()
+		and GlobalStorageSiK.Permissions.isServerStaff(chr)
+end
+
 local function isTerminalOpen()
 	local main = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	return main and main.getIsVisible and main:getIsVisible()
@@ -111,6 +131,7 @@ function GS_InventorySidebarPopup:new(x, y, width, height, chr)
 	o.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	o.gsIcon = loadSidebarIcon(textureWidth, false)
 	o.gsIconOn = loadSidebarIcon(textureWidth, true) or o.gsIcon
+	o.isStaff = isPlayerStaff(chr)
 	return o
 end
 
@@ -150,6 +171,8 @@ function GS_InventorySidebarPopup:onMouseMove()
 	local index = math.floor(self:getMouseX() / self.TEXTURE_WIDTH)
 	if index == 1 then
 		self:showTooltip(T("IGUI_GS_OpenTerminal"))
+	elseif index == 2 and self.isStaff then
+		self:showTooltip(T("IGUI_GS_AdminDashboardTooltip"))
 	else
 		self:hideTooltip()
 	end
@@ -179,6 +202,10 @@ function GS_InventorySidebarPopup:onMouseDown(x, y)
 		end
 		return true
 	end
+	if index == 2 and self.isStaff then
+		GlobalStorageSiK.AdminDashboard.show()
+		return true
+	end
 	return false
 end
 
@@ -190,6 +217,15 @@ function GS_InventorySidebarPopup:render()
 	if tex then
 		self:drawTextureScaledAspect(tex, self.TEXTURE_WIDTH, 0, self.TEXTURE_WIDTH, self.TEXTURE_HEIGHT, 1, 1, 1, 1)
 	end
+	-- Tercer icono (staff): mismo icono base con tinte ambar/rojo para
+	-- diferenciarlo sin depender de arte nuevo - "diferenciado de algun
+	-- modo" (pedido explicito), sin bloquear la entrega en un asset que no
+	-- existe todavia.
+	if self.isStaff and self.gsIcon then
+		local adminOn = GlobalStorageSiK.AdminDashboard.instance ~= nil
+		local ar, ag, ab = adminOn and 1 or 0.85, adminOn and 0.55 or 0.35, 0.15
+		self:drawTextureScaledAspect(self.gsIcon, self.TEXTURE_WIDTH * 2, 0, self.TEXTURE_WIDTH, self.TEXTURE_HEIGHT, ar, ag, ab, 1)
+	end
 end
 
 function GS_SidebarPatch.updatePopupGeometry(panel)
@@ -200,9 +236,11 @@ function GS_SidebarPatch.updatePopupGeometry(panel)
 
 	local textureWidth = getTextureWidth()
 	local textureHeight = textureWidth * 0.75
+	panel.gsInventoryPopup.isStaff = isPlayerStaff(panel.chr)
+	local slots = panel.gsInventoryPopup.isStaff and 3 or 2
 	panel.gsInventoryPopup:setX(panel:getAbsoluteX() + anchor:getX())
 	panel.gsInventoryPopup:setY(panel:getAbsoluteY() + anchor:getY())
-	panel.gsInventoryPopup:setWidth(textureWidth * 2)
+	panel.gsInventoryPopup:setWidth(textureWidth * slots)
 	panel.gsInventoryPopup:setHeight(textureHeight)
 	panel.gsInventoryPopup.TEXTURE_WIDTH = textureWidth
 	panel.gsInventoryPopup.TEXTURE_HEIGHT = textureHeight

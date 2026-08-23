@@ -1479,6 +1479,19 @@ function GS_TerminalUI:onAddPermissionUser(characterName, characterId, factionUs
 	})
 end
 
+--- Boton "Reclamar propiedad" de la propia pestaña de admin (2026-08-23,
+--- ver GlobalStorageSiK.Permissions.canAdminClaimOwnership): distinto del
+--- boton de la pantalla de bloqueo (GS_TerminalUI_BlockedPanel.lua) - este
+--- solo aparece para un admin que YA tiene acceso normal, cuando el
+--- propietario lleva demasiado inactivo (o la red esta vacante). Sin
+--- networkId explicito, igual que onAddPermissionUser - el servidor
+--- resuelve la red desde la sesion activa del terminal ya abierto.
+function GS_TerminalUI:onClaimAsAdmin()
+	GlobalStorageSiK.NetClient.sendCommand("adminClaimOwnership", {
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
 function GS_TerminalUI:onAddMyFaction()
 	local fname = ""
 	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer then

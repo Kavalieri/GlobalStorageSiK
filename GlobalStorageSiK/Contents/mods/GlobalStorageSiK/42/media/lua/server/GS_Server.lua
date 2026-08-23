@@ -876,6 +876,64 @@ end
 
 
 
+--- Diagnostico DEV puntual (2026-08-22): el spam "Couldn't find item
+--- Base.carpentry_01_16" reaparecio 3 veces pese a cerrar el mismo numero de
+--- fuentes distintas de esta sesion (GS_I18n.lua, 5 sitios de
+--- ScriptManager:getItem() sin cache, itemProbe/itemTexture del terminal) -
+--- hipotesis final, no confirmada, a validar de forma directa: el item en si
+--- esta FISICAMENTE guardado con un fullType corrupto (probablemente la
+--- "Caja de madera" mencionada por el usuario, deuda de una version antigua
+--- de categorizacion/iconos) en el inventario del jugador - si es asi, el
+--- PROPIO panel de inventario VANILLA de Project Zomboid (no nuestro
+--- terminal, no ningun codigo de este mod) redibuja ese item cada frame
+--- mientras el panel de inventario este abierto (siempre, es un panel base
+--- del juego) y dispara este mismo log el motor internamente, sin pasar por
+--- ninguna de las funciones ya cacheadas - no seria arreglable desde Lua del
+--- mod en absoluto, habria que localizar y quitar/reparar el item corrupto
+--- de los datos guardados. Escanea recursivamente el inventario del propio
+--- jugador (incluye mochilas anidadas) buscando items cuyo fullType no
+--- resuelva a un ScriptItem real Y que no tengan worldSprite (para no marcar
+--- falsos positivos en muebles recogidos legitimos, que nunca resuelven
+--- como ScriptItem y es esperado).
+---@param container ItemContainer|nil
+---@param path string
+---@param out table[]
+local function scanContainerForBrokenItems(container, path, out)
+	if not container or not container.getItems then return end
+	local okItems, items = pcall(function() return container:getItems() end)
+	if not okItems or not items then return end
+	for i = 0, items:size() - 1 do
+		local item = items:get(i)
+		if item and item.getFullType then
+			local okType, fullType = pcall(function() return item:getFullType() end)
+			if okType and fullType and fullType ~= "" then
+				local hasWorldSprite = false
+				if item.getWorldSprite then
+					local okWs, ws = pcall(function() return item:getWorldSprite() end)
+					hasWorldSprite = okWs and ws ~= nil and ws ~= ""
+				end
+				if not hasWorldSprite then
+					local script = GlobalStorageSiK.I18n.getScriptItem(fullType)
+					if not script then
+						local okName, name = pcall(function() return item:getName() end)
+						out[#out + 1] = path .. ": " .. tostring(fullType)
+							.. " (" .. tostring(okName and name or "?") .. ")"
+					end
+				end
+			end
+			if item.getInventory then
+				local okInv, nested = pcall(function() return item:getInventory() end)
+				if okInv and nested and nested ~= container then
+					local label = "?"
+					local okDisp, disp = pcall(function() return item:getDisplayName() end)
+					if okDisp and disp then label = disp end
+					scanContainerForBrokenItems(nested, path .. " > " .. label, out)
+				end
+			end
+		end
+	end
+end
+
 local playerCraftProbe = {}
 
 local ACCESS_MESSAGES = {
@@ -886,17 +944,46 @@ local ACCESS_MESSAGES = {
 	no_player = GlobalStorageSiK.I18n.remote("IGUI_GS_AccessInvalidPlayer"),
 }
 
-local function sendTerminalBlocked(player, reason)
+--- networkId es opcional - solo hace falta cuando hay una red concreta de
+--- fondo (reason=="network_vacant" o "denied" con red identificada) para
+--- poder calcular si ESTE jugador puede reclamar la propiedad (diseño
+--- "herencia de red", 2026-08-21) y/o recuperar su propio rol anterior
+--- (diseño "recuperacion de rol propio", 2026-08-23). La eligibilidad
+--- SIEMPRE se calcula aqui, en servidor - el cliente solo pinta el boton
+--- segun lo que se le diga, nunca decide por su cuenta si puede actuar.
+local function sendTerminalBlocked(player, reason, networkId)
 	clearTerminalWatcher(player)
 	GlobalStorageSiK.TerminalAccess.clearSession(player)
 	if GlobalStorageSiK.Server.pushTerminalManifest then
 		GlobalStorageSiK.Server.pushTerminalManifest(player)
+	end
+	local canClaim, claimTier = false, nil
+	if reason == "network_vacant" and networkId
+		and GlobalStorageSiK.Permissions.canClaimVacantOwnership then
+		canClaim, claimTier = GlobalStorageSiK.Permissions.canClaimVacantOwnership(player, networkId)
+	end
+	-- Independiente de canClaim/claimTier a proposito: "recuperar mi propio
+	-- rol de admin/member" no es la misma decision que "reclamar la
+	-- propiedad" (ver comentario de canRecoverOwnRole) - ambos botones
+	-- pueden aparecer a la vez si el jugador es elegible para los dos (p.ej.
+	-- un ex-admin muerto ante una red TAMBIEN vacante). No depende de que
+	-- reason sea "network_vacant" en concreto: un ex-member/admin muerto
+	-- ante una red que SIGUE teniendo dueño llega aqui con reason=="denied",
+	-- y tambien debe poder recuperar su acceso.
+	local canRecover, recoverableRole = false, nil
+	if networkId and GlobalStorageSiK.Permissions.canRecoverOwnRole then
+		canRecover, recoverableRole = GlobalStorageSiK.Permissions.canRecoverOwnRole(player, networkId)
 	end
 	gsSendServerCommand(player, "terminalBlocked", {
 		reason = reason,
 		wirelessRange = GlobalStorageSiK.Sandbox.getWirelessRange(),
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
 		serverMinimal = true,
+		networkId = networkId,
+		canClaimOwnership = canClaim,
+		claimTier = claimTier,
+		canRecoverRole = canRecover,
+		recoverableRole = recoverableRole,
 	})
 end
 
@@ -944,12 +1031,26 @@ function GlobalStorageSiK.Server.pushTerminalManifest(player)
 	gsSendServerCommand(player, "terminalManifest", manifest)
 end
 
---- Comprueba permisos de red; envía actionResult si falla.
+-- ============================================================================
+-- Familia "require<Nivel>Access" - naming unificado 2026-08-22 (auditoria de
+-- permisos): tres funciones, una por nivel de la jerarquia member < admin <
+-- owner, cada una implica TODAS las de los niveles inferiores. Ninguna
+-- concede bypass por rango de staff del servidor (ver requireServerMod, mas
+-- abajo - eje totalmente aparte, rango de servidor, no rol de red). Estas
+-- son la capa de GATE (server-only, con efecto secundario: envian
+-- actionResult y devuelven false si fallan) - se usan SOLO al principio de
+-- un manejador de comando, nunca para decidir que pintar en la UI. La capa
+-- de CONSULTA pura (sin efectos secundarios, valida desde cliente o
+-- servidor) vive en GS_Permissions.lua: isOwnerPlayer/isAdminPlayer.
+-- ============================================================================
+
+--- Nivel 1 (el mas bajo): el jugador tiene CUALQUIER acceso a la red -
+--- member, admin u owner. Envía actionResult si falla.
 ---@param player IsoPlayer
 ---@param networkId string
 ---@param resultMeta table|nil Campos opcionales para correlacionar el rechazo.
 ---@return boolean
-local function requireNetworkPermission(player, networkId, resultMeta)
+local function requireMemberAccess(player, networkId, resultMeta)
 	local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
 	if allowed then
 		return true
@@ -966,20 +1067,18 @@ local function requireNetworkPermission(player, networkId, resultMeta)
 	return false
 end
 
---- Comprueba que el jugador tiene rol admin o superior; envía actionResult si falla.
+--- Nivel 2: el jugador tiene rol admin O SUPERIOR (admin u owner) - incluye
+--- todo lo de requireMemberAccess. Envía actionResult si falla.
 ---@param player IsoPlayer
 ---@param networkId string
 ---@param resultMeta table|nil Campos opcionales para correlacionar el rechazo.
 ---@return boolean
 local function requireAdminAccess(player, networkId, resultMeta)
-	if not requireNetworkPermission(player, networkId, resultMeta) then
+	if not requireMemberAccess(player, networkId, resultMeta) then
 		return false
 	end
-	if GlobalStorageSiK.Permissions.isServerStaff(player) then
-		GlobalStorageSiK.Log.info("Permissions", "serverStaffOverride",
-			tostring(player:getUsername()) .. " networkId=" .. tostring(networkId))
-		return true
-	end
+	-- El rango de staff del servidor ya NO concede bypass aqui (deuda tecnica
+	-- cerrada 2026-08-22, ver comentario de isServerStaff en GS_Permissions.lua).
 	if GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return true
 	end
@@ -992,33 +1091,74 @@ local function requireAdminAccess(player, networkId, resultMeta)
 	return false
 end
 
---- Gate exclusivo de Auto Sort: solo roles persistentes owner/admin de ESTA
---- red. Deliberadamente no aplica el override global de staff usado por las
---- demás herramientas administrativas.
+--- Nivel 3 (el mas alto): el jugador es el propietario exacto de la red -
+--- incluye todo lo de requireMemberAccess/requireAdminAccess. Antes cada
+--- comando owner-only (setMemberRole, renameNetwork...) repetia su propio
+--- "if not isOwnerPlayer(...) then <mensaje a medida> end" inline -
+--- unificado aqui como el resto de la familia (auditoria de naming
+--- 2026-08-22, pedido explicito del usuario).
 ---@param player IsoPlayer
 ---@param networkId string
 ---@param resultMeta table|nil
 ---@return boolean
-local function requireAutoSortAccess(player, networkId, resultMeta)
-	if not requireNetworkPermission(player, networkId, resultMeta) then
+local function requireOwnerAccess(player, networkId, resultMeta)
+	if not requireMemberAccess(player, networkId, resultMeta) then
 		return false
 	end
-	if GlobalStorageSiK.Permissions.hasNetworkAdminRole(player, networkId) then
+	if GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return true
 	end
 	gsSendServerCommand(player, "actionResult", {
 		ok = false,
-		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeAdminOnly"),
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireOwnerRole"),
 		jobType = resultMeta and resultMeta.jobType or nil,
 		jobState = resultMeta and resultMeta.jobState or nil,
 	})
 	return false
 end
 
---- Mantiene estable el contrato de nodos/zonas que Auto Sort capturó. No
---- bloquea depósitos ni retiros: solo cambios estructurales que alterarían los
---- candidatos o sus reglas a mitad del job.
-local function requireNetworkConfigIdle(player, networkId)
+--- Gate del panel de soporte GM/moderacion (2026-08-22) - unico punto donde
+--- isServerStaff() concede algo, de forma explicita y auditada (nunca como
+--- bypass silencioso de la logica de acceso normal de una red, ver
+--- comentario de isServerStaff en GS_Permissions.lua). Registra SIEMPRE
+--- (Log.warn, no gateado por Modo depuracion) quien intento que accion sobre
+--- que red - es una herramienta de soporte, su uso debe quedar trazado.
+--- Renombrado de requireServerStaff (2026-08-22, auditoria de naming): eje
+--- totalmente aparte de member/admin/owner (rango de SERVIDOR, no rol de
+--- red) - el nombre ahora deja hueco para un futuro requireServerAdmin mas
+--- estricto (moderador+ vs admin+ de servidor), sin tener que volver a
+--- renombrar esta funcion cuando se añada.
+---@param player IsoPlayer
+---@param action string
+---@param networkId string|nil
+---@return boolean
+local function requireServerMod(player, action, networkId)
+	if GlobalStorageSiK.Permissions.isServerStaff(player) then
+		GlobalStorageSiK.Log.warn("Permissions", "adminDashboard",
+			tostring(player:getUsername()) .. " action=" .. tostring(action) .. " networkId=" .. tostring(networkId))
+		return true
+	end
+	gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole") })
+	return false
+end
+
+--- Guarda de CONCURRENCIA, no de permisos (auditoria de naming 2026-08-22:
+--- renombrado de requireNetworkConfigIdle, que por seguir el patron
+--- "require<Algo>" junto a la familia de arriba parecia un chequeo de rol -
+--- no lo es en absoluto). El mod ejecuta dos trabajos de fondo por red,
+--- ZoneScanJob (reescanea contenedores hacia la estructura de zonas/nodos) y
+--- RedistributeJob ("Auto Sort", que captura una foto de zonas/nodos y mueve
+--- items segun esa foto) - ambos asumen que la estructura de zonas/
+--- contenedores se mantiene fija mientras corren. Esta guarda bloquea
+--- comandos de cambio ESTRUCTURAL (crear/borrar/editar una zona, registrar/
+--- quitar un contenedor...) mientras cualquiera de los dos siga activo en
+--- esa red, para que ninguno acabe operando sobre una estructura ya
+--- obsoleta a media ejecucion. No bloquea depositos ni retiros normales de
+--- items, solo cambios de estructura.
+---@param player IsoPlayer
+---@param networkId string
+---@return boolean
+local function blockIfNetworkJobRunning(player, networkId)
 	if GlobalStorageSiK.ZoneScanJob.isActive(networkId) then
 		gsSendServerCommand(player, "actionResult", {
 			ok = false,
@@ -1044,7 +1184,7 @@ end
 ---@param resultMeta table|nil
 ---@return boolean
 local function requireTerminalAccess(player, networkId, resultMeta)
-	if not requireNetworkPermission(player, networkId, resultMeta) then
+	if not requireMemberAccess(player, networkId, resultMeta) then
 		return false
 	end
 	local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
@@ -1790,7 +1930,16 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 	local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	if not allowed then
 		GlobalStorageSiK.Log.warn("Server", "openTerminal denied", "permissions:" .. tostring(reason))
-		gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
+		-- Unificado (2026-08-22, pedido explicito): CUALQUIER motivo de "sin
+		-- permiso" (no solo network_vacant) abre el panel de bloqueo con su
+		-- estado real, igual que ya hacia pingTerminalAccess mas abajo -
+		-- antes solo el primer intento de apertura via openTerminal se
+		-- quedaba con un aviso generico sin informacion ("Sin permiso de
+		-- acceso"), obligando a adivinar la causa desde fuera. La barrera de
+		-- apertura (proximidad/hardware, resuelta antes de llegar aqui) queda
+		-- separada de esta - la decision de que ventana mostrar dentro de
+		-- "hay terminal y estas cerca" es siempre nuestra logica de permisos.
+		sendTerminalBlocked(player, reason or "no_permission", networkId)
 		return
 	end
 
@@ -1886,7 +2035,7 @@ local function handleInstallTerminalReader(player, args)
 	end
 	local mode = args.mode or "link"
 	local targetNet = args.networkId
-	if mode == "link" and (not targetNet or not requireNetworkPermission(player, targetNet)) then
+	if mode == "link" and (not targetNet or not requireMemberAccess(player, targetNet)) then
 		gsSendServerCommand(player, "terminalRegisterFailed", { reason = "denied", x = x, y = y, z = z })
 		return
 	end
@@ -2030,6 +2179,190 @@ local function onClientCommand(module, command, player, args)
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 
+	elseif command == "reclaimOwnership" then
+		-- Diseño "herencia de red" (2026-08-21): revalida en servidor la misma
+		-- condicion que ya se comprobo para mostrar el boton - nunca confia en
+		-- que siga siendo valida en el momento exacto de pulsarlo.
+		-- BUG REAL cerrado (2026-08-22, confirmado en pruebas reales: red
+		-- reclamada estando MAS LEJOS que el rango del terminal): este comando
+		-- nunca comprobaba proximidad, a diferencia de openTerminal/
+		-- pingTerminalAccess - un jugador con acceso a la cascada de herencia
+		-- podia reclamar una red entera desde cualquier parte del mapa, sin
+		-- estar cerca de ningun terminal suyo. Mismo patron de comprobacion
+		-- que el resto del fichero (findNearestRegisteredTerminal + rango de
+		-- sandbox).
+		local proxRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+		local nearby = GlobalStorageSiK.TerminalAccess.findNearestRegisteredTerminal(player, networkId, proxRange)
+		if not nearby then
+			GlobalStorageSiK.Log.warn("Server", "reclaimOwnership rejected", "out_of_range networkId=" .. tostring(networkId))
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
+			return
+		end
+		local ok, message = GlobalStorageSiK.Permissions.claimVacantOwnership(player, networkId)
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
+		if ok then
+			handleOpenTerminal(player, args, networkId, searchQuery)
+		end
+
+	elseif command == "recoverOwnRole" then
+		-- Diseño "recuperacion de rol propio" (2026-08-23): mismo patron que
+		-- reclaimOwnership - revalida en servidor la misma condicion que ya
+		-- se comprobo para mostrar el boton, y exige proximidad real a un
+		-- terminal de ESA red (nunca confiar en el cliente para ninguna de
+		-- las dos cosas).
+		local proxRangeRecover = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+		local nearbyRecover = GlobalStorageSiK.TerminalAccess.findNearestRegisteredTerminal(player, networkId, proxRangeRecover)
+		if not nearbyRecover then
+			GlobalStorageSiK.Log.warn("Server", "recoverOwnRole rejected", "out_of_range networkId=" .. tostring(networkId))
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
+			return
+		end
+		local recoverOk, recoverMessage = GlobalStorageSiK.Permissions.recoverOwnRole(player, networkId)
+		gsSendServerCommand(player, "actionResult", { ok = recoverOk, message = recoverMessage })
+		if recoverOk then
+			handleOpenTerminal(player, args, networkId, searchQuery)
+		end
+
+	elseif command == "adminClaimOwnership" then
+		-- Diseño "reclamo por inactividad del propietario" (2026-08-23): a
+		-- diferencia de reclaimOwnership/recoverOwnRole (para alguien SIN
+		-- acceso, desde la pantalla de bloqueo), este boton vive en la propia
+		-- pestaña de administracion de un admin que YA tiene acceso normal -
+		-- por eso exige requireAdminAccess (igual que el resto de acciones de
+		-- esa pestaña) ademas de revalidar la condicion de inactividad en
+		-- servidor. Misma comprobacion de proximidad que los otros dos
+		-- comandos de reclamo, por consistencia.
+		if requireAdminAccess(player, networkId) then
+			local proxRangeAdminClaim = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+			local nearbyAdminClaim = GlobalStorageSiK.TerminalAccess.findNearestRegisteredTerminal(player, networkId, proxRangeAdminClaim)
+			if not nearbyAdminClaim then
+				GlobalStorageSiK.Log.warn("Server", "adminClaimOwnership rejected", "out_of_range networkId=" .. tostring(networkId))
+				gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoAccess") })
+				return
+			end
+			local adminClaimOk, adminClaimMessage = GlobalStorageSiK.Permissions.adminClaimOwnership(player, networkId)
+			gsSendServerCommand(player, "actionResult", { ok = adminClaimOk, message = adminClaimMessage })
+			if adminClaimOk then
+				handleOpenTerminal(player, args, networkId, searchQuery)
+			end
+		end
+
+	-- Panel de soporte GM/moderacion (2026-08-22): gestion tecnica de
+	-- miembros/roles/propietario de CUALQUIER red, nunca acceso al almacen.
+	-- Cada comando revalida requireServerMod por su cuenta - nunca confia
+	-- en que el cliente solo muestre el boton a quien corresponde.
+	elseif command == "adminListNetworks" then
+		if requireServerMod(player, command, nil) then
+			gsSendServerCommand(player, "adminNetworkList", { networks = GlobalStorageSiK.Permissions.adminListNetworks() })
+		end
+
+	elseif command == "adminGetNetworkMembers" then
+		if requireServerMod(player, command, networkId) then
+			gsSendServerCommand(player, "adminNetworkMembers",
+				{ networkId = networkId, members = GlobalStorageSiK.Permissions.adminGetNetworkMembers(networkId) })
+		end
+
+	elseif command == "gsDiagFindBrokenItems" then
+		-- Diagnostico DEV puntual, ver comentario de scanContainerForBrokenItems.
+		-- Cualquier jugador puede escanear SU PROPIO inventario - de solo
+		-- lectura, no requiere ser staff.
+		local out = {}
+		local inv = player and player.getInventory and player:getInventory()
+		scanContainerForBrokenItems(inv, "Inventario", out)
+		local message
+		if #out == 0 then
+			message = "Sin items con fullType roto en tu inventario."
+		else
+			message = tostring(#out) .. " item(s) con fullType roto:\n" .. table.concat(out, "\n")
+		end
+		GlobalStorageSiK.Log.error("Diag", "findBrokenItems",
+			tostring(player and player:getUsername()) .. " -> " .. message)
+		gsSendServerCommand(player, "actionResult", { ok = true, message = message })
+
+	elseif command == "adminListOnlinePlayers" then
+		if requireServerMod(player, command, nil) then
+			gsSendServerCommand(player, "adminOnlinePlayers",
+				{ players = GlobalStorageSiK.Permissions.adminListOnlinePlayers() })
+		end
+
+	elseif command == "adminAddMember" then
+		if requireServerMod(player, command, networkId) then
+			local ok, reason = GlobalStorageSiK.Permissions.adminAddMember(networkId, args.characterId)
+			if ok then
+				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if reason == "added" then
+					GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_add_member",
+						tostring(player:getUsername()) .. " (staff) añadio a characterId=" .. tostring(args.characterId))
+				end
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok, message = reason })
+		end
+
+	elseif command == "adminGetNetworkHistory" then
+		if requireServerMod(player, command, networkId) then
+			gsSendServerCommand(player, "adminNetworkHistory",
+				{ networkId = networkId, events = GlobalStorageSiK.Permissions.adminGetNetworkHistory(networkId) })
+		end
+
+	elseif command == "adminSetMemberRole" then
+		if requireServerMod(player, command, networkId) then
+			local ok = GlobalStorageSiK.Permissions.adminSetMemberRole(networkId, args.characterId, args.role)
+			if ok then
+				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_role",
+					tostring(player:getUsername()) .. " (staff) cambio el rol de characterId="
+						.. tostring(args.characterId) .. " a " .. tostring(args.role))
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok })
+		end
+
+	elseif command == "adminRemoveMember" then
+		if requireServerMod(player, command, networkId) then
+			local ok = GlobalStorageSiK.Permissions.adminRemoveMember(networkId, args.characterId)
+			if ok then
+				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_remove_member",
+					tostring(player:getUsername()) .. " (staff) quito a characterId=" .. tostring(args.characterId))
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok })
+		end
+
+	elseif command == "adminSetOwner" then
+		if requireServerMod(player, command, networkId) then
+			local ok, reason = GlobalStorageSiK.Permissions.adminSetOwner(networkId, args.characterId)
+			if ok then
+				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_owner",
+					tostring(player:getUsername()) .. " (staff) asigno propietario a characterId=" .. tostring(args.characterId))
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok, message = reason })
+		end
+
+	elseif command == "adminReleaseOwnership" then
+		if requireServerMod(player, command, networkId) then
+			local ok = GlobalStorageSiK.Permissions.adminReleaseOwnership(networkId)
+			if ok then
+				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_release_ownership",
+					tostring(player:getUsername()) .. " (staff) libero la propiedad de la red")
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok })
+		end
+
+	elseif command == "adminDeleteNetwork" then
+		if requireServerMod(player, command, networkId) and args.confirm == true then
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_delete_network",
+				tostring(player:getUsername()) .. " (staff) borro la red del registro")
+			local ok = GlobalStorageSiK.Permissions.adminDeleteNetwork(networkId)
+			if ok and ModData and ModData.transmit then
+				-- Borra tanto la parte operativa (contenedores/terminales) como la
+				-- de permisos (ModData propia) - las dos hay que difundirlas.
+				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok })
+		end
+
 	elseif command == "pingTerminalAccess" then
 		local sessionNet = GlobalStorageSiK.TerminalAccess.getSessionNetworkId(player)
 		if sessionNet then
@@ -2038,7 +2371,7 @@ local function onClientCommand(module, command, player, args)
 		local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
 		if not allowed then
 			GlobalStorageSiK.TerminalAccess.clearSession(player)
-			sendTerminalBlocked(player, reason or "no_permission")
+			sendTerminalBlocked(player, reason or "no_permission", networkId)
 			return
 		end
 		local proxRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
@@ -2074,7 +2407,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-			requireNetworkConfigIdle(player, networkId)
+			blockIfNetworkJobRunning(player, networkId)
 			return
 		end
 		startIncrementalScan(player, networkId, searchQuery)
@@ -2347,7 +2680,7 @@ local function onClientCommand(module, command, player, args)
 		if args.x and args.y and args.z then
 			local x, y, z = math.floor(args.x), math.floor(args.y), math.floor(args.z)
 			local nid = args.gsnNetworkId or GlobalStorageSiK.Network.findNetworkIdAtTerminal(x, y, z)
-			if not nid or not requireNetworkPermission(player, nid) then
+			if not nid or not requireMemberAccess(player, nid) then
 				return
 			end
 			clearTerminalObjectsAt(x, y, z)
@@ -2399,7 +2732,7 @@ local function onClientCommand(module, command, player, args)
 		if args.x and args.y and args.z and GlobalStorageSiK.TerminalRegistry then
 			local x, y, z = math.floor(args.x), math.floor(args.y), math.floor(args.z)
 			local nid = args.gsnNetworkId or GlobalStorageSiK.Network.findNetworkIdAtTerminal(x, y, z)
-			if not nid or not requireNetworkPermission(player, nid) then
+			if not nid or not requireMemberAccess(player, nid) then
 				return
 			end
 			local ok = GlobalStorageSiK.TerminalRegistry.renameTerminalAt(nid, x, y, z, args.name)
@@ -2683,7 +3016,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-			requireNetworkConfigIdle(player, networkId)
+			blockIfNetworkJobRunning(player, networkId)
 			return
 		end
 		local zoneId = args.zoneId
@@ -2696,7 +3029,7 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "redistributeNetwork" then
 		return (function()
-		if not requireAutoSortAccess(player, networkId, {
+		if not requireAdminAccess(player, networkId, {
 			jobType = "redistribute",
 			jobState = "finished",
 		}) then
@@ -2729,7 +3062,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone or not args.name or args.name == "" then
@@ -2747,7 +3080,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone then
@@ -2770,7 +3103,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local node = registry.nodes and registry.nodes[args.nodeId]
 		if not node then
@@ -2871,7 +3204,7 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "applyNodeTemplateToZone" then
 		return (function()
 		if not requireAdminAccess(player, networkId) then return end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone or zone.networkId ~= networkId then
@@ -2921,7 +3254,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local bounds = boundsFromPlayerRoom(player)
 
 		if not bounds then
@@ -2949,7 +3282,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local ok = GlobalStorageSiK.Zones.moveZonePriority(networkId, args.zoneId, args.direction)
 		if ok then
 			-- Cambiar prioridad no altera el inventario ni exige volver a recorrerlo.
@@ -2966,7 +3299,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local ok = GlobalStorageSiK.Zones.setPriority(networkId, args.zoneId, args.priority)
 		if ok then
 			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
@@ -2981,7 +3314,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local bounds, zoneName, source = GlobalStorageSiK.Zones.boundsFromStructure(player)
 		if not bounds then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuildingOrSafehouse") })
@@ -3004,7 +3337,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local bounds, buildingTitle = GlobalStorageSiK.Zones.boundsFromPlayerBuilding(player)
 		if not bounds then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuilding") })
@@ -3025,7 +3358,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		if not GlobalStorageSiK.Sandbox.allowSafehouseImport() then
 
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_SafehouseImportDisabledMsg") })
@@ -3065,7 +3398,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local b = args.bounds
 		if not b or b.x1 == nil or b.y1 == nil or b.x2 == nil or b.y2 == nil then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidArea") })
@@ -3150,8 +3483,11 @@ local function onClientCommand(module, command, player, args)
 				targetUsername, targetCharacterId)
 		end
 		if ok then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
 			GlobalStorageSiK.Log.info("Server", "transferOwnership", player:getUsername() .. " -> " .. newOwner)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "owner_transferred",
+				tostring(player:getUsername()) .. " transfirio la propiedad a " .. tostring(newOwner)
+					.. (args.keepFormerOwner == true and " (conserva como admin)" or ""))
 		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
@@ -3164,7 +3500,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
-		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		if changed then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
 		GlobalStorageSiK.Log.info("Permissions", "addFactionMembers",
 			"network=" .. tostring(networkId)
 				.. " ok=" .. tostring(ok)
@@ -3178,7 +3514,7 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		if not requireNetworkConfigIdle(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local ok = GlobalStorageSiK.Categories.add(networkId, args.name)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryDuplicate") })
@@ -3241,7 +3577,11 @@ local function onClientCommand(module, command, player, args)
 				.. " ok=" .. tostring(ok)
 				.. " changed=" .. tostring(changed)
 				.. " reason=" .. tostring(reason))
-		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		if changed then
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_added",
+				tostring(player:getUsername()) .. " añadio a " .. loggedTarget)
+		end
 		local resultMessage = failureMessage
 		if ok and changed then
 			resultMessage = GlobalStorageSiK.I18n.remote("IGUI_GS_UserAdded")
@@ -3258,12 +3598,14 @@ local function onClientCommand(module, command, player, args)
 		-- rol (member/admin/owner) - solo hace falta pertenecer a la red,
 		-- nunca requireAdminAccess. Si es el owner, GS_Permissions.leaveNetwork
 		-- dispara la misma sucesion automatica que al morir.
-		if not requireNetworkPermission(player, networkId) then
+		if not requireMemberAccess(player, networkId) then
 			return
 		end
 		local ok, message = GlobalStorageSiK.Permissions.leaveNetworkPlayer(networkId, player)
 		if ok then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_left",
+				tostring(player:getUsername()) .. " abandono la red voluntariamente")
 		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
@@ -3272,14 +3614,13 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "removePermissionUser" then
 		return (function()
-		if not requireNetworkPermission(player, networkId) then
+		if not requireMemberAccess(player, networkId) then
 			return
 		end
 		-- Admin puede eliminar miembros; solo owner puede eliminar admins
 		local target = args.username or ""
 		local targetId = args.characterId or ""
-		local registry = GlobalStorageSiK.Network.getRegistry()
-		local net = registry.networks and registry.networks[networkId]
+		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 		local targetIsAdmin = false
 		if net then
 			local record = targetId ~= "" and net.characterPermissions and net.characterPermissions[targetId]
@@ -3311,7 +3652,9 @@ local function onClientCommand(module, command, player, args)
 			for i = #(net.adminUsers or {}), 1, -1 do
 				if net.adminUsers[i] == target then table.remove(net.adminUsers, i) end
 			end
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_removed",
+				tostring(player:getUsername()) .. " quito acceso a " .. tostring(target ~= "" and target or targetId))
 		end
 		GlobalStorageSiK.Log.info("Permissions", "removePermissionUser",
 			"network=" .. tostring(networkId)
@@ -3323,8 +3666,7 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "setMemberRole" then
 		return (function()
-		if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerChangeRolesMsg") })
+		if not requireOwnerAccess(player, networkId) then
 			return
 		end
 		local ok
@@ -3333,7 +3675,13 @@ local function onClientCommand(module, command, player, args)
 		else
 			ok = GlobalStorageSiK.Permissions.setUserRole(networkId, args.username or "", args.role or "member")
 		end
-		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		if ok then
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_role_changed",
+				tostring(player:getUsername()) .. " cambio el rol de "
+					.. tostring((args.characterId and args.characterId ~= "") and args.characterId or args.username)
+					.. " a " .. tostring(args.role or "member"))
+		end
 		GlobalStorageSiK.Log.info("Permissions", "setMemberRole",
 			"network=" .. tostring(networkId)
 				.. " characterId=" .. string.sub(tostring(args.characterId or ""), 1, 96)
@@ -3359,7 +3707,13 @@ local function onClientCommand(module, command, player, args)
 			tostring(args.characterId or ""),
 			tostring(args.username or ""),
 			deniedZoneIds)
-		if ok then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		if ok then
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			local target = (args.characterId and args.characterId ~= "") and args.characterId or (args.username or "")
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_zone_access_changed",
+				tostring(player:getUsername()) .. " cambio el acceso por zona de " .. tostring(target)
+					.. " (" .. tostring(#deniedZoneIds) .. " zona(s) denegada(s))")
+		end
 		GlobalStorageSiK.Log.info("Permissions", "setMemberZoneAccess",
 			"network=" .. tostring(networkId)
 				.. " characterId=" .. string.sub(tostring(args.characterId or ""), 1, 96)
@@ -3378,22 +3732,28 @@ local function onClientCommand(module, command, player, args)
 		if not requireAdminAccess(player, networkId) then
 			return
 		end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		GlobalStorageSiK.Permissions.ensure(registry, networkId)
-		registry.networks[networkId].factionOnly = args.enabled == true
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+		local factionOnlyEnabled = args.enabled == true
+		net.factionOnly = factionOnlyEnabled
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+		GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_only_changed",
+			tostring(player:getUsername()) .. " "
+				.. (factionOnlyEnabled and "activo" or "desactivo") .. " el modo solo-faccion")
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PermissionsUpdatedMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "renameNetwork" then
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
-		if not GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRenameNetworkMsg") })
+		-- Antes: doble gate redundante (requireAdminAccess + isOwnerPlayer
+		-- inline) - unificado a un unico requireOwnerAccess (auditoria de
+		-- naming 2026-08-22), ya implica member+admin por su cuenta.
+		if not requireOwnerAccess(player, networkId) then
 			return
 		end
 		local ok, message = GlobalStorageSiK.Network.renameDisplayName(networkId, player:getUsername(), args.name)
+		if ok then
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "network_renamed",
+				tostring(player:getUsername()) .. " renombro la red a \"" .. tostring(args.name or "") .. "\"")
+		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
 			pushTerminalState(player, networkId, nil, searchQuery)
@@ -3419,7 +3779,11 @@ local function onClientCommand(module, command, player, args)
 		-- "Añadir" a un acceso individual (net.allowedUsers) por cada
 		-- miembro, mismo mecanismo ya confirmado.
 		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
-		if changed then ModData.transmit(GlobalStorageSiK.MODDATA_KEY) end
+		if changed then
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_members_added",
+				tostring(player:getUsername()) .. " expandio su faccion a acceso individual")
+		end
 		GlobalStorageSiK.Log.info("Permissions", "addPermissionFaction",
 			"network=" .. tostring(networkId)
 				.. " ok=" .. tostring(ok)
@@ -3432,7 +3796,11 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		local ok = GlobalStorageSiK.Permissions.removeFaction(networkId, args.factionName)
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		if ok then
+			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_removed",
+				tostring(player:getUsername()) .. " quito el acceso de faccion \"" .. tostring(args.factionName or "") .. "\"")
+		end
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_FactionRemovedMsg") or GlobalStorageSiK.I18n.remote("IGUI_GS_FactionNotFoundMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
@@ -3503,8 +3871,17 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "registerContainer" then
 
+		-- BUG REAL cerrado (2026-08-22, auditoria de permisos): sin ningun
+		-- gate de acceso en absoluto - ni miembro, ni admin, ni propietario -
+		-- cualquiera que hablara con el servidor podia marcar un contenedor
+		-- en cualquier red. Nada del cliente actual envia este comando (sin
+		-- llamador encontrado en todo el arbol client/), asi que no era una
+		-- ruta explotable en juego normal, pero "configurar contenedores" es
+		-- explicitamente una herramienta de nivel admin (politica del
+		-- usuario) y debe estar gateada igual que el resto.
 		local targetNetworkId = args.networkId or networkId
-		if not requireNetworkConfigIdle(player, targetNetworkId) then return end
+		if not requireAdminAccess(player, targetNetworkId) then return end
+		if not blockIfNetworkJobRunning(player, targetNetworkId) then return end
 
 		local ok, message = registerContainer(args.entry, targetNetworkId)
 
@@ -3512,8 +3889,10 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "unregisterContainer" then
 
+		-- Mismo bug real que registerContainer, arriba.
 		local targetNetworkId = args.networkId or networkId
-		if not requireNetworkConfigIdle(player, targetNetworkId) then return end
+		if not requireAdminAccess(player, targetNetworkId) then return end
+		if not blockIfNetworkJobRunning(player, targetNetworkId) then return end
 
 		local ok, message = unregisterContainer(args.containerId, targetNetworkId)
 
@@ -3617,6 +3996,18 @@ end
 
 if Events and Events.OnPlayerDeath then
 	Events.OnPlayerDeath.Add(function(player)
+		-- DIAGNOSTICO DIRIGIDO (2026-08-22): red de pruebas real quedo con
+		-- net.owner sin limpiar tras una muerte - sin poder confirmar nunca
+		-- si este evento llego a dispararse o si murio en alguna condicion
+		-- de aqui abajo. Log SIEMPRE visible (no gateado por Modo depuracion,
+		-- a proposito: el momento de morir es el unico instante en que se
+		-- puede capturar esto, no se puede pedir activar debug de antemano
+		-- para cada prueba de muerte).
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.warn("Permissions", "OnPlayerDeath fired hasPlayer=" .. tostring(player ~= nil)
+				.. " isAuthoritative=" .. tostring(GlobalStorageSiK.isAuthoritative())
+				.. " username=" .. tostring(player and player.getUsername and player:getUsername() or "?"))
+		end
 		-- Sucesion de propietario: sin esto, si el dueño de una red moria y
 		-- no quedaba forma de recuperar el rol (net.owner deja de coincidir
 		-- con cualquier personaje vivo), los admins/miembros restantes
@@ -3627,6 +4018,10 @@ if Events and Events.OnPlayerDeath then
 			return
 		end
 		local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.warn("Permissions", "OnPlayerDeath charName=" .. tostring(charName)
+				.. " willCallHandleOwnerDeath=" .. tostring(charName ~= "" and GlobalStorageSiK.Permissions.handleOwnerDeath ~= nil))
+		end
 		if charName ~= "" and GlobalStorageSiK.Permissions.handleOwnerDeath then
 			GlobalStorageSiK.Permissions.handleOwnerDeath(player)
 		end

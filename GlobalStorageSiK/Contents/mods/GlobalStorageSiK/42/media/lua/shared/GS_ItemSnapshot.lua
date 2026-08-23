@@ -112,6 +112,17 @@ local function metadataForItem(item, fullType)
 	if not displayName or GlobalStorageSiK.I18n.isLowQualityDisplayName(displayName) then
 		displayName = GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
 	end
+	-- Si tiene worldSprite y aun asi moveableDisplayNameFromSprite no supo
+	-- resolverlo, es (2026-08-22, confirmado en pruebas reales - spam de
+	-- "Couldn't find item Base.carpentry_01_16") un moveable sin traduccion
+	-- conocida, NO un ScriptItem real - preguntarle a ScriptManager
+	-- (typeDisplayName completo) va a fallar siempre e imprime ese log
+	-- vanilla de forma incondicional. Usar el humanizado sin tocar
+	-- ScriptManager; typeDisplayName completo se reserva para fullTypes sin
+	-- worldSprite, donde SI puede tratarse de un item real.
+	if not displayName and worldSprite then
+		displayName = GlobalStorageSiK.I18n.humanizeFallbackName(fullType)
+	end
 	cached = {
 		fullType = fullType,
 		displayName = displayName or GlobalStorageSiK.I18n.typeDisplayName(fullType),

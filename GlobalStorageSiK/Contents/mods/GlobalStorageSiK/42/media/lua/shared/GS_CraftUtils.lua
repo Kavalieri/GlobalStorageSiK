@@ -9,6 +9,7 @@ require "GS_Sandbox"
 require "GS_Log"
 require "GS_DepositSources"
 require "GS_InventorySync"
+require "GS_I18n"
 
 GlobalStorageSiK.CraftUtils = {}
 
@@ -935,7 +936,11 @@ function GlobalStorageSiK.CraftUtils.getItemIconTexture(fullType)
 	if getItemTex then
 		return getItemTex(fullType)
 	end
-	local script = getScriptManager() and getScriptManager():getItem(fullType) or nil
+	-- BUG REAL cerrado (2026-08-23, misma clase que GS_TerminalWithdrawDrag.lua
+	-- dragTexture): consultaba ScriptManager sin cache; usar el cache
+	-- compartido de sesion (GS_I18n.getScriptItem) evita repetir el log
+	-- vanilla "Couldn't find item" para el mismo fullType roto.
+	local script = GlobalStorageSiK.I18n.getScriptItem(fullType)
 	if script and script.getNormalTexture then
 		return script:getNormalTexture()
 	end

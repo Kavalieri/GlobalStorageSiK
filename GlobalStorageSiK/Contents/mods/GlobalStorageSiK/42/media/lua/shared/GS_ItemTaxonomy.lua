@@ -13,6 +13,8 @@
 require "GS_Subcategories"
 require "GS_Sandbox"
 require "GS_Log"
+require "GS_I18n"
+require "GS_CompatMods"
 
 GlobalStorageSiK.ItemTaxonomy = {}
 
@@ -145,20 +147,17 @@ function GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(key)
 end
 
 --- Obtiene script de ítem.
+--- BUG REAL cerrado (2026-08-22, misma clase que GS_Categories.lua/
+--- GS_NetworkCapacity.lua - sm:getItem(fullType) SIN CACHE, aqui usado en
+--- prácticamente cualquier clasificación de item de todo el mod): usar el
+--- cache de sesion compartido en vez de consultar ScriptManager a pelo.
 ---@param fullType string|nil
 ---@return any|nil
 local function scriptForFullType(fullType)
-	if not fullType or not getScriptManager then
+	if not fullType or not GlobalStorageSiK.I18n or not GlobalStorageSiK.I18n.getScriptItem then
 		return nil
 	end
-	local sm = getScriptManager()
-	if not sm or not sm.getItem then
-		return nil
-	end
-	local ok, item = pcall(function()
-		return sm:getItem(fullType)
-	end)
-	return ok and item or nil
+	return GlobalStorageSiK.I18n.getScriptItem(fullType)
 end
 
 -- Nota: instanceItem NO se usa en cliente para evitar NPE en Kahlua con items moddeados.
@@ -314,12 +313,23 @@ end
 --- Categories tienen prioridad. CamelCase solo identifica la familia raíz;
 --- nunca se usa para inventar niveles intermedios. Una categoría desconocida
 --- sin raíz reconocible queda plana.
+--- Resolutor de la FAMILIA "sin mod de categorias" (base vanilla + GS propio,
+--- FLAT_CATEGORY_ROOTS) y Extended Categories (tablas CAEC_*, nombradas asi
+--- por su id interno "CAExtendedCategories" - son nuestras, no codigo ajeno,
+--- pero describen su gramatica concreta). Estos dos casos y Better Sorting
+--- comparten genuinamente la MISMA familia de gramatica (nombres PascalCase
+--- heredados de vanilla; Better Sorting llega aqui sin ninguna tabla propia
+--- porque sus codigos ya casan con este mismo patron, sin reglas extra que
+--- añadir) - no es una fusion accidental, es que estructuralmente son el
+--- mismo caso con matices. Organized Categories: Core NO pertenece a esta
+--- familia (gramatica distinta: minuscula+guion bajo) y por eso NUNCA llega
+--- aqui - se resuelve aparte, ver canonicalHierarchy() mas abajo.
 ---@param mainCanon string
 ---@param scriptItem any|nil
 ---@return string groupKey
 ---@return string|nil subGroupKey
 ---@return string|nil categoryLeafKey
-local function canonicalHierarchy(mainCanon, scriptItem)
+local function resolveVanillaGrammarHierarchy(mainCanon, scriptItem)
 	if not mainCanon or mainCanon == "" then return "", nil, nil end
 	local roots = canonicalRootKeys()
 	local groupKey = EXACT_CATEGORY_GROUP[mainCanon]
@@ -423,6 +433,43 @@ local function canonicalHierarchy(mainCanon, scriptItem)
 	if not subGroupKey then subGroupKey = mainCanon end
 	local leafKey = string.lower(subGroupKey) ~= string.lower(mainCanon) and mainCanon or nil
 	return groupKey, subGroupKey, leafKey
+end
+
+--- NEXO COMÚN: punto de entrada único para resolver categoría/subcategoría/
+--- detalle de CUALQUIER item, alimenta tanto el filtro del Almacén como la
+--- configuración de contenedores (misma fuente de verdad para ambos sitios).
+--- Despacha por mod de categorías detectado - cada mod resuelve con SU
+--- PROPIO método (nunca se reutiliza la adaptación de un mod para otro), y
+--- este nexo solo decide CUAL usar, sin conocer el detalle interno de
+--- ninguno:
+---   - Organized Categories: Core -> GlobalStorageSiK.Subcategories.
+---     organizedCategoriesCoreHierarchy() (gramatica propia, autonoma).
+---   - Sin ningun mod de categorias, Extended Categories, o Better Sorting ->
+---     resolveVanillaGrammarHierarchy() (los 3 comparten genuinamente la misma
+---     familia de gramatica PascalCase heredada de vanilla - ver su cabecera
+---     para el porque no es una mezcla accidental).
+--- Añadir un mod de categorias nuevo en el futuro: si su gramatica de codigo
+--- es compatible con la familia PascalCase de arriba, no hace falta tocar
+--- nada (cae solo en resolveVanillaGrammarHierarchy); si usa una gramatica propia
+--- distinta (como OC:Core), darle su propia funcion autonoma en
+--- GS_Subcategories.lua y una rama aqui, nunca mezclarla dentro de
+--- resolveVanillaGrammarHierarchy ni de la de ningun otro mod.
+---@param mainCanon string
+---@param scriptItem any|nil
+---@return string groupKey
+---@return string|nil subGroupKey
+---@return string|nil categoryLeafKey
+local function canonicalHierarchy(mainCanon, scriptItem)
+	if not mainCanon or mainCanon == "" then return "", nil, nil end
+	if GlobalStorageSiK.CompatMods.hasOrganizedCategoriesCore()
+		and GlobalStorageSiK.Subcategories.organizedCategoriesCoreHierarchy then
+		local ocGroupKey, ocSubGroupKey, ocLeafKey =
+			GlobalStorageSiK.Subcategories.organizedCategoriesCoreHierarchy(mainCanon)
+		if ocGroupKey and ocGroupKey ~= "" then
+			return ocGroupKey, ocSubGroupKey, ocLeafKey
+		end
+	end
+	return resolveVanillaGrammarHierarchy(mainCanon, scriptItem)
 end
 
 --- Etiqueta localizada para una clave canonica. El recorte del padre es solo
@@ -761,6 +808,25 @@ function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 	-- concatenadas de Extended Categories.
 	local groupKey, subGroupKey, categoryLeafKey = canonicalHierarchy(mainCanon, scriptItem)
 	local groupLabel = GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil)
+	-- Raiz SIN traduccion propia ni vanilla (categorias que GS no conoce,
+	-- p.ej. Organized Categories: Core "Collectable"/"Placeable" - solo
+	-- publica traduccion para el codigo compuesto completo, nunca para el
+	-- prefijo suelto). En vez de dejar el Nivel 1 en ingles sin traducir,
+	-- se deriva del PRIMER trozo de la traduccion compuesta del propio
+	-- Nivel 2 (misma tecnica que ya usa hierarchyLabel para extraer el
+	-- ULTIMO trozo como hoja - aqui se toma el primero como raiz).
+	if subGroupKey and (not GlobalStorageSiK.I18n or not GlobalStorageSiK.I18n.tryGetText
+		or not GlobalStorageSiK.I18n.tryGetText("IGUI_ItemCat_" .. groupKey)) then
+		local compoundLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(subGroupKey)
+		local separators = { " - ", ", ", " / ", " > " }
+		for i = 1, #separators do
+			local pos = compoundLabel:find(separators[i], 1, true)
+			if pos then
+				groupLabel = compoundLabel:sub(1, pos - 1)
+				break
+			end
+		end
+	end
 	local subGroupLabel = subGroupKey and GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subGroupKey, groupKey) or nil
 	local categoryLeafLabel = categoryLeafKey
 		and GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(categoryLeafKey, subGroupKey or groupKey) or nil

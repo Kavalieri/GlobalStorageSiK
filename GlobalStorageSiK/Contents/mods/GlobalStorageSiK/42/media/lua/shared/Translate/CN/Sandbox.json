@@ -196,5 +196,15 @@
 	"Sandbox_GlobalStorageSiK_Recipe_SolderingHandle_RequireBook": "需要说明书：GS 烙铁手柄",
 	"Sandbox_GlobalStorageSiK_Recipe_SolderingHandle_RequireBook_tooltip": "开启后，必须先通过电烙铁说明书学习 GS 烙铁手柄 的配方才能制作。关闭后，从一开始就已掌握。若上方配方已禁用，则此项无效。",
 	"Sandbox_GlobalStorageSiK_LootSolderingPartsWeight": "战利品权重：电烙铁零件",
-	"Sandbox_GlobalStorageSiK_LootSolderingPartsWeight_tooltip": "烙铁头、发热丝和手柄作为世界战利品出现频率的倍率。1.0 = 正常，0 = 从不出现（仅可制作）。"
+	"Sandbox_GlobalStorageSiK_LootSolderingPartsWeight_tooltip": "烙铁头、发热丝和手柄作为世界战利品出现频率的倍率。1.0 = 正常，0 = 从不出现（仅可制作）。",
+	"Sandbox_GlobalStorageSiK_NetworkInactivityDays": "网络不活跃阈值（天）",
+	"Sandbox_GlobalStorageSiK_NetworkInactivityDays_tooltip": "管理员/成员在多少天未上线后，将不再阻止对所有者已死亡的网络进行所有权恢复，即使其自己的角色从未死亡。不会移除其成员资格。",
+	"Sandbox_GlobalStorageSiK_OwnerInactivityClaimDays": "管理员接管前的所有者不活跃天数",
+	"Sandbox_GlobalStorageSiK_OwnerInactivityClaimDays_tooltip": "所有者可以多少天不上线，之后该网络当前活跃的管理员即可自行认领所有权，而无需等待所有者死亡或网络正式空缺。",
+	"Sandbox_GlobalStorageSiK_DebugCatSearch_tooltip": "需要开启调试模式。追踪物品标签页搜索框中的每次更改：字节长度与实际 UTF-8 字符长度的对比，以及收到的文本。用于诊断非 ASCII 语言（中文、日文、韩文等）的搜索问题。",
+	"Sandbox_GlobalStorageSiK_DebugCatCompatCategories_tooltip": "需要开启调试模式。记录 Better Sorting 的扁平分类代码在被我们自己的子分类引擎评估之前，何时被规范化回原版分类（Food/Weapon/Accessory/Material/FirstAid/Gardening）。每件物品的详情位于单独的 >>> 详细 子日志中。",
+	"Sandbox_GlobalStorageSiK_DebugDetailCompatCategories_tooltip": "需要开启调试模式和分类兼容性。高流量子日志：通过 Better Sorting 规范化表分类的每件物品各一行。仅在需要针对性诊断分类映射时启用。",
+	"Sandbox_GlobalStorageSiK_DebugCatCapacityBonus_tooltip": "需要开启调试模式。记录为请求玩家（例如“有条理”特质）在每个容器上检测到的个人容量加成，实时读取自原版 API getEffectiveCapacity(character) - 与游戏本身用来判断存放是否放得下的 API 相同。",
+	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead_tooltip": "需要开启调试模式。记录仓库中显示的每一行读物，其配方探测是否成功以及返回了什么，以便用真实数据而非猜测来验证“已读”标记。",
+	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus_tooltip": "需要开启调试模式和容量加成。高流量子日志：每次终端刷新时，检测到个人加成的每个实时容器各一行。仅在需要针对性诊断容量时启用。"
 }

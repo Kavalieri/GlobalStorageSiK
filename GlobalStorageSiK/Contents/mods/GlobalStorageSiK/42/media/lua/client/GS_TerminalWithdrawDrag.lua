@@ -21,27 +21,23 @@ local dragPreviewPanel = nil
 
 local GSWithdrawDragPreview = ISPanel:derive("GSWithdrawDragPreview")
 
+-- BUG REAL cerrado (2026-08-23): este fichero mantenia su PROPIA cadena de
+-- fallback para el icono (getItemTex directo -> ScriptItem -> sprite crudo
+-- via getSprite), mas corta que la de GS_TerminalUI_Items.lua - nunca llegaba
+-- a reconstruir el item real desde el worldSprite via ISMoveableSpriteProps,
+-- asi que un item derivado de un Moveable (p.ej. una caja recogida, con
+-- worldSprite pero sin ScriptItem real) mostraba "?" en el fantasma de
+-- arrastre pese a que la fila de origen SI mostraba su icono correcto en el
+-- Almacen. GlobalStorageSiK.TerminalItems.textureForRow (GS_TerminalUI_Items.
+-- lua) es la unica ruta robusta ya probada - se delega en ella en vez de
+-- mantener un segundo camino que puede divergir. Sin "require" explicito a
+-- proposito: GS_TerminalUI_Items.lua ya requiere este fichero (orden
+-- inverso), asi que enlazar por la tabla global en tiempo de llamada (nunca
+-- al cargar el fichero) evita un require circular.
 local function dragTexture(row)
 	if not row or not row.fullType then return nil end
-	if getItemTex then
-		local ok, texture = pcall(getItemTex, row.fullType)
-		if ok and texture then return texture end
-	end
-	if ScriptManager and ScriptManager.instance then
-		local ok, script = pcall(function()
-			return ScriptManager.instance:getItem(row.fullType)
-		end)
-		if ok and script and script.getNormalTexture then
-			local texOk, texture = pcall(function() return script:getNormalTexture() end)
-			if texOk and texture then return texture end
-		end
-	end
-	if row.worldSprite and getSprite then
-		local ok, texture = pcall(function()
-			local sprite = getSprite(row.worldSprite)
-			return sprite and sprite.getTexture and sprite:getTexture() or nil
-		end)
-		if ok then return texture end
+	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.textureForRow then
+		return GlobalStorageSiK.TerminalItems.textureForRow(row)
 	end
 	return nil
 end

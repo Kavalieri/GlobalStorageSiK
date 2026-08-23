@@ -20,6 +20,31 @@ local T = GlobalStorageSiK.I18n.text
 local cache = {}
 local pending = {}
 local CACHE_TTL_MS = 4000
+
+-- Cache de sesion, SOLO fullType (2026-08-23, root cause real del spam
+-- "Couldn't find item" que persistia pese a las 4 rondas de cache previas -
+-- ver GS_I18n.lua:cachedScriptItem): render() de ISToolTipInv corre a
+-- 30-60fps SIEMPRE que el jugador mantiene el raton sobre CUALQUIER item, y
+-- llamaba a ItemTaxonomy.resolve(fullType, {}) sin cache en cada uno de esos
+-- fotogramas - resolve() es una funcion no trivial (varias tablas, varios
+-- niveles de traduccion), no solo la consulta a ScriptManager (esa parte SI
+-- ya estaba cacheada via GS_I18n.getScriptItem, por eso las rondas
+-- anteriores de fix no lo detectaban con un grep de "getItem sin cache").
+-- Aqui SIEMPRE se llama con row={} (nunca datos de fila reales), asi que
+-- cachear unicamente por fullType es correcto para este call site concreto;
+-- no se toca la firma general de ItemTaxonomy.resolve() usada en otros
+-- ficheros con datos de fila reales.
+local _taxResolveCache = {}
+local function getCachedTaxonomy(fullType)
+	local cached = _taxResolveCache[fullType]
+	if cached ~= nil then
+		return cached or nil
+	end
+	local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
+	local result = (ok and tax) or false
+	_taxResolveCache[fullType] = result
+	return result or nil
+end
 local hooksInstalled = false
 local activeRenderWrapper = nil
 
@@ -587,8 +612,8 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 					-- y casi nunca hace falta truncarla; solo aparecen los niveles que
 					-- el item realmente tiene.
 					local lines = {}
-					local okTax, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
-					if okTax and tax and tax.groupLabel and tax.groupLabel ~= "" then
+					local tax = getCachedTaxonomy(fullType)
+					if tax and tax.groupLabel and tax.groupLabel ~= "" then
 						lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", tax.groupLabel)
 						if tax.subGroupLabel and tax.subGroupLabel ~= "" then
 							lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", tax.subGroupLabel)

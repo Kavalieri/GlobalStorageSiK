@@ -58,6 +58,24 @@ function GlobalStorageSiK.TerminalChrome.truncateText(text, maxWidth, font)
 	return GlobalStorageSiK.Libs.truncateText(text, maxWidth, font, "..")
 end
 
+--- Antiguedad relativa legible ("hace 3h") de una marca de tiempo ms.
+--- Compartido entre el panel de staff (GS_AdminDashboard.lua) y la pestaña
+--- normal de permisos (GS_TerminalUI_Permissions.lua) para mostrar
+--- "ultima conexion" sin duplicar la misma logica en dos ficheros.
+---@param tsMs number|nil
+---@return string
+function GlobalStorageSiK.TerminalChrome.relativeAge(tsMs)
+	tsMs = tonumber(tsMs) or 0
+	if tsMs <= 0 then return "?" end
+	local T = GlobalStorageSiK.I18n.text
+	local nowTs = (getTimestampMs and getTimestampMs()) or tsMs
+	local deltaS = math.max(0, math.floor((nowTs - tsMs) / 1000))
+	if deltaS < 60 then return T("IGUI_GS_AdminAgeSeconds", deltaS) end
+	if deltaS < 3600 then return T("IGUI_GS_AdminAgeMinutes", math.floor(deltaS / 60)) end
+	if deltaS < 86400 then return T("IGUI_GS_AdminAgeHours", math.floor(deltaS / 3600)) end
+	return T("IGUI_GS_AdminAgeDays", math.floor(deltaS / 86400))
+end
+
 --- Nine-patch de botón NeatUI (esquinas fijas, sin estirar como píldora).
 ---@return userdata|nil
 function GlobalStorageSiK.TerminalChrome.getButtonNinePatch()
