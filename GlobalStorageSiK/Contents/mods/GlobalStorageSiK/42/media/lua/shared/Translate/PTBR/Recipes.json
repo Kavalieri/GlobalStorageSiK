@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "Fabricar Leitor GS: Placa de Circuito",
 	"Build GS Reader Antenna": "Fabricar Leitor GS: Sensor",
 	"Build GS Terminal Reader": "Fabricar Leitor GS",
-	"Build GS Desktop Computer": "Fabricar Computador de Mesa"
+	"Build GS Desktop Computer": "Fabricar Computador de Mesa",
+	"Build GS Soldering Tip": "Fabricar Ferro de Solda GS: Ponta",
+	"Build GS Soldering Resistance Coil": "Fabricar Ferro de Solda GS: Resistência",
+	"Build GS Soldering Handle": "Fabricar Ferro de Solda GS: Cabo",
+	"Build GS Soldering Iron": "Fabricar Ferro de Solda GS",
+	"Program GS Network Disk": "Programar Disquete GS: Rede",
+	"Program GS Uninstall Disk": "Programar Disquete de Desinstalação GS",
+	"Program GS Floppy Drive Network Disk": "Programar Disquete GS: Drive"
 }

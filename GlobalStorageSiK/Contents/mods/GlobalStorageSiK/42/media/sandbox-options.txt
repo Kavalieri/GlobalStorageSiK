@@ -308,6 +308,22 @@ option GlobalStorageSiK.DebugCatCapacityBonus
 	translation = GlobalStorageSiK_DebugCatCapacityBonus,
 }
 
+option GlobalStorageSiK.DebugCatZones
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatZones,
+}
+
+option GlobalStorageSiK.DebugCatItemActions
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatItemActions,
+}
+
 option GlobalStorageSiK.DebugDetailCapacityBonus
 {
 	type = boolean,

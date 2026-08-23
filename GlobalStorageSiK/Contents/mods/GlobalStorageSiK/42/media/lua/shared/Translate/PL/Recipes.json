@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "Zbuduj napęd GS: Płytka obwodu",
 	"Build GS Reader Antenna": "Zbuduj napęd GS: Czujnik",
 	"Build GS Terminal Reader": "Zbuduj napęd GS",
-	"Build GS Desktop Computer": "Zbuduj komputer stacjonarny"
+	"Build GS Desktop Computer": "Zbuduj komputer stacjonarny",
+	"Build GS Soldering Tip": "Zbuduj lutownicę GS: grot",
+	"Build GS Soldering Resistance Coil": "Zbuduj lutownicę GS: grzałkę",
+	"Build GS Soldering Handle": "Zbuduj lutownicę GS: rączkę",
+	"Build GS Soldering Iron": "Zbuduj lutownicę GS",
+	"Program GS Network Disk": "Zaprogramuj dyskietkę GS: sieć",
+	"Program GS Uninstall Disk": "Zaprogramuj dyskietkę deinstalacyjną GS",
+	"Program GS Floppy Drive Network Disk": "Zaprogramuj dyskietkę GS: napęd"
 }

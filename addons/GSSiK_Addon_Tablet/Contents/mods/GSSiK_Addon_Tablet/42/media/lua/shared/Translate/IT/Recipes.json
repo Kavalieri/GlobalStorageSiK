@@ -1,0 +1,20 @@
+{
+	"Build GS Antenna Dish": "Assembla parabola antenna GS",
+	"Build GS Antenna Transmitter": "Assembla trasmettitore antenna GS",
+	"Build GS WiFi Chip T1": "Assembla chip WiFi GS T1",
+	"Build GS WiFi Antenna": "Assembla antenna WiFi GS T1",
+	"Build GS WiFi Chip T2": "Assembla chip WiFi GS T2",
+	"Build GS WiFi Antenna T2": "Assembla antenna WiFi GS T2",
+	"Build GS WiFi Chip T3": "Assembla chip WiFi GS T3",
+	"Build GS WiFi Antenna T3": "Assembla antenna WiFi GS T3",
+	"Program GS Tablet Install Disk": "Programma floppy GS: tablet",
+	"Build GS Tablet Screen": "Assembla tablet GS: schermo",
+	"Build GS Tablet Battery": "Assembla tablet GS: batteria",
+	"Build GS Tablet": "Assembla tablet GS",
+	"Build GS Craft Tablet Module": "Assembla tablet Craft GS: modulo",
+	"Build GS Craft Tablet": "Assembla tablet Craft GS",
+	"Build GS Builder Tablet Module": "Assembla tablet Builder GS: modulo",
+	"Build GS Builder Tablet": "Assembla tablet Builder GS",
+	"Build GS Master Tablet Core": "Assembla tablet Master GS: nucleo",
+	"Build GS Master Tablet": "Assembla tablet Master GS"
+}

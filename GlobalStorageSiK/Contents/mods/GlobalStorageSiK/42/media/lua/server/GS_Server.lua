@@ -725,9 +725,80 @@ end
 
 ---@return boolean, string
 
+--- Texto compacto de unos bounds para diagnostico (categoria "Zones", ver
+--- GS_Log.lua) - mismo formato en todas las trazas de addZone() para poder
+--- comparar visualmente dos intentos a simple vista en console.txt.
+---@param b table|nil
+---@return string
+local function boundsLogText(b)
+	b = b or {}
+	local x1 = math.min(b.x1 or b.x or 0, b.x2 or b.x or 0)
+	local x2 = math.max(b.x1 or b.x or 0, b.x2 or b.x or 0)
+	local y1 = math.min(b.y1 or b.y or 0, b.y2 or b.y or 0)
+	local y2 = math.max(b.y1 or b.y or 0, b.y2 or b.y or 0)
+	local zMin = b.z or b.zMin or 0
+	local zMax = b.zMax or zMin
+	return string.format("x[%d,%d] y[%d,%d] z[%d,%d]", x1, x2, y1, y2, zMin, zMax)
+end
+
+--- Traza de entrada comun a los 5 comandos "Crear zona desde..." (categoria
+--- "Zones", ver GS_Log.lua) - se llama SIEMPRE, antes de cualquier gate, para
+--- que quede rastro incluso si el jugador no tiene permiso o hay un job
+--- bloqueando. playerLabel identifica quien pidio la accion (util en MP con
+--- varios jugadores compartiendo red; en SP real solo hay uno, pero el
+--- formato es el mismo en los dos casos - la traza no distingue SP/MP a
+--- proposito, solo el prefijo [SP]/[SRV]/[HOST]/[CLI] que ya añade
+--- GS_Log.write() segun GS_DebugRelay.processTag()).
+---@param command string
+---@param player IsoPlayer|nil
+---@param networkId string|nil
+local function logZoneCommand(command, player, networkId)
+	local playerLabel = player and player.getUsername and player:getUsername() or "?"
+	GlobalStorageSiK.Log.debug("Zones", command .. " solicitado",
+		"player=" .. tostring(playerLabel) .. " networkId=" .. tostring(networkId))
+end
+
+--- Traza de rechazo por gate (permiso o job en curso) - las funciones
+--- compartidas requireAdminAccess/blockIfNetworkJobRunning ya envian su
+--- propio actionResult al jugador, pero no dejaban NINGUN rastro en consola
+--- (son gates genericos usados por decenas de comandos, no solo zonas - no
+--- se les añade log ahi para no atribuir mal el origen; se registra aqui,
+--- en el punto de llamada especifico de cada comando de zona).
+---@param command string
+---@param reason string
+local function logZoneGateRejected(command, reason)
+	GlobalStorageSiK.Log.debug("Zones", command .. " rechazado en gate", "motivo=" .. tostring(reason))
+end
+
 local function addZone(zone)
 
 	local registry = GlobalStorageSiK.Zones.getRegistry()
+
+	-- Categoria "Zones" (2026-08-23, reporte real: jugador con 8 zonas
+	-- contando para el limite de sandbox, pero solo 2 realmente pobladas, y
+	-- CERO trazas existentes para diagnosticar a distancia que estaba
+	-- pasando - ver comentario de la categoria en GS_Log.lua). Se registra
+	-- SIEMPRE el intento, antes de cualquier chequeo, para que quede rastro
+	-- incluso si algo de lo de abajo revienta.
+	GlobalStorageSiK.Log.debug("Zones", "addZone intento",
+		"name=" .. tostring(zone.name) .. " source=" .. tostring(zone.source)
+			.. " networkId=" .. tostring(zone.networkId) .. " bounds=" .. boundsLogText(zone.bounds))
+
+	-- BUG REAL cerrado (2026-08-23, mismo reporte): createZone()/addZone()
+	-- nunca comprobaban si la zona nueva ya existia fisicamente, asi que
+	-- pulsar dos veces "Crear zona desde mi habitacion/edificio" sobre el
+	-- MISMO sitio consumia dos huecos del limite sin ningun aviso ni
+	-- beneficio. Deliberadamente EXACTA (ver GlobalStorageSiK.Zones.
+	-- findDuplicateZone) - una zona anidada/solapada a proposito con limites
+	-- DISTINTOS sigue permitida, solo se rechaza el caso "esto ya es
+	-- literalmente la misma zona".
+	local duplicate = GlobalStorageSiK.Zones.findDuplicateZone(registry, zone.networkId, zone.bounds)
+	if duplicate then
+		GlobalStorageSiK.Log.debug("Zones", "addZone rechazado: duplicado exacto",
+			"nuevaZona=" .. tostring(zone.name) .. " coincideCon=" .. tostring(duplicate.name)
+				.. " (id=" .. tostring(duplicate.id) .. ")")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneAlreadyExists", duplicate.name or "?")
+	end
 
 	local maxZones = GlobalStorageSiK.Sandbox.getMaxZonesPerNetwork()
 
@@ -735,17 +806,25 @@ local function addZone(zone)
 
 	local count = 0
 
+	local existingNames = {}
+
 	for _, z in pairs(registry.zones or {}) do
 
 		if z.networkId == zone.networkId then
 
 			count = count + 1
 
+			existingNames[#existingNames + 1] = tostring(z.name) .. "(" .. boundsLogText(z.bounds) .. ")"
+
 		end
 
 	end
 
 	if count >= maxZones then
+
+		GlobalStorageSiK.Log.debug("Zones", "addZone rechazado: limite alcanzado",
+			"networkId=" .. tostring(zone.networkId) .. " count=" .. tostring(count) .. "/" .. tostring(maxZones)
+				.. " zonasExistentes=[" .. table.concat(existingNames, " | ") .. "]")
 
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneLimitReached")
 
@@ -761,6 +840,10 @@ local function addZone(zone)
 	registry.zones[zone.id] = zone
 
 	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+
+	GlobalStorageSiK.Log.debug("Zones", "addZone OK",
+		"id=" .. tostring(zone.id) .. " name=" .. tostring(zone.name)
+			.. " networkId=" .. tostring(zone.networkId) .. " count=" .. tostring(count + 1) .. "/" .. tostring(maxZones))
 
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneCreatedMsg", zone.name)
 
@@ -3077,22 +3160,47 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "deleteZone" then
 		return (function()
+		logZoneCommand("deleteZone", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("deleteZone", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("deleteZone", "job de red en curso")
+			return
+		end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
 		if not zone then
+			GlobalStorageSiK.Log.debug("Zones", "deleteZone zona no encontrada", "zoneId=" .. tostring(args.zoneId))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg") })
 			return
 		end
 		local zoneName = zone.name or args.zoneId
+		-- Recuento ANTES de borrar (categoria "Zones", ver comentario de
+		-- logZoneCommand): cuantos contenedores (nodos) se pierden con esta
+		-- zona y cuantas zonas quedaran para esta red despues, para poder
+		-- correlacionar directamente con lo que el jugador reporte ver en la
+		-- pestaña Zonas tras el borrado.
+		local nodeCountBefore = 0
+		for _, node in pairs(registry.nodes or {}) do
+			if node.zoneId == args.zoneId then nodeCountBefore = nodeCountBefore + 1 end
+		end
+		local zoneCountBefore = 0
+		for _, z in pairs(registry.zones or {}) do
+			if z.networkId == networkId then zoneCountBefore = zoneCountBefore + 1 end
+		end
 		local ok = GlobalStorageSiK.Zones.removeZone(args.zoneId)
 		if not ok then
+			GlobalStorageSiK.Log.debug("Zones", "deleteZone fallo en removeZone", "zoneId=" .. tostring(args.zoneId) .. " name=" .. tostring(zoneName))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeleteFailedMsg") })
 			return
 		end
+		GlobalStorageSiK.Log.debug("Zones", "deleteZone OK",
+			"name=" .. tostring(zoneName) .. " zoneId=" .. tostring(args.zoneId)
+				.. " contenedoresEliminados=" .. tostring(nodeCountBefore)
+				.. " zonas " .. tostring(zoneCountBefore) .. "->" .. tostring(zoneCountBefore - 1)
+				.. " de " .. tostring(GlobalStorageSiK.Sandbox.getMaxZonesPerNetwork()))
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
 		pushTerminalState(player, networkId, nil, searchQuery)
@@ -3251,13 +3359,22 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "createZoneRoom" then
 		return (function()
+		logZoneCommand("createZoneRoom", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("createZoneRoom", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("createZoneRoom", "job de red en curso")
+			return
+		end
 		local bounds = boundsFromPlayerRoom(player)
 
 		if not bounds then
+
+			GlobalStorageSiK.Log.debug("Zones", "createZoneRoom sin habitacion",
+				"player=" .. tostring(player and player.getUsername and player:getUsername() or "?")
+					.. " - el jugador no esta dentro de una habitacion valida ahora mismo")
 
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoRoom") })
 
@@ -3311,12 +3428,19 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "createZoneStructure" then
 		return (function()
+		logZoneCommand("createZoneStructure", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("createZoneStructure", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("createZoneStructure", "job de red en curso")
+			return
+		end
 		local bounds, zoneName, source = GlobalStorageSiK.Zones.boundsFromStructure(player)
 		if not bounds then
+			GlobalStorageSiK.Log.debug("Zones", "createZoneStructure sin edificio/refugio",
+				"player=" .. tostring(player and player.getUsername and player:getUsername() or "?"))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuildingOrSafehouse") })
 			return
 		end
@@ -3334,12 +3458,19 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "createZoneBuilding" then
 		return (function()
+		logZoneCommand("createZoneBuilding", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("createZoneBuilding", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("createZoneBuilding", "job de red en curso")
+			return
+		end
 		local bounds, buildingTitle = GlobalStorageSiK.Zones.boundsFromPlayerBuilding(player)
 		if not bounds then
+			GlobalStorageSiK.Log.debug("Zones", "createZoneBuilding sin edificio",
+				"player=" .. tostring(player and player.getUsername and player:getUsername() or "?"))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoBuilding") })
 			return
 		end
@@ -3355,11 +3486,18 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "createZoneSafehouse" then
 		return (function()
+		logZoneCommand("createZoneSafehouse", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("createZoneSafehouse", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("createZoneSafehouse", "job de red en curso")
+			return
+		end
 		if not GlobalStorageSiK.Sandbox.allowSafehouseImport() then
+
+			logZoneGateRejected("createZoneSafehouse", "importar refugios desactivado por sandbox")
 
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_SafehouseImportDisabledMsg") })
 
@@ -3370,6 +3508,9 @@ local function onClientCommand(module, command, player, args)
 		local bounds = GlobalStorageSiK.Zones.boundsFromSafehouse(player:getSquare(), player)
 
 		if not bounds then
+
+			GlobalStorageSiK.Log.debug("Zones", "createZoneSafehouse sin refugio",
+				"player=" .. tostring(player and player.getUsername and player:getUsername() or "?"))
 
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_NoSafehouseMsg") })
 
@@ -3395,12 +3536,19 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "createZoneSelection" then
 		return (function()
+		logZoneCommand("createZoneSelection", player, networkId)
 		if not requireAdminAccess(player, networkId) then
+			logZoneGateRejected("createZoneSelection", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then
+			logZoneGateRejected("createZoneSelection", "job de red en curso")
+			return
+		end
 		local b = args.bounds
 		if not b or b.x1 == nil or b.y1 == nil or b.x2 == nil or b.y2 == nil then
+			GlobalStorageSiK.Log.debug("Zones", "createZoneSelection area invalida",
+				"bounds recibidos=" .. tostring(b and (tostring(b.x1) .. "," .. tostring(b.y1) .. "," .. tostring(b.x2) .. "," .. tostring(b.y2)) or "nil"))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidArea") })
 			return
 		end

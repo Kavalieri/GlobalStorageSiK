@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "GS Laufwerk bauen: Platine",
 	"Build GS Reader Antenna": "GS Laufwerk bauen: Sensor",
 	"Build GS Terminal Reader": "GS Laufwerk bauen",
-	"Build GS Desktop Computer": "Desktop Computer bauen"
+	"Build GS Desktop Computer": "Desktop Computer bauen",
+	"Build GS Soldering Tip": "GS Lötkolben bauen: Spitze",
+	"Build GS Soldering Resistance Coil": "GS Lötkolben bauen: Heizwendel",
+	"Build GS Soldering Handle": "GS Lötkolben bauen: Griff",
+	"Build GS Soldering Iron": "GS Lötkolben bauen",
+	"Program GS Network Disk": "GS Netzdiskette programmieren",
+	"Program GS Uninstall Disk": "GS Deinstallationsdiskette programmieren",
+	"Program GS Floppy Drive Network Disk": "GS Laufwerksdiskette programmieren"
 }

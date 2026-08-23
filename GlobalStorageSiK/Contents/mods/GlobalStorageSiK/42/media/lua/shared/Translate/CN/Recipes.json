@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "制作 GS 软驱：电路板",
 	"Build GS Reader Antenna": "制作 GS 软驱：传感器",
 	"Build GS Terminal Reader": "制作 GS 软驱",
-	"Build GS Desktop Computer": "制作台式电脑"
+	"Build GS Desktop Computer": "制作台式电脑",
+	"Build GS Soldering Tip": "制作 GS 焊铁：烙铁头",
+	"Build GS Soldering Resistance Coil": "制作 GS 焊铁：发热丝",
+	"Build GS Soldering Handle": "制作 GS 焊铁：手柄",
+	"Build GS Soldering Iron": "制作 GS 焊铁",
+	"Program GS Network Disk": "烧录 GS 软盘：网络",
+	"Program GS Uninstall Disk": "烧录 GS 卸载磁盘",
+	"Program GS Floppy Drive Network Disk": "烧录 GS 软盘：软驱"
 }

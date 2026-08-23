@@ -85,6 +85,24 @@ local AREA_CATEGORY = {
 	-- de seguir adivinando a ciegas por que un manual con receta fija de
 	-- script nunca marcaba el tick pese a estar ya aprendida.
 	LiteratureRead = "LiteratureRead",
+	-- Categoria propia (pedido explicito 2026-08-23, tras un reporte real de
+	-- un jugador con 8 zonas contando para el limite de sandbox pero solo 2
+	-- realmente pobladas, sin ninguna traza que explicara que estaba pasando
+	-- ni por que): la creacion de zonas (los 5 caminos "Crear zona desde...")
+	-- no tenia NINGUN log, ni siquiera sin categoria propia - imposible
+	-- diagnosticar a distancia sin pedirle al jugador capturas manuales de
+	-- cada zona. Cubre nombre/origen/bounds de cada intento, si coincide con
+	-- una zona ya existente (guarda de duplicados, ver GS_Zones.
+	-- findDuplicateZone) y el recuento contra el limite configurado.
+	Zones = "Zones",
+	-- Categoria propia (pedido explicito 2026-08-23, diagnostico del menu
+	-- contextual "Global Storage" tras un reporte real de que la opcion
+	-- Transferir no aparecia ni por proximidad fisica ni con el Almacen
+	-- abierto): confirma si el evento OnPreFillInventoryObjectContextMenu
+	-- llega a dispararse de verdad para el click probado, en vez de seguir
+	-- adivinando a ciegas si el fallo esta en el registro del evento o en la
+	-- condicion de canTransfer.
+	ItemActions = "ItemActions",
 }
 
 --- Escribe línea en consola del juego.

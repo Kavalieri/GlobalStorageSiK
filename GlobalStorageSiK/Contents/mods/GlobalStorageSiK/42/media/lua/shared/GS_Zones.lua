@@ -203,6 +203,58 @@ function GlobalStorageSiK.Zones.containsPoint(zone, x, y, z)
 	return x >= x1 and x <= x2 and y >= y1 and y <= y2
 end
 
+--- Normaliza un bounds a sus 6 limites reales (min/max en los 3 ejes),
+--- mismo criterio que containsPoint - evita comparar x1/x2 sin normalizar
+--- (una zona guardada con x1>x2, por ejemplo tras un refactor de origen,
+--- daria un falso "no coincide" contra la misma zona con los ejes en el
+--- orden esperado).
+---@param b table|nil
+---@return number x1, number x2, number y1, number y2, number zMin, number zMax
+local function normalizedBounds(b)
+	b = b or {}
+	local x1 = math.min(b.x1 or b.x or 0, b.x2 or b.x or 0)
+	local x2 = math.max(b.x1 or b.x or 0, b.x2 or b.x or 0)
+	local y1 = math.min(b.y1 or b.y or 0, b.y2 or b.y or 0)
+	local y2 = math.max(b.y1 or b.y or 0, b.y2 or b.y or 0)
+	local zMin = b.z or b.zMin or 0
+	local zMax = b.zMax or zMin
+	return x1, x2, y1, y2, zMin, zMax
+end
+
+--- Busca, entre las zonas YA registradas de una red, una cuyos limites
+--- coincidan EXACTAMENTE con los de "bounds" - guarda de seguridad
+--- (2026-08-23, pedido explicito tras un reporte real: un jugador con 8
+--- zonas contando para el limite de sandbox pero solo 2 realmente
+--- utiles/pobladas, sin ningun aviso al crear zonas repetidas sobre la
+--- MISMA area fisica). createZone()/addZone() nunca comprobaban solapamiento
+--- - cada pulsacion de "Crear zona desde mi habitacion/edificio/refugio"
+--- crea una entrada nueva con ID propio, aunque el jugador la aplique dos
+--- veces sobre el mismo sitio, consumiendo un hueco del limite de zonas sin
+--- ningun beneficio real.
+--- Deliberadamente EXACTA, no "solapamiento parcial": el mod SI soporta
+--- zonas anidadas/solapadas a proposito (una zona pequeña de alta prioridad
+--- dentro de otra mas grande, resuelto por GS_ZonePriority) - bloquear
+--- cualquier solapamiento romperia ese uso legitimo. Solo el caso "esto ya
+--- es literalmente la misma zona" debe rechazarse.
+---@param registry table
+---@param networkId string
+---@param bounds table
+---@return table|nil existingZone
+function GlobalStorageSiK.Zones.findDuplicateZone(registry, networkId, bounds)
+	if not registry or not networkId or not bounds then return nil end
+	local x1, x2, y1, y2, zMin, zMax = normalizedBounds(bounds)
+	for _, zone in pairs(registry.zones or {}) do
+		if zone.networkId == networkId then
+			local ex1, ex2, ey1, ey2, ezMin, ezMax = normalizedBounds(zone.bounds)
+			if ex1 == x1 and ex2 == x2 and ey1 == y1 and ey2 == y2
+				and ezMin == zMin and ezMax == zMax then
+				return zone
+			end
+		end
+	end
+	return nil
+end
+
 --- Elimina una zona y los nodos asociados del registro.
 ---@param zoneId string
 ---@return boolean removed

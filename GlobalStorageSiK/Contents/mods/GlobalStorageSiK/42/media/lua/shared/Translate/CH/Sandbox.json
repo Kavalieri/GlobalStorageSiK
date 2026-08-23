@@ -87,6 +87,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatCapacityBonus": "   >> 容量加成（有序等特质）",
 	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus": "      >>> 详细：逐容器加成",
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead": "   >> 讀取檢測",
+	"Sandbox_GlobalStorageSiK_DebugCatZones": "   >> 區域建立/上限",
+	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> 物品右鍵選單",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "需要调试模式。汇总存入与 Auto Sort 的目标选择。逐节点判断仅在独立的 >>> 详细模块中输出。",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "远程物品转移",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "允许通过终端界面存取网络中的物品，而无需实际走到容器旁。关闭以获得更真实的体验。",

@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "Build GS Reader: Circuit Board",
 	"Build GS Reader Antenna": "Build GS Reader: Sensor",
 	"Build GS Terminal Reader": "Build GS Reader",
-	"Build GS Desktop Computer": "Build Desktop Computer"
+	"Build GS Desktop Computer": "Build Desktop Computer",
+	"Build GS Soldering Tip": "Build GS Soldering: Tip",
+	"Build GS Soldering Resistance Coil": "Build GS Soldering: Resistance Coil",
+	"Build GS Soldering Handle": "Build GS Soldering: Handle",
+	"Build GS Soldering Iron": "Build GS Soldering Iron",
+	"Program GS Network Disk": "Program GS Network Disk",
+	"Program GS Uninstall Disk": "Program GS Uninstall Disk",
+	"Program GS Floppy Drive Network Disk": "Program GS Drive Disk"
 }

@@ -468,6 +468,7 @@
 	"IGUI_GS_WithdrawnPartial": "Extraídos: {1} de {2} solicitados",
 	"IGUI_GS_WithdrawErrorReason": "Error: {1}",
 	"IGUI_GS_ZoneLimitReached": "Límite de zonas alcanzado",
+	"IGUI_GS_ZoneAlreadyExists": "Esta misma área ya está registrada como la zona \"{1}\"",
 	"IGUI_GS_InvalidEntry": "Entrada inválida",
 	"IGUI_GS_AlreadyMarked": "Ya está marcado",
 	"IGUI_GS_ContainerLimitReached": "Límite de contenedores alcanzado",

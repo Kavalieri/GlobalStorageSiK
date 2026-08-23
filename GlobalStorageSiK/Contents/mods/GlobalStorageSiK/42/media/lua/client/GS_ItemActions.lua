@@ -163,12 +163,20 @@ function GlobalStorageSiK.ItemActions.canTransfer(playerArg, items)
 	if not first or not first.getContainer or not first:getContainer() then
 		return false
 	end
-	-- Transferir ítems de inventario a la red solo tiene sentido a rango de
-	-- un terminal ACTIVO (mismo rango que abrirlo) - sin esto, el submenú
-	-- "Transferir" aparecía siempre en cualquier ítem, en cualquier parte del
-	-- mapa, sin relación con poder depositar de verdad.
-	local range = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
-	return GlobalStorageSiK.TerminalAccess.findNearestTerminal(player, range) ~= nil
+	-- BUG REAL cerrado (2026-08-23, pedido explicito del usuario): antes
+	-- exigia proximidad FISICA a un terminal (findNearestTerminal), lo que
+	-- dejaba fuera el caso de acceso INALAMBRICO (addon Tablet) - un jugador
+	-- con el Almacen realmente abierto y viendo la red en directo, pero sin
+	-- ningun terminal fisico cerca, nunca veia la opcion "Transferir" del
+	-- menu contextual, solo podia arrastrar. El criterio correcto es "el
+	-- Almacen esta abierto y accesible ahora mismo" - el mismo que ya exige
+	-- soltar un item arrastrado sobre la ventana del terminal
+	-- (GS_TerminalWithdrawDrag.lua) - cubre proximidad fisica Y acceso
+	-- inalambrico por igual, sin necesitar dos caminos distintos, y evita
+	-- ofrecer "Transferir" a ciegas sin que el jugador pueda ver primero el
+	-- estado real de la red.
+	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	return ui ~= nil and ui.getIsVisible and ui:getIsVisible() and ui.accessMode ~= "blocked"
 end
 
 --- Añade opciones de transferencia al menú contextual. Llamar solo tras
@@ -189,6 +197,13 @@ end
 ---@param context ISContextMenu
 ---@param items table
 local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
+	GlobalStorageSiK.Log.debug("ItemActions", string.format(
+		"OnPreFillInventoryObjectContextMenu disparado: items=%s uiVisible=%s",
+		tostring(items and #items or 0),
+		tostring(GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+			and GlobalStorageSiK.TerminalUI.instance.getIsVisible
+			and GlobalStorageSiK.TerminalUI.instance:getIsVisible())
+	))
 	local ok, err = pcall(function()
 		if not context or not items or #items == 0 then
 			return

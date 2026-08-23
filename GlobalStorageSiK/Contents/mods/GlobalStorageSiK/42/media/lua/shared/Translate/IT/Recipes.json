@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "Assembla lettore GS: circuito",
 	"Build GS Reader Antenna": "Assembla lettore GS: antenna",
 	"Build GS Terminal Reader": "Assembla lettore GS",
-	"Build GS Desktop Computer": "Assembla computer desktop"
+	"Build GS Desktop Computer": "Assembla computer desktop",
+	"Build GS Soldering Tip": "Assembla saldatore GS: punta",
+	"Build GS Soldering Resistance Coil": "Assembla saldatore GS: resistenza",
+	"Build GS Soldering Handle": "Assembla saldatore GS: impugnatura",
+	"Build GS Soldering Iron": "Assembla saldatore GS",
+	"Program GS Network Disk": "Programma floppy GS: rete",
+	"Program GS Uninstall Disk": "Programma floppy di disinstallazione GS",
+	"Program GS Floppy Drive Network Disk": "Programma floppy GS: drive"
 }

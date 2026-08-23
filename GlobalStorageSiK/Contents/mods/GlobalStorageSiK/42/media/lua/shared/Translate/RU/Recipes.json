@@ -7,5 +7,12 @@
 	"Build GS Reader Circuit Board": "Собрать дисковод GS: плата",
 	"Build GS Reader Antenna": "Собрать дисковод GS: антенна",
 	"Build GS Terminal Reader": "Собрать дисковод GS",
-	"Build GS Desktop Computer": "Собрать настольный компьютер"
+	"Build GS Desktop Computer": "Собрать настольный компьютер",
+	"Build GS Soldering Tip": "Собрать паяльник GS: жало",
+	"Build GS Soldering Resistance Coil": "Собрать паяльник GS: спираль",
+	"Build GS Soldering Handle": "Собрать паяльник GS: рукоятку",
+	"Build GS Soldering Iron": "Собрать паяльник GS",
+	"Program GS Network Disk": "Запрограммировать дискету GS: сеть",
+	"Program GS Uninstall Disk": "Запрограммировать дискету деинсталляции GS",
+	"Program GS Floppy Drive Network Disk": "Запрограммировать дискету GS: дисковод"
 }
