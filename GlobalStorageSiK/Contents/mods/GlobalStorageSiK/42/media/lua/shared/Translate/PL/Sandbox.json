@@ -89,6 +89,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead": "   >> Wykrywanie odczytu",
 	"Sandbox_GlobalStorageSiK_DebugCatZones": "   >> Tworzenie stref / limit",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menu kontekstowe przedmiotów",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Instalacja/deinstalacja dodatków",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Wymaga trybu debug. Podsumowuje wybór celu dla depozytu i Auto Sort. Decyzje dla każdego węzła pozostają w osobnym bloku >>> SZCZEGÓŁY.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Zdalny transfer przedmiotów",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Pozwala wkładać i wyjmować przedmioty z sieci przez interfejs terminala bez fizycznego dochodzenia do pojemnika. Wyłącz dla bardziej realistycznego doświadczenia.",

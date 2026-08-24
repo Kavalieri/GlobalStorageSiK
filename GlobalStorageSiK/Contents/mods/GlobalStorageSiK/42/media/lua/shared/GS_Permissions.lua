@@ -526,6 +526,31 @@ local function nowMs()
 	return (getTimestampMs and getTimestampMs()) or (os and os.time and os.time() * 1000) or 0
 end
 
+-- BUG REAL de rendimiento cerrado (2026-08-23, reportado por analisis de
+-- telemetria real de servidor: "canAccessDenied" repitiendose varias veces
+-- por segundo para las mismas 2 redes, en una ruta sincrona muy frecuente).
+-- canAccessDenied() se llama en CADA comprobacion de acceso fallida (varias
+-- por segundo mientras una UI sigue pidiendo estado) - sin throttle, cada
+-- personaje+red+DebugMode activo generaba una linea nueva por llamada. Una
+-- linea por combinacion personaje+red cada DENIED_LOG_THROTTLE_MS es
+-- suficiente para diagnosticar sin añadir trabajo perceptible a esta ruta.
+local DENIED_LOG_THROTTLE_MS = 30000
+local deniedLogLastMs = {}
+
+---@param characterId string
+---@param networkId string
+---@return boolean shouldLog
+local function shouldLogDenied(characterId, networkId)
+	local key = tostring(characterId) .. "|" .. tostring(networkId)
+	local last = deniedLogLastMs[key]
+	local now = nowMs()
+	if last and (now - last) < DENIED_LOG_THROTTLE_MS then
+		return false
+	end
+	deniedLogLastMs[key] = now
+	return true
+end
+
 -- Historico de auditoria por red (2026-08-22, ver comentario de
 -- HISTORY_MODDATA_KEY en GS_Config.lua). Cada entrada: {ts, type, detail}.
 -- Acotado a HISTORY_MAX_ENTRIES por red - descarta las mas antiguas al
@@ -1270,6 +1295,37 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Permissions.ensure(registry, networkId)
 	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+	-- BUG REAL cerrado (2026-08-23, encontrado revisando log real de
+	-- servidor: "owner=Kava 4 ownerCharacterId=nil" con el propio dueño
+	-- conectado y denegado): datos de una version anterior a la separacion
+	-- de responsabilidades (2026-08-22) podian dejar net.owner con el
+	-- nombre del propietario pero SIN net.ownerCharacterId enlazado -
+	-- bindCharacter/applyOwnerRoleToRecord (unico escritor actual de ambos
+	-- campos) siempre los escriben a la vez, pero nunca migraron datos ya
+	-- guardados asi. Sin ese enlace ni isOwnerPlayer() reconoce al dueño
+	-- real, ni la red se considera vacante (net.owner no esta vacio) - se
+	-- queda atascada para siempre, ni el propio dueño puede reclamarla. El
+	-- nombre por si solo no sirve para reparar esto con seguridad (PZ anade
+	-- un sufijo de desambiguacion tipo "Kava 4" cuando hay/hubo varios
+	-- personajes con el mismo nombre, que nunca coincide con el nombre
+	-- actual sin sufijo) - se usa la cuenta (ownerAccountLogin), la unica
+	-- señal estable que no depende del nombre de personaje.
+	if (not net.ownerCharacterId or net.ownerCharacterId == "") and net.owner and net.owner ~= "" and characterId ~= "" then
+		local ownerAccountKey = normalizeName(net.ownerAccountLogin)
+		local myAccountKey = normalizeName(username)
+		if ownerAccountKey ~= "" and ownerAccountKey == myAccountKey then
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.warn("Permissions", "ownerLinkRepaired",
+					networkId .. ": " .. tostring(net.owner) .. " (cuenta " .. tostring(username)
+						.. ") recuperado sin ownerCharacterId enlazado (datos de una version anterior) - "
+						.. "re-enlazado a characterId=" .. characterId)
+			end
+			recordNetworkHistoryEvent(networkId, "owner_link_repaired",
+				tostring(net.owner) .. " (cuenta " .. tostring(username) .. ") re-enlazado como propietario: "
+					.. "faltaba ownerCharacterId, datos de una version anterior")
+			bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+		end
+	end
 	-- RECONCILIACION QUIRURGICA (2026-08-22): red de pruebas real confirmo
 	-- que Events.OnPlayerDeath puede no dejar net.owner limpio (motivo exacto
 	-- aun sin confirmar - ver traza siempre visible añadida en el propio
@@ -1438,7 +1494,7 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	-- reconstruir a ciegas por que fallo cada rama anterior (visto en pruebas
 	-- reales del flujo de herencia). Vuelca el estado relevante de la red y
 	-- del jugador en el momento exacto del rechazo final.
-	if GlobalStorageSiK.Log then
+	if GlobalStorageSiK.Log and shouldLogDenied(characterId, networkId) then
 		GlobalStorageSiK.Log.debug("Permissions", "canAccessDenied",
 			"networkId=" .. tostring(networkId)
 				.. " owner=" .. tostring(net.owner) .. " ownerCharacterId=" .. tostring(net.ownerCharacterId)

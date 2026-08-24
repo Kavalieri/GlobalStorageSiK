@@ -3,6 +3,7 @@
 	"IGUI_GS_TabBuilder": "Строительство",
 	"IGUI_GS_AddonBuilderTitle": "Строительство",
 	"IGUI_GS_AddonBuilderDesc": "Дополнение Строительство: требуется журнал (Электричество 5). Изготовьте и установите модуль во вкладке Дополнения.",
+	"IGUI_GS_SectionBuildRemote": "Строительство с сетевым инвентарём",
 	"IGUI_GS_CraftOpenBuildVanilla": "Открыть строительство игры",
 	"IGUI_GS_CraftOpenBuildNeat": "Открыть Neat Building",
 	"IGUI_GS_BuildRemoteHint": "Открывает интерфейс строительства игры; сетевые контейнеры добавляются, пока у вас есть доступ к терминалу.",

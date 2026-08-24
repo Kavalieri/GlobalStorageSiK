@@ -89,6 +89,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead": "   >> Проверка чтения",
 	"Sandbox_GlobalStorageSiK_DebugCatZones": "   >> Создание зон / лимит",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Контекстное меню предметов",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Установка/удаление аддонов",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Требует режима отладки. Сводка выбора назначения для внесения и Auto Sort. Решения по узлам остаются в отдельном блоке >>> ДЕТАЛИ.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Удалённый перенос предметов",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Позволяет добавлять и забирать предметы из сети через интерфейс терминала без физического похода к контейнеру. Отключите для более реалистичного опыта.",

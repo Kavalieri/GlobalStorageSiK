@@ -3953,18 +3953,39 @@ local function onClientCommand(module, command, player, args)
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "installAddon" then
-		if not requireAdminAccess(player, networkId) then
+		-- BUG REAL / feature cerrado (2026-08-23, pedido explicito: "Instalar"
+		-- por clic derecho en el disquete del addon debe funcionar como
+		-- activacion PROPIA e independiente de la de depositar objetos - no
+		-- debe exigir tener el terminal abierto". Antes esto exigia SIEMPRE
+		-- una sesion de terminal ya abierta (getSessionAnchor) - si el
+		-- jugador nunca abrio la ventana, anchor salia nil y el comando
+		-- rechazaba sin mas. Ahora, si no hay sesion, se reescanea la
+		-- proximidad fisica directamente (mismo patron que el flujo de
+		-- instalar el Lector por disquete, GS_InstallTerminalReaderAction) -
+		-- exige un terminal YA instalado (alreadyInstalled=true; un PC sin
+		-- terminal no pertenece a ninguna red donde instalar el addon).
+		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		local resolvedNetworkId = networkId
+		if not anchor or not anchor.x then
+			local range = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+			local target = GlobalStorageSiK.TerminalAccess.findNearestKnownComputer(player, range)
+			if target and target.alreadyInstalled then
+				anchor = { x = target.x, y = target.y, z = target.z or 0 }
+				resolvedNetworkId = GlobalStorageSiK.Network.findNetworkIdAtTerminal(
+					target.x, target.y, target.z or 0) or resolvedNetworkId
+			end
+		end
+		if not requireAdminAccess(player, resolvedNetworkId) then
 			return
 		end
-		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 		if not anchor or not anchor.x then
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalInstallAddonsMsg") })
 			return
 		end
-		local ok, message = GlobalStorageSiK.Addons.install(player, networkId, anchor, args.addonId)
+		local ok, message = GlobalStorageSiK.Addons.install(player, resolvedNetworkId, anchor, args.addonId)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
-			pushTerminalState(player, networkId, nil, searchQuery, nil, false, nil, anchor)
+			pushTerminalState(player, resolvedNetworkId, nil, searchQuery, nil, false, nil, anchor)
 		end
 
 	elseif command == "uninstallAddon" then

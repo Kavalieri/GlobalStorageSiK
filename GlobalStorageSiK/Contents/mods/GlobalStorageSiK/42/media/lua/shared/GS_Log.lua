@@ -103,6 +103,13 @@ local AREA_CATEGORY = {
 	-- adivinando a ciegas si el fallo esta en el registro del evento o en la
 	-- condicion de canTransfer.
 	ItemActions = "ItemActions",
+	-- Categoria propia (pedido explicito 2026-08-23, tras reporte real: "no
+	-- me ha entregado la impresora" al desinstalar y "no consumio la
+	-- impresora" al instalar, con todos los addons probados): confirma con
+	-- datos reales el fullType exacto buscado/eliminado al instalar y si
+	-- giveModuleItem() genero de verdad el item al desinstalar - antes este
+	-- subsistema no tenia NINGUNA traza, ni siquiera sin categoria propia.
+	Addons = "Addons",
 }
 
 --- Escribe línea en consola del juego.

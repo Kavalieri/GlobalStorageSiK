@@ -99,6 +99,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead": "   >> Comprobación de lectura",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menú contextual de ítems",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions_tooltip": "Requiere Modo depuración activado. Registra cada vez que el menú contextual del inventario (clic derecho) se dispara y si el Almacén está visible en ese momento, para diagnosticar por qué no aparece la opción Transferir.",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Instalación/desinstalación de addons",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons_tooltip": "Requiere Modo depuración activado. Registra qué ítem exacto se busca/elimina del inventario al instalar un addon, y si se generó de verdad el ítem al desinstalarlo.",
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead_tooltip": "Requiere Modo depuración activado. Registra, por cada fila de literatura mostrada en el Almacén, si la sonda de receta tuvo éxito y qué devolvió, para poder verificar el check de \"ya leído\" con datos reales en vez de suposiciones.",
 	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus": "      >>> DETALLE: bonus por contenedor",
 	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus_tooltip": "Requiere Modo depuración y Bonus de capacidad. Sublog de alto volumen: una línea por contenedor en directo con bonus personal detectado, en cada refresco de terminal. Actívalo solo para diagnosticar la capacidad.",

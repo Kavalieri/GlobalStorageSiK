@@ -437,17 +437,47 @@ end
 --- Orden total para candidatos que YA pertenecen al mismo tier de
 --- coincidencia. La categoria/filtro decide antes de llegar aqui; por tanto
 --- ninguna prioridad puede hacer ganar a un contenedor generico frente a una
---- coincidencia o afinidad mejores.
+--- coincidencia o afinidad mejores. Prioridad de ZONA primero (2026-08-24,
+--- pedido explicito del usuario: "lo mas normal es que el jugador no toque el
+--- campo de zona; si lo toca, es porque quiere que primero se revise esa
+--- zona" - mas amplio/deliberado que un solo contenedor cuando se configura,
+--- asi que decide antes). Mismo orden en GS_Redistribute.lua (candidateBetter).
 local function depositCandidateBetter(a, b)
 	local ea, eb = a.entry or {}, b.entry or {}
-	local pa = tonumber(ea.priority) or 50
-	local pb = tonumber(eb.priority) or 50
-	if pa ~= pb then return pa < pb end
 	local za = tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
 	local zb = tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
 	if za ~= zb then return za < zb end
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
 	-- Desempate estable: evita que table.sort deje resultados equivalentes en
 	-- un orden dependiente del recorrido de tablas/ModData.
+	return tostring(ea.id or "") < tostring(eb.id or "")
+end
+
+--- Compara candidatos SIN categoria/filtro configurado (tiers 4/5/6
+--- fusionados): aqui la PRIORIDAD (zona primero, contenedor despues - mismo
+--- orden que depositCandidateBetter arriba) manda antes que la afinidad
+--- (pedido explicito del usuario, 2026-08-24 - antes la afinidad exacta/
+--- taxonomica ganaba siempre y un contenedor nuevo vacio con prioridad alta
+--- nunca podia atraer objetos de un contenedor viejo que ya los tenia). La
+--- afinidad solo desempata entre candidatos que comparten AMBAS prioridades
+--- (zona Y contenedor) - cambiar la prioridad de un contenedor/zona SI
+--- afecta al resultado de la afinidad, no es un criterio aislado. Mismo
+--- cambio en paralelo en GS_Redistribute.lua (unrestrictedCandidateBetter)
+--- para que Auto-ordenar y el deposito manual decidan igual.
+---@param a table candidato { live=table, affinityTier=number }
+---@param b table candidato { live=table, affinityTier=number }
+---@return boolean
+local function unrestrictedDepositCandidateBetter(a, b)
+	local ea, eb = a.live.entry or {}, b.live.entry or {}
+	local za = tonumber(a.live.zonePriority) or tonumber(ea.zonePriority) or 50
+	local zb = tonumber(b.live.zonePriority) or tonumber(eb.zonePriority) or 50
+	if za ~= zb then return za < zb end
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
+	if a.affinityTier ~= b.affinityTier then return a.affinityTier < b.affinityTier end
 	return tostring(ea.id or "") < tostring(eb.id or "")
 end
 
@@ -525,14 +555,28 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		-- (descendente), asi que un contenedor marcado "Baja" prioridad
 		-- (numero alto) se elegia ANTES que uno "Alta" (numero bajo).
 		--
-		-- Especificidad de categoria PRIMERO, prioridad numerica solo como
-		-- desempate DENTRO del mismo nivel (ver comentario de matchSpecificity).
-		-- Dentro de un tier: contenedor primero, zona despues e ID como empate
-		-- tecnico final. Esta misma jerarquia se usa en GS_Redistribute.lua:
-		-- tier 1 = hoja/custom exacto, tier 2 = subcategoria, tier 3 = categoria,
-		-- tier 4 = mismo fullType, tier 5 = misma ruta taxonomica y tier 6 =
-		-- nodo sin restriccion cualquiera. "Queda en inventario" es el resultado
-		-- terminal cuando ninguno tiene hueco, no otro tier de destino.
+		-- Especificidad de categoria PRIMERO (tiers 1-3: filtro/categoria
+		-- configurada a mano), prioridad numerica solo como desempate DENTRO
+		-- del mismo nivel ahi (ver comentario de matchSpecificity). Dentro de
+		-- un tier 1-3: ZONA primero, contenedor despues, ID como empate
+		-- tecnico final (2026-08-24, pedido explicito del usuario: la
+		-- prioridad de zona es mas amplia/deliberada cuando se configura, asi
+		-- que decide antes que la de un solo contenedor). Esta misma
+		-- jerarquia se usa en GS_Redistribute.lua.
+		--
+		-- Tiers 4/5/6 (sin categoria configurada en ningun lado - "afinidad")
+		-- se tratan distinto desde 2026-08-24 (pedido explicito del usuario):
+		-- se FUSIONAN en un solo grupo donde la PRIORIDAD (zona, luego
+		-- contenedor - mismo orden que arriba) manda primero y la afinidad
+		-- exacta(4)/taxonomica(5)/ninguna(6) solo desempata entre candidatos
+		-- que comparten AMBAS prioridades - antes la afinidad ganaba siempre
+		-- y un contenedor nuevo vacio con prioridad alta nunca podia atraer
+		-- objetos de un contenedor viejo que ya los contenia (se
+		-- autocalificaba mejor tier por afinidad consigo mismo). Cambiar la
+		-- prioridad de zona o de contenedor SI afecta al resultado de la
+		-- afinidad ahora, no es un criterio aislado. "Queda en inventario" es
+		-- el resultado terminal cuando ninguno tiene hueco, no otro tier de
+		-- destino.
 		local tiers = { {}, {}, {}, {}, {}, {} }
 		local hasStrictCandidate = false
 		for i = 1, #liveNodes do
@@ -555,37 +599,64 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 					.. " tier=" .. tostring(destinationTier or "rechazado"))
 			end
 		end
-		for tierIdx = 1, 6 do
+		for tierIdx = 1, 3 do
+			-- Categoria/filtro configurado a mano: sin cambios, sigue ganando
+			-- siempre a la familia "sin restriccion" de abajo.
 			local sorted = tiers[tierIdx]
-			if tierIdx < 6 and #sorted > 0 then
-				-- Categoría/filtro (1-3) o afinidad real (4-5). Si existe pero
-				-- está lleno, el motivo correcto será no_space, no no_match.
+			if #sorted > 0 then
 				hasStrictCandidate = true
 			end
 			table.sort(sorted, depositCandidateBetter)
-			-- Tier 6 = sin restriccion ni afinidad: el barrido generico
-			-- (ignora afinidad, solo mira hueco libre) es exactamente el "a
-			-- lo loco" que rejectDepositIfNoMatch debe evitar. Tiers 1-3 son
-			-- match real y tiers 4-5 son afinidad real; se permiten siempre.
-			if tierIdx < 6 or not strictNoMatch then
-				for i = 1, #sorted do
-					local live = sorted[i]
-					local hasSpace = GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
-					if detailOn then
-						GlobalStorageSiK.Log.detail("Router", "pickDepositTarget | tier=" .. tostring(tierIdx)
-							.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
-					end
-					if hasSpace then
-						local reason = tierIdx <= 3 and "match por categoria"
-							or (tierIdx == 4 and "afinidad mismo item"
-								or (tierIdx == 5 and "afinidad taxonomica" or "contenedor sin restriccion"))
-						if debugOn then
-							GlobalStorageSiK.Log.debug("Router", string.format("RESULT tier=%s nodeId=%s (%s)",
-								tostring(tierIdx), tostring((live.entry or {}).id), reason))
-						end
-						return live
-					end
+			for i = 1, #sorted do
+				local live = sorted[i]
+				local hasSpace = GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
+				if detailOn then
+					GlobalStorageSiK.Log.detail("Router", "pickDepositTarget | tier=" .. tostring(tierIdx)
+						.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
 				end
+				if hasSpace then
+					if debugOn then
+						GlobalStorageSiK.Log.debug("Router", string.format("RESULT tier=%s nodeId=%s (match por categoria)",
+							tostring(tierIdx), tostring((live.entry or {}).id)))
+					end
+					return live
+				end
+			end
+		end
+		-- Tiers 4/5/6 fusionados: sin categoria configurada en ningun lado, la
+		-- prioridad del contenedor manda primero y la afinidad solo desempata
+		-- entre candidatos de la misma prioridad (pedido explicito del
+		-- usuario, 2026-08-24 - ver unrestrictedDepositCandidateBetter). Tier
+		-- 6 (sin afinidad) se excluye del todo si el sandbox exige rechazar
+		-- sin match.
+		local unrestrictedMerged = {}
+		for srcTier = 4, 6 do
+			if srcTier < 6 and #tiers[srcTier] > 0 then
+				hasStrictCandidate = true
+			end
+			if srcTier < 6 or not strictNoMatch then
+				for _, live in ipairs(tiers[srcTier]) do
+					table.insert(unrestrictedMerged, { live = live, affinityTier = srcTier })
+				end
+			end
+		end
+		table.sort(unrestrictedMerged, unrestrictedDepositCandidateBetter)
+		for i = 1, #unrestrictedMerged do
+			local cand = unrestrictedMerged[i]
+			local live = cand.live
+			local hasSpace = GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
+			if detailOn then
+				GlobalStorageSiK.Log.detail("Router", "pickDepositTarget | tier=" .. tostring(cand.affinityTier)
+					.. " nodeId=" .. tostring((live.entry or {}).id) .. " hasSpace=" .. tostring(hasSpace))
+			end
+			if hasSpace then
+				local reason = cand.affinityTier == 4 and "afinidad mismo item"
+					or (cand.affinityTier == 5 and "afinidad taxonomica" or "contenedor sin restriccion")
+				if debugOn then
+					GlobalStorageSiK.Log.debug("Router", string.format("RESULT tier=%s nodeId=%s (%s)",
+						tostring(cand.affinityTier), tostring((live.entry or {}).id), reason))
+				end
+				return live
 			end
 		end
 		if strictNoMatch and not hasStrictCandidate then

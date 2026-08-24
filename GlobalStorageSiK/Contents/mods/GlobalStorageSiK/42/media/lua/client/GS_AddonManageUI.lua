@@ -22,6 +22,7 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_AddonRegistry"
 require "GS_AddonRecipes"
+require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
 require "GS_TerminalUI_Chrome"
 require "GS_TerminalUI_Scroll"
@@ -66,6 +67,39 @@ local function moduleRequirementText(def)
 	return table.concat(names, " / ")
 end
 
+--- Huella de los materiales de la receta base del modulo (chasis/cabezal/
+--- placa, etc.) - BUG REAL cerrado (2026-08-23, reportado explicitamente:
+--- "la ventana no refleja en tiempo real los materiales de fabricacion").
+--- statusSignature() nunca incluia esto, asi que aunque OnContainerUpdate ya
+--- disparaba refresh() en cada cambio de inventario, refresh() lo descartaba
+--- de inmediato porque la firma completa no habia cambiado - la tarjeta de
+--- receta (chasis 0/1, cabezal 0/1, nivel de electricidad) se quedaba
+--- obsoleta hasta cambiar de pestaña o reabrir la ventana, mientras que
+--- "conoce la receta" (via revista) SI formaba parte de la firma y por eso
+--- se actualizaba al instante. Barato: getModuleIngredients() son pocos
+--- items (2-4 tipicamente), getItemCountRecurse por item ya es la misma
+--- llamada que hace el propio recipe card.
+---@param player IsoPlayer|nil
+---@param def table
+---@return string
+local function ingredientSignature(player, def)
+	local ingDefs = GlobalStorageSiK.AddonRecipes.getModuleIngredients(def)
+	if #ingDefs == 0 or not player or not player.getInventory then
+		return "0"
+	end
+	local inv = player:getInventory()
+	local parts = {}
+	for i = 1, #ingDefs do
+		local ing = ingDefs[i]
+		local have = ing.item and (inv:getItemCountRecurse(ing.item) or 0) or 0
+		parts[#parts + 1] = tostring(have)
+	end
+	local skillHave = GlobalStorageSiK.CraftUtils and GlobalStorageSiK.CraftUtils.getElectricityLevel
+		and GlobalStorageSiK.CraftUtils.getElectricityLevel(player) or 0
+	parts[#parts + 1] = tostring(skillHave)
+	return table.concat(parts, ",")
+end
+
 --- Firma corta del estado actual, para no reconstruir si no cambio nada
 --- (mismo motivo que GS_ReaderAcquireUI/GS_PCAcquireUI: evita que la
 --- ventana "salte" con cada tick de refresco si nada cambio de verdad).
@@ -83,7 +117,7 @@ local function statusSignature(player, def, networkId, anchor, installed)
 	local uninstallDiskItem = GlobalStorageSiK.Addons.uninstallDiskItem()
 	local hasUninstallDisk = uninstallDiskItem and player and player:getInventory()
 		and (player:getInventory():getItemCountRecurse(uninstallDiskItem) or 0) >= 1
-	return string.format("%s|%s|%s|%s|%s", tostring(modActive), tostring(isInstalled), tostring(knowsMag), tostring(canInstall), tostring(hasUninstallDisk))
+	return string.format("%s|%s|%s|%s|%s|%s", tostring(modActive), tostring(isInstalled), tostring(knowsMag), tostring(canInstall), tostring(hasUninstallDisk), ingredientSignature(player, def))
 end
 
 function GS_AddonManageUI:initialise()
@@ -349,7 +383,16 @@ function GS_AddonManageUI:buildLayout()
 		local hasDisk = not def.installDiskItem or def.installDiskItem == ""
 			or (inv and (inv:getItemCountRecurse(def.installDiskItem) or 0) >= 1)
 		local hasMagazine = self.player and GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(self.player, def.id)
-		canInstall = hasModule and hasDisk and hasMagazine
+		-- BUG REAL cerrado (2026-08-23, pedido explicito: "no veo la
+		-- disquetera como requisito global de todas las instalaciones, en su
+		-- modal, junto al resto de requisitos") - este bloque nunca
+		-- comprobaba ni mostraba la disquetera (aceptando inventario O
+		-- instalada como addon, hasReaderAvailable) como requisito, pese a
+		-- que el servidor SI la exige (hasRequiredInstallItems) - "Instalar"
+		-- podia aparecer habilitado sin ella y el jugador nunca veia ese
+		-- requisito en ningun lado de esta ventana.
+		local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
+		canInstall = hasReader and hasModule and hasDisk and hasMagazine
 
 		local reqLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonReqInstallTitle"), 0.82, 0.85, 0.9, 1, UIFont.Small, true)
 		reqLbl:initialise()
@@ -366,6 +409,9 @@ function GS_AddonManageUI:buildLayout()
 		local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, cardTop, textW, 10)
 		self:addChild(card)
 		y = y + 8
+		local readerType = GlobalStorageSiK.Config and GlobalStorageSiK.Config.ITEM_TERMINAL_READER
+		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
+		y = y + 6
 		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, moduleRequirementText(def), hasModule)
 		y = y + 6
 		if def.installDiskItem and def.installDiskItem ~= "" then

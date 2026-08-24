@@ -55,21 +55,54 @@ end
 --- Compara dos nodos candidatos para saber cual es mejor destino (true si a
 --- es mejor que b, para ordenar de mejor a peor).
 --- La especificidad/tier ya se compara antes de llamar a esta funcion.
---- Dentro del mismo tier: 1) contenedor, 2) zona, 3) ID estable. Esto hace que
---- la prioridad solo ordene candidatos equivalentes y nunca adelante una
---- categoria generica frente a una coincidencia o afinidad mejores.
+--- Dentro del mismo tier: 1) zona, 2) contenedor, 3) ID estable - prioridad de
+--- ZONA primero (2026-08-24, pedido explicito del usuario: "lo mas normal es
+--- que el jugador no toque el campo de zona; si lo toca, es porque quiere que
+--- primero se revise esa zona" - mas amplio/deliberado que un solo contenedor
+--- cuando se configura, asi que decide antes). Esto hace que la prioridad
+--- solo ordene candidatos equivalentes y nunca adelante una categoria
+--- generica frente a una coincidencia o afinidad mejores.
 ---@param a table live entry candidato
 ---@param b table live entry candidato
 ---@param zonePriorityOf table<string, number>
 ---@return boolean
 local function candidateBetter(a, b, zonePriorityOf)
 	local ea, eb = a.entry or {}, b.entry or {}
-	local pa = tonumber(ea.priority) or 50
-	local pb = tonumber(eb.priority) or 50
-	if pa ~= pb then return pa < pb end
 	local za = zonePriorityOf[ea.zoneId] or tonumber(a.zonePriority) or tonumber(ea.zonePriority) or 50
 	local zb = zonePriorityOf[eb.zoneId] or tonumber(b.zonePriority) or tonumber(eb.zonePriority) or 50
 	if za ~= zb then return za < zb end
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
+	return tostring(ea.id or "") < tostring(eb.id or "")
+end
+
+--- Compara candidatos SIN categoria/filtro configurado (familia "sin
+--- restriccion", antes tiers 4/5/6 separados): aqui la PRIORIDAD (zona
+--- primero, contenedor despues - mismo orden que candidateBetter arriba)
+--- manda antes que la afinidad (pedido explicito del usuario, 2026-08-24 -
+--- antes la afinidad exacta/taxonomica ganaba siempre y un contenedor nuevo
+--- vacio con prioridad alta nunca podia atraer objetos de una estanteria
+--- vieja que ya los contenia, porque esa estanteria se autocalificaba mejor
+--- tier por afinidad consigo misma). La afinidad solo desempata entre
+--- candidatos que comparten AMBAS prioridades (zona Y contenedor) - cambiar
+--- la prioridad de un contenedor/zona SI afecta al resultado de la afinidad,
+--- no es un criterio aislado. Mismo cambio en paralelo en GS_Router.lua
+--- (unrestrictedDepositCandidateBetter) para que Auto-ordenar y el deposito
+--- manual decidan igual.
+---@param a table candidato { live=table, affinityTier=number }
+---@param b table candidato { live=table, affinityTier=number }
+---@param zonePriorityOf table<string, number>
+---@return boolean
+local function unrestrictedCandidateBetter(a, b, zonePriorityOf)
+	local ea, eb = a.live.entry or {}, b.live.entry or {}
+	local za = zonePriorityOf[ea.zoneId] or tonumber(a.live.zonePriority) or tonumber(ea.zonePriority) or 50
+	local zb = zonePriorityOf[eb.zoneId] or tonumber(b.live.zonePriority) or tonumber(eb.zonePriority) or 50
+	if za ~= zb then return za < zb end
+	local pa = tonumber(ea.priority) or 50
+	local pb = tonumber(eb.priority) or 50
+	if pa ~= pb then return pa < pb end
+	if a.affinityTier ~= b.affinityTier then return a.affinityTier < b.affinityTier end
 	return tostring(ea.id or "") < tostring(eb.id or "")
 end
 
@@ -123,6 +156,7 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 	end
 
 	local bestByTier = {}
+	local bestUnrestricted = nil
 	local fullType = item.getFullType and item:getFullType() or nil
 	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch
 		and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
@@ -137,22 +171,31 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 			local isSelf = (live.container == fromLive.container)
 			local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
 			if hasSpace then
-				local destinationTier = matchTier
-				if matchTier == 4 then
-					destinationTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(
-						item, i, affinityIndex, isSelf)
-				end
-				if destinationTier and (destinationTier < 6 or not strictNoMatch) then
-					local current = bestByTier[destinationTier]
+				if matchTier < 4 then
+					-- Categoria/filtro configurado a mano: sin cambios, sigue
+					-- ganando siempre a la familia "sin restriccion" de abajo.
+					local current = bestByTier[matchTier]
 					if not current or candidateBetter(live, current.live, session.zonePriorityOf) then
-						bestByTier[destinationTier] = { live = live, index = i }
+						bestByTier[matchTier] = { live = live, index = i }
+					end
+				else
+					-- Sin categoria configurada: la prioridad del contenedor
+					-- manda, la afinidad solo desempata (ver unrestrictedCandidateBetter).
+					local affinityTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(
+						item, i, affinityIndex, isSelf)
+					if affinityTier < 6 or not strictNoMatch then
+						local candidate = { live = live, index = i, affinityTier = affinityTier }
+						if not bestUnrestricted
+							or unrestrictedCandidateBetter(candidate, bestUnrestricted, session.zonePriorityOf) then
+							bestUnrestricted = candidate
+						end
 					end
 				end
 			end
 		end
 	end
 
-	for tierIdx = 1, 6 do
+	for tierIdx = 1, 3 do
 		local best = bestByTier[tierIdx]
 		if best then
 			if best.live.container == fromLive.container then
@@ -160,6 +203,12 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 			end
 			return best.live, best.index, tierIdx
 		end
+	end
+	if bestUnrestricted then
+		if bestUnrestricted.live.container == fromLive.container then
+			return nil, nil, nil
+		end
+		return bestUnrestricted.live, bestUnrestricted.index, bestUnrestricted.affinityTier
 	end
 	return nil, nil, nil
 end

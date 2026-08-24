@@ -9,6 +9,8 @@ require "GS_Network"
 require "GS_AddonRegistry"
 require "GS_Permissions"
 require "GS_I18n"
+require "GS_Log"
+require "GS_InventorySync"
 -- Registra el addon "Reader" (ver GS_ReaderAddon.lua) - require aqui, no
 -- desde GS_AddonRegistry.lua, porque necesita que AddonRegistry.register ya
 -- exista (este fichero carga siempre despues, nunca antes).
@@ -208,15 +210,22 @@ function GlobalStorageSiK.Addons.serializeForTerminal(networkId, anchor)
 end
 
 --- Crea ítem de módulo en inventario del jugador.
+--- BUG REAL cerrado (2026-08-23, reportado explicitamente: "el periferico
+--- nunca vuelve al inventario al desinstalar" - confirmado tras 3 pruebas
+--- aisladas del usuario, con datos de servidor mostrando "itemGiven=true" a
+--- pesar de que el jugador nunca lo recibia): esto llamaba a `inv:AddItem`
+--- directamente, sin pasar por el patron de sincronizacion MP ya establecido
+--- en `GS_InventorySync.lua` (usado en el resto del mod) - en servidor,
+--- `AddItem` en crudo muta el objeto Lua autoritativo pero nunca transmite
+--- el alta al cliente, asi que el item se creaba "de verdad" (de ahi que el
+--- log dijera exito) pero jamas llegaba a la pantalla del jugador. Ahora usa
+--- `GlobalStorageSiK.InventorySync.addToPlayer`, el mismo helper publico que
+--- ya gestiona `sendAddItemToContainer`/lotes en MP.
 ---@param player IsoPlayer
 ---@param fullType string
 ---@return InventoryItem|nil
 local function giveModuleItem(player, fullType)
 	if not player or not fullType or fullType == "" then
-		return nil
-	end
-	local inv = player:getInventory()
-	if not inv then
 		return nil
 	end
 	local item = nil
@@ -226,7 +235,9 @@ local function giveModuleItem(player, fullType)
 		item = InventoryItemFactory.CreateItem(fullType)
 	end
 	if item then
-		inv:AddItem(item)
+		if not GlobalStorageSiK.InventorySync.addToPlayer(player, item) then
+			return nil
+		end
 	end
 	return item
 end
@@ -241,17 +252,17 @@ end
 function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
 	if not def then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonUnknownMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonUnknownMsg")
 	end
 	if not GlobalStorageSiK.AddonRegistry.isModActive(addonId) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonModInactiveMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonModInactiveMsg")
 	end
 	if not GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(player, addonId) then
 		-- Antes texto fijo en español, se le mostraba literal a cualquier
 		-- jugador sea cual sea su idioma (reportado: un jugador ingles vio
 		-- este mensaje en español). GS_I18n.text() ya se usa asi en servidor
 		-- para otros mensajes (ver GS_Server.lua, IGUI_GS_PCAcquireFailBook).
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonStatusNeedMagazine")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonStatusNeedMagazine")
 	end
 	-- BUG REAL cerrado (2026-08-22, reportado en Steam Workshop y confirmado
 	-- en auditoria: "un admin debe poder instalar addons, configurar
@@ -262,14 +273,14 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	-- al mismo nivel que el resto de herramientas de gestion (zonas,
 	-- contenedores): admin O propietario.
 	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerInstallAddonsMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerInstallAddonsMsg")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)
 	if not key then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_InvalidTerminalMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidTerminalMsg")
 	end
 	if GlobalStorageSiK.Addons.isInstalled(networkId, anchor, addonId) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonAlreadyInstalledMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonAlreadyInstalledMsg")
 	end
 	-- Igual que instalar el terminal en un PC: hace falta el lector
 	-- universal en el inventario principal (autoridad de servidor, no basta
@@ -278,13 +289,13 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	local hasItems, itemsReason = GlobalStorageSiK.AddonRegistry.hasRequiredInstallItems(player, def, networkId, anchor)
 	if not hasItems then
 		if itemsReason == "reader" then
-			return false, GlobalStorageSiK.I18n.text("IGUI_GS_NeedReaderMainInventoryMsg")
+			return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NeedReaderMainInventoryMsg")
 		end
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_MissingInstallDiskMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_MissingInstallDiskMsg")
 	end
 	local inv = player:getInventory()
 	if not inv or not def.itemType then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_InvalidInventoryMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidInventoryMsg")
 	end
 	-- Cualquiera de los tiers del modulo sirve para instalar (ver
 	-- GS_AddonRegistry.moduleItemTypes) - se recuerda EXACTAMENTE cual se
@@ -303,9 +314,20 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 		end
 	end
 	if not moduleItem then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_MissingModuleMsg")
+		GlobalStorageSiK.Log.debug("Addons", "installFailed",
+			"addonId=" .. tostring(addonId) .. " reason=no_module_found candidateTypes=" .. tostring(#candidateTypes))
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_MissingModuleMsg")
 	end
-	inv:Remove(moduleItem)
+	-- Traza dirigida (2026-08-23, pedido explicito del usuario tras reporte
+	-- de que la impresora/pizarra no se consumia al instalar y no volvia al
+	-- retirar): confirma con datos reales el fullType exacto que se
+	-- encontro/elimino, no una suposicion.
+	GlobalStorageSiK.Log.debug("Addons", "installConsuming",
+		"addonId=" .. tostring(addonId) .. " moduleItemType=" .. tostring(moduleItemType)
+			.. " itemId=" .. tostring(moduleItem.getID and moduleItem:getID() or "?"))
+	-- Mismo bug real y mismo arreglo que giveModuleItem() - inv:Remove()
+	-- en crudo nunca transmitia la baja al cliente en MP.
+	GlobalStorageSiK.InventorySync.removeItem(inv, moduleItem)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local net = registry.networks[networkId]
@@ -319,7 +341,9 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end
-	return true, GlobalStorageSiK.I18n.text("IGUI_GS_AddonInstalledMsg")
+	GlobalStorageSiK.Log.debug("Addons", "installOk",
+		"addonId=" .. tostring(addonId) .. " key=" .. tostring(key) .. " recordedItemType=" .. tostring(moduleItemType))
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonInstalledMsg")
 end
 
 --- Retira addon y devuelve el módulo al inventario.
@@ -332,25 +356,25 @@ end
 function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
 	if not def then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonUnknownMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonUnknownMsg")
 	end
 	-- Mismo criterio y mismo bug real que install() arriba - admin O
 	-- propietario, no solo propietario.
 	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_OnlyOwnerRemoveAddonsMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRemoveAddonsMsg")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)
 	if not key then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_InvalidTerminalMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidTerminalMsg")
 	end
 	if not GlobalStorageSiK.Addons.isInstalled(networkId, anchor, addonId) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_AddonNotInstalledHereMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonNotInstalledHereMsg")
 	end
 	-- Operar el disquete de desinstalacion exige el Lector a mano, igual que
 	-- cualquier otra ejecucion/grabacion de programa (ver
 	-- GS_DiskProgramming.lua) - instalado en esta red o llevado encima.
 	if not GlobalStorageSiK.Addons.hasReaderAvailable(player, networkId, anchor) then
-		return false, GlobalStorageSiK.I18n.text("IGUI_GS_NeedReaderNetworkOrInventoryMsg")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NeedReaderNetworkOrInventoryMsg")
 	end
 	-- Disquete de desinstalacion: se exige en el inventario pero NO se
 	-- consume (igual que installDiskItem al instalar - ver
@@ -361,19 +385,29 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	if uninstallDiskItem then
 		local inv = player:getInventory()
 		if not inv or (inv:getItemCountRecurse(uninstallDiskItem) or 0) < 1 then
-			return false, GlobalStorageSiK.I18n.text("IGUI_GS_NeedUninstallDiskMsg")
+			return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NeedUninstallDiskMsg")
 		end
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = registry.networks[networkId]
 	local installedType = def.itemType
+	local hadRecord = false
 	if net and net.addonInstalls and net.addonInstalls[key] and net.addonInstalls[key][addonId] then
 		installedType = net.addonInstalls[key][addonId].itemType or def.itemType
+		hadRecord = true
 		net.addonInstalls[key][addonId] = nil
 	end
-	giveModuleItem(player, installedType)
+	local given = giveModuleItem(player, installedType)
+	GlobalStorageSiK.Log.debug("Addons", "uninstallReturn",
+		"addonId=" .. tostring(addonId) .. " key=" .. tostring(key) .. " hadRecord=" .. tostring(hadRecord)
+			.. " installedType=" .. tostring(installedType) .. " itemGiven=" .. tostring(given ~= nil))
+	if not given then
+		GlobalStorageSiK.Log.error("Addons", "uninstallReturnFailed",
+			"addonId=" .. tostring(addonId) .. " installedType=" .. tostring(installedType)
+				.. " - giveModuleItem() no genero el item, el jugador no recibio nada")
+	end
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end
-	return true, GlobalStorageSiK.I18n.text("IGUI_GS_AddonRemovedMsg")
+	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonRemovedMsg")
 end

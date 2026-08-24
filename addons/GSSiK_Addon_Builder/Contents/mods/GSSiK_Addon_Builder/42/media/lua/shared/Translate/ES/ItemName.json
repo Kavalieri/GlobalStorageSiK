@@ -3,14 +3,14 @@
 	"GSSiK_Addon_Builder.GS_DigitalWhiteboard_Frame": "Marco de pizarra GS",
 	"GSSiK_Addon_Builder.GS_DigitalWhiteboard_Screen": "Panel de pizarra GS",
 	"GSSiK_Addon_Builder.GS_DigitalWhiteboard_Stylus": "Lápiz óptico GS",
-	"GSSiK_Addon_Builder.GS_FloppyDisk_Builder": "20 - Disquete: Builder GS",
-	"GSSiK_Addon_Builder.GS_Manual_Builder": "GS Mensual de Red: Builder",
-	"GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram": "20 - GS Programación: Disquete Builder",
+	"GSSiK_Addon_Builder.GS_FloppyDisk_Builder": "20 - Disquete: Constructor GS",
+	"GSSiK_Addon_Builder.GS_Manual_Builder": "GS Mensual de Red: Constructor",
+	"GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram": "20 - GS Programación: Disquete Constructor",
 	"ItemName_GSSiK_Addon_Builder.GS_DigitalWhiteboard": "Pizarra Digital GS",
 	"ItemName_GSSiK_Addon_Builder.GS_DigitalWhiteboard_Frame": "Marco de pizarra GS",
 	"ItemName_GSSiK_Addon_Builder.GS_DigitalWhiteboard_Screen": "Panel de pizarra GS",
 	"ItemName_GSSiK_Addon_Builder.GS_DigitalWhiteboard_Stylus": "Lápiz óptico GS",
-	"ItemName_GSSiK_Addon_Builder.GS_FloppyDisk_Builder": "20 - Disquete: Builder GS",
-	"ItemName_GSSiK_Addon_Builder.GS_Manual_Builder": "GS Mensual de Red: Builder",
-	"ItemName_GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram": "20 - GS Programación: Disquete Builder"
+	"ItemName_GSSiK_Addon_Builder.GS_FloppyDisk_Builder": "20 - Disquete: Constructor GS",
+	"ItemName_GSSiK_Addon_Builder.GS_Manual_Builder": "GS Mensual de Red: Constructor",
+	"ItemName_GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram": "20 - GS Programación: Disquete Constructor"
 }

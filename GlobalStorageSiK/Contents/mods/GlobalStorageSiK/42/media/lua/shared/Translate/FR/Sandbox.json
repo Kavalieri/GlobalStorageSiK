@@ -89,6 +89,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead": "   >> Détection de lecture",
 	"Sandbox_GlobalStorageSiK_DebugCatZones": "   >> Création de zones / limite",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menu contextuel des objets",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Installation/désinstallation d'addons",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Nécessite le mode débogage. Résume la sélection de destination pour les dépôts et Auto Sort. Les décisions par nœud restent dans le bloc >>> DÉTAIL séparé.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transfert d'objets à distance",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permet d'insérer et de retirer des objets du réseau via l'interface du terminal sans marcher physiquement jusqu'au conteneur. Désactivez pour une expérience plus réaliste.",

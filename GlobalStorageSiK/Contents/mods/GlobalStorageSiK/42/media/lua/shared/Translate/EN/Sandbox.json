@@ -100,6 +100,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatLiteratureRead_tooltip": "Requires Debug mode ON. Logs, per literature row shown in Storage, whether the recipe probe succeeded and what it returned, so the already-read checkmark can be verified against real data instead of guesses.",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Item context menu",
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions_tooltip": "Requires Debug mode ON. Logs every time the inventory right-click context menu fires and whether the Storage window is visible at that moment, to diagnose why the Transfer option is not showing up.",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Addon install/uninstall",
+	"Sandbox_GlobalStorageSiK_DebugCatAddons_tooltip": "Requires Debug mode ON. Logs the exact item searched/removed from inventory when installing an addon, and whether the item was actually generated when uninstalling it.",
 	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus": "      >>> DETAIL: per-container bonus",
 	"Sandbox_GlobalStorageSiK_DebugDetailCapacityBonus_tooltip": "Requires Debug mode and Capacity bonus. High-volume sublog: one line per live container with a detected personal bonus, on every terminal refresh. Enable only for a targeted capacity diagnosis.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Remote item transfer",

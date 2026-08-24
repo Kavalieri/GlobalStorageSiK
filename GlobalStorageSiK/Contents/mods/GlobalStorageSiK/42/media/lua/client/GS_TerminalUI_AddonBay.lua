@@ -33,6 +33,28 @@ local FLOPPY_ICON_PATH = "media/textures/Item_GS_FloppyDisk_Blank.png"
 
 local T = GlobalStorageSiK.I18n.text
 
+-- BUG REAL cerrado (2026-08-23, pedido explicito del usuario): las ranuras
+-- de Craft/Builder/Reader mostraban un nombre generico fijo por titleKey
+-- ("Craft", "Constructor", "Lector"), mientras que Tablet mostraba el
+-- nombre real del periferico ("Antena WiFi GS") solo porque su titleKey
+-- estaba redactado a mano con ese mismo texto - inconsistencia entre
+-- addons, no una diferencia de diseño intencional. Ahora TODAS las ranuras
+-- resuelven el nombre real del item instalable (def.itemType) via
+-- I18n.typeDisplayName (misma fuente que ItemName.json, ya traducida a los
+-- 10 idiomas del juego para el item en si) - titleKey queda como fallback
+-- solo si el addon no define itemType.
+---@param def table
+---@return string
+local function addonSlotLabel(def)
+	if def.itemType and def.itemType ~= "" and GlobalStorageSiK.I18n.typeDisplayName then
+		local name = GlobalStorageSiK.I18n.typeDisplayName(def.itemType)
+		if name and name ~= "" then
+			return name
+		end
+	end
+	return T(def.titleKey or "IGUI_GS_AddonUnknown")
+end
+
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 
 local SLOT_GAP = 16
@@ -98,7 +120,7 @@ local function measureBayLayout(defs, availW)
 
 	for i = 1, count do
 
-		local label = T(defs[i].titleKey or "IGUI_GS_AddonUnknown")
+		local label = addonSlotLabel(defs[i])
 
 		maxLabelW = math.max(maxLabelW, tm:MeasureStringX(UIFont.Small, label))
 
@@ -223,7 +245,7 @@ function GlobalStorageSiK.TerminalAddonBay.addBay(scroll, x, y, innerW, defs, ct
 
 			end
 
-			local label = T(def.titleKey or "IGUI_GS_AddonUnknown")
+			local label = addonSlotLabel(def)
 
 			local tw = getTextManager():MeasureStringX(UIFont.Small, label)
 
