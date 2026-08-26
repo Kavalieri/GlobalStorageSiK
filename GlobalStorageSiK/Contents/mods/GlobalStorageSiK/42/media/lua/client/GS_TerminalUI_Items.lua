@@ -2,7 +2,7 @@
 	GlobalStorageSiK - Pestaña de ítems del terminal (iconos, orden, menú contextual)
 	Autor: SiK
 	Fecha: 2025-06-24
-	Descripción: Lista virtual con NIVirtualScrollView (NeatUI) o pool legacy.
+	Descripción: Lista virtual propia SiK UI con pool reutilizable.
 ]]
 
 require "ISUI/ISPanel"
@@ -18,9 +18,11 @@ require "GS_WithdrawMenu"
 require "GS_QuantityPrompt"
 require "GS_Log"
 require "GS_ContextMenuUi"
+require "GS_NodeHighlight"
 require "GS_ContainerTargets"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Table"
+require "GS_SiK_UI_Core"
 require "GS_ItemNetworkTooltip"
 require "GS_NetworkReadAction"
 
@@ -29,10 +31,18 @@ GlobalStorageSiK.TerminalItems = {}
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local ICON_SIZE = 32
-local ROW_H = ICON_SIZE + 8
-local HEADER_H = FONT_HGT_SMALL + 10
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = math.max(TABLE_METRICS.rowHeight, ICON_SIZE + 8)
+local HEADER_H = TABLE_METRICS.headerHeight
 local DRAG_THRESHOLD = 6
 local ITEM_TEXTURE_CACHE = {}
+local ITEM_TABLE_COLUMNS = {
+	{ key = "displayName", titleKey = "IGUI_GS_ColName", flex = 1.5, minWidth = 180, pad = 6 },
+	{ key = "category", titleKey = "IGUI_GS_ColCategory", flex = 1.0, minWidth = 130, pad = 6 },
+	{ key = "zone", titleKey = "IGUI_GS_ColZone", flex = 0.9, minWidth = 110, pad = 6 },
+	{ key = "count", titleKey = "IGUI_GS_ColCount", align = "right", measureValues = { "999999" }, pad = 8 },
+}
+local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 4 }
 
 ---@param panel ISPanel
 ---@param fullType string|nil
@@ -119,7 +129,16 @@ local function handleRowClick(panel, row)
 	if not data or not data.fullType then
 		return
 	end
-	local idx = row.rowIndex or findItemIndex(panel, data.fullType) or 1
+	-- BUG REAL (auditoria post-migracion SiK_UI, dev35): `row.rowIndex` es el
+	-- indice de la fila POOLEADA/visual, reasignado por `bindItemRowIndex` en
+	-- cada `refreshItems()` - si un scroll o refresco de datos ocurre entre el
+	-- mousedown y el mouseup de un clic (o durante un Shift-click posterior),
+	-- puede quedar apuntando a un dato distinto del que el usuario clico de
+	-- verdad, descuadrando el ancla de rango Shift. `findItemIndex` busca por
+	-- identidad real (`fullType`) en el dataset actual `panel._lastItems`,
+	-- siempre correcto independientemente del pool - preferirlo siempre,
+	-- `row.rowIndex` queda solo como reserva si la busqueda no encuentra nada.
+	local idx = findItemIndex(panel, data.fullType) or row.rowIndex or 1
 	if isCtrlKeyDown and isCtrlKeyDown() then
 		toggleRowSelection(panel, data.fullType)
 	elseif isShiftKeyDown and isShiftKeyDown() then
@@ -138,7 +157,7 @@ end
 ---@param font UIFont|nil
 ---@return string
 local function truncateText(text, maxW, font)
-	return GlobalStorageSiK.TerminalChrome.truncateText(text, maxW, font or UIFont.Small)
+	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, font or UIFont.Small)
 end
 
 GlobalStorageSiK.TerminalItems.ROW_H = ROW_H
@@ -534,12 +553,63 @@ local function isLiteratureReadSafe(player, row)
 	return false
 end
 
+--- Nombre de zona del nodo indicado, ya sincronizado en terminalState.nodes
+--- (cada nodo ya trae zoneName, ver GS_Server.lua:serializeNodes) - sin
+--- llamada de red aparte.
+---@param nodes table[]
+---@param nodeId string
+---@return string|nil
+local function findNodeZoneName(nodes, nodeId)
+	for i = 1, #nodes do
+		if nodes[i].id == nodeId then
+			-- "or nil" en vez de devolver zoneName tal cual: una cadena
+			-- vacia es VERDADERA en Lua (solo nil/false son falsy), asi que
+			-- un "zoneName or T(...)" en el llamante NUNCA caeria al
+			-- fallback "Global" si zoneName llegara como "" en vez de nil -
+			-- se quedaria en blanco de verdad, sin mostrar nada.
+			local zn = nodes[i].zoneName
+			if zn == "" then return nil end
+			return zn
+		end
+	end
+	return nil
+end
+
+--- Columna "Zona" (dev26 ronda 4quinquies, pedido explicito del usuario):
+--- nombre de la zona donde esta almacenado este tipo de item. Un fullType
+--- agregado puede repartirse en VARIOS contenedores (ver data.locations,
+--- GS_Index.lua) - si todos caen en la misma zona se muestra su nombre, si
+--- no se muestra un aviso generico en vez de elegir una zona al azar.
+---@param terminal GS_TerminalUI|nil
+---@param data table|nil
+---@return string
+local function resolveZoneLabel(terminal, data)
+	local locations = data and data.locations
+	if not terminal or not locations or #locations == 0 then
+		return "—"
+	end
+	local nodes = terminal.terminalState and terminal.terminalState.nodes or {}
+	local zoneName, multiple = nil, false
+	for i = 1, #locations do
+		local zn = findNodeZoneName(nodes, locations[i].nodeId) or T("IGUI_GS_ProtocolGlobal")
+		if zoneName == nil then
+			zoneName = zn
+		elseif zoneName ~= zn then
+			multiple = true
+		end
+	end
+	if multiple then
+		return T("IGUI_GS_ColZoneMultiple")
+	end
+	return zoneName or "—"
+end
+
 --- Ordena filas según clave y dirección.
 ---@param rows table[]
 ---@param sortKey string
 ---@param ascending boolean
 ---@return table[]
-local function sortKeyValue(row, sortKey)
+local function sortKeyValue(row, sortKey, terminal)
 	if sortKey == "count" then
 		return row.count or 0
 	end
@@ -549,6 +619,9 @@ local function sortKeyValue(row, sortKey)
 		end
 		return string.lower(tostring(row.category or ""))
 	end
+	if sortKey == "zone" then
+		return string.lower(resolveZoneLabel(terminal, row))
+	end
 	local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
 	return string.lower(tostring(name or row.fullType or ""))
 end
@@ -557,15 +630,32 @@ end
 ---@param rows table[]
 ---@param sortKey string
 ---@param ascending boolean
+---@param terminal GS_TerminalUI|nil solo lo necesita sortKey=="zone"
 ---@return table[]
-local function sortRows(rows, sortKey, ascending)
+local function sortRows(rows, sortKey, ascending, terminal)
 	local sorted = {}
 	for i = 1, #rows do
 		sorted[i] = rows[i]
 	end
+	-- Precalculado UNA vez por fila (O(N)) ANTES de ordenar para las claves
+	-- cuya resolucion no es gratis, en vez de dentro del comparador de
+	-- table.sort - que llama a sortKeyValue O(N log N) veces (dos por
+	-- comparacion). "zone" recorre data.locations x terminalState.nodes sin
+	-- indice (ver resolveZoneLabel); "category" ya llamaba a
+	-- ItemTaxonomy.resolve, mismo tipo de coste desde antes de esta ronda.
+	-- Sin este cache, ordenar por Zona en una red con un catalogo grande
+	-- multiplicaria ese coste por O(N log N) en vez de O(N) - justo el riesgo
+	-- de rendimiento senalado al revisar data.locations.
+	local cache = nil
+	if sortKey == "zone" or sortKey == "category" then
+		cache = {}
+		for i = 1, #sorted do
+			cache[sorted[i]] = sortKeyValue(sorted[i], sortKey, terminal)
+		end
+	end
 	table.sort(sorted, function(a, b)
-		local av = sortKeyValue(a, sortKey)
-		local bv = sortKeyValue(b, sortKey)
+		local av = cache and cache[a] or sortKeyValue(a, sortKey, terminal)
+		local bv = cache and cache[b] or sortKeyValue(b, sortKey, terminal)
 		if av == bv then
 			return (a.fullType or "") < (b.fullType or "")
 		end
@@ -898,9 +988,34 @@ local function openItemContextMenu(listPanel, terminal, data)
 			end)
 		end)
 
-		GlobalStorageSiK.WithdrawMenu.addFlatToContext(cm, player, data, function(rowData, amount, targetKey)
+		-- BUG REAL reportado por el usuario (2026-08-26): "el menu contextual
+		-- del almacen es muy grande... las opciones de transferencia deben ir
+		-- dentro del submenu de Retirar". addFlatToContext volcaba TODAS las
+		-- opciones de retiro (destino, cantidades, seleccion) sueltas en la
+		-- raiz del menu - GlobalStorageSiK.WithdrawMenu.addToContext YA
+		-- construia exactamente el submenu "Retirar" agrupado que hacia
+		-- falta (usado en otro punto del proyecto), simplemente no se llamaba
+		-- aqui todavia. Cero codigo nuevo, solo la llamada correcta.
+		GlobalStorageSiK.WithdrawMenu.addToContext(cm, player, data, function(rowData, amount, targetKey)
 			withdrawFromRowData(terminal, rowData, amount, targetKey)
 		end, getSelectedRows(listPanel))
+
+		-- "Localizar objeto" (dev26 ronda 4quinquies, ver Documentacion/
+		-- pending-work/DEFERRED.md): ilumina TODOS los contenedores reales que
+		-- aportan a esta fila agregada (data.locations, ver GS_Index.lua) con
+		-- el mismo sistema seguro ya usado en la pestaña Nodos
+		-- (GS_NodeHighlight.highlightNodes) - nunca un resaltado propio nuevo,
+		-- misma proteccion contra parpadeo/coste de render repetido.
+		if data.locations and #data.locations > 0 then
+			cm:addOption(T("IGUI_GS_LocateItem"), player, function()
+				local nodeIds = {}
+				for i = 1, #data.locations do
+					nodeIds[#nodeIds + 1] = data.locations[i].nodeId
+				end
+				local allNodes = terminal.terminalState and terminal.terminalState.nodes or {}
+				GlobalStorageSiK.NodeHighlight.highlightNodes(nodeIds, allNodes)
+			end)
+		end
 
 		GlobalStorageSiK.ContextMenuUi.raiseMenu(cm)
 	end)
@@ -921,7 +1036,7 @@ local function openItemContextMenu(listPanel, terminal, data)
 	GlobalStorageSiK.ContextMenuUi.scheduleTerminalRestore(menuState)
 end
 
---- Crea fila de ítem (pool virtual o NIVirtualScrollView).
+--- Crea una fila reutilizable de la lista virtual SiK UI.
 ---@param scroll ISPanel
 ---@param listPanel ISPanel
 ---@param terminal GS_TerminalUI
@@ -943,7 +1058,7 @@ local function createItemRow(scroll, listPanel, terminal)
 		ISPanel.prerender(self)
 		local data = self.itemData
 		local selected = data and self.listPanel and isRowSelected(self.listPanel, data.fullType)
-		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), selected)
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), selected)
 		if data and GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			local types = GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes
 			if types and data.fullType and types[data.fullType] then
@@ -954,7 +1069,7 @@ local function createItemRow(scroll, listPanel, terminal)
 			end
 		end
 		if data then
-			local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+			local pal = GlobalStorageSiK.SiK_UI.PALETTE
 			local tex = itemTexture(data)
 			local iconY = math.floor((self.height - ICON_SIZE) / 2)
 			if tex then
@@ -971,22 +1086,29 @@ local function createItemRow(scroll, listPanel, terminal)
 					self:drawTexture(tick, 6, iconY - 1, 1, 1, 1, 1)
 				end
 			end
-			local textX = 6 + ICON_SIZE + 8
+			local columns = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
+				self.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
+			local nameCol, catCol, zoneCol, countCol = columns[1], columns[2], columns[3], columns[4]
+			local textX = nameCol.x + 6 + ICON_SIZE + 8
 			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
 			local cat = GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
+			local zoneLabel = self._gsZoneLabel or "—"
 			local count = tostring(data.count or 0)
 			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-			local catX = math.floor(self.width * 0.55)
-			local nameMaxW = catX - textX - 8
+			local catX = catCol.x + catCol.pad
+			local zoneX = zoneCol.x + zoneCol.pad
+			local nameMaxW = nameCol.finish - textX - 8
 			-- Reserva de espacio para la columna Cant. (numero corto, pero con
 			-- margen holgado: hay contenedores con miles de unidades) antes de
-			-- truncar la categoria - sin esto, una categoria/subcategoria larga
-			-- (p.ej. "Herramienta / Arma - Arma de hoja corta") se dibujaba
-			-- entera y se solapaba visualmente con la cantidad.
-			local catMaxW = self.width - catX - 54
+			-- truncar categoria/zona - sin esto, un texto largo (p.ej.
+			-- "Herramienta / Arma - Arma de hoja corta") se dibujaba entero y se
+			-- solapaba visualmente con la cantidad.
+			local catMaxW = catCol.finish - catX - catCol.pad
+			local zoneMaxW = zoneCol.finish - zoneX - zoneCol.pad
 			self:drawText(truncateText(name, nameMaxW, UIFont.Small), textX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 			self:drawText(truncateText(cat, catMaxW, UIFont.Small), catX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-			self:drawTextRight(count, self.width - 8, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+			self:drawText(truncateText(zoneLabel, zoneMaxW, UIFont.Small), zoneX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+			self:drawTextRight(count, countCol.finish - countCol.pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		end
 
 		-- Tooltip al pasar el raton: en TODA la fila (icono/nombre/categoria)
@@ -1105,11 +1227,16 @@ end
 ---@param data table|nil
 local function updateItemRow(row, data)
 	row.itemData = data
+	row._gsZoneLabel = data and resolveZoneLabel(row.terminal, data) or nil
 end
 
 ---@param panel ISPanel
-local function bindItemRowIndex(row, data, panel)
+local function bindItemRowIndex(row, data, panel, dataIndex)
 	updateItemRow(row, data)
+	row.rowIndex = dataIndex
+	if dataIndex then
+		return
+	end
 	row.rowIndex = nil
 	if not data or not panel._lastItems then
 		return
@@ -1123,35 +1250,12 @@ local function bindItemRowIndex(row, data, panel)
 	end
 end
 
---- Actualiza filas visibles del pool virtual (legacy; NIVirtualScrollView no lo usa).
+--- Actualiza las filas visibles de la lista virtual SiK UI.
 ---@param listPanel ISPanel
 function GlobalStorageSiK.TerminalItems.updateVirtualRows(listPanel)
 	local scroll = listPanel and listPanel.itemScroll
-	if scroll and scroll._gsScrollMode == "neat_virtual" then
-		return
-	end
-	local items = listPanel and listPanel._lastItems
-	if not scroll or not items or not listPanel.itemRowPool then
-		return
-	end
-
-	local yScroll = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-	local firstIdx = math.floor(yScroll / ROW_H) + 1
-	local rowW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-
-	for i = 1, #listPanel.itemRowPool do
-		local row = listPanel.itemRowPool[i]
-		local dataIdx = firstIdx + i - 1
-		if dataIdx <= #items then
-			row:setX(4)
-			row:setY((i - 1) * ROW_H)
-			row:setWidth(rowW)
-			row.rowIndex = dataIdx
-			updateItemRow(row, items[dataIdx])
-			row:setVisible(true)
-		else
-			row:setVisible(false)
-		end
+	if scroll and scroll.refreshItems then
+		scroll:refreshItems()
 	end
 end
 
@@ -1169,19 +1273,11 @@ local function ensureColumnHeader(panel, terminal)
 	panel.columnHeader.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.columnHeader.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableHeaderLine(self)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		local w = self.width
 		local parent = self.parentPanel
 		local sortKey = parent and parent.itemsSortKey or "displayName"
 		local asc = parent and parent.itemsSortAsc ~= false
-		local arrow = asc and " v" or " ^"
-		local nameLbl = T("IGUI_GS_ColName") .. (sortKey == "displayName" and arrow or "")
-		local catLbl = T("IGUI_GS_ColCategory") .. (sortKey == "category" and arrow or "")
-		local cntLbl = T("IGUI_GS_ColCount") .. (sortKey == "count" and arrow or "")
-		self:drawText(nameLbl, 6 + ICON_SIZE + 8, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(catLbl, math.floor(w * 0.55), 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(cntLbl, w - 12, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(
+			self, ITEM_TABLE_COLUMNS, sortKey, asc, 2, UIFont.Small, ITEM_TABLE_OPTIONS)
 	end
 	panel.columnHeader.parentPanel = panel
 	panel.columnHeader.terminal = terminal
@@ -1190,14 +1286,10 @@ local function ensureColumnHeader(panel, terminal)
 		if not parent then
 			return false
 		end
-		local w = self.width
-		if x < w * 0.45 then
-			parent.itemsSortKey = "displayName"
-		elseif x < w * 0.78 then
-			parent.itemsSortKey = "category"
-		else
-			parent.itemsSortKey = "count"
-		end
+		local layout = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
+			self.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
+		local column = GlobalStorageSiK.SiK_UI.Table.columnAtX(layout, x)
+		parent.itemsSortKey = column and column.key or "displayName"
 		if parent.itemsSortKey == (parent._lastSortKey or "") then
 			parent.itemsSortAsc = not parent.itemsSortAsc
 		else
@@ -1215,7 +1307,7 @@ local function ensureColumnHeader(panel, terminal)
 	panel:addChild(panel.columnHeader)
 end
 
---- Crea scroll de ítems (NIVirtualScrollView NeatUI; fallback pool legacy dinámico).
+--- Crea la lista virtual propia SiK UI del Almacén.
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI
 local function disposeItemScroll(panel)
@@ -1230,70 +1322,37 @@ local function disposeItemScroll(panel)
 		panel.itemScroll:destroy()
 	end
 	panel.itemScroll = nil
-	panel.itemRowPool = nil
-	panel._usesNeatVirtual = nil
 end
 
 local function ensureItemScroll(panel, terminal)
-	if panel.itemScroll and (panel.itemScroll._gsScrollMode == "neat_virtual" or panel.itemScroll._gsScrollMode == "rows") then
+	if panel.itemScroll and panel.itemScroll._gsScrollMode == "sik_virtual" then
 		return
 	end
 	disposeItemScroll(panel)
 
 	local listGap = GlobalStorageSiK.TerminalScroll.listBottomGap()
 	local scrollH = math.max(120, (panel.height or 200) - HEADER_H - listGap - 4)
-	local scrollBarW = GlobalStorageSiK.TerminalChrome.scrollBarWidth()
+	local scrollBarW = GlobalStorageSiK.SiK_UI.scrollBarWidth()
 	local itemW = math.max(120, (panel.width or 200) - scrollBarW - 8)
 
-	local virtual = GlobalStorageSiK.TerminalScroll.createVirtual(panel, 0, HEADER_H + 2, panel.width, scrollH, ROW_H, 0)
-	if virtual then
-		panel.itemScroll = virtual
-		panel._usesNeatVirtual = true
-		virtual:setOnCreateItem(function()
-			local row = createItemRow(virtual, panel, terminal)
-			row:setWidth(itemW)
-			return row
-		end)
-		virtual:setOnUpdateItem(function(row, data)
-			bindItemRowIndex(row, data, panel)
-		end)
-		return
-	end
-
-	local scroll = GlobalStorageSiK.TerminalScroll.createLegacy(panel, 0, HEADER_H + 2, panel.width, scrollH, "rows")
+	local scroll = GlobalStorageSiK.SiK_UI.Table.createVirtual(
+		panel, 0, HEADER_H + 2, panel.width, scrollH, ROW_H, 0,
+		ITEM_TABLE_COLUMNS, nil, nil, ITEM_TABLE_OPTIONS)
 	scroll._gsScrollBarGap = 12
 	scroll._gsBarRightPad = 6
 	panel.itemScroll = scroll
-	panel.itemRowPool = {}
-
-	local poolSize = GlobalStorageSiK.TerminalScroll.rowPoolSizeForViewport(scrollH, ROW_H)
-	for i = 1, poolSize do
+	scroll:setOnCreateItem(function()
 		local row = createItemRow(scroll, panel, terminal)
-		row:setVisible(false)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
-		panel.itemRowPool[i] = row
-	end
-
-	scroll.onMouseWheel = function(self, del)
-		GlobalStorageSiK.TerminalScroll.applyWheelDelta(self, del, ROW_H)
-		panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(self)
-		GlobalStorageSiK.TerminalItems.updateVirtualRows(panel)
-		return true
-	end
+		row:setWidth(itemW)
+		return row
+	end)
+	scroll:setOnUpdateItem(function(row, data, dataIndex)
+		bindItemRowIndex(row, data, panel, dataIndex)
+	end)
 	GlobalStorageSiK.TerminalScroll.bindScrollEvents(scroll, function()
 		panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-		GlobalStorageSiK.TerminalItems.updateVirtualRows(panel)
+		scroll:refreshItems()
 	end)
-
-	local basePrerender = scroll.prerender
-	scroll.prerender = function(self)
-		if basePrerender then
-			basePrerender(self)
-		else
-			ISPanel.prerender(self)
-		end
-		GlobalStorageSiK.TerminalItems.updateVirtualRows(panel)
-	end
 end
 
 --- Lista opciones de depósito (jugador + contenedores cercanos).
@@ -1329,32 +1388,13 @@ function GlobalStorageSiK.TerminalItems.getDepositSelection(combo)
 	return combo.selected or 1
 end
 
---- Fuerza actualización de filas visibles en NIVirtualScrollView.
+--- Fuerza la actualización de filas visibles en la lista SiK UI.
 ---@param scroll ISUIElement|nil
 local function forceVirtualListRefresh(scroll)
-	if not scroll or scroll._gsScrollMode ~= "neat_virtual" or not scroll.refreshItems then
+	if not scroll or scroll._gsScrollMode ~= "sik_virtual" or not scroll.refreshItems then
 		return
 	end
-	scroll.visibleStartIndex = -1
-	scroll.visibleEndIndex = -1
 	scroll:refreshItems()
-	if scroll.onUpdateItem and scroll.itemPool and scroll.dataSource then
-		local startIndex = scroll.visibleStartIndex or 1
-		local endIndex = scroll.visibleEndIndex or 0
-		local poolIndex = 1
-		for dataIndex = startIndex, endIndex do
-			if poolIndex > #scroll.itemPool then
-				break
-			end
-			local row = scroll.itemPool[poolIndex]
-			local data = scroll.dataSource[dataIndex]
-			if row and data then
-				scroll.onUpdateItem(row, data)
-				row:setVisible(true)
-			end
-			poolIndex = poolIndex + 1
-		end
-	end
 end
 
 --- Construye o refresca el scroll de ítems.
@@ -1370,7 +1410,7 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 	panel.itemsSortKey = panel.itemsSortKey or "displayName"
 	panel.itemsSortAsc = panel.itemsSortAsc ~= false
 	panel._selectedKeys = panel._selectedKeys or {}
-	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc)
+	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc, terminal)
 	-- BUG REAL (Shift+Click seleccionaba rango incorrecto/inconsistente,
 	-- reportado 2026-08-16): _lastItems se asignaba ANTES de ordenar, con la
 	-- referencia SIN ORDENAR - pero sortRows() copia a una tabla NUEVA y
@@ -1391,11 +1431,15 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 		panel.columnHeader:setWidth(panel.width)
 	end
 
-	if #items == 0 then
-		if panel.emptyLbl then
+        if #items == 0 then
+		if panel.itemScroll and panel.itemScroll.setDataSource then
+			panel.itemScroll:setDataSource({}, false)
+			panel._itemsScrollOffset = 0
+		end
+                if panel.emptyLbl then
 			panel.emptyLbl:setVisible(true)
 		else
-			local _epal = GlobalStorageSiK.TerminalChrome.PALETTE
+			local _epal = GlobalStorageSiK.SiK_UI.PALETTE
 			panel.emptyLbl = ISLabel:new(10, HEADER_H + 8, FONT_HGT_SMALL, T("IGUI_GS_NoItems"), _epal.textMuted[1], _epal.textMuted[2], _epal.textMuted[3], 1, UIFont.Small, true)
 			panel.emptyLbl:initialise()
 			panel:addChild(panel.emptyLbl)
@@ -1417,32 +1461,13 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 			panel.itemScroll:setWidth(panel.width)
 			panel.itemScroll:setHeight(scrollH)
 			panel.itemScroll:setVisible(true)
-			if panel.itemScroll._gsScrollMode == "neat_virtual" and panel.itemScroll.setDataSource then
-				panel.itemScroll:setDataSource(items, true)
-				-- forceVirtualListRefresh es imprescindible aqui: setDataSource
-				-- por si sola solo cambia la referencia de datos, pero
-				-- NIVirtualScrollView no vuelve a llamar onUpdateItem en filas
-				-- YA visibles si el numero de filas y el scroll no cambian (solo
-				-- lo hace al desplazarse a un indice nuevo). Sin esto, tras
-				-- retirar/depositar sin cerrar la ventana, la fila seguia
-				-- mostrando la cantidad vieja hasta cerrar y reabrir el
-				-- Almacen (el usuario reporto justo este sintoma: cantidad
-				-- visual desincronizada tras transferir desde el menu
-				-- contextual, con los items moviendose bien de verdad).
-				forceVirtualListRefresh(panel.itemScroll)
-				GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
-				GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
-				GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
-					panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
-			else
-				GlobalStorageSiK.TerminalScroll.setContentHeight(panel.itemScroll, math.max(scrollH, #items * ROW_H + 4))
-				GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
-				GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
-				GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
-					panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
-				GlobalStorageSiK.TerminalItems.updateVirtualRows(panel)
-			end
-			panel._itemsScrollOffset = savedOffset
+			panel.itemScroll:setDataSource(items, true)
+			GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
+			forceVirtualListRefresh(panel.itemScroll)
+			GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
+			GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
+				panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
+			panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(panel.itemScroll)
 		end
 	end
 end
@@ -1474,43 +1499,21 @@ function GlobalStorageSiK.TerminalItems.syncLayout(panel, terminal)
 	panel.itemScroll:setWidth(panel.width)
 	panel.itemScroll:setHeight(scrollH)
 	panel.itemScroll:setVisible(#items > 0)
-	if panel.itemScroll._gsScrollMode == "neat_virtual" then
-		local scrollBarW = GlobalStorageSiK.TerminalChrome.scrollBarWidth()
-		local itemW = math.max(120, panel.width - scrollBarW - 8)
-		if panel.itemScroll.setConfig then
-			panel.itemScroll:setConfig(ROW_H, 0)
-		end
-		if panel.itemScroll.itemPool then
-			for _, row in ipairs(panel.itemScroll.itemPool) do
-				if row and row.setWidth then
-					row:setWidth(itemW)
-				end
+	local scrollBarW = GlobalStorageSiK.SiK_UI.scrollBarWidth()
+	local itemW = math.max(120, panel.width - scrollBarW - 8)
+	panel.itemScroll:setConfig(ROW_H, 0)
+	if panel.itemScroll.itemPool then
+		for _, row in ipairs(panel.itemScroll.itemPool) do
+			if row and row.setWidth then
+				row:setWidth(itemW)
 			end
 		end
-		if #items > 0 and panel.itemScroll.setDataSource then
-			panel.itemScroll:setDataSource(items, false)
-		end
-		forceVirtualListRefresh(panel.itemScroll)
-		GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
-		GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
-		GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
-			panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
-	elseif panel.itemScroll._gsScrollMode == "rows" and panel.itemRowPool then
-		local needed = GlobalStorageSiK.TerminalScroll.rowPoolSizeForViewport(scrollH, ROW_H)
-		while #panel.itemRowPool < needed do
-			local row = createItemRow(panel.itemScroll, panel, terminal)
-			row:setVisible(false)
-			GlobalStorageSiK.TerminalScroll.addChild(panel.itemScroll, row)
-			panel.itemRowPool[#panel.itemRowPool + 1] = row
-		end
-		if #items > 0 then
-			GlobalStorageSiK.TerminalScroll.setContentHeight(panel.itemScroll, math.max(scrollH, #items * ROW_H + 4))
-		end
-		GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
-		GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
-		GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
-			panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
-		GlobalStorageSiK.TerminalItems.updateVirtualRows(panel)
 	end
-	panel._itemsScrollOffset = savedOffset
+	panel.itemScroll:setDataSource(items, true)
+	GlobalStorageSiK.TerminalScroll.setScrollOffset(panel.itemScroll, savedOffset)
+	forceVirtualListRefresh(panel.itemScroll)
+	GlobalStorageSiK.TerminalScroll.ensureScrollBars(panel.itemScroll)
+	GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
+		panel.itemScroll, #items * ROW_H + 4 > scrollH + 2)
+	panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(panel.itemScroll)
 end

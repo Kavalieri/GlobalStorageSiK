@@ -19,6 +19,31 @@ GlobalStorageSiK.Index = {}
 ---@param byType table<string, table>
 ---@param container ItemContainer
 ---@param nodeId string
+--- Añade/acumula la contribucion de UN nodo al desglose de ubicaciones de una
+--- fila agregada - dev26 ronda 4quinquies (pestaña Almacén: columna "Zona" y
+--- "Localizar objeto" del menú contextual). Antes solo se guardaba
+--- `nodeId`/`existing.nodeId` del PRIMER nodo fusionado, sin actualizarlo
+--- nunca mas - para un ítem repartido en varios contenedores, ese valor era
+--- practicamente arbitrario (dependia del orden de iteracion de `pairs()`,
+--- no determinista entre refrescos) y por tanto no fiable para resaltar "el"
+--- contenedor real. `locations` guarda TODAS las contribuciones reales.
+---@param row table fila agregada existente (byType[fullType])
+---@param nodeId string
+---@param count number
+local function addLocation(row, nodeId, count)
+	if not nodeId or not count or count <= 0 then
+		return
+	end
+	row.locations = row.locations or {}
+	for i = 1, #row.locations do
+		if row.locations[i].nodeId == nodeId then
+			row.locations[i].count = row.locations[i].count + count
+			return
+		end
+	end
+	row.locations[#row.locations + 1] = { nodeId = nodeId, count = count }
+end
+
 local function mergeLiveContainer(byType, container, nodeId)
 	if not container then
 		return
@@ -41,8 +66,10 @@ local function mergeLiveContainer(byType, container, nodeId)
 				count = row.count,
 				nodeId = nodeId,
 			}
+			addLocation(byType[fullType], nodeId, row.count)
 		else
 			existing.count = existing.count + row.count
+			addLocation(existing, nodeId, row.count)
 		end
 	end
 end
@@ -71,8 +98,10 @@ local function mergeNodeSnapshot(byType, node)
 				count = row.count or 0,
 				nodeId = node.id,
 			}
+			addLocation(byType[fullType], node.id, row.count or 0)
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
+			addLocation(existing, node.id, row.count or 0)
 		end
 	end
 end

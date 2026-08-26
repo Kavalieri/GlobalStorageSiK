@@ -27,7 +27,7 @@ require "ISUI/ISTextEntryBox"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalAccess"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_Config"
 require "GS_Sandbox"
 
@@ -74,7 +74,7 @@ local function recoverySummaryLines(row, textW)
 	}
 	local lines = {}
 	for i = 1, #texts do
-		local wrapped = GlobalStorageSiK.TerminalChrome.wrapTextLines(texts[i], textW, UIFont.Small)
+		local wrapped = GlobalStorageSiK.SiK_UI.wrapTextLines(texts[i], textW, UIFont.Small)
 		for j = 1, #wrapped do lines[#lines + 1] = wrapped[j] end
 	end
 	return lines
@@ -95,7 +95,7 @@ end
 ---@return table[] labels, number yAfter
 local function addWrappedLabel(panel, x, y, w, text, r, g, b)
 	local labels = {}
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, w, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, w, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -123,7 +123,7 @@ local function refreshRecoverySelection(panel)
 		local label = row and ((row.activeTerminals or 0) > 0
 			and T("IGUI_GS_NetLinkAction") or T("IGUI_GS_NetReactivateAction"))
 			or T("IGUI_GS_NetLinkAction")
-		panel.networkActionBtn._gsNeatLabel = label
+		panel.networkActionBtn._sikUiLabel = label
 		panel.networkActionBtn:setEnable(row ~= nil)
 	end
 end
@@ -132,7 +132,7 @@ end
 ---@return number
 local function measurePanelHeight(rows)
 	local textW = PANEL_W - PAD * 2
-	local introLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(
+	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
 		T("IGUI_GS_InstallReaderIntro", GlobalStorageSiK.Sandbox.getTerminalNetworkRange()),
 		textW, UIFont.Small)
 	local h = PAD
@@ -146,7 +146,7 @@ local function measurePanelHeight(rows)
 	-- ajuste de linea - puede ocupar mas de 1 linea segun idioma/longitud).
 	h = h + FONT_HGT_SMALL + 6
 	if #rows == 0 then
-		local noNetLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(
+		local noNetLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
 			T("IGUI_GS_InstallReaderNoNetworks"), textW, UIFont.Small)
 		h = h + #noNetLines * (FONT_HGT_SMALL + LINE_GAP) + 4
 	else
@@ -169,7 +169,7 @@ function GS_TerminalInstallReaderChoice:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self.statusMsg = nil
@@ -244,8 +244,10 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 	local pad = PAD
 	local rows = self.networkRows or {}
 
-	self.linkTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_InstallReaderLinkTitle"), 0.88, 0.9, 0.94, 1, UIFont.Small, true)
-	self.linkTitle:initialise()
+	-- createSectionLabel (pedido 2026-08-26, "ajustarse a la nueva UI y las
+	-- herramientas ya generadas") en vez del ISLabel suelto con color a mano
+	-- que tenia antes - mismo titulo de bloque que el resto del proyecto.
+	self.linkTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_InstallReaderLinkTitle"))
 	self:addChild(self.linkTitle)
 	y = y + FONT_HGT_SMALL + 6
 
@@ -259,7 +261,7 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 	else
 		self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
 		self.networkCombo:initialise()
-		GlobalStorageSiK.TerminalChrome.styleComboBox(self.networkCombo)
+		GlobalStorageSiK.SiK_UI.styleComboBox(self.networkCombo)
 		for i = 1, #rows do
 			local row = rows[i]
 			local status = (row.activeTerminals or 0) > 0
@@ -277,10 +279,10 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 			self.networkInfoLbls[#self.networkInfoLbls + 1] = lbl
 			y = y + FONT_HGT_SMALL + LINE_GAP
 		end
-		self.networkActionBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.networkActionBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_NetLinkAction"), self, function()
 				self:onLinkTo(selectedRecoveryRow(self))
-			end)
+			end, nil, true)
 		self:addChild(self.networkActionBtn)
 		self.networkBtns[1] = self.networkActionBtn
 		y = y + BTN_H + 6
@@ -301,7 +303,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 
 	local introLabels = {}
 	local linkRange = GlobalStorageSiK.Sandbox.getTerminalNetworkRange()
-	local introLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(
+	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
 		T("IGUI_GS_InstallReaderIntro", linkRange), textW, UIFont.Small)
 	for i = 1, #introLines do
 		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, introLines[i], 0.78, 0.82, 0.88, 1, UIFont.Small, true)
@@ -313,20 +315,19 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	y = y + 6
 
 	-- ── Bloque "Red nueva": nombre + Crear, un solo clic ────────────────────
-	self.newTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_InstallReaderNewTitle"), 0.88, 0.9, 0.94, 1, UIFont.Small, true)
-	self.newTitle:initialise()
+	self.newTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_InstallReaderNewTitle"))
 	self:addChild(self.newTitle)
 	y = y + FONT_HGT_SMALL + 4
 
-	local createW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(
+	local createW = GlobalStorageSiK.SiK_UI.measureButtonWidth(
 		T("IGUI_GS_InstallReaderCreateBtn"), UIFont.Small, 14, 100, math.floor(textW * 0.4))
 	self.nameEntry = ISTextEntryBox:new(T("IGUI_GS_InstallReaderNameDefault"), pad, y, textW - createW - 6, ENTRY_H)
 	self.nameEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.nameEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
 	self.nameEntry:instantiate()
 	self:addChild(self.nameEntry)
 
-	self.createBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.createBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + textW - createW, y, createW, ENTRY_H, T("IGUI_GS_InstallReaderCreateBtn"), self, function()
 			self:onCreateNew()
 		end)
@@ -351,13 +352,13 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	y = y + FONT_HGT_SMALL + pad
 
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(introLabels)
-	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(title)
-	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.statusLabel)
-	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.newTitle)
-	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.linkTitle)
-	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.noNetworksLbls or {})
-	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.networkInfoLbls or {})
+	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(introLabels)
+	GlobalStorageSiK.SiK_UI.makeMousePassthrough(title)
+	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.statusLabel)
+	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.newTitle)
+	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.linkTitle)
+	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.noNetworksLbls or {})
+	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.networkInfoLbls or {})
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "TerminalInstallReaderChoice")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "TerminalInstallReaderChoice")
@@ -403,10 +404,10 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 	end
 	y = y + FONT_HGT_SMALL + pad
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
-	GlobalStorageSiK.TerminalChrome.makeMousePassthrough(self.linkTitle)
-	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.noNetworksLbls or {})
-	GlobalStorageSiK.TerminalChrome.setMouseTransparentAll(self.networkInfoLbls or {})
+	GlobalStorageSiK.SiK_UI.centerModal(self)
+	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.linkTitle)
+	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.noNetworksLbls or {})
+	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.networkInfoLbls or {})
 end
 
 --- Abre el diálogo. `target` = { x, y, z, object } del ordenador ya detectado.
@@ -429,8 +430,8 @@ function GlobalStorageSiK.TerminalInstallReaderChoice.show(player, target)
 	ui.target = target
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalChrome.centerModal(ui)
-	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
+	GlobalStorageSiK.SiK_UI.centerModal(ui)
+	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.TerminalInstallReaderChoice.instance = ui
 end
 

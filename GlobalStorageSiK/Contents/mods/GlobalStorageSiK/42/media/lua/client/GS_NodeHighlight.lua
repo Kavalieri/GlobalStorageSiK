@@ -19,6 +19,7 @@ local state = {
 	zoneId = nil,
 	zoneName = nil,
 	nodeId = nil,
+	nodeIdSet = nil,
 	allNodes = nil,
 	objects = {},
 }
@@ -94,6 +95,16 @@ local function resolveActiveNodes()
 			end
 		end
 	end
+	if state.mode == "nodes" and state.allNodes and state.nodeIdSet then
+		local list = {}
+		for i = 1, #state.allNodes do
+			local node = state.allNodes[i]
+			if node and state.nodeIdSet[node.id] then
+				list[#list + 1] = node
+			end
+		end
+		return list
+	end
 	return {}
 end
 
@@ -148,6 +159,13 @@ local function applyToNodes(nodes, silent)
 		elseif state.mode == "node" and nodes[1] then
 			local name = nodes[1].displayName or nodes[1].name or "?"
 			showHalo(T("IGUI_GS_NodeHighlightOne", name), 140, 230, 170)
+		elseif state.mode == "nodes" then
+			if #nodes == 1 then
+				local name = nodes[1].displayName or nodes[1].name or "?"
+				showHalo(T("IGUI_GS_NodeHighlightOne", name), 140, 230, 170)
+			else
+				showHalo(T("IGUI_GS_NodeHighlightMultiple", found), 140, 230, 170)
+			end
 		end
 	end
 	return found, #nodes
@@ -176,6 +194,7 @@ function GlobalStorageSiK.NodeHighlight.clear()
 	state.zoneId = nil
 	state.zoneName = nil
 	state.nodeId = nil
+	state.nodeIdSet = nil
 	state.allNodes = nil
 end
 
@@ -265,8 +284,37 @@ function GlobalStorageSiK.NodeHighlight.highlightNode(node, allNodes)
 	state.zoneId = nil
 	state.zoneName = nil
 	state.nodeId = node.id
+	state.nodeIdSet = nil
 	state.allNodes = allNodes or state.allNodes or { node }
 	applyToNodes({ node }, false)
+end
+
+--- Ilumina un CONJUNTO arbitrario de contenedores a la vez (dev26 ronda
+--- 4quinquies, "Localizar objeto" desde la pestaña Almacén) - un ítem puede
+--- estar repartido en varios contenedores de zonas DISTINTAS, caso que
+--- highlightZone (una sola zona) y highlightNode (un solo nodo) no cubren.
+--- Reutiliza EXACTAMENTE el mismo camino seguro (applyToNodes,
+--- reapplyAfterRefresh, refreshTracked con su red de seguridad de 400 ticks)
+--- que ya evita el parpadeo/coste de render por re-registro FBO repetido -
+--- nunca un resaltado propio nuevo.
+---@param nodeIds string[] ids de nodo a iluminar
+---@param allNodes table[] lista completa de nodos conocidos (para resolver objetos)
+function GlobalStorageSiK.NodeHighlight.highlightNodes(nodeIds, allNodes)
+	nodeIds = nodeIds or {}
+	if #nodeIds == 0 then
+		return
+	end
+	local set = {}
+	for i = 1, #nodeIds do
+		set[nodeIds[i]] = true
+	end
+	state.mode = "nodes"
+	state.zoneId = nil
+	state.zoneName = nil
+	state.nodeId = nil
+	state.nodeIdSet = set
+	state.allNodes = allNodes or {}
+	applyToNodes(resolveActiveNodes(), false)
 end
 
 Events.OnTick.Add(function()

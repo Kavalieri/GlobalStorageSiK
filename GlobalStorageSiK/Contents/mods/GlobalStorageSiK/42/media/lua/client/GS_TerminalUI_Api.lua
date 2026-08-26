@@ -150,14 +150,35 @@ function GlobalStorageSiK.TerminalUI.show(state)
 end
 
 --- Muestra ventana bloqueada por acceso denegado (sin round-trip al servidor).
----@param reason string|nil
+--- BUG REAL confirmado (2026-08-25, investigacion del cuelgue de cliente al
+--- morir y reclamar): cuando el servidor manda "terminalBlocked" con la
+--- ventana YA abierta, el handler de GS_Client.lua llamaba aqui pasando SOLO
+--- el motivo (reason) - esta funcion reconstruia entonces su PROPIO payload
+--- via buildBlockedPayload (incompleto: sin canClaimOwnership/networkId/
+--- claimTier, nunca los rellena) y forzaba un primer rebuild completo del
+--- panel con esos datos a medias, para que el propio handler, un par de
+--- lineas despues, llamara OTRA VEZ a TerminalBlockedUI.refresh() con el
+--- payload de verdad (completo) del servidor - forzando un SEGUNDO rebuild
+--- completo inmediatamente detras. Cada respuesta periodica del servidor
+--- (pingTerminalAccess, ver GS_TerminalAccessGuard.lua) reconstruia asi la
+--- ventana dos veces en vez de una, ademas de mostrar brevemente el panel
+--- sin el boton de reclamo aunque debiera tenerlo. payloadOrReason acepta
+--- ahora una tabla ya completa (server payload real) ademas del string de
+--- siempre (usado por el resto de llamantes, que no tienen un payload de
+--- servidor a mano) - con tabla, se usa tal cual, sin reconstruir nada.
+---@param payloadOrReason string|table|nil
 ---@param rect table|nil { x, y, w, h }
-function GlobalStorageSiK.TerminalUI.showBlocked(reason, rect)
+function GlobalStorageSiK.TerminalUI.showBlocked(payloadOrReason, rect)
 	if GlobalStorageSiK.TerminalAccessGuard and GlobalStorageSiK.TerminalAccessGuard.ensure then
 		GlobalStorageSiK.TerminalAccessGuard.ensure()
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-	local payload = buildBlockedPayload(player, reason)
+	local payload
+	if type(payloadOrReason) == "table" then
+		payload = payloadOrReason
+	else
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+		payload = buildBlockedPayload(player, payloadOrReason)
+	end
 	local rx = rect and rect.x
 	local ry = rect and rect.y
 	local rw = rect and rect.w

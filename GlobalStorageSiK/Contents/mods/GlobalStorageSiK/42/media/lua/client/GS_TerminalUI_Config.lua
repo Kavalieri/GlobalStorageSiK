@@ -13,7 +13,7 @@ require "GS_I18n"
 require "GS_ItemTaxonomy"
 require "GS_Subcategories"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 
 GlobalStorageSiK.TerminalConfig = {}
 
@@ -63,7 +63,7 @@ function GlobalStorageSiK.TerminalConfig.formatNodeMeta(node)
 	return string.format("%s | %s | %d tipos | %s%s", coords, zone, types, member, status)
 end
 
---- Crea botón de ancho completo con texturas NeatUI.
+--- Crea botón SiK UI de ancho completo.
 ---@param x number
 ---@param y number
 ---@param w number
@@ -73,12 +73,12 @@ end
 ---@return ISButton
 local function createFullButton(x, y, w, title, target, onClick)
 	local h = FONT_HGT_SMALL + 10
-	return GlobalStorageSiK.TerminalChrome.createNeatButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
 end
 
---- Crea botón compacto NeatUI.
+--- Crea botón compacto SiK UI.
 local function createRowButton(x, y, w, h, title, target, onClick)
-	return GlobalStorageSiK.TerminalChrome.createNeatButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
 end
 
 --- Texto de categoría seleccionada en combo (vacío = cualquiera).
@@ -311,7 +311,7 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 	local btnGap = 6
 	local entryW = innerW - renameW - deleteW - btnGap * 2
 
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if not zones or #zones == 0 then
 		local emptyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NoZonesYet"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small, true)
 		emptyLbl:initialise()
@@ -341,7 +341,7 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 
 		row.nameEntry = ISTextEntryBox:new(zone.name or "", pad, y, entryW, ENTRY_H)
 		row.nameEntry:initialise()
-		GlobalStorageSiK.TerminalChrome.styleTextEntry(row.nameEntry)
+		GlobalStorageSiK.SiK_UI.styleTextEntry(row.nameEntry)
 		row.nameEntry:instantiate()
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameEntry)
 
@@ -353,7 +353,7 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 		row.deleteBtn = createRowButton(pad + entryW + btnGap + renameW + btnGap, y, deleteW, ENTRY_H, T("IGUI_GS_DeleteZone"), scroll, function()
 			terminal:onDeleteZone(zone.id)
 		end)
-		GlobalStorageSiK.TerminalChrome.applyDangerButton(row.deleteBtn)
+		GlobalStorageSiK.SiK_UI.applyDangerButton(row.deleteBtn)
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.deleteBtn)
 
 		y = y + ENTRY_H + BLOCK_GAP
@@ -405,7 +405,7 @@ function GlobalStorageSiK.TerminalConfig.buildNodesHeader(panel)
 	end
 	panel.nodesHeaderBuilt = true
 	local pad = panel.contentPad or 8
-	local _pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _pal = GlobalStorageSiK.SiK_UI.PALETTE
 	panel.nodesHelpLbl = ISLabel:new(
 		pad, 0, FONT_HGT_SMALL, T("IGUI_GS_NodesHelpShort"),
 		_pal.textMuted[1], _pal.textMuted[2], _pal.textMuted[3], 1, UIFont.Small, true
@@ -442,16 +442,6 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 			GlobalStorageSiK.TerminalScroll.addChild(scroll, widget)
 		end
 	end
-	local function applyUpdate(category)
-		if terminal and terminal.onUpdateNode then
-			terminal:onUpdateNode(node.id, node.displayName or node.name, category, nil, nil)
-		elseif GlobalStorageSiK.TerminalNodeEditor and GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate then
-			GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, {
-				displayName = node.displayName or node.name,
-				categories  = category and category ~= "" and { category } or {},
-			})
-		end
-	end
 	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
 	local payload = cache[node.id]
 	local source = payload and payload.source or "empty"
@@ -464,30 +454,22 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 	else
 		sourceLbl = T("IGUI_GS_NodeContentsEmpty")
 	end
-	local _rpal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _rpal = GlobalStorageSiK.SiK_UI.PALETTE
 	local srcLabel = ISLabel:new(pad, y, FONT_HGT_SMALL, sourceLbl, _rpal.textMuted[1], _rpal.textMuted[2], _rpal.textMuted[3], 1, UIFont.Small, true)
 	srcLabel:initialise()
 	adopt(srcLabel)
 	y = y + FONT_HGT_SMALL + 6
 
-	if payload and payload.suggestedCategory and payload.suggestedCategory ~= "" then
-		local applyW = math.min(84, math.max(68, math.floor(innerW * 0.22)))
-		local rowY = y
-		local suggest = T("IGUI_GS_NodeSuggestCategory", categoryLabel(payload.suggestedCategory))
-		local labelMaxW = math.max(40, innerW - applyW - pad - 6)
-		local sugLbl = ISLabel:new(
-			pad, rowY + 2, FONT_HGT_SMALL,
-			GlobalStorageSiK.TerminalChrome.truncateText(suggest, labelMaxW, UIFont.Small),
-			_rpal.statusOk[1], _rpal.statusOk[2], _rpal.statusOk[3], 1, UIFont.Small, true
-		)
-		sugLbl:initialise()
-		adopt(sugLbl)
-		local applyBtn = createRowButton(innerW - applyW, rowY, applyW, ENTRY_H, T("IGUI_GS_NodeApplySuggest"), scroll, function()
-			applyUpdate(payload.suggestedCategory)
-		end)
-		adopt(applyBtn)
-		y = rowY + ENTRY_H + 8
-	end
+	-- dev25: bloque legacy "Sugerida: X [Aplicar]" ELIMINADO de aqui - era una
+	-- segunda implementacion, mas vieja e independiente, del mismo concepto
+	-- que ya cubre la tarjeta "Categoria sugerida" (con botones OR/AND y
+	-- deteccion de contradicciones) construida al principio del bloque de
+	-- reglas en GS_TerminalUI_NodeEditor.lua - las dos convivian sin que
+	-- nadie retirase esta cuando se construyo la nueva, dejando un boton
+	-- "Aplicar" suelto (sin OR/AND, sin pasar por detectContradiction) mas
+	-- abajo del todo, bajo "Contenido del contenedor" (bug real con captura
+	-- del usuario). `applyUpdate` e `IGUI_GS_NodeSuggestCategory` quedan sin
+	-- uso aqui a proposito, la tarjeta nueva ya cubre el flujo completo.
 	if #rows == 0 then
 		return y + 4
 	end
@@ -528,7 +510,7 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 	local y = pad
 	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 
-	local _npal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _npal = GlobalStorageSiK.SiK_UI.PALETTE
 	if not nodes or #nodes == 0 then
 		local emptyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NoNodesYet"), _npal.textMuted[1], _npal.textMuted[2], _npal.textMuted[3], 1, UIFont.Small, true)
 		emptyLbl:initialise()
@@ -560,7 +542,7 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 
 		row.nameEntry = ISTextEntryBox:new(node.displayName or node.name or "", pad, y, innerW, ENTRY_H)
 		row.nameEntry:initialise()
-		GlobalStorageSiK.TerminalChrome.styleTextEntry(row.nameEntry)
+		GlobalStorageSiK.SiK_UI.styleTextEntry(row.nameEntry)
 		row.nameEntry:instantiate()
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameEntry)
 		y = y + ENTRY_H + 4
@@ -572,7 +554,7 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 
 		row.catCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, scroll, nil)
 		row.catCombo:initialise()
-		GlobalStorageSiK.TerminalChrome.styleComboBox(row.catCombo)
+		GlobalStorageSiK.SiK_UI.styleComboBox(row.catCombo)
 		GlobalStorageSiK.TerminalConfig.fillCategoryCombo(row.catCombo, categories, primaryCategory)
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.catCombo)
 		y = y + ENTRY_H + 6

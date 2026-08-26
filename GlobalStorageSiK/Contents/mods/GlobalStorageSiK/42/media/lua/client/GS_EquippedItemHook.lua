@@ -5,7 +5,7 @@
 
 	Patrón sidebar hover (ancla zoneBtn en B42).
 	- Logo Workshop: icon.png → media/ui/Sidebar/{48..128}/GS_Off|On_{size}.png
-	- Cabecera: media/ui/GS/GS_Logo_{24,32,48}.png (GS_TerminalUI_Chrome)
+	- Cabecera: media/ui/GS/GS_Logo_{24,32,48}.png (GS_SiK_UI_Core)
 ]]
 
 require "ISUI/ISPanel"

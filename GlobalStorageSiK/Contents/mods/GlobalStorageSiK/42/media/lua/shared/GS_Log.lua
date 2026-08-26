@@ -63,13 +63,36 @@ local AREA_CATEGORY = {
 	ItemTaxonomy = "Inventory",
 	Subcategories = "Inventory",
 	Router = "Router",
-	NodeNaming = "UI",
-	TerminalUI = "UI",
-	-- Categoria propia (pedido explicito 2026-08-18): antes SearchDiag no
-	-- tenia entrada aqui, asi que solo dependia del interruptor maestro
-	-- Modo depuracion y no se podia apagar por separado sin tocar tambien
-	-- cualquier otra traza activa en ese momento.
-	SearchDiag = "Search",
+	-- dev36: categoria "UI" (antes cubria NodeNaming + TerminalUI a la vez,
+	-- sin poder separarlos) retirada y sustituida por un arbol propio "SiK UI"
+	-- con sub-categorias, pedido explicito del usuario para poder depurar
+	-- el framework/interfaz por partes tras la migracion completa de
+	-- NeatUI_Framework a SiK_UI (dev28-dev35). NodeNaming es logica de
+	-- nombrado de terminal (servidor de nombres), no forma parte del
+	-- framework visual - se separa en su propia categoria para no perderla.
+	NodeNaming = "NodeNaming",
+	-- General/framework: apertura de ventana, refresco de pestaña, fallos de
+	-- TerminalUI - antes "UI" (compartida con NodeNaming), ahora bajo el
+	-- arbol SiK UI. Tambien gobierna GS_UIDebug.lua (arbol de widgets, clicks,
+	-- solapes) - ver GlobalStorageSiK.Sandbox.debugCategoryEnabled("SiKUI"),
+	-- sustituye al antiguo interruptor independiente DebugModeUI.
+	TerminalUI = "SiKUI",
+	-- Geometria de columnas de SiK_UI.Table (GS_SiK_UI_Table.lua) - ancho
+	-- resuelto por columna, solo se traza cuando el ancho disponible cambia
+	-- de verdad (resize), nunca por fotograma.
+	SiKUITable = "SiKUITable",
+	-- Motor de scroll/lista virtual (GS_TerminalUI_Scroll.lua) - crecimiento
+	-- de pool y cambios de dataset (Almacen y cualquier lista virtualizada).
+	SiKUIScroll = "SiKUIScroll",
+	-- Pestañas laterales + contrato de extensiones (GS_TerminalUI_TabRail.lua/
+	-- GS_TerminalUI_Extensions.lua) - registro/reutilizacion de panel,
+	-- visibilidad y activacion/cancelacion de clic.
+	SiKUITabs = "SiKUITabs",
+	-- Caja de busqueda de SiK UI (antes "SearchDiag", pedido explicito
+	-- 2026-08-18: sin esta entrada dependia solo del interruptor maestro).
+	-- Renombrada en dev36 para agrupar bajo el mismo arbol SiK UI en vez de
+	-- quedar suelta.
+	SiKUISearch = "SiKUISearch",
 	-- Categoria propia (pedido explicito 2026-08-21, fase dev Better Sorting):
 	-- traza de normalizacion de categorias por item, alto volumen (Log.detail),
 	-- debe poder apagarse sin tocar el resto de diagnosticos activos.

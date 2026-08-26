@@ -11,7 +11,7 @@ require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_PCAcquire"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "TimedActions/GS_AcquirePCAction"
 
 GlobalStorageSiK.PCAcquireUI = {}
@@ -95,7 +95,7 @@ function GS_PCAcquireUI:initialise()
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildLayout()
@@ -131,7 +131,7 @@ function GS_PCAcquireUI:buildLayout()
 	local textW = self.width - pad * 2
 	local y = self.headerHeight + pad
 
-	local introLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_PCAcquireIntro"), textW, UIFont.Small)
+	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_PCAcquireIntro"), textW, UIFont.Small)
 	for _, line in ipairs(introLines) do
 		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.78, 0.82, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -144,31 +144,33 @@ function GS_PCAcquireUI:buildLayout()
 	local sigParts = {}
 	for _, spec in ipairs(lines) do
 		sigParts[#sigParts + 1] = spec.ok and "1" or "0"
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad, y, textW, spec.icon, spec.text, spec.ok)
+		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad, y, textW, spec.icon, spec.text, spec.ok)
 		y = y + 2
 	end
 	self._lastSig = table.concat(sigParts, "")
 	y = y + 10
 
-	self.craftBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, textW, BTN_H, T("IGUI_GS_PCAcquireCraftBtn"), self, function()
+	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
+	-- criterio aplicado a Programacion/disquetera): antes el boton se dejaba
+	-- SIEMPRE activo y solo avisaba con un halo note al pulsar si faltaba
+	-- algo - no era ni ancho completo (sin fullWidth, se encogia al texto)
+	-- ni "claramente bloqueado". Ahora ocupa toda la fila y se pinta
+	-- bloqueado de verdad mientras falte cualquier requisito, con el motivo
+	-- en el tooltip - la revalidacion en el momento del clic deja de hacer
+	-- falta porque un boton bloqueado no puede pulsarse.
+	self.craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, T("IGUI_GS_PCAcquireCraftBtn"), self, function()
 		if not self.player then return end
-		-- Nunca deshabilitar: revalida en el momento del clic y avisa si
-		-- falta algo, en vez de dejar el boton muerto sin explicacion.
-		local _, ready = buildStatusLines(self.player)
-		if not ready then
-			if self.player.setHaloNote then
-				self.player:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
-			end
-			return
-		end
 		ISTimedActionQueue.add(GS_AcquirePCAction:new(self.player))
 		self:destroy()
-	end)
+	end, nil, true, not allReady)
+	if not allReady then
+		self.craftBtn:setTooltip(T("IGUI_GS_CraftMissing"))
+	end
 	self:addChild(self.craftBtn)
 	y = y + BTN_H + pad
 
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
 	-- Centrar verticalmente SOLO la primera vez (apertura inicial): refresh()
 	-- llama a buildLayout() cada vez que cambia el inventario (ej. al
 	-- terminar de craftear una pieza), y sin esta guarda la ventana volvia
@@ -228,8 +230,8 @@ function GlobalStorageSiK.PCAcquireUI.show(player)
 	ui.player = player
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalChrome.centerModal(ui)
-	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
+	GlobalStorageSiK.SiK_UI.centerModal(ui)
+	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.PCAcquireUI.instance = ui
 end
 

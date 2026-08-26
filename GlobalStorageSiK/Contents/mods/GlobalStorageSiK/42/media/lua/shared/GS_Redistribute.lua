@@ -106,14 +106,21 @@ local function unrestrictedCandidateBetter(a, b, zonePriorityOf)
 	return tostring(ea.id or "") < tostring(eb.id or "")
 end
 
---- Cachea el tier por fullType+nodo solo si el nodo no tiene filtros
---- personalizados. Categorías/subcategorías dependen del tipo de script y son
---- estables; nombre/peso/tag pueden depender de la instancia y se reevalúan.
+--- Cachea el tier por fullType+nodo solo si el nodo no tiene filtros/reglas
+--- personalizados NI su zona tiene reglas propias. Categorías/subcategorías
+--- dependen del tipo de script y son estables; nombre/peso/tag (en filtros
+--- legacy o en el motor unificado entry.rules/zone.rules, dev26) pueden
+--- depender de la instancia concreta del item y se reevalúan siempre.
 local function cachedMatchTier(session, nodeIndex, item, fullType)
 	local live = session.liveNodes[nodeIndex]
 	local entry = live and live.entry or {}
-	if (entry.filters and #entry.filters > 0) or not fullType then
-		return GlobalStorageSiK.Router.matchSpecificity(entry, item)
+	local zoneRules = live and live.zoneRules
+	local zoneEnabled = live and live.zoneEnabled
+	local hasInstanceDependentRules = (entry.filters and #entry.filters > 0)
+		or (entry.rules and #entry.rules > 0)
+		or (zoneRules and #zoneRules > 0)
+	if hasInstanceDependentRules or not fullType then
+		return GlobalStorageSiK.Router.matchWithZoneGate(entry, zoneRules, zoneEnabled, item)
 	end
 	local byNode = session.matchTiersByType[fullType]
 	if not byNode then
@@ -122,7 +129,7 @@ local function cachedMatchTier(session, nodeIndex, item, fullType)
 	end
 	local cached = byNode[nodeIndex]
 	if cached ~= nil then return cached ~= false and cached or nil end
-	local tier = GlobalStorageSiK.Router.matchSpecificity(entry, item)
+	local tier = GlobalStorageSiK.Router.matchWithZoneGate(entry, zoneRules, zoneEnabled, item)
 	byNode[nodeIndex] = tier or false
 	return tier
 end

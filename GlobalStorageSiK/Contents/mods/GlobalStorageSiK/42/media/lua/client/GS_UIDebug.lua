@@ -3,8 +3,9 @@
 	Autor: SiK
 	Fecha: 2026-06-30
 	Descripción: Registro completo de la pintada de la UI, clicks y acciones.
-	             Todo gated por la opción sandbox DebugMode: al desactivarla,
-	             cero salida y cero coste (cada helper hace early-return).
+	             Gated por Modo depuración + categoría "SiK UI" (DebugCatSiKUI,
+	             dev36): al desactivar cualquiera de los dos, cero salida y
+	             cero coste (cada helper hace early-return).
 	             Salida en console.txt con prefijo [GS_UI].
 ]]
 
@@ -12,15 +13,21 @@ require "GS_Sandbox"
 
 GlobalStorageSiK.UIDebug = GlobalStorageSiK.UIDebug or {}
 
---- ¿Debug de UI activo? Categoria propia (sandbox DebugModeUI), separada del
---- DebugMode general a proposito - ese inunda la consola con trazas de red
---- en cada comando y el rastro de clics/arbol de widgets se pierde entre el
---- ruido. Activar solo esta si lo que se investiga es clics/capas/layout.
+--- ¿Debug de UI activo? Categoria "SiKUI" (sandbox DebugCatSiKUI) dentro del
+--- arbol de debug estandar del mod - antes interruptor independiente
+--- DebugModeUI, unificado en dev36 bajo el mismo mecanismo generico
+--- DebugCat<X> que usa el resto de categorias (Network/Craft/Inventory...),
+--- pedido explicito del usuario al consolidar todo el debug de la interfaz
+--- bajo un unico arbol "SiK UI" con sub-categorias. Requiere ademas el
+--- interruptor maestro Modo depuracion, igual que antes - ese inunda la
+--- consola con trazas de red en cada comando y el rastro de clics/arbol de
+--- widgets se pierde entre el ruido si no se puede aislar por separado.
 ---@return boolean
 function GlobalStorageSiK.UIDebug.enabled()
 	return GlobalStorageSiK.Sandbox ~= nil
-		and GlobalStorageSiK.Sandbox.debugModeUI ~= nil
-		and GlobalStorageSiK.Sandbox.debugModeUI() == true
+		and GlobalStorageSiK.Sandbox.debugMode ~= nil
+		and GlobalStorageSiK.Sandbox.debugMode() == true
+		and GlobalStorageSiK.Sandbox.debugCategoryEnabled("SiKUI") == true
 end
 
 local function out(line)
@@ -122,8 +129,8 @@ end
 local function isScrollBar(el)
 	local ok, r = pcall(function()
 		return GlobalStorageSiK.TerminalScroll
-			and GlobalStorageSiK.TerminalScroll.isNeatScrollBar
-			and GlobalStorageSiK.TerminalScroll.isNeatScrollBar(el)
+			and GlobalStorageSiK.TerminalScroll.isScrollBarWidget
+			and GlobalStorageSiK.TerminalScroll.isScrollBarWidget(el)
 	end)
 	return ok and r == true
 end

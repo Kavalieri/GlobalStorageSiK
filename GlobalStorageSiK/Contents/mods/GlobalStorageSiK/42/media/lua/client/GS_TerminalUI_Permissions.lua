@@ -13,16 +13,18 @@ require "GS_I18n"
 require "GS_Permissions"
 require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_UILayout"
 require "GS_TerminalUI_MemberEditor"
+require "GS_SiK_UI_Table"
 
 GlobalStorageSiK.TerminalPermissions = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local ROW_H = FONT_HGT_SMALL + 10
-local HEADER_H = FONT_HGT_SMALL + 8
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = TABLE_METRICS.rowHeight
+local HEADER_H = TABLE_METRICS.headerHeight
 local ENTRY_H = FONT_HGT_SMALL + 6
 local ROW_GAP = 6
 local BLOCK_GAP = 10
@@ -46,6 +48,12 @@ local COL_SEEN_W = math.max(
 	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOnline")),
 	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOffline", "99d"))
 ) + 14
+local MEMBER_TABLE_COLUMNS = {
+	{ key = "role", titleKey = "IGUI_GS_PermColRole", width = COL_ROLE_W, pad = COL_ROLE_X },
+	{ key = "name", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 80, pad = 4 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, pad = 0 },
+}
+local MEMBER_TABLE_OPTIONS = { left = 0, right = 8, gap = 12 }
 local ADD_W = 72
 -- v20: fila de miembro simplificada (sin botones "Quitar"/"Roles" inline) -
 -- un clic en la fila abre GS_TerminalUI_MemberEditor.lua, igual patron que
@@ -54,11 +62,11 @@ local ADD_W = 72
 local PERM_UI_VERSION = 20
 
 local function truncate(text, maxW)
-	return GlobalStorageSiK.TerminalChrome.truncateText(text, maxW, UIFont.Small)
+	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, UIFont.Small)
 end
 
 local function createRowButton(x, y, w, h, title, target, onClick)
-	return GlobalStorageSiK.TerminalChrome.createNeatButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
 end
 
 ---@param kind string|nil owner|admin|user|faction
@@ -382,7 +390,7 @@ end
 ---@param kind string
 ---@return number r, number g, number b
 local function roleColor(kind)
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if kind == "owner" then
 		return pal.accent[1], pal.accent[2], pal.accent[3]
 	elseif kind == "admin" then
@@ -410,27 +418,28 @@ local function createMemberRow(host, terminal, ui)
 		ISPanel.prerender(self)
 		local data = self.memberData
 		if not data then return end
-		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
+		local pal = GlobalStorageSiK.SiK_UI.PALETTE
+		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, MEMBER_TABLE_COLUMNS, MEMBER_TABLE_OPTIONS)
 		local rr, rg, rb = roleColor(data.kind)
 		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-		local nameMaxW = math.max(40, self.width - COL_NAME_X - COL_SEEN_W - 8)
-		self:drawText(truncate(memberRoleLabel(data.kind), COL_ROLE_W), COL_ROLE_X, yMid,
+		local nameMaxW = math.max(40, cols[2].width - 8)
+		self:drawText(truncate(memberRoleLabel(data.kind), cols[1].width - cols[1].pad), cols[1].x + cols[1].pad, yMid,
 			rr, rg, rb, 1, UIFont.Small)
 		local nameText = data.displayName or data.name or "?"
 		local nr, ng, nb = pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3]
-		self:drawText(truncate(nameText, nameMaxW), COL_NAME_X, yMid, nr, ng, nb, 1, UIFont.Small)
+		self:drawText(truncate(nameText, nameMaxW), cols[2].x + cols[2].pad, yMid, nr, ng, nb, 1, UIFont.Small)
 		-- Columna "Conexion": puramente informativa (pedido explicito
 		-- 2026-08-22), nunca se usa para inferir ni marcar nada - "Conectado"
 		-- en verde para quien sigue en linea ahora mismo, "Desconectado hace
 		-- X" para el resto. Solo ayuda a detectar a simple vista un caso
 		-- "colgado" que un fallecido normal.
-		local seenX = math.max(COL_NAME_X + nameMaxW + 4, self.width - COL_SEEN_W)
+		local seenX = cols[3].x
 		if data.online then
 			local gr, gg, gb = pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
 			self:drawText(truncate(T("IGUI_GS_AdminOnline"), COL_SEEN_W), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
 		elseif data.lastSeenAt then
-			local seenText = T("IGUI_GS_AdminOffline", GlobalStorageSiK.TerminalChrome.relativeAge(data.lastSeenAt))
+			local seenText = T("IGUI_GS_AdminOffline", GlobalStorageSiK.SiK_UI.relativeAge(data.lastSeenAt))
 			self:drawText(truncate(seenText, COL_SEEN_W), seenX, yMid,
 				pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		end
@@ -671,7 +680,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui._permRowW = rowW
 	ui.terminalRef = terminal
 
-	local _ppal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _ppal = GlobalStorageSiK.SiK_UI.PALETTE
 	ui.secLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_PermSectionTitle"), _ppal.textPrimary[1], _ppal.textPrimary[2], _ppal.textPrimary[3], 1, UIFont.Small, true)
 	ui.secLbl:initialise()
 	addPermWidget(scroll, ui, ui.secLbl)
@@ -695,14 +704,8 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.permTableHeader:initialise()
 	ui.permTableHeader.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableHeaderLine(self)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		self:drawText(T("IGUI_GS_PermColRole"), COL_ROLE_X, 2,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_PermColMemberName"), COL_NAME_X, 2,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_PermColConnection"), math.max(COL_NAME_X, self.width - COL_SEEN_W), 2,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, MEMBER_TABLE_COLUMNS, nil, true,
+			2, UIFont.Small, MEMBER_TABLE_OPTIONS)
 	end
 	ui.permTableHost:addChild(ui.permTableHeader)
 
@@ -720,7 +723,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	-- Avisos de sucesion de propietario (solo visibles para el owner, ver
 	-- syncPermsData): explica que pasa al morir para que el jugador conozca
 	-- el riesgo, en vez de descubrirlo tras perder acceso.
-	ui.successionHintLbl = GlobalStorageSiK.TerminalChrome.createHintLabel(pad, y, T("IGUI_GS_PermSuccessionHint"))
+	ui.successionHintLbl = GlobalStorageSiK.SiK_UI.createHintLabel(pad, y, T("IGUI_GS_PermSuccessionHint"))
 	addPermWidget(scroll, ui, ui.successionHintLbl)
 	y = y + FONT_HGT_SMALL + ROW_GAP
 
@@ -755,7 +758,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	-- aviso breve de abajo (evita el fallo silencioso original).
 	ui.memberPickCombo = ISComboBox:new(pad, y, comboW, ENTRY_H, scroll, nil)
 	ui.memberPickCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(ui.memberPickCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(ui.memberPickCombo)
 	addPermWidget(scroll, ui, ui.memberPickCombo)
 	ui.addMemberBtn = createRowButton(pad + comboW + ROW_GAP, y, 200, ENTRY_H, T("IGUI_GS_AddMember"), scroll, function()
 		local pick = resolveMemberPick(ui)
@@ -776,7 +779,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	-- boton no hacia nada visible). Se auto-oculta comprobando el timestamp
 	-- en su propio render, sin necesitar un tick externo. Texto neutro (no
 	-- "primero...") - el combo ya deja claro que hay que elegir algo.
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	ui.addMemberWarnLbl = ISLabel:new(pad, y + ENTRY_H + 2, FONT_HGT_SMALL, T("IGUI_GS_PermPickNone"),
 		pal.statusWarn[1], pal.statusWarn[2], pal.statusWarn[3], 1, UIFont.Small, true)
 	ui.addMemberWarnLbl:initialise()
@@ -946,7 +949,7 @@ local function layoutPermsBlock(scroll, ui, startY)
 		col:place(ui.noBackupWarnLbl, titleH)
 	end
 	if ui.claimAsAdminBtn and ui.claimAsAdminBtn.isVisible and ui.claimAsAdminBtn:isVisible() then
-		GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.claimAsAdminBtn)
+		GlobalStorageSiK.SiK_UI.fitButtonToLabel(ui.claimAsAdminBtn)
 		col:place(ui.claimAsAdminBtn, ENTRY_H + ROW_GAP)
 	end
 
@@ -957,7 +960,7 @@ local function layoutPermsBlock(scroll, ui, startY)
 		col:place(ui.addBlockTitle, titleH)
 		local rowY = col.cursor
 		if ui.addMemberBtn then
-			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.addMemberBtn)
+			GlobalStorageSiK.SiK_UI.fitButtonToLabel(ui.addMemberBtn)
 		end
 		col:_set(ui.memberPickCombo, pad, rowY, comboW, nil)
 		col:_set(ui.addMemberBtn, pad + comboW + ROW_GAP, rowY, nil, nil)

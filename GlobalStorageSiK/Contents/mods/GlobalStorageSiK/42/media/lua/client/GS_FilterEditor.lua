@@ -11,7 +11,10 @@ require "ISUI/ISTextEntryBox"
 require "ISUI/ISComboBox"
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Window"
+require "GS_TerminalUI_Config"
+require "GS_RulesUI"
 
 GlobalStorageSiK.FilterEditor = {}
 GlobalStorageSiK.FilterEditor.instance = nil
@@ -22,9 +25,17 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local ENTRY_H = FONT_HGT_SMALL + 8
 local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 420
 local RESULT_ROW_H = FONT_HGT_SMALL + 6
 local MAX_RESULTS = 12
+
+--- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua
+--- y GS_TerminalUI_ZoneEditor.lua) - se usa en el borde superior del modal
+--- para reforzar visualmente que operador se esta configurando.
+local RULE_OP_COLOR = {
+	OR  = GlobalStorageSiK.SiK_UI.PALETTE.ruleOr,
+	AND = GlobalStorageSiK.SiK_UI.PALETTE.ruleAnd,
+	NOT = GlobalStorageSiK.SiK_UI.PALETTE.ruleNot,
+}
 
 GS_FilterEditorUI = ISPanel:derive("GS_FilterEditorUI")
 
@@ -44,8 +55,9 @@ local WEIGHT_MODE_LABELS = {
 	lte = "IGUI_GS_FilterModeLte",
 	between = "IGUI_GS_FilterModeBetween",
 }
-local FILTER_TYPES = { "name", "weight", "tag", "item" }
+local FILTER_TYPES = { "category", "name", "weight", "tag", "item" }
 local FILTER_TYPE_LABELS = {
+	category = "IGUI_GS_FilterTypeCategory",
 	name = "IGUI_GS_FilterTypeName",
 	weight = "IGUI_GS_FilterTypeWeight",
 	tag = "IGUI_GS_FilterTypeTag",
@@ -110,10 +122,11 @@ function GS_FilterEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
-	self.filterType = "name"
+	self.operator = self.operator or "OR"
+	self.filterType = self.filterType or "category"
 	self.selectedItem = nil
 	self:buildLayout()
 end
@@ -134,8 +147,20 @@ end
 
 function GS_FilterEditorUI:prerender()
 	ISPanel.prerender(self)
-	GlobalStorageSiK.TerminalChrome.renderPanelBackground(self)
-	self:drawText(T("IGUI_GS_FilterEditorTitle"), self.padding + 2,
+	GlobalStorageSiK.SiK_UI.renderPanelBackground(self)
+	-- Franja superior del color del operador (dev26 ronda 3) - mismo trio
+	-- que las tarjetas de reglas y el modal de contradicciones, refuerza de
+	-- un vistazo que operador se esta configurando sin depender solo del texto.
+	local color = RULE_OP_COLOR[self.operator] or RULE_OP_COLOR.OR
+	self:drawRect(0, 0, self.width, 3, 1, color[1], color[2], color[3])
+	local title = T("IGUI_GS_FilterEditorTitle") .. " - " .. T("IGUI_GS_FilterEditorOperatorLabel", self.operator or "OR")
+	-- Truncar por si acaso (idioma largo, operador largo) en vez de dejar
+	-- que se salga por encima del boton de cerrar como antes (bug real con
+	-- captura del usuario, incluso ya con el panel mas ancho).
+	local closeW = self.closeBtn and self.closeBtn.width or 24
+	local titleMaxW = self.width - self.padding - 4 - closeW - 8
+	title = GlobalStorageSiK.SiK_UI.truncateText(title, titleMaxW, UIFont.Medium)
+	self:drawText(title, self.padding + 2,
 		math.floor((self.headerHeight - FONT_HGT_MEDIUM) / 2), 1, 1, 1, 1, UIFont.Medium)
 	if self.closeBtn then
 		self.closeBtn:bringToTop()
@@ -164,7 +189,7 @@ function GS_FilterEditorUI:buildLayout()
 
 	self.typeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.typeCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(self.typeCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.typeCombo)
 	for i = 1, #FILTER_TYPES do
 		self.typeCombo:addOption(T(FILTER_TYPE_LABELS[FILTER_TYPES[i]]))
 	end
@@ -180,7 +205,9 @@ function GS_FilterEditorUI:buildLayout()
 	self:addChild(self.typeCombo)
 	y = y + ENTRY_H + 10
 
-	if self.filterType == "name" then
+	if self.filterType == "category" then
+		y = self:buildCategoryFields(pad, innerW, y)
+	elseif self.filterType == "name" then
 		y = self:buildNameFields(pad, innerW, y)
 	elseif self.filterType == "weight" then
 		y = self:buildWeightFields(pad, innerW, y)
@@ -191,15 +218,70 @@ function GS_FilterEditorUI:buildLayout()
 	end
 
 	y = y + 6
-	self.addBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, innerW, BTN_H, T("IGUI_GS_FilterAddBtn"), self, function()
+	self.addBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, innerW, BTN_H, T("IGUI_GS_FilterAddBtn"), self, function()
 		self:onAddClicked()
-	end)
+	end, nil, true)
 	self:addChild(self.addBtn)
 	y = y + BTN_H + pad
 
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
 	self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
+end
+
+--- Categoria > Subcategoria > Sub-subcategoria en cascada VERTICAL (a
+--- diferencia de GS_TerminalUI_NodeEditor.lua, que las pone en 3 columnas).
+--- Reutiliza los mismos
+--- helpers compartidos de GS_TerminalUI_Config.lua (mismo catalogo completo,
+--- no solo lo que la red tiene ahora).
+function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
+	local mainLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryMainLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	mainLbl:initialise()
+	self:addChild(mainLbl)
+	y = y + FONT_HGT_SMALL + 2
+
+	self.catMainCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
+	self.catMainCombo:initialise()
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.catMainCombo)
+	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "")
+	self:addChild(self.catMainCombo)
+	y = y + ENTRY_H + 8
+
+	local subLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategorySubLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	subLbl:initialise()
+	self:addChild(subLbl)
+	y = y + FONT_HGT_SMALL + 2
+
+	self.catSubCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
+	self.catSubCombo:initialise()
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.catSubCombo)
+	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {})
+	self:addChild(self.catSubCombo)
+	y = y + ENTRY_H + 8
+
+	local leafLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryLeafLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	leafLbl:initialise()
+	self:addChild(leafLbl)
+	y = y + FONT_HGT_SMALL + 2
+
+	self.catLeafCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
+	self.catLeafCombo:initialise()
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.catLeafCombo)
+	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "")
+	self:addChild(self.catLeafCombo)
+
+	self.catMainCombo.onChange = function()
+		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
+		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {})
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "")
+	end
+	self.catSubCombo.onChange = function()
+		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
+		local subKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "")
+	end
+	y = y + ENTRY_H + 4
+	return y
 end
 
 function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
@@ -210,7 +292,7 @@ function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
 
 	self.nameModeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.nameModeCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(self.nameModeCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.nameModeCombo)
 	for i = 1, #NAME_MODES do
 		self.nameModeCombo:addOption(T(NAME_MODE_LABELS[NAME_MODES[i]]))
 	end
@@ -225,7 +307,7 @@ function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
 
 	self.nameEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
 	self.nameEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.nameEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
 	self.nameEntry:instantiate()
 	self:addChild(self.nameEntry)
 	y = y + ENTRY_H + 4
@@ -240,7 +322,7 @@ function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
 
 	self.weightModeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.weightModeCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(self.weightModeCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.weightModeCombo)
 	for i = 1, #WEIGHT_MODES do
 		self.weightModeCombo:addOption(T(WEIGHT_MODE_LABELS[WEIGHT_MODES[i]]))
 	end
@@ -262,7 +344,7 @@ function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
 	local halfW = mode == "between" and math.floor((innerW - 8) / 2) or innerW
 	self.weightEntry = ISTextEntryBox:new("", pad, y, halfW, ENTRY_H)
 	self.weightEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.weightEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.weightEntry)
 	self.weightEntry:instantiate()
 	if self.weightEntry.setOnlyNumbers then self.weightEntry:setOnlyNumbers(true) end
 	self:addChild(self.weightEntry)
@@ -270,7 +352,7 @@ function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
 	if mode == "between" then
 		self.weightEntry2 = ISTextEntryBox:new("", pad + halfW + 8, y, halfW, ENTRY_H)
 		self.weightEntry2:initialise()
-		GlobalStorageSiK.TerminalChrome.styleTextEntry(self.weightEntry2)
+		GlobalStorageSiK.SiK_UI.styleTextEntry(self.weightEntry2)
 		self.weightEntry2:instantiate()
 		if self.weightEntry2.setOnlyNumbers then self.weightEntry2:setOnlyNumbers(true) end
 		self:addChild(self.weightEntry2)
@@ -289,7 +371,7 @@ function GS_FilterEditorUI:buildTagFields(pad, innerW, y)
 
 	self.tagEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
 	self.tagEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.tagEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.tagEntry)
 	self.tagEntry:instantiate()
 	self:addChild(self.tagEntry)
 	y = y + ENTRY_H + 4
@@ -304,7 +386,7 @@ function GS_FilterEditorUI:buildItemFields(pad, innerW, y)
 
 	self.itemSearchEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
 	self.itemSearchEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.itemSearchEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.itemSearchEntry)
 	self.itemSearchEntry:instantiate()
 	self.itemSearchEntry.onTextChange = function()
 		self:refreshItemResults()
@@ -347,10 +429,10 @@ function GS_FilterEditorUI:refreshItemResults()
 	local ry = 0
 	for i = 1, #results do
 		local r = results[i]
-		local btn = GlobalStorageSiK.TerminalChrome.createNeatButton(0, ry, innerW, RESULT_ROW_H, r.name, self.itemResultsHost, function()
+		local btn = GlobalStorageSiK.SiK_UI.createButton(0, ry, innerW, RESULT_ROW_H, r.name, self.itemResultsHost, function()
 			self.selectedItem = { fullType = r.fullType, name = r.name }
 			self:buildLayout()
-		end)
+		end, nil, true)
 		self.itemResultsHost:addChild(btn)
 		ry = ry + RESULT_ROW_H + 3
 	end
@@ -363,16 +445,26 @@ function GS_FilterEditorUI:refreshItemResults()
 		self.addBtn:setY(newY + 2)
 		newY = newY + BTN_H + self.padding + 2
 		self:setHeight(newY)
-		GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, self.padding)
+		GlobalStorageSiK.SiK_UI.layoutModalFrame(self, self.padding)
 	end
 	return newY
 end
 
 function GS_FilterEditorUI:onAddClicked()
-	if not self.node then return end
+	if not self.target then return end
 	local filter = nil
 
-	if self.filterType == "name" then
+	if self.filterType == "category" then
+		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
+		local subKey  = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
+		local leafKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catLeafCombo)
+		-- Mismo criterio que GS_TerminalUI_NodeEditor.lua:catApplyBtn: se
+		-- guarda SIEMPRE la clave del nivel MAS ESPECIFICO elegido.
+		local key = (leafKey ~= "" and leafKey) or (subKey ~= "" and subKey) or (mainKey ~= "" and mainKey) or nil
+		if not key then return end
+		filter = { type = "category", value = key }
+
+	elseif self.filterType == "name" then
 		local val = self.nameEntry and self.nameEntry:getText() or ""
 		if val == "" then return end
 		local idx = self.nameModeCombo and self.nameModeCombo.selected or 1
@@ -402,27 +494,87 @@ function GS_FilterEditorUI:onAddClicked()
 
 	if not filter then return end
 
-	GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addFilter = filter })
+	local newRule = { op = self.operator or "OR", condition = filter }
+	-- Detector general de contradicciones (dev26, ronda 2 - ver
+	-- Documentacion/GS_FilterRedesign_Plan.md §4.4-quinquies): si esta
+	-- nueva regla neutraliza una ya guardada (un NOT contra un OR/AND que se
+	-- solapa, o al reves), avisar ANTES de guardar en vez de aplicar en
+	-- silencio - el jugador decide si de verdad quiere ese conflicto.
+	local conflict = GlobalStorageSiK.RulesUI.detectContradiction(self.target.rules, newRule)
+	local conflictContainerName = nil
+	if not conflict and self.target.containerGroups then
+		-- Version cruzada (§4.4-quinquies, "cambiar la categoria de zona
+		-- deriva en cambio de contenedores que contiene"): solo se pasa
+		-- containerGroups cuando target.kind == "zone" (ver
+		-- GS_TerminalUI_ZoneEditor.lua) - una regla de zona nueva puede
+		-- neutralizar una regla ya guardada de un contenedor de esa zona.
+		conflictContainerName, conflict = GlobalStorageSiK.RulesUI.detectCrossLevelContradiction(newRule, self.target.containerGroups)
+	end
+	if conflict then
+		self:confirmContradiction(conflict, newRule, conflictContainerName)
+		return
+	end
+	self:sendAddRule(newRule)
+end
+
+--- Envia la regla ya validada (sin conflicto, o confirmado por el jugador).
+---@param newRule table {op, condition}
+function GS_FilterEditorUI:sendAddRule(newRule)
+	if self.target.kind == "zone" then
+		GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.target.id, addRule = newRule })
+	else
+		GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.target.id, addRule = newRule })
+	end
 	if self.onAdded then
 		self.onAdded()
 	end
 	self:destroy()
 end
 
---- Abre el editor de filtro para un nodo.
----@param node table
----@param onAdded function|nil callback tras enviar el filtro al servidor
-function GlobalStorageSiK.FilterEditor.show(node, onAdded)
-	if not node then return end
+--- Confirmacion explicita antes de guardar una regla que contradice una ya
+--- existente - nombra AMBAS reglas (ver §4.4-quinquies). Confirmar guarda de
+--- todos modos; cancelar no manda nada y deja el editor abierto.
+---@param conflict table regla existente en conflicto {op, condition}
+---@param newRule table regla nueva {op, condition}
+---@param conflictContainerName string|nil nombre del contenedor en conflicto (solo caso cruzado zona->contenedor)
+function GS_FilterEditorUI:confirmContradiction(conflict, newRule, conflictContainerName)
+	local existingLabel = GlobalStorageSiK.RulesUI.describeCondition(conflict.condition)
+	local newLabel = GlobalStorageSiK.RulesUI.describeCondition(newRule.condition)
+	local message
+	if conflictContainerName then
+		message = T("IGUI_GS_RuleContradictionConfirmCross", conflictContainerName, conflict.op, existingLabel, newRule.op, newLabel)
+	else
+		message = T("IGUI_GS_RuleContradictionConfirm", conflict.op, existingLabel, newRule.op, newLabel)
+	end
+	GlobalStorageSiK.SiK_UI.Modal.confirm(message, function()
+		self:sendAddRule(newRule)
+	end)
+end
+
+--- Abre el editor de regla (motor AND/OR/NOT, dev26) para un contenedor o
+--- una zona.
+---@param target table { kind="node"|"zone", id=string, rules=table|nil } - rules = lista actual del propietario, para el detector de contradicciones
+---@param operator string "OR"|"AND"|"NOT" - operador con el que se combinara la regla creada
+---@param onAdded function|nil callback tras enviar la regla al servidor
+function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded)
+	if not target or not target.id then return end
 	if GlobalStorageSiK.FilterEditor.instance then
 		GlobalStorageSiK.FilterEditor.instance:destroy()
 	end
-	local ui = GS_FilterEditorUI:new(0, 0, PANEL_W, 200)
-	ui.node = node
+	-- Mismo ancho que los editores de contenedor/zona (dev26 ronda 4quinquies,
+	-- pedido explicito: el titulo largo con el operador - "Anadir regla
+	-- personalizada - Operador: NOT" - se salia del modal de 460px, tapado
+	-- por el boton de cerrar). Solo el ANCHO se comparte con
+	-- resolveEditorWindowSize(); el alto sigue calculandose del contenido
+	-- real como siempre, este modal no es una ventana redimensionable.
+	local panelW = GlobalStorageSiK.SiK_UI.resolveEditorWindowSize()
+	local ui = GS_FilterEditorUI:new(0, 0, panelW, 200)
+	ui.target = target
+	ui.operator = operator or "OR"
 	ui.onAdded = onAdded
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalChrome.centerModal(ui)
-	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
+	GlobalStorageSiK.SiK_UI.centerModal(ui)
+	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.FilterEditor.instance = ui
 end

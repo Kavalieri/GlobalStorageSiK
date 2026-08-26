@@ -11,18 +11,19 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalRegistry"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_TerminalCatalog"
-require "ISUI/ISModalDialog"
 require "GS_TerminalUI_TerminalEditor"
+require "GS_SiK_UI_Table"
 
 GlobalStorageSiK.TerminalNetworkTerminals = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local BTN_H = FONT_HGT_SMALL + 6
-local ROW_H = BTN_H + 4
-local HEADER_H = FONT_HGT_SMALL + 8
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
+local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_GAP = 6
 local POOL = 6
 -- Nombre es la PRIMERA columna (a peticion del usuario), luego coordenadas/rol/estado.
@@ -30,6 +31,12 @@ local COL_NAME_FRAC   = 0.0   -- empieza en x=4 (absoluto)
 local COL_COORD_FRAC  = 0.30
 local COL_ROLE_FRAC   = 0.58
 local COL_STATUS_FRAC = 0.80
+local TERMINAL_TABLE_COLUMNS = {
+	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", start = 4, finishFraction = COL_COORD_FRAC, pad = 0 },
+	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", startFraction = COL_COORD_FRAC, finishFraction = COL_ROLE_FRAC, pad = 0 },
+	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", startFraction = COL_ROLE_FRAC, finishFraction = COL_STATUS_FRAC, pad = 0 },
+	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", startFraction = COL_STATUS_FRAC, right = 4, pad = 0 },
+}
 
 ---@param row table|nil
 ---@return string
@@ -72,7 +79,7 @@ end
 ---@return number
 ---@return number
 local function statusColor(row)
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if row and row.unknown then
 		return pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3]
 	end
@@ -129,24 +136,20 @@ local function createTerminalRow(host, terminal, ui)
 	row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	row.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
 		local data = self.terminalData
 		if not data then
 			return
 		end
-local w = self.width
-		local col0 = 4
-		local colCoord = math.floor(w * COL_COORD_FRAC)
-		local col1 = math.floor(w * COL_ROLE_FRAC)
-		local col2 = math.floor(w * COL_STATUS_FRAC)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, TERMINAL_TABLE_COLUMNS)
+		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 		local sr, sg, sb = statusColor(data)
-		local nameMaxW = colCoord - col0 - 6
-		self:drawText(GlobalStorageSiK.TerminalChrome.truncateText(nameLabel(data), nameMaxW, UIFont.Small),
-			col0, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		self:drawText(coordsLabel(data), colCoord, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(roleLabel(data), col1, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(statusLabel(data), col2, 2, sr, sg, sb, 1, UIFont.Small)
+		local nameMaxW = cols[1].width - 6
+		self:drawText(GlobalStorageSiK.SiK_UI.truncateText(nameLabel(data), nameMaxW, UIFont.Small),
+			cols[1].x, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		self:drawText(coordsLabel(data), cols[2].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+		self:drawText(roleLabel(data), cols[3].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+		self:drawText(statusLabel(data), cols[4].x, 2, sr, sg, sb, 1, UIFont.Small)
 	end
 -- Un clic en la fila abre SIEMPRE el editor completo (renombrar, marcar
 	-- como principal, suspender, eliminar) - a peticion del usuario, en vez de
@@ -179,12 +182,12 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	local pad = 8
 	ui.termBlockY = y
 
-	local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
+	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
 	card._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 	ui.termBlockCard = card
 
-	local title = GlobalStorageSiK.TerminalChrome.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_NetBlockTerminals"))
+	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_NetBlockTerminals"))
 	ui.termBlockTitle = title
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
 	y = y + FONT_HGT_SMALL + 8
@@ -200,16 +203,7 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	ui.termHeader:initialise()
 	ui.termHeader.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableHeaderLine(self)
-local w = self.width
-		local colCoord = math.floor(w * COL_COORD_FRAC)
-		local col1 = math.floor(w * COL_ROLE_FRAC)
-		local col2 = math.floor(w * COL_STATUS_FRAC)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		self:drawText(T("IGUI_GS_ColTerminalName"), 4, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_ColTerminalCoords"), colCoord, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_ColTerminalRole"), col1, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_ColTerminalStatus"), col2, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, TERMINAL_TABLE_COLUMNS, nil, true, 2, UIFont.Small)
 	end
 	ui.termTableHost:addChild(ui.termHeader)
 
@@ -221,7 +215,7 @@ local w = self.width
 		ui.termRowPool[i] = row
 	end
 
-	local _tpal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _tpal = GlobalStorageSiK.SiK_UI.PALETTE
 	ui.termEmptyLbl = ISLabel:new(pad, y + HEADER_H + 4, FONT_HGT_SMALL, T("IGUI_GS_NoTerminalsRegistered"), _tpal.textMuted[1], _tpal.textMuted[2], _tpal.textMuted[3], 1, UIFont.Small, true)
 	ui.termEmptyLbl:initialise()
 	ui.termEmptyLbl:setVisible(false)
@@ -230,7 +224,7 @@ local w = self.width
 	ui.termTableY = y
 	y = y + ui.termTableHost:getHeight() + 4
 
-	ui.termPurgeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	ui.termPurgeBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, math.min(240, innerW - pad * 2), BTN_H + 2, T("IGUI_GS_TerminalPurgeMissing"), scroll, function()
 			local rows = ui.terminalRows or {}
 			for i = 1, #rows do
@@ -246,7 +240,7 @@ local w = self.width
 
 	y = y + BTN_H + 10
 	ui.termBlockEndY = y
-	GlobalStorageSiK.TerminalChrome.resizeSectionCard(card,
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
 		pad - 4, ui.termBlockY - 2,
 		innerW - (pad - 4) * 2, y - ui.termBlockY + 4)
 	ui.lastTermFp = ""

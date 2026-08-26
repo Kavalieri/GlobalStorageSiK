@@ -164,8 +164,8 @@ local LINE_PAD = 4
 ---@param maxW number
 ---@return string
 local function truncate(text, maxW)
-	if GlobalStorageSiK.TerminalChrome and GlobalStorageSiK.TerminalChrome.truncateText then
-		return GlobalStorageSiK.TerminalChrome.truncateText(text, maxW, NET_FONT)
+	if GlobalStorageSiK.SiK_UI and GlobalStorageSiK.SiK_UI.truncateText then
+		return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, NET_FONT)
 	end
 	return text
 end
@@ -420,6 +420,37 @@ local function drawNetworkExtension(tr, lines, yOffset, colorRGB)
 	return boxH
 end
 
+--- Pista narrativa "hay que encontrarlo" del GS_SolderingIron (2026-08-25,
+--- pedido explicito del usuario tras el comentario de Steam de "Corvalao":
+--- la receta de ensamblaje ya esta oculta salvo que se active
+--- GlobalStorageSiK.EnableSolderingIronCraft en el sandbox, pero el item no
+--- explicaba por que en ningun sitio). SOLO se muestra cuando la opcion esta
+--- DESACTIVADA (el caso por defecto) - si esta activada, el tooltip estatico
+--- normal (Tooltip_GS_SolderingIron en Tooltip.json) ya es una descripcion
+--- corta sin alusiones, no hace falta añadir nada mas.
+--- Envuelto con SiK_UI.wrapTextLines (si esta cargado) para no
+--- depender de que la traduccion de cada idioma quepa en una sola linea del
+--- ancho fijo de drawNetworkExtension - mismo criterio que el resto de la UI
+--- del mod para texto de longitud variable (ver CLAUDE.md regla 7).
+local SOLDERING_IRON_FULLTYPE = "GlobalStorageSiK.GS_SolderingIron"
+local SOLDERING_LORE_MAX_W = MAX_EXT_WIDTH - 16
+---@param fullType string|nil
+---@return string[]|nil
+local function getSolderingIronLoreLines(fullType)
+	if fullType ~= SOLDERING_IRON_FULLTYPE then
+		return nil
+	end
+	local enabled = SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.EnableSolderingIronCraft == true
+	if enabled then
+		return nil
+	end
+	local text = T("IGUI_GS_SolderingIronFindHint")
+	if GlobalStorageSiK.SiK_UI and GlobalStorageSiK.SiK_UI.wrapTextLines then
+		return GlobalStorageSiK.SiK_UI.wrapTextLines(text, SOLDERING_LORE_MAX_W, NET_FONT)
+	end
+	return { text }
+end
+
 --- Version minima (sin ajustes de context-menu/joypad, no hacen falta aqui)
 --- del render() vanilla real de ISToolTipInv - ver
 --- media/lua/client/ISUI/ISToolTipInv.lua del juego base. Se usa SOLO cuando
@@ -651,7 +682,15 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 					-- simple vista del bloque rojo de red/categoria.
 					local skillLines = getSkillTrainingLines(self.item)
 					if skillLines and #skillLines > 0 then
-						drawNetworkExtension(self, skillLines, usedH, { 0.55, 0.85, 1 })
+						usedH = usedH + drawNetworkExtension(self, skillLines, usedH, { 0.55, 0.85, 1 })
+					end
+
+					-- Pista narrativa del soldador (solo si el crafteo del
+					-- GS_SolderingIron sigue desactivado en el sandbox) - propio
+					-- color neutro, distinto del rojo de red y el azul de VHS.
+					local loreLines = getSolderingIronLoreLines(fullType)
+					if loreLines and #loreLines > 0 then
+						drawNetworkExtension(self, loreLines, usedH, { 0.75, 0.7, 0.6 })
 					end
 				end
 			end

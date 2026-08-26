@@ -16,5 +16,6 @@
 	"Tooltip_GS_FloppyDisk_DriveInstall": "Un programa, un propósito: enseñar a un terminal a mantener su propia Disquetera conectada, para que deje de ir dando tumbos en tus bolsillos.",
 	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "«GS Programación»: instrucciones paso a paso para grabar el disquete que instala la Disquetera en la red de un terminal. Hace falta estar lo bastante cerca de un terminal como para molestarte.",
 	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "«GS Programación»: instrucciones paso a paso para grabar el disquete que lleva el propio sistema operativo de la red GS. Hace falta estar lo bastante cerca de un terminal como para molestarte.",
-	"Tooltip_GS_Manual_SolderingIron": "Una guía casera para montarte tu propio soldador con piezas de saqueo. Leerla sola no te lleva a ningún sitio - alguien tiene que haber habilitado antes este atajo."
+	"Tooltip_GS_Manual_SolderingIron": "Una guía casera para montarte tu propio soldador con piezas de saqueo. Leerla sola no te lleva a ningún sitio - alguien tiene que haber habilitado antes este atajo.",
+	"Tooltip_GS_SolderingIron": "Un soldador curtido, montado por alguien que sabía exactamente lo que hacía."
 }

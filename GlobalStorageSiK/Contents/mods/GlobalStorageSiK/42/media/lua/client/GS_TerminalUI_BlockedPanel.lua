@@ -11,7 +11,7 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalRecipes"
 require "GS_CraftUtils"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_TerminalUI_Scroll"
 require "GS_WorldHighlight"
 require "GS_TerminalAccess"
@@ -34,11 +34,6 @@ local CRAFT_BTN_H = FONT_HGT_SMALL + 10
 local REFRESH_TICKS = 8
 local REQ_ICON = 20
 local REQ_ICON_GAP = 6
--- Recetas que se muestran como tarjeta en la pantalla de bloqueo: el
--- terminal antiguo (compatibilidad) y el PC vanilla liso (para quien no
--- encuentre uno en el mundo - ver GS_TerminalRecipes.LIST "vanilla_pc").
-local BLOCKED_WINDOW_RECIPE_IDS = { terminal_unit = true, vanilla_pc = true }
-
 -- Declaración adelantada: la función real se define más abajo (junto al
 -- resto de la lógica del lector), pero stateSignature (justo debajo)
 -- necesita poder llamarla. Un "local function" normal no sirve aquí porque
@@ -58,12 +53,44 @@ local installReaderStatus
 --- forzar un rebuild por otra vía). Ahora se basa en lo que de verdad
 --- determina qué se ve en pantalla: motivo de bloqueo, rango, y estado del
 --- lector/disquete/ordenador.
+--
+-- BUG REAL confirmado (2026-08-25, investigacion del cuelgue de cliente al
+-- morir y reclamar): con estos motivos la tarjeta de lector/disco/ordenador
+-- NUNCA se pinta (ver el mismo filtro en rebuildContent mas abajo), asi que
+-- calcular installReaderStatus() para ellos era trabajo tirado - pero esta
+-- firma lo hacia SIEMPRE, cada 8 ticks (REFRESH_TICKS), mientras la pantalla
+-- de bloqueo estuviera abierta, sin mirar el motivo. installReaderStatus
+-- llama a TerminalAccess.findNearestKnownComputer(), un escaneo cuadrado
+-- completo (getGridSquare + iterar objetos de cada casilla) del rango de
+-- proximidad configurado - con "red vacante" (el estado exacto reproducido:
+-- 3 redes reconciliadas tras morir, sin haber reclamado todavia) ese escaneo
+-- se repetia unas 7-8 veces por segundo de forma indefinida solo para
+-- alimentar una firma cuyo resultado nunca se pintaba en pantalla.
+-- Reproduccion real del usuario: el cuelgue ocurrio con la pantalla de
+-- bloqueo abierta, ANTES de reclamar, justo al cruzar el rango de proximidad
+-- ("a unas 8-9 celdas la ventana cambio... al alejarme, ya estaba colgado").
+local READER_STATUS_EXCLUDED_REASONS = {
+	tablet_out_of_range = true,
+	antenna_out_of_range = true,
+	tablet_addon_required = true,
+	network_vacant = true,
+	denied = true,
+	no_permission = true,
+}
+
+local function reasonNeedsReaderStatus(reason)
+	return not READER_STATUS_EXCLUDED_REASONS[reason]
+end
+
 local function stateSignature(state)
 	if not state then
 		return ""
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-	local rs = installReaderStatus and installReaderStatus(player) or {}
+	local rs = {}
+	if reasonNeedsReaderStatus(state.reason) then
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+		rs = installReaderStatus and installReaderStatus(player) or {}
+	end
 	return table.concat({
 		tostring(state.reason),
 		tostring(state.proximityRange),
@@ -94,19 +121,6 @@ local function buildClientBlockedState(ui, player)
 	return state
 end
 
-local function blockedWindowRecipes(recipes)
-	local out = {}
-	if not recipes then
-		return out
-	end
-	for i = 1, #recipes do
-		if recipes[i].id == BLOCKED_TERMINAL_RECIPE_ID then
-			table.insert(out, recipes[i])
-		end
-	end
-	return out
-end
-
 local function introApproachHintLines(panelWidth, state)
 	local prox = tonumber(state and state.proximityRange) or 3
 	local hintKey = "IGUI_GS_BlockedApproachHint"
@@ -132,9 +146,9 @@ local function introApproachHintLines(panelWidth, state)
 		hintKey = "IGUI_GS_BlockedNoAccess"
 	end
 	local wrapW = math.max(260, panelWidth - INTRO_PAD * 2)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T(hintKey, prox), wrapW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(T(hintKey, prox), wrapW, UIFont.Small)
 	if extraKey then
-		for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(T(extraKey, prox), wrapW, UIFont.Small)) do
+		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T(extraKey, prox), wrapW, UIFont.Small)) do
 			lines[#lines + 1] = line
 		end
 	end
@@ -143,7 +157,7 @@ end
 
 local function measureIntroHeight(panelWidth, state)
 	local wrapW = math.max(260, panelWidth - INTRO_PAD * 2)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)
 	local lh = FONT_HGT_SMALL + LINE_GAP
 	local hintLines = introApproachHintLines(panelWidth, state)
 	-- Version del mod visible aqui (pedido 2026-08-15, ronda de pruebas
@@ -153,24 +167,20 @@ local function measureIntroHeight(panelWidth, state)
 	return INTRO_PAD + #lines * lh + 8 + #hintLines * lh + 8 + lh + INTRO_PAD
 end
 
-local function pushWrappedLines(out, text, maxWidth, r, g, b)
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxWidth, UIFont.Small)) do
-		table.insert(out, { text = line, r = r, g = g, b = b })
-	end
-end
-
-local function measureBodyHeight(bodyLines, textW)
-	local h = 0
-	local iconRowH = math.max(FONT_HGT_SMALL + LINE_GAP, REQ_ICON + LINE_GAP)
-	for i = 1, #bodyLines do
-		local spec = bodyLines[i]
-		if spec.icon or spec.itemType then
-			h = h + iconRowH
-		else
-			h = h + GlobalStorageSiK.TerminalChrome.countWrappedLines(spec.text, textW, UIFont.Small, LINE_GAP)
-		end
-	end
-	return h
+--- Color ok/falta de un requisito - antes cada sitio repetia el mismo
+--- literal (0.5/0.78/0.5 vs 0.82/0.32/0.32) 6 veces en este fichero, sin
+--- relacion con la paleta compartida (pedido 2026-08-26: "ajustarse a la
+--- nueva UI y las herramientas ya generadas"). Los valores de PALETTE son
+--- casi identicos (diferencia solo de matiz), asi que no cambia el aspecto
+--- de forma perceptible, solo deja de duplicar el color a mano.
+---@param ok boolean
+---@return number r
+---@return number g
+---@return number b
+local function reqColor(ok)
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local c = ok and pal.statusOk or pal.statusDanger
+	return c[1], c[2], c[3]
 end
 
 local function resolveReqIcon(spec)
@@ -183,78 +193,14 @@ local function resolveReqIcon(spec)
 	return nil
 end
 
-local function buildRecipeBodyLines(recipe, textW)
-	local lines = {}
-	local textWIcon = math.max(120, textW - REQ_ICON - REQ_ICON_GAP)
-	if recipe.requireBooks then
-		local bookR, bookG, bookB = recipe.knowsBook and 0.5 or 0.82, recipe.knowsBook and 0.78 or 0.32, recipe.knowsBook and 0.5 or 0.32
-		local bookLine = recipe.knowsBook and T("IGUI_GS_ReqBookOk", recipe.manualDisplay or "?")
-			or T("IGUI_GS_ReqBookMissing", recipe.manualDisplay or "?")
-		table.insert(lines, { text = bookLine, r = bookR, g = bookG, b = bookB, itemType = recipe.manualItem })
-	end
-	if (recipe.skillLevel or 0) > 0 then
-		local skillLine = T("IGUI_GS_CraftSkillReqLine", recipe.skillHave or 0, recipe.skillLevel or 0)
-		local skR, skG, skB = recipe.skillOk and 0.5 or 0.82, recipe.skillOk and 0.78 or 0.32, recipe.skillOk and 0.5 or 0.32
-		local skillIcon = Perks and Perks.Electricity and GlobalStorageSiK.CraftUtils.getPerkTexture(Perks.Electricity) or nil
-		table.insert(lines, { text = skillLine, r = skR, g = skG, b = skB, icon = skillIcon })
-	end
-	if recipe.requireWorkbench then
-		local wbR, wbG, wbB = recipe.nearWorkbench and 0.5 or 0.82, recipe.nearWorkbench and 0.78 or 0.32, recipe.nearWorkbench and 0.5 or 0.32
-		local wbLine = recipe.nearWorkbench and T("IGUI_GS_ReqWorkbenchOk") or T("IGUI_GS_ReqWorkbenchMissing")
-		pushWrappedLines(lines, wbLine, textWIcon, wbR, wbG, wbB)
-	end
-	if recipe.requireLight then
-		local ltR, ltG, ltB = recipe.hasCraftLight and 0.5 or 0.82, recipe.hasCraftLight and 0.78 or 0.32, recipe.hasCraftLight and 0.5 or 0.32
-		local ltLine = recipe.hasCraftLight and T("IGUI_GS_ReqLightOk") or T("IGUI_GS_ReqLightMissing")
-		pushWrappedLines(lines, ltLine, textWIcon, ltR, ltG, ltB)
-	end
-	for j = 1, #(recipe.ingredients or {}) do
-		local ing = recipe.ingredients[j]
-		local colorR, colorG, colorB = 0.78, 0.38, 0.38
-		if ing.ok or recipe.freeBuild then
-			colorR, colorG, colorB = 0.5, 0.78, 0.5
-		end
-		local line = string.format("%s  %d/%d", ing.displayName or ing.item, ing.have or 0, ing.count or 0)
-		table.insert(lines, { text = line, r = colorR, g = colorG, b = colorB, itemType = ing.item })
-	end
-	return lines
-end
-
-local function drawBodyLines(panel, bodyLines, textW, startY, pad)
-	local y = startY
-	local lh = FONT_HGT_SMALL + LINE_GAP
-	local iconRowH = math.max(lh, REQ_ICON + LINE_GAP)
-	local textX = pad + REQ_ICON + REQ_ICON_GAP
-	local textWIcon = math.max(120, textW - REQ_ICON - REQ_ICON_GAP)
-	for i = 1, #bodyLines do
-		local spec = bodyLines[i]
-		local icon = resolveReqIcon(spec)
-		if icon then
-			-- drawTextureScaled real B42 signature es (tex,x,y,w,h,a,r,g,b), NO
-			-- (tex,x,y,w,h,r,g,b,a): pasar el color ok/falta aqui desplazaba los
-			-- canales y el azul quedaba siempre a 1 - todo icono salia teñido de
-			-- azul sin importar el estado. El icono se dibuja en su color real,
-			-- el tinte ok/falta ya lo lleva el texto de al lado.
-			panel:drawTextureScaled(icon, pad, y, REQ_ICON, REQ_ICON, 1, 1, 1, 1)
-			panel:drawText(spec.text, textX, y, spec.r or 1, spec.g or 1, spec.b or 1, 1, UIFont.Small)
-			y = y + iconRowH
-		else
-			for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(spec.text, textW, UIFont.Small)) do
-				panel:drawText(line, pad, y, spec.r or 1, spec.g or 1, spec.b or 1, 1, UIFont.Small)
-				y = y + lh
-			end
-		end
-	end
-	return y
-end
 
 local function drawIntroBlock(panel)
 	local state = panel.blockedState or {}
 	local y = INTRO_PAD
 	local lh = FONT_HGT_SMALL + LINE_GAP
 	local wrapW = math.max(260, panel.width - INTRO_PAD * 2)
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)) do
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)) do
 		panel:drawText(line, INTRO_PAD, y, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		y = y + lh
 	end
@@ -265,7 +211,7 @@ local function drawIntroBlock(panel)
 	end
 	y = y + 8
 	local versionLine = "GlobalStorageSiK v" .. tostring(GlobalStorageSiK.Config.MOD_VERSION)
-	panel:drawText(versionLine, INTRO_PAD, y, 0.45, 0.47, 0.5, 1, UIFont.Small)
+	panel:drawText(versionLine, INTRO_PAD, y, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.55, UIFont.Small)
 end
 
 --- Estado del metodo nuevo de instalacion (lector+disquete) para el jugador
@@ -336,7 +282,17 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	local lineH = FONT_HGT_SMALL + LINE_GAP
 	local iconRowH = math.max(lineH, REQ_ICON + LINE_GAP)
 	local bodyH = #lines * iconRowH
+	-- Rediseño 2026-08-26 (maqueta validada, "revisar bloqueo/reclamar/sin
+	-- red para que se ajusten a la nueva UI"): "Conseguir PC" vivia como
+	-- boton suelto FUERA de esta tarjeta aunque es la misma pregunta ("como
+	-- consigo acceso fisico") - ahora entra en la misma tarjeta, debajo de
+	-- Instalar aqui/Fabricar lector, solo cuando no se ha detectado ningun
+	-- ordenador cerca.
+	local showPcBtn = status.computerState == "none"
 	local cardH = titleH + pad + bodyH + CRAFT_BTN_H + 12
+	if showPcBtn then
+		cardH = cardH + CRAFT_BTN_H + 6
+	end
 
 	local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
 	card:initialise()
@@ -344,14 +300,14 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	card.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	card.prerender = function(panel)
 		ISPanel.prerender(panel)
-		GlobalStorageSiK.TerminalChrome.drawCardBackground(panel, titleH)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
+		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 		panel:drawText(T("IGUI_GS_InstallReaderCardTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		local ly = titleH + pad
 		local textX = pad + REQ_ICON + REQ_ICON_GAP
 		for i = 1, #lines do
 			local spec = lines[i]
-			local r, g, b = spec.ok and 0.5 or 0.82, spec.ok and 0.78 or 0.32, spec.ok and 0.5 or 0.32
+			local r, g, b = reqColor(spec.ok)
 			local icon = resolveReqIcon(spec)
 			if icon then
 				-- Mismo fix que en drawBodyLines: (a,r,g,b), no (r,g,b,a).
@@ -364,7 +320,16 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		end
 	end
 
-	local btnY = cardH - CRAFT_BTN_H - 6
+	-- BUG REAL reportado por el usuario con captura (2026-08-26): btnY se
+	-- calculaba como "cardH - CRAFT_BTN_H - 6" - correcto SOLO cuando la
+	-- tarjeta terminaba justo despues de esta fila de botones. Al añadir el
+	-- boton "Conseguir PC" (que amplia cardH con un CRAFT_BTN_H+6 extra), ese
+	-- mismo calculo desplazaba la fila "Instalar aqui/Fabricar lector" hacia
+	-- ABAJO (dejando un hueco vacio de sobra) y empujaba "Conseguir PC" fuera
+	-- del borde de la tarjeta, solapando la siguiente ("Tus redes"). btnY
+	-- debe anclarse al final del CUERPO (titulo+lineas), nunca al final de
+	-- la tarjeta completa, para no depender de cuantos botones vengan despues.
+	local btnY = titleH + pad + bodyH + 6
 	-- Si falta el lector, se lo ponemos fácil: un botón "Fabricar lector" al
 	-- lado de "Instalar aquí" que abre la misma ventana propia que ya usa
 	-- "Conseguir PC" (validar requisitos, esperar el tiempo de crafteo,
@@ -375,7 +340,7 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		installBtnW = math.floor((textW - 8) / 2)
 	end
 
-	local btn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	local btn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, btnY, installBtnW, CRAFT_BTN_H, T("IGUI_GS_InstallReaderCardBtn"), card, function()
 			local p = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 			-- Re-revalida SIEMPRE en el momento del clic (el panel puede llevar
@@ -404,7 +369,7 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 				end
 				p:setHaloNote(msg, 220, 180, 100, 300)
 			end
-		end)
+		end, nil, true)
 	-- NUNCA deshabilitar este boton: un boton desactivado no llega a
 	-- procesar el clic en absoluto en PZ, asi que la logica de arriba (que
 	-- SI explica con un aviso por que no puede instalar) nunca se ejecutaba
@@ -416,12 +381,21 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	card:addChild(btn)
 
 	if not status.hasReader then
-		local buildReaderBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		local buildReaderBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad + installBtnW + 8, btnY, installBtnW, CRAFT_BTN_H, T("IGUI_GS_ReaderAcquireOpenBtn"), card, function()
 				GlobalStorageSiK.ReaderAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-			end)
+			end, nil, true)
 		card.buildReaderBtn = buildReaderBtn
 		card:addChild(buildReaderBtn)
+	end
+
+	if showPcBtn then
+		local pcBtn = GlobalStorageSiK.SiK_UI.createButton(
+			pad, btnY + CRAFT_BTN_H + 6, textW, CRAFT_BTN_H, T("IGUI_GS_PCAcquireOpenBtn"), card, function()
+				GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
+			end, nil, true)
+		card.pcBtn = pcBtn
+		card:addChild(pcBtn)
 	end
 
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
@@ -462,94 +436,6 @@ function GlobalStorageSiK.TerminalBlockedPanel.layout(terminal, innerW, innerH)
 	terminal.blockedPanel:setWidth(innerW)
 	terminal.blockedPanel:setHeight(innerH)
 	GlobalStorageSiK.TerminalScroll.resize(terminal.blockedScroll, innerW, innerH)
-end
-
----@param terminal GS_TerminalUI
----@param recipe table
----@param y number
----@param cardW number
----@return number cardH
-local function buildRecipeCard(terminal, recipe, y, cardW)
-	local pad = 10
-	local textW = math.max(220, cardW - pad * 2)
-	local titleH = FONT_HGT_SMALL + 10
-	local bodyH = measureBodyHeight(buildRecipeBodyLines(recipe, textW), textW)
-	local cardH = titleH + pad + bodyH + CRAFT_BTN_H + 12
-
-	local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
-	card:initialise()
-	card.drawBackground = false
-	card.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	card.textW = textW
-	card.contentPad = pad
-	card.titleHeight = titleH
-	card.recipeId = recipe.id
-	card.ownerUI = terminal
-	card.clipChildren = true
-
-	card.prerender = function(panel)
-		ISPanel.prerender(panel)
-		local owner = panel.ownerUI
-		local liveRecipe = recipe
-		if owner and owner.blockedState and owner.blockedState.recipes then
-			for i = 1, #owner.blockedState.recipes do
-				local candidate = owner.blockedState.recipes[i]
-				if candidate.id == panel.recipeId then
-					liveRecipe = candidate
-					break
-				end
-			end
-		end
-		local title = liveRecipe.outputDisplay or liveRecipe.id
-		local bodyLines = buildRecipeBodyLines(liveRecipe, panel.textW)
-		GlobalStorageSiK.TerminalChrome.drawCardBackground(panel, panel.titleHeight)
-		local _bpal = GlobalStorageSiK.TerminalChrome.PALETTE
-		panel:drawText(title, panel.contentPad, 3, _bpal.textPrimary[1], _bpal.textPrimary[2], _bpal.textPrimary[3], 1, UIFont.Small)
-		drawBodyLines(panel, bodyLines, panel.textW, panel.titleHeight + panel.contentPad, panel.contentPad)
-		if panel.craftBtn then
-			local canCraft = liveRecipe.canCraft == true
-			panel.craftBtn._gsNeatLabel = canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-			panel.craftBtn:setEnable(canCraft)
-		end
-	end
-
-	local btnTitle = recipe.canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-	local craftBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-		pad, cardH - CRAFT_BTN_H - 6, 220, CRAFT_BTN_H, btnTitle, card, function()
-			GlobalStorageSiK.TerminalBlockedPanel.onCraftRecipe(terminal, recipe.id)
-		end)
-	craftBtn:setEnable(recipe.canCraft == true)
-	card.craftBtn = craftBtn
-	card:addChild(craftBtn)
-	card.onMouseDown = function(panel, x, y)
-		if not panel.craftBtn then
-			return false
-		end
-		local btn = panel.craftBtn
-		if x >= btn:getX() and x <= btn:getX() + btn.width
-			and y >= btn:getY() and y <= btn:getY() + btn.height then
-			return true
-		end
-		return false
-	end
-	card.onMouseUp = function(panel, x, y, button)
-		if button ~= 0 or not panel.craftBtn then
-			return false
-		end
-		local btn = panel.craftBtn
-		if not btn.enable then
-			return false
-		end
-		if x >= btn:getX() and x <= btn:getX() + btn.width
-			and y >= btn:getY() and y <= btn:getY() + btn.height then
-			GlobalStorageSiK.TerminalBlockedPanel.onCraftRecipe(terminal, panel.recipeId)
-			return true
-		end
-		return false
-	end
-
-	GlobalStorageSiK.TerminalScroll.addChild(terminal.blockedScroll, card)
-	return cardH
 end
 
 --- Ilumina en el mundo el ALCANCE de cada red a la que el jugador tiene
@@ -680,71 +566,82 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	end
 	intro.prerender = function(panel)
 		ISPanel.prerender(panel)
-		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.07, 0.07, 0.07)
+		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, 0)
 		drawIntroBlock(panel)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, intro)
 	y = y + introH + CARD_GAP
 
-	if terminal.blockedState and terminal.blockedState.reason == "network_vacant" and terminal.blockedState.canClaimOwnership then
-		local claimNetworkId = terminal.blockedState.networkId
-		local claimBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-			CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, T("IGUI_GS_ClaimOwnershipButton"), scroll, function()
-				if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and claimNetworkId then
-					GlobalStorageSiK.NetClient.sendCommand("reclaimOwnership", { networkId = claimNetworkId })
-				end
-			end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, claimBtn)
-		y = y + CRAFT_BTN_H + CARD_GAP
-	end
-
+	-- Rediseño 2026-08-26 (maqueta validada, "revisar bloqueo/reclamar/sin
+	-- red para que se ajusten a la nueva UI"): antes cada bloque vivia
+	-- suelto directamente sobre el fondo del scroll, sin ningun tratamiento
+	-- de tarjeta salvo la de instalar lector - ahora los 4 bloques (Estado,
+	-- Recuperar acceso, Instalar terminal, Tus redes) comparten la misma
+	-- tarjeta con borde/cabecera (drawCardBackground), agrupados por
+	-- intencion en vez de por orden de aparicion historico. Ningun cambio de
+	-- condicion de visibilidad ni de texto - solo el contenedor visual.
+	local claimEligible = terminal.blockedState and terminal.blockedState.reason == "network_vacant"
+		and terminal.blockedState.canClaimOwnership
 	-- Diseño "recuperacion de rol propio" (2026-08-23): independiente del
-	-- boton de arriba (canClaimOwnership decide QUIEN se convierte en el
-	-- nuevo propietario; esto es "esta cuenta ya tenia SU PROPIO rol aqui,
-	-- se lo devolvemos") - no depende de reason=="network_vacant", un
-	-- ex-admin/member muerto ante una red que SIGUE teniendo dueño (reason
-	-- =="denied") tambien debe poder recuperar su acceso. Pueden aparecer
-	-- los dos botones a la vez si el jugador es elegible para ambos.
-	if terminal.blockedState and terminal.blockedState.canRecoverRole then
-		local recoverNetworkId = terminal.blockedState.networkId
-		local recoverBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-			CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, T("IGUI_GS_RecoverRoleButton"), scroll, function()
-				if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and recoverNetworkId then
-					GlobalStorageSiK.NetClient.sendCommand("recoverOwnRole", { networkId = recoverNetworkId })
-				end
-			end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, recoverBtn)
-		y = y + CRAFT_BTN_H + CARD_GAP
+	-- de arriba (canClaimOwnership decide QUIEN se convierte en el nuevo
+	-- propietario; esto es "esta cuenta ya tenia SU PROPIO rol aqui, se lo
+	-- devolvemos") - no depende de reason=="network_vacant", un ex-admin/
+	-- member muerto ante una red que SIGUE teniendo dueño (reason=="denied")
+	-- tambien debe poder recuperar su acceso. Pueden aparecer los dos
+	-- botones a la vez si el jugador es elegible para ambos.
+	local recoverEligible = terminal.blockedState and terminal.blockedState.canRecoverRole
+	if claimEligible or recoverEligible then
+		local pad = 10
+		local titleH = FONT_HGT_SMALL + 10
+		local btnCount = (claimEligible and 1 or 0) + (recoverEligible and 1 or 0)
+		local cardH = titleH + pad + btnCount * (CRAFT_BTN_H + 6)
+		local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
+		card:initialise()
+		card.drawBackground = false
+		card.prerender = function(panel)
+			ISPanel.prerender(panel)
+			GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
+			local pal = GlobalStorageSiK.SiK_UI.PALETTE
+			panel:drawText(T("IGUI_GS_RecoverAccessTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		end
+		local by = titleH + pad
+		if claimEligible then
+			local claimNetworkId = terminal.blockedState.networkId
+			local claimBtn = GlobalStorageSiK.SiK_UI.createButton(
+				pad, by, cardW - pad * 2, CRAFT_BTN_H, T("IGUI_GS_ClaimOwnershipButton"), card, function()
+					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and claimNetworkId then
+						GlobalStorageSiK.NetClient.sendCommand("reclaimOwnership", { networkId = claimNetworkId })
+					end
+				end, nil, true)
+			card:addChild(claimBtn)
+			by = by + CRAFT_BTN_H + 6
+		end
+		if recoverEligible then
+			local recoverNetworkId = terminal.blockedState.networkId
+			local recoverBtn = GlobalStorageSiK.SiK_UI.createButton(
+				pad, by, cardW - pad * 2, CRAFT_BTN_H, T("IGUI_GS_RecoverRoleButton"), card, function()
+					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and recoverNetworkId then
+						GlobalStorageSiK.NetClient.sendCommand("recoverOwnRole", { networkId = recoverNetworkId })
+					end
+				end, nil, true)
+			card:addChild(recoverBtn)
+		end
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+		y = y + cardH + CARD_GAP
 	end
 
 	-- Unico camino para conseguir un terminal: lector + disquete sobre un
-	-- ordenador ya en el mapa. Si no hay ninguno detectado cerca, se ofrece
-	-- ademas "Conseguir PC" (ventana propia, ver GS_PCAcquireUI.lua) para
-	-- fabricar uno sin depender de encontrarlo por el mundo.
+	-- ordenador ya en el mapa. "Conseguir PC" (ventana propia, ver
+	-- GS_PCAcquireUI.lua) vive ahora DENTRO de esta misma tarjeta (ver
+	-- buildInstallReaderCard) cuando no se ha detectado ningun ordenador
+	-- cerca, en vez de flotar suelto debajo como antes.
 	-- Motivos de PERMISOS (ya hay terminal, ya estas cerca - lo que falta es
 	-- acceso, no hardware): ofrecer "instalar terminal aqui"/"conseguir PC" es
 	-- enganoso, ya existe un terminal funcional al lado. Excluidos junto con
 	-- los de proximidad/hardware de siempre.
-	local readerStatus = nil
-	if terminal.blockedState and terminal.blockedState.reason ~= "tablet_out_of_range"
-		and terminal.blockedState.reason ~= "antenna_out_of_range"
-		and terminal.blockedState.reason ~= "tablet_addon_required"
-		and terminal.blockedState.reason ~= "network_vacant"
-		and terminal.blockedState.reason ~= "denied"
-		and terminal.blockedState.reason ~= "no_permission" then
-		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-		readerStatus = installReaderStatus(player)
+	if terminal.blockedState and reasonNeedsReaderStatus(terminal.blockedState.reason) then
 		local cardH = buildInstallReaderCard(scroll, terminal, y, cardW)
 		y = y + cardH + CARD_GAP
-
-		if readerStatus.computerState == "none" then
-			local pcBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-				CONTENT_PAD, y, math.min(cardW, 260), CRAFT_BTN_H, T("IGUI_GS_PCAcquireOpenBtn"), scroll, function()
-					GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-				end)
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, pcBtn)
-			y = y + CRAFT_BTN_H + CARD_GAP
-		end
 	end
 
 	-- Boton "mostrar cobertura" RETIRADO de aqui (2026-08-17, pedido
@@ -754,7 +651,6 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	-- redes conocidas" queda descartado por ahora, sin borrar el motor
 	-- compartido de resaltado (toggleMarkKnownTerminals/redrawMarkers, mas
 	-- arriba en este fichero) por si se retoma mas adelante.
-	y = y + CARD_GAP
 
 	-- Visibilidad minima de "tus redes" sin tener terminal a mano - pide la
 	-- lista la primera vez que se construye este panel (mismos datos que ya
@@ -777,23 +673,40 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 		end
 		networksText = T("IGUI_GS_BlockedYourNetworks", table.concat(names, ", "))
 	end
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(networksText, cardW - CONTENT_PAD, UIFont.Small)) do
-		local lbl = ISLabel:new(CONTENT_PAD, y, FONT_HGT_SMALL, line, 0.62, 0.66, 0.7, 1, UIFont.Small, true)
-		lbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-		y = y + FONT_HGT_SMALL + LINE_GAP
+	do
+		local pad = 10
+		local titleH = FONT_HGT_SMALL + 10
+		local textW = math.max(120, cardW - pad * 2)
+		local netLines = GlobalStorageSiK.SiK_UI.wrapTextLines(networksText, textW, UIFont.Small)
+		local lh = FONT_HGT_SMALL + LINE_GAP
+		local cardH = titleH + pad + #netLines * lh + 4
+		local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
+		card:initialise()
+		card.drawBackground = false
+		card.prerender = function(panel)
+			ISPanel.prerender(panel)
+			GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
+			local pal = GlobalStorageSiK.SiK_UI.PALETTE
+			panel:drawText(T("IGUI_GS_YourNetworksTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+			local ly = titleH + pad
+			for i = 1, #netLines do
+				panel:drawText(netLines[i], pad, ly, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+				ly = ly + lh
+			end
+		end
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+		y = y + cardH + CARD_GAP
 	end
-	y = y + CARD_GAP
 
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + CONTENT_PAD)
 	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
 	GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
 		scroll, (scroll._gsContentHeight or 0) > (scroll.height or 0) + 2)
 	terminal.lastBlockedLayoutWidth = terminal.width
-	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedChrome then
-		GlobalStorageSiK.TerminalTabs.syncBlockedChrome(terminal)
+	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedFrame then
+		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 	end
-	-- Diagnostico dedicado (sandbox DebugModeUI, separado del ruido de red):
+	-- Diagnostico dedicado (sandbox DebugCatSiKUI, dev36 antes DebugModeUI, separado del ruido de red):
 	-- vuelca el arbol y comprueba solapes justo tras reconstruir, para poder
 	-- ver el estado exacto de los 3 botones en el momento en que el jugador
 	-- intenta pulsarlos, no solo en la apertura inicial de la ventana.
@@ -848,37 +761,6 @@ function GlobalStorageSiK.TerminalBlockedPanel.refresh(terminal, blockedState)
 		terminal.lastBlockedSignature = stateSignature(blockedState)
 	end
 	GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(terminal, true)
-end
-
----@param terminal GS_TerminalUI
----@param recipeId string
-function GlobalStorageSiK.TerminalBlockedPanel.onCraftRecipe(terminal, recipeId)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-	local recipe = GlobalStorageSiK.TerminalRecipes.getById(recipeId)
-	if not player or not recipe then
-		return
-	end
-	if ISTimedActionQueue and ISTimedActionQueue.getTimedActionQueue then
-		local queue = ISTimedActionQueue.getTimedActionQueue(player)
-		if queue and queue.queue then
-			for i = 1, #queue.queue do
-				if queue.queue[i] and queue.queue[i].Type == "GS_CraftTerminalTimedAction" then
-					return
-				end
-			end
-		end
-	end
-	if not GlobalStorageSiK.TerminalRecipes.canCraft(player, recipe) then
-		return
-	end
-	if not GS_CraftTerminalTimedAction then
-		require "TimedActions/GS_CraftTerminalTimedAction"
-	end
-	if not GS_CraftTerminalTimedAction then
-		GlobalStorageSiK.NetClient.sendCommand("craftTerminalRecipe", { recipeId = recipeId })
-		return
-	end
-	ISTimedActionQueue.add(GS_CraftTerminalTimedAction:new(player, recipeId, recipe.time or 100))
 end
 
 function GlobalStorageSiK.TerminalBlockedPanel.onLiveStateEvent()

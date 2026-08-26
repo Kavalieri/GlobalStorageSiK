@@ -3,8 +3,7 @@
 	Autor: SiK
 	Fecha: 2026-06-30
 	Descripción: Helper de geometría PURA (no crea ni destruye widgets, solo
-	             coloca/dimensiona los que se le pasan) inspirado en el layout
-	             tipo fill de NeatUI (addColumn/addColumnFill/setElement).
+	             coloca/dimensiona los que se le pasan) con columnas y relleno.
 
 	Garantías por construcción:
 	  - Sin solapes: el cursor vertical solo avanza, nunca retrocede.
@@ -41,8 +40,8 @@ local function setBounds(widget, x, y, w, h)
 	if h ~= nil and widget.setHeight then widget:setHeight(h) end
 end
 
---- Coloca un widget. Si la columna está ligada a un scroll NeatUI, usa
---- setContentX/Y (respeta el offset de scroll); si no, posicionado directo.
+--- Coloca un widget. Si la columna está ligada a un scroll SiK UI, usa
+--- setContentX/Y; si no, aplica posicionamiento directo.
 ---@param widget any
 function Column:_set(widget, x, y, w, h)
 	if not widget then return end

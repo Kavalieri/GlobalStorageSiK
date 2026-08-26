@@ -16,5 +16,6 @@
 	"Tooltip_GS_FloppyDisk_DriveInstall": "Jeden program, jeden cel: uczy terminal, jak trzymać własny Napęd Dyskietek podłączony na stałe, żeby przestał jeździć w twojej kieszeni.",
 	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"Narzędzia dyskowe GS\": instrukcje krok po kroku, jak zapisać dyskietkę instalującą Napęd Dyskietek w sieci terminala. Wymaga stania wystarczająco blisko terminala, żeby się to opłacało.",
 	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"Narzędzia dyskowe GS\": instrukcje krok po kroku, jak zapisać dyskietkę niosącą własny system operacyjny sieci GS. Wymaga stania wystarczająco blisko terminala, żeby się to opłacało.",
-	"Tooltip_GS_Manual_SolderingIron": "Naprędce sklecony poradnik, jak zbudować własną lutownicę z odzyskanych części. Samo przeczytanie nic nie da - ktoś najpierw musi pozwolić na ten skrót."
+	"Tooltip_GS_Manual_SolderingIron": "Naprędce sklecony poradnik, jak zbudować własną lutownicę z odzyskanych części. Samo przeczytanie nic nie da - ktoś najpierw musi pozwolić na ten skrót.",
+	"Tooltip_GS_SolderingIron": "Mocno znoszona lutownica, złożona przez kogoś, kto dokładnie wiedział, co robi."
 }

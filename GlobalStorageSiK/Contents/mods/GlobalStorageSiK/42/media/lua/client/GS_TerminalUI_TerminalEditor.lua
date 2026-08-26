@@ -12,10 +12,10 @@
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISTextEntryBox"
-require "ISUI/ISModalDialog"
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Window"
 require "GS_TerminalUI_BlockedPanel"
 
 GlobalStorageSiK.TerminalTerminalEditor = {}
@@ -48,7 +48,7 @@ function GS_TerminalEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildLayout()
@@ -113,7 +113,7 @@ end
 function GS_TerminalEditorUI:onToggleCoverage()
 	local marking = GlobalStorageSiK.TerminalBlockedPanel.toggleSingleTerminalCoverage(self.row)
 	if self.coverageBtn then
-		self.coverageBtn._gsNeatLabel = marking and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
+		self.coverageBtn._sikUiLabel = marking and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
 	end
 end
 
@@ -135,16 +135,9 @@ function GS_TerminalEditorUI:onDeleteClicked()
 		self:onDelete()
 		return
 	end
-	local function onResult(_, button)
-		if button and button.internal == "YES" then
-			self:onDelete()
-		end
-	end
-	local modal = ISModalDialog:new(0, 0, 400, 180, T("IGUI_GS_UninstallConfirm"), true, nil, onResult, nil)
-	modal:initialise()
-	modal:addToUIManager()
-	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
-	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_UninstallConfirm"), function()
+		self:onDelete()
+	end)
 end
 
 function GS_TerminalEditorUI:buildLayout()
@@ -181,11 +174,11 @@ function GS_TerminalEditorUI:buildLayout()
 	local renameW = 110
 	self.nameEntry = ISTextEntryBox:new(row.label or "", pad, y, textW - renameW - 6, ENTRY_H)
 	self.nameEntry:initialise()
-	GlobalStorageSiK.TerminalChrome.styleTextEntry(self.nameEntry)
+	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
 	self.nameEntry:instantiate()
 	self:addChild(self.nameEntry)
 
-	self.renameBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.renameBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + textW - renameW, y, renameW, ENTRY_H, T("IGUI_GS_TerminalEditorRenameBtn"), self, function()
 			self:onRename()
 		end)
@@ -195,7 +188,7 @@ function GS_TerminalEditorUI:buildLayout()
 	-- ── Acciones ─────────────────────────────────────────────────────────
 	local isActive = not row.missing and row.present ~= false and not row.suspended and not row.unknown
 	if isActive and not row.controller then
-		self.controllerBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.controllerBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorMakeControllerBtn"), self, function()
 				self:onSetController()
 			end)
@@ -204,7 +197,7 @@ function GS_TerminalEditorUI:buildLayout()
 	end
 
 	if isActive then
-		self.suspendBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.suspendBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorSuspendBtn"), self, function()
 				self:onSuspend()
 			end)
@@ -215,14 +208,14 @@ function GS_TerminalEditorUI:buildLayout()
 	local coverageLabel = GlobalStorageSiK.TerminalBlockedPanel._singleMarking
 		and GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow == row
 		and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
-	self.coverageBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.coverageBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, textW, BTN_H, coverageLabel, self, function()
 			self:onToggleCoverage()
 		end)
 	self:addChild(self.coverageBtn)
 	y = y + BTN_H + LINE_GAP
 
-	self.deleteBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorDeleteBtn"), self, function()
 			self:onDeleteClicked()
 		end)
@@ -230,8 +223,8 @@ function GS_TerminalEditorUI:buildLayout()
 	y = y + BTN_H + pad
 
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
+	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 --- Abre (o reemplaza) el editor de un terminal concreto.

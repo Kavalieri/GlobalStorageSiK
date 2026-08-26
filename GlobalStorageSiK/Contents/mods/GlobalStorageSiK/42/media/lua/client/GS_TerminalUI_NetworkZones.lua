@@ -11,7 +11,8 @@ require "GS_I18n"
 require "GS_ZonePriority"
 require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Table"
+require "GS_SiK_UI_Core"
 
 GlobalStorageSiK.TerminalNetworkZones = {}
 
@@ -19,8 +20,9 @@ local T = GlobalStorageSiK.I18n.text
 local ACTION_BTN_MAX_W = 220
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local BTN_H = FONT_HGT_SMALL + 6
-local ROW_H = BTN_H + 4
-local HEADER_H = FONT_HGT_SMALL + 8
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
+local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_GAP = 6
 local TAG = "_gsNetZoneTbl"
 local POOL = 4
@@ -32,6 +34,24 @@ local COL_PRIO_X = 4
 local COL_TYPE_X = 26
 local COL_TYPE_W = 110
 local COL_NAME_X = 142
+
+local function zoneActionColumnWidth()
+	local total = 28 * 2
+	for _, key in ipairs({ "IGUI_GS_ZoneRescan", "IGUI_GS_Rename", "IGUI_GS_DeleteZone" }) do
+		total = total + GlobalStorageSiK.SiK_UI.measureButtonWidth(T(key), UIFont.Small, 18, 40, ACTION_BTN_MAX)
+	end
+	return total + ACTION_GAP * 5
+end
+
+local ZONE_TABLE_COLUMNS = {
+	{ key = "priority", titleKey = "IGUI_GS_ColPriority", width = 22, pad = 4 },
+	{ key = "type", titleKey = "IGUI_GS_ColZoneType", width = COL_TYPE_W + 6, pad = 0 },
+	{ key = "name", titleKey = "IGUI_GS_ColZoneName", flex = 1, minWidth = 48, pad = 0 },
+	{ key = "actions", titleKey = "IGUI_GS_ColZoneActions", align = "right", width = zoneActionColumnWidth(), pad = 0 },
+	{ key = "containers", titleKey = "IGUI_GS_ColContainers", align = "right",
+		measureValues = { "999", T("IGUI_GS_ZoneNeverLoaded") }, measurePad = 8, pad = 0 },
+}
+local ZONE_TABLE_OPTIONS = { left = 0, right = 8, gap = 4 }
 
 local function zoneTypeLabel(source)
 	local key = ({
@@ -45,7 +65,7 @@ local function zoneTypeLabel(source)
 end
 
 local function truncate(text, maxW)
-	return GlobalStorageSiK.TerminalChrome.truncateText(text, maxW, UIFont.Small)
+	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, UIFont.Small)
 end
 
 --- Abre cuadro para renombrar una zona.
@@ -89,13 +109,14 @@ local function layoutZoneRowActions(row)
 		return
 	end
 	local w = row.width or 200
+	local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ZONE_TABLE_COLUMNS, ZONE_TABLE_OPTIONS)
 	local btnY = math.floor((ROW_H - BTN_H) / 2)
-	local x = w - 8 - COUNT_RESERVE - ACTION_GAP
+	local x = cols[4].finish
 	local btns = { row.btnDel, row.btnRename, row.btnRescan, row.btnDown, row.btnUp }
 	for i = 1, #btns do
 		local btn = btns[i]
 		if btn and btn.setX then
-			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(btn)
+			GlobalStorageSiK.SiK_UI.fitButtonToLabel(btn)
 			btn:setHeight(BTN_H)
 			btn:setY(btnY)
 			x = x - btn.width
@@ -103,7 +124,7 @@ local function layoutZoneRowActions(row)
 			x = x - ACTION_GAP
 		end
 	end
-	row._nameMaxW = math.max(48, x - COL_NAME_X - 8)
+	row._nameMaxW = math.max(48, cols[3].width - 8)
 end
 
 ---@param row ISPanel
@@ -112,7 +133,7 @@ end
 ---@param onClick function
 ---@return ISButton
 local function addZoneRowButton(row, title, maxW, onClick)
-	local btn = GlobalStorageSiK.TerminalChrome.createNeatButton(0, 0, maxW, BTN_H, title, row, onClick)
+	local btn = GlobalStorageSiK.SiK_UI.createButton(0, 0, maxW, BTN_H, title, row, onClick)
 	row:addChild(btn)
 	btn:bringToTop()
 	return btn
@@ -137,15 +158,15 @@ local function createZoneRow(host, terminal, ui)
 			row.terminal:onMoveZonePriority(row.zoneData.id, "up")
 		end
 	end)
-	row.btnUp._gsNeatPadH = 8
-	row.btnUp._gsNeatMinW = 28
+	row.btnUp._sikUiPadH = 8
+	row.btnUp._sikUiMinW = 28
 	row.btnDown = addZoneRowButton(row, "v", ARROW_BTN_MAX, function()
 		if row.zoneData and row.terminal then
 			row.terminal:onMoveZonePriority(row.zoneData.id, "down")
 		end
 	end)
-	row.btnDown._gsNeatPadH = 8
-	row.btnDown._gsNeatMinW = 28
+	row.btnDown._sikUiPadH = 8
+	row.btnDown._sikUiMinW = 28
 	row.btnRescan = addZoneRowButton(row, T("IGUI_GS_ZoneRescan"), ACTION_BTN_MAX, function()
 		if row.zoneData and row.terminal and row.terminal.onRescanZone then
 			row.terminal:onRescanZone(row.zoneData.id)
@@ -168,23 +189,24 @@ local function createZoneRow(host, terminal, ui)
 		if not data then
 			return
 		end
-		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
 		local w = self.width
 		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		local nameMaxW = self._nameMaxW or math.max(48, w - COL_NAME_X - COUNT_RESERVE - 160)
-		self:drawText(tostring(data.priority or "—"), COL_PRIO_X, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(truncate(zoneTypeLabel(data.source), COL_TYPE_W), COL_TYPE_X, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(truncate(data.name or "?", nameMaxW), COL_NAME_X, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		local pal = GlobalStorageSiK.SiK_UI.PALETTE
+		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ZONE_TABLE_COLUMNS, ZONE_TABLE_OPTIONS)
+		local nameMaxW = self._nameMaxW or math.max(48, cols[3].width - 8)
+		self:drawText(tostring(data.priority or "—"), cols[1].x + cols[1].pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		self:drawText(truncate(zoneTypeLabel(data.source), cols[2].width), cols[2].x, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+		self:drawText(truncate(data.name or "?", nameMaxW), cols[3].x, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		if (data.nodeCount or 0) == 0 and data.neverLoaded then
 			-- Zona nunca escaneada con sus baldosas cargadas en memoria (RV
 			-- interior, sotano de mods como Excavation, etc.): "0" confirmado
 			-- vacio y "0" nunca-verificado son cosas MUY distintas para el
 			-- jugador - sin esto, una zona en un interior lejano parece vacia
 			-- para siempre aunque tenga contenedores reales dentro.
-			self:drawTextRight(T("IGUI_GS_ZoneNeverLoaded"), w - 8, yMid, 0.9, 0.75, 0.35, 1, UIFont.Small)
+			self:drawTextRight(T("IGUI_GS_ZoneNeverLoaded"), cols[5].finish, yMid, 0.9, 0.75, 0.35, 1, UIFont.Small)
 		else
-			self:drawTextRight(tostring(data.nodeCount or 0), w - 8, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+			self:drawTextRight(tostring(data.nodeCount or 0), cols[5].finish, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		end
 	end
 	return row
@@ -200,17 +222,17 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 	local pad = 8
 	ui.block2Y = y
 
-	local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
+	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
 	card._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 	ui.block2Card = card
 
-	local title = GlobalStorageSiK.TerminalChrome.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_SectionZones"))
+	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_SectionZones"))
 	title._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
 	y = y + FONT_HGT_SMALL + 6
 
-	local hint = GlobalStorageSiK.TerminalChrome.createHintLabel(pad + 6, y, T("IGUI_GS_ZonesPriorityHint"))
+	local hint = GlobalStorageSiK.SiK_UI.createHintLabel(pad + 6, y, T("IGUI_GS_ZonesPriorityHint"))
 	hint._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hint)
 	y = y + FONT_HGT_SMALL + 8
@@ -219,24 +241,24 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 	local roomTitle = T("IGUI_GS_CreateRoomZone")
 	local structTitle = T("IGUI_GS_CreateStructureZone")
 	local selectTitle = T("IGUI_GS_CreateSelectionZone")
-	local roomW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(roomTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
-	local structW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(structTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
-	local selectW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(selectTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
-	ui.roomZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, ACTION_BTN_MAX_W, btnH, roomTitle, scroll, function()
+	local roomW = GlobalStorageSiK.SiK_UI.measureButtonWidth(roomTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
+	local structW = GlobalStorageSiK.SiK_UI.measureButtonWidth(structTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
+	local selectW = GlobalStorageSiK.SiK_UI.measureButtonWidth(selectTitle, UIFont.Small, 18, 80, ACTION_BTN_MAX_W)
+	ui.roomZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, ACTION_BTN_MAX_W, btnH, roomTitle, scroll, function()
 		terminal:onCreateRoomZone()
-	end)
+	end, nil, true)
 	ui.roomZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.roomZoneBtn)
 	roomW = ui.roomZoneBtn.width
-	ui.structureZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad + roomW + ROW_GAP, y, ACTION_BTN_MAX_W, btnH, structTitle, scroll, function()
+	ui.structureZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad + roomW + ROW_GAP, y, ACTION_BTN_MAX_W, btnH, structTitle, scroll, function()
 		terminal:onCreateStructureZone()
-	end)
+	end, nil, true)
 	ui.structureZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.structureZoneBtn)
 	structW = ui.structureZoneBtn.width
-	ui.selectZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad + roomW + ROW_GAP + structW + ROW_GAP, y, ACTION_BTN_MAX_W, btnH, selectTitle, scroll, function()
+	ui.selectZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad + roomW + ROW_GAP + structW + ROW_GAP, y, ACTION_BTN_MAX_W, btnH, selectTitle, scroll, function()
 		terminal:onCreateSelectionZone()
-	end)
+	end, nil, true)
 	ui.selectZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.selectZoneBtn)
 	y = y + btnH + 10
@@ -252,14 +274,8 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 	ui.zoneHeader:initialise()
 	ui.zoneHeader.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableHeaderLine(self)
-		local w = self.width
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		self:drawText(T("IGUI_GS_ColPriority"), COL_PRIO_X, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_ColZoneType"), COL_TYPE_X, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(T("IGUI_GS_ColZoneName"), COL_NAME_X, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(T("IGUI_GS_ColZoneActions"), w - 8 - COUNT_RESERVE - 200, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(T("IGUI_GS_ColContainers"), w - 8, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, ZONE_TABLE_COLUMNS, nil, true,
+			2, UIFont.Small, ZONE_TABLE_OPTIONS)
 	end
 	ui.zoneTableHost:addChild(ui.zoneHeader)
 
@@ -274,7 +290,7 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 	ui.zoneTableY = y
 	y = y + ui.zoneTableHost:getHeight() + 8
 	ui.block2EndY = y
-	GlobalStorageSiK.TerminalChrome.resizeSectionCard(card,
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
 		pad - 4, ui.block2Y - 2,
 		innerW - (pad - 4) * 2, y - ui.block2Y + 4)
 	ui.lastZoneFp = ""

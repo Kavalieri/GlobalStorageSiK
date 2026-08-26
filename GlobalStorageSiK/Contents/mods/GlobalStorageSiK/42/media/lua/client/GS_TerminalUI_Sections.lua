@@ -1,5 +1,5 @@
 --[[
-	GlobalStorageSiK - Secciones visuales del terminal (NeatUI)
+	GlobalStorageSiK - Secciones visuales del terminal (SiK UI)
 	Autor: SiK
 	Fecha: 2025-06-24
 	Descripción: Títulos y agrupación sin marcos azules ni cajas anidadas.
@@ -9,7 +9,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_Libs"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 
 GlobalStorageSiK.TerminalSections = {}
 
@@ -53,10 +53,7 @@ function GlobalStorageSiK.TerminalSections.create(parent, x, y, w, h, titleKey)
 		end
 		if title and title ~= "" then
 			local titleH = self.titleHeight or (FONT_HGT_SMALL + 10)
-			local patches = GlobalStorageSiK.TerminalChrome.getNeatPanelPatches()
-			if not GlobalStorageSiK.TerminalChrome.renderNinePatch(self, patches.innerTitle, 0, 0, self.width, titleH, 0.2, 0.2, 0.2, 0.85) then
-				self:drawRect(0, 0, self.width, titleH, 0.85, 0.12, 0.12, 0.12)
-			end
+			self:drawRect(0, 0, self.width, titleH, 0.85, 0.12, 0.12, 0.12)
 			self:drawText(title, self.contentPad, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
 			local lineY = self.titleHeight - 2
 			self:drawRect(self.contentPad, lineY, math.max(0, self.width - self.contentPad * 2), 1, 0.35, 0.32, 0.32, 0.32)
@@ -74,7 +71,7 @@ end
 ---@param titleKey string
 ---@return ISLabel
 function GlobalStorageSiK.TerminalSections.addTitleLabel(parent, x, y, titleKey)
-	local lbl = GlobalStorageSiK.TerminalChrome.createSectionLabel(x, y, T(titleKey))
+	local lbl = GlobalStorageSiK.SiK_UI.createSectionLabel(x, y, T(titleKey))
 	parent:addChild(lbl)
 	return lbl
 end
@@ -104,7 +101,7 @@ end
 ---@param b number
 ---@return number nextY
 function GlobalStorageSiK.TerminalSections.addWrappedStatLabels(section, y, text, maxWidth, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxWidth, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxWidth, UIFont.Small)
 	for i = 1, #lines do
 		GlobalStorageSiK.TerminalSections.addStatLabel(section, y, lines[i], r, g, b)
 		y = y + FONT_HGT_SMALL + 3

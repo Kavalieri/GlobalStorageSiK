@@ -9,7 +9,7 @@ require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_Libs"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Builder_Sandbox"
 
@@ -22,7 +22,7 @@ local BLOCK_GAP = 8
 local BTN_H = FONT_HGT_SMALL + 10
 
 local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -41,10 +41,7 @@ local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	hdr.drawBackground = false
 	hdr.prerender = function(panel)
 		ISPanel.prerender(panel)
-		local patches = GlobalStorageSiK.TerminalChrome.getNeatPanelPatches()
-		if not GlobalStorageSiK.TerminalChrome.renderNinePatch(panel, patches.innerTitle, 0, 0, panel.width, panel.height, 0.2, 0.2, 0.2, 0.88) then
-			panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
-		end
+		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
 		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)
@@ -65,7 +62,7 @@ function GlobalStorageSiK.TerminalBuilder.buildPanel(panel, terminal)
 	-- Version del addon, esquina inferior derecha - fuera del scroll (nunca
 	-- se mueve con el contenido), discreta a propósito.
 	local verText = "v" .. tostring(GSSiK_Addon_Builder.VERSION or "?")
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	panel.versionLbl = ISLabel:new(0, 0, FONT_HGT_SMALL, verText, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.5, UIFont.Small, true)
 	panel.versionLbl:initialise()
 	panel:addChild(panel.versionLbl)
@@ -109,9 +106,12 @@ function GlobalStorageSiK.TerminalBuilder.refresh(panel, terminal)
 	local cardW = math.max(260, innerW - pad * 2)
 	local y = pad
 
+	-- dev39 (pedido explicito del usuario, extendido a "cualquier ventana de
+	-- crafteo/build"): el parrafo bajo el titulo pasa a un boton "?" junto al
+	-- propio titulo, igual que en Craft y en los editores de nodo/zona.
+	local titleY = y
 	y = addSectionTitle(scroll, pad, y, "IGUI_GS_SectionBuildRemote", innerW)
-	y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_BuildRemoteHint"), cardW, 0.62, 0.68, 0.72)
-	y = y + BLOCK_GAP
+	GlobalStorageSiK.SiK_UI.addBlockInfoBtn(scroll, pad + 8, titleY + 2, T("IGUI_GS_SectionBuildRemote"), T("IGUI_GS_BuildRemoteHint"), scroll)
 
 	local sessionStatus = GlobalStorageSiK.CraftSession.getStatus("Builder")
 	local statusText, statusR, statusG, statusB = nil, 0.5, 0.72, 0.55
@@ -144,24 +144,20 @@ function GlobalStorageSiK.TerminalBuilder.refresh(panel, terminal)
 		y = y + BLOCK_GAP
 	end
 
-	local btnW = math.min(280, cardW)
-	local buildVanillaBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenBuildVanilla"), scroll, function()
-		if terminal and terminal.onOpenVanillaBuild then
-			terminal:onOpenVanillaBuild()
-		end
-	end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, buildVanillaBtn)
-	y = y + BTN_H + 6
-
-	if GlobalStorageSiK.Libs.hasNeatBuilding() then
-		local buildNeatBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenBuildNeat"), scroll, function()
+	-- dev39: boton a ancho completo, misma norma que Craft/resto del mod.
+	local hasNeatBuilding = GlobalStorageSiK.Libs.hasNeatBuilding()
+	local buildLabelKey = hasNeatBuilding and "IGUI_GS_CraftOpenBuildNeat" or "IGUI_GS_CraftOpenBuildVanilla"
+	local buildBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, cardW, BTN_H, T(buildLabelKey), scroll, function()
+		if hasNeatBuilding then
 			if terminal and terminal.onOpenNeatBuild then
 				terminal:onOpenNeatBuild()
 			end
-		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, buildNeatBtn)
-		y = y + BTN_H + 6
-	end
+		elseif terminal and terminal.onOpenVanillaBuild then
+			terminal:onOpenVanillaBuild()
+		end
+	end, nil, true)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, buildBtn)
+	y = y + BTN_H + 6
 
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)

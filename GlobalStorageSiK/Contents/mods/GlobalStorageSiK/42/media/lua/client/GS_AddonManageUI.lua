@@ -11,7 +11,7 @@
 	esta ventana con: descripción, receta para fabricar el módulo (si el mod
 	del addon está activo), requisitos de instalación (manual/disquete) y el
 	botón instalar/desinstalar. Mismo patrón de ventana modal ya usado en
-	GS_ReaderAcquireUI.lua/GS_PCAcquireUI.lua (mismo chrome, mismo refresco en
+	GS_ReaderAcquireUI.lua/GS_PCAcquireUI.lua (mismo marco, mismo refresco en
 	vivo de bajo coste) - no es una clase nueva desde cero, es el mismo molde
 	ya probado.
 ]]
@@ -24,7 +24,7 @@ require "GS_AddonRegistry"
 require "GS_AddonRecipes"
 require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_TerminalUI_Scroll"
 
 GlobalStorageSiK.AddonManageUI = {}
@@ -128,7 +128,7 @@ function GS_AddonManageUI:initialise()
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildLayout()
@@ -189,7 +189,7 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	local textW = self.width - pad * 2
 	local btnLabel = isInstalled and T("IGUI_GS_AddonUninstallBtn") or T("IGUI_GS_AddonInstallBtn")
 	local searchQuery = self.terminal and self.terminal.searchEntry and self.terminal.searchEntry:getText() or ""
-	local actionBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, textW, BTN_H, btnLabel, self, function()
+	local actionBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, btnLabel, self, function()
 		-- BUG REAL encontrado (reportado: "si no tenemos antena en el
 		-- inventario no da feedback, falla en silencio aunque el boton
 		-- reacciona"): antes esto enviaba el comando y cerraba la ventana
@@ -252,7 +252,7 @@ function GS_AddonManageUI:buildLayout()
 	local textW = self.width - pad * 2
 	local y = self.headerHeight + pad
 
-	local descLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T(def.descKey or "IGUI_GS_AddonDescGeneric"), textW, UIFont.Small)
+	local descLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T(def.descKey or "IGUI_GS_AddonDescGeneric"), textW, UIFont.Small)
 	for _, line in ipairs(descLines) do
 		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.78, 0.82, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -301,7 +301,7 @@ function GS_AddonManageUI:buildLayout()
 	-- niveles) con el tier instalado/en inventario resaltado en verde.
 	if def.tierItems and #def.tierItems > 0 then
 		local tierCardTop = y
-		local tierCard = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, tierCardTop, textW, 10)
+		local tierCard = GlobalStorageSiK.SiK_UI.createSectionCard(pad, tierCardTop, textW, 10)
 		self:addChild(tierCard)
 		y = y + 8
 		local inv = self.player and self.player:getInventory()
@@ -312,11 +312,11 @@ function GS_AddonManageUI:buildLayout()
 			local owned = inv and (inv:getItemCountRecurse(tier.item) or 0) >= 1
 			local statusKey = isActiveTier and "IGUI_GS_TierInstalled" or (owned and "IGUI_GS_TierInInventory" or "IGUI_GS_TierNotOwned")
 			local line = tierName .. " - " .. T(statusKey)
-			y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, tier.item, line, isActiveTier or owned)
+			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, tier.item, line, isActiveTier or owned)
 			y = y + 4
 		end
 		y = y + 4
-		GlobalStorageSiK.TerminalChrome.resizeSectionCard(tierCard, pad, tierCardTop, textW, y - tierCardTop)
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(tierCard, pad, tierCardTop, textW, y - tierCardTop)
 		y = y + 10
 	end
 
@@ -351,18 +351,18 @@ function GS_AddonManageUI:buildLayout()
 		y = y + FONT_HGT_SMALL + 6
 
 		local cardTop = y
-		local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, cardTop, textW, 10)
+		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, textW, 10)
 		self:addChild(card)
 		y = y + 8
 		local readerType = GlobalStorageSiK.Config and GlobalStorageSiK.Config.ITEM_TERMINAL_READER
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
+		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
 		y = y + 6
 		if uninstallDiskItem then
-			y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, uninstallDiskItem, T("IGUI_GS_AddonReqUninstallDisk"), hasUninstallDisk)
+			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, uninstallDiskItem, T("IGUI_GS_AddonReqUninstallDisk"), hasUninstallDisk)
 			y = y + 6
 		end
 		y = y + 2
-		GlobalStorageSiK.TerminalChrome.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
 		y = y + 10
 		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
 		-- tiene sentido detras de todas las recetas).
@@ -406,21 +406,21 @@ function GS_AddonManageUI:buildLayout()
 		-- terminal, para no repetir el bug ya documentado de dimensionar
 		-- despues de rellenar contenido.
 		local cardTop = y
-		local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, cardTop, textW, 10)
+		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, textW, 10)
 		self:addChild(card)
 		y = y + 8
 		local readerType = GlobalStorageSiK.Config and GlobalStorageSiK.Config.ITEM_TERMINAL_READER
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
+		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
 		y = y + 6
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, moduleRequirementText(def), hasModule)
+		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, moduleRequirementText(def), hasModule)
 		y = y + 6
 		if def.installDiskItem and def.installDiskItem ~= "" then
-			y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.installDiskItem, itemDisplayName(def.installDiskItem), hasDisk)
+			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.installDiskItem, itemDisplayName(def.installDiskItem), hasDisk)
 			y = y + 6
 		end
-		y = GlobalStorageSiK.TerminalChrome.addRequirementLine(self, pad + 8, y, textW - 16, def.magazineType, itemDisplayName(def.magazineType), hasMagazine)
+		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.magazineType, itemDisplayName(def.magazineType), hasMagazine)
 		y = y + 8
-		GlobalStorageSiK.TerminalChrome.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
 		y = y + 10
 		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
 		-- tiene sentido detras de todas las recetas).
@@ -453,7 +453,7 @@ function GS_AddonManageUI:buildLayout()
 
 	self._lastSig = statusSignature(self.player, def, self.networkId, self.anchor, self.installed)
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
 	if not self._positioned then
 		self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
 		self._positioned = true
@@ -474,7 +474,7 @@ end
 ---@param b number
 ---@return number
 function GS_AddonManageUI:addWrappedLabel(x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
 	for _, line in ipairs(lines) do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, line, r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -537,8 +537,8 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.installed = installed or {}
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalChrome.centerModal(ui)
-	GlobalStorageSiK.TerminalChrome.finalizeModalShow(ui)
+	GlobalStorageSiK.SiK_UI.centerModal(ui)
+	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
 end
 

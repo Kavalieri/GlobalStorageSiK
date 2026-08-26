@@ -26,12 +26,14 @@
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISComboBox"
-require "ISUI/ISModalDialog"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Table"
+require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Scroll"
+require "GS_TerminalUI_Extensions"
 
 GlobalStorageSiK.AdminDashboard = GlobalStorageSiK.AdminDashboard or {}
 GlobalStorageSiK.AdminDashboard.instance = nil
@@ -41,9 +43,10 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local LINE_GAP = 4
-local ROW_H = FONT_HGT_SMALL + 14
-local ROW_GAP = 4
 local BTN_H = FONT_HGT_SMALL + 8
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics({ rowVerticalPadding = 14 })
+local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
+local ROW_GAP = 4
 local ENTRY_H = FONT_HGT_SMALL + 8
 local WINDOW_W = 860
 local WINDOW_H = 780
@@ -56,6 +59,18 @@ local COL_SEEN_W = math.max(
 	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOnline")),
 	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOffline", "99d"))
 ) + 14
+local ADMIN_MEMBER_TABLE_COLUMNS = {
+	{ key = "member", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 100, pad = 6 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, pad = 0 },
+	{ key = "actions", titleKey = "IGUI_GS_ColZoneActions", align = "right", width = 96, pad = 0 },
+}
+local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = 0, gap = 6 }
+
+local function staffActionCallback(action, dashboard)
+	return function()
+		action.invoke(dashboard)
+	end
+end
 
 ---@param kind string
 ---@return string
@@ -79,9 +94,9 @@ local function memberLabel(m)
 	return name .. " (" .. account .. ")"
 end
 
--- relativeAge() vive en GlobalStorageSiK.TerminalChrome (GS_TerminalUI_Chrome.lua)
+-- relativeAge() vive en GlobalStorageSiK.SiK_UI (GS_SiK_UI_Core.lua)
 -- - compartida con GS_TerminalUI_Permissions.lua, no duplicar aqui.
-local relativeAge = GlobalStorageSiK.TerminalChrome.relativeAge
+local relativeAge = GlobalStorageSiK.SiK_UI.relativeAge
 
 --- Columna "Conexion" de un miembro: 3 estados posibles, nunca solo 2 -
 --- "Desconectado" no tiene sentido para alguien fallecido (pedido explicito
@@ -91,7 +106,7 @@ local relativeAge = GlobalStorageSiK.TerminalChrome.relativeAge
 ---@param m table
 ---@return string text, number r, number g, number b
 local function connectionLabel(m)
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if m.online then
 		return T("IGUI_GS_AdminOnline"), pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
 	end
@@ -112,7 +127,7 @@ function GS_AdminHistoryUI:initialise()
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	local title = ISLabel:new(PAD, PAD, FONT_HGT_MEDIUM, T("IGUI_GS_AdminHistoryTitle"),
@@ -126,7 +141,7 @@ function GS_AdminHistoryUI:initialise()
 	-- proyecto: texto de longitud variable siempre con wrap real).
 	if self.networkLabel and self.networkLabel ~= "" then
 		local labelW = self.width - PAD * 2
-		for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(self.networkLabel, labelW, UIFont.Small)) do
+		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(self.networkLabel, labelW, UIFont.Small)) do
 			local netLbl = ISLabel:new(PAD, scrollY, FONT_HGT_SMALL, line, 0.65, 0.68, 0.72, 1, UIFont.Small, true)
 			netLbl:initialise()
 			self:addChild(netLbl)
@@ -134,10 +149,10 @@ function GS_AdminHistoryUI:initialise()
 		end
 		scrollY = scrollY + 4
 	end
-	self.eventScroll = GlobalStorageSiK.TerminalScroll.createNeat(
+	self.eventScroll = GlobalStorageSiK.TerminalScroll.create(
 		self, PAD, scrollY, self.width - PAD * 2, self.height - scrollY - PAD)
 	self:refreshEvents()
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
+	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 function GS_AdminHistoryUI:destroy()
@@ -172,7 +187,7 @@ function GS_AdminHistoryUI:refreshEvents()
 			hLbl:initialise()
 			GlobalStorageSiK.TerminalScroll.addChild(scroll, hLbl)
 			y = y + FONT_HGT_SMALL + 2
-			local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(ev.detail or "", w - 12, UIFont.Small)
+			local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(ev.detail or "", w - 12, UIFont.Small)
 			for j = 1, #lines do
 				local lbl = ISLabel:new(12, y, FONT_HGT_SMALL, lines[j], 0.78, 0.8, 0.84, 1, UIFont.Small, true)
 				lbl:initialise()
@@ -215,7 +230,7 @@ function GS_AdminMemberEditorUI:initialise()
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildLayout()
@@ -249,7 +264,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 	-- diedAt, roleLabel(m.role) ya dice "Muerto"/"Dead" por si solo.
 	local isDead = (m.role == GlobalStorageSiK.Permissions.ROLE_DEAD)
 	local nameText = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(nameText, textW, UIFont.Small)) do
+	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(nameText, textW, UIFont.Small)) do
 		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.78, 0.82, 0.88, 1, UIFont.Small, true)
 		lbl:initialise()
 		self:addChild(lbl)
@@ -280,7 +295,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 		y = y + FONT_HGT_SMALL + ROW_GAP
 	elseif not isOwnerRow then
 		local toggleTo = (m.role == "admin") and "member" or "admin"
-		local roleBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		local roleBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, btnW, BTN_H, T(toggleTo == "admin" and "IGUI_GS_AdminMakeAdmin" or "IGUI_GS_AdminMakeMember"),
 			self, function()
 				dashboard:onSetMemberRole(m.id, toggleTo)
@@ -289,7 +304,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 		self:addChild(roleBtn)
 		y = y + BTN_H + ROW_GAP
 
-		local ownerBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		local ownerBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, btnW, BTN_H, T("IGUI_GS_AdminSetOwner"), self, function()
 				dashboard:onSetOwner(m.id)
 				self:destroy()
@@ -297,12 +312,12 @@ function GS_AdminMemberEditorUI:buildLayout()
 		self:addChild(ownerBtn)
 		y = y + BTN_H + ROW_GAP
 
-		local removeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		local removeBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, btnW, BTN_H, T("IGUI_GS_AdminRemoveMember"), self, function()
 				dashboard:onRemoveMember(m.id)
 				self:destroy()
 			end)
-		GlobalStorageSiK.TerminalChrome.applyDangerButton(removeBtn)
+		GlobalStorageSiK.SiK_UI.applyDangerButton(removeBtn)
 		self:addChild(removeBtn)
 		y = y + BTN_H + ROW_GAP
 	else
@@ -313,7 +328,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 		y = y + FONT_HGT_SMALL + ROW_GAP
 	end
 
-	local closeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	local closeBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, btnW, BTN_H, T("IGUI_GS_Close"), self, function()
 			self:destroy()
 		end)
@@ -321,7 +336,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 	y = y + BTN_H + pad
 
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
+	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 ---@param dashboard table
@@ -330,7 +345,7 @@ function GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
 	if GlobalStorageSiK.AdminDashboard.memberEditorInstance then
 		GlobalStorageSiK.AdminDashboard.memberEditorInstance:destroy()
 	end
-	local w = GlobalStorageSiK.TerminalChrome.STANDARD_MODAL_W
+	local w = GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W
 	local ui = GS_AdminMemberEditorUI:new(0, 0, w, 100)
 	ui.dashboard = dashboard
 	ui.member = member
@@ -350,10 +365,10 @@ function GS_AdminDashboardUI:initialise()
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
-	self:buildStaticChrome()
+	self:buildStaticFrame()
 	self:requestNetworkList()
 	self:requestOnlinePlayers()
 end
@@ -453,7 +468,7 @@ end
 --- proyecto para texto de longitud variable), lista de miembros con scroll,
 --- y la barra de acciones de red. Se llama UNA vez; lo que cambia con los
 --- datos vive dentro de cada refresh*.
-function GS_AdminDashboardUI:buildStaticChrome()
+function GS_AdminDashboardUI:buildStaticFrame()
 	local pad = PAD
 	local textW = self.width - pad * 2
 	local y = pad
@@ -466,7 +481,7 @@ function GS_AdminDashboardUI:buildStaticChrome()
 
 	self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
 	self.networkCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(self.networkCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.networkCombo)
 	self.networkCombo.onChange = function() self:onComboChanged() end
 	self:addChild(self.networkCombo)
 	y = y + ENTRY_H + LINE_GAP + 2
@@ -482,14 +497,14 @@ function GS_AdminDashboardUI:buildStaticChrome()
 	y = y + LINE_GAP + 4
 
 	local reloadW = math.floor(textW / 2) - 4
-	self.reloadBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.reloadBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, reloadW, BTN_H, T("IGUI_GS_AdminReload"), self, function()
 			self:requestNetworkList()
 			if self._selectedNetworkId then self:requestMembers(self._selectedNetworkId) end
 		end)
 	self:addChild(self.reloadBtn)
 
-	self.historyBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.historyBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + reloadW + 8, y, reloadW, BTN_H, T("IGUI_GS_AdminHistoryButton"), self, function()
 			self:requestHistory()
 		end)
@@ -502,7 +517,7 @@ function GS_AdminDashboardUI:buildStaticChrome()
 	-- de QUIEN pulsa el boton (no de la red), el resultado sale por chat y
 	-- por console.txt (Log.error, siempre visible). Quitar cuando ya no haga
 	-- falta.
-	self.diagBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.diagBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, textW, BTN_H, T("IGUI_GS_AdminFindBrokenItems"), self, function()
 			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 				GlobalStorageSiK.NetClient.sendCommand("gsDiagFindBrokenItems", {})
@@ -510,6 +525,32 @@ function GS_AdminDashboardUI:buildStaticChrome()
 		end)
 	self:addChild(self.diagBtn)
 	y = y + BTN_H + LINE_GAP + 6
+
+	-- Herramientas internas aportadas por los addons. El Dashboard solo pinta
+	-- el registro neutral; cada addon conserva la responsabilidad de abrir su
+	-- ruta vanilla y de decidir como se integra con una sesion de red activa.
+	local staffActions = GlobalStorageSiK.TerminalExtensions.getStaffActions()
+	if #staffActions > 0 then
+		local toolsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AdminInternalTests"))
+		self:addChild(toolsTitle)
+		y = y + FONT_HGT_SMALL + LINE_GAP
+
+		local actionGap = 8
+		local actionW = math.floor((textW - actionGap) / 2)
+		for i = 1, #staffActions do
+			local action = staffActions[i]
+			local column = (i - 1) % 2
+			local row = math.floor((i - 1) / 2)
+			local buttonW = (#staffActions == 1) and textW or actionW
+			local buttonX = pad + column * (actionW + actionGap)
+			local actionBtn = GlobalStorageSiK.SiK_UI.createButton(
+				buttonX, y + row * (BTN_H + LINE_GAP), buttonW, BTN_H, T(action.labelKey), self,
+				staffActionCallback(action, self))
+			self:addChild(actionBtn)
+		end
+		local actionRows = math.ceil(#staffActions / 2)
+		y = y + actionRows * (BTN_H + LINE_GAP) + 6
+	end
 
 	self.membersTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AdminMembersTitle"),
 		0.7, 0.72, 0.76, 1, UIFont.Small, true)
@@ -522,9 +563,9 @@ function GS_AdminDashboardUI:buildStaticChrome()
 	local addBtnW = 90
 	self.addMemberCombo = ISComboBox:new(pad, y, textW - addBtnW - 8, ENTRY_H, self, nil)
 	self.addMemberCombo:initialise()
-	GlobalStorageSiK.TerminalChrome.styleComboBox(self.addMemberCombo)
+	GlobalStorageSiK.SiK_UI.styleComboBox(self.addMemberCombo)
 	self:addChild(self.addMemberCombo)
-	self.addMemberBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.addMemberBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + textW - addBtnW, y, addBtnW, ENTRY_H, T("IGUI_GS_AdminAddMember"), self, function()
 			self:onAddMember()
 		end)
@@ -534,24 +575,24 @@ function GS_AdminDashboardUI:buildStaticChrome()
 	-- Texto de longitud variable SIEMPRE con wrap real (regla del proyecto) -
 	-- antes era un ISLabel de una sola linea y se salia/cortaba por el borde
 	-- de la ventana (confirmado en pruebas reales).
-	local hintLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
+	local hintLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
 	local actionsH = BTN_H + ROW_GAP
 	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
 	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
-	self.memberScroll = GlobalStorageSiK.TerminalScroll.createNeat(self, pad, y, textW, memberH)
+	self.memberScroll = GlobalStorageSiK.TerminalScroll.create(self, pad, y, textW, memberH)
 	local actionsY = y + memberH + ROW_GAP
 
-	self.releaseBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.releaseBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminReleaseOwnership"), self, function()
 			self:onReleaseOwnership()
 		end)
 	self:addChild(self.releaseBtn)
 
-	self.deleteBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), self, function()
 			self:onDeleteNetworkConfirm()
 		end)
-	GlobalStorageSiK.TerminalChrome.applyDangerButton(self.deleteBtn)
+	GlobalStorageSiK.SiK_UI.applyDangerButton(self.deleteBtn)
 	self:addChild(self.deleteBtn)
 
 	local hintY = actionsY + BTN_H + ROW_GAP
@@ -570,7 +611,7 @@ function GS_AdminDashboardUI:buildStaticChrome()
 		self:setHeight(neededHeight)
 	end
 
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
+	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 ---@param networks table[]
@@ -635,10 +676,21 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 	local scroll = self.memberScroll
 	GlobalStorageSiK.TerminalScroll.clear(scroll)
 	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	local btnW = 90
-	local nameMaxW = w - btnW - COL_SEEN_W - 24
-	local seenX = nameMaxW + 6
-	local y = 4
+	local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ADMIN_MEMBER_TABLE_COLUMNS, ADMIN_MEMBER_TABLE_OPTIONS)
+	local btnW = cols[3].width
+	local nameMaxW = cols[1].width - cols[1].pad * 2
+	local seenX = cols[2].x
+	local headerMetrics = GlobalStorageSiK.SiK_UI.Table.metrics()
+	local header = ISPanel:new(0, 0, w, headerMetrics.headerHeight)
+	header:initialise()
+	header.drawBackground = false
+	header.prerender = function(target)
+		ISPanel.prerender(target)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(target, ADMIN_MEMBER_TABLE_COLUMNS,
+			nil, true, 2, UIFont.Small, ADMIN_MEMBER_TABLE_OPTIONS)
+	end
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, header)
+	local y = headerMetrics.headerHeight + 2
 	local dashboard = self
 	if #self._members == 0 then
 		local lbl = ISLabel:new(6, y, FONT_HGT_SMALL, T("IGUI_GS_AdminNoMembers"), 0.6, 0.63, 0.66, 1, UIFont.Small, true)
@@ -654,7 +706,7 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 		row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 		row.prerender = function(self)
 			ISPanel.prerender(self)
-			GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, i, self:isMouseOver(), false)
+			GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, i, self:isMouseOver(), false)
 			-- Rol como fuente unica de verdad (incluido "Muerto" = ROLE_DEAD, ver
 			-- GS_Permissions.lua). Columna de conexion aparte, puramente
 			-- informativa (pedido explicito 2026-08-22, nunca se infiere ni se
@@ -662,15 +714,15 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 			-- linea ahora mismo, "Desconectado hace X" para el resto.
 			local label = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
 			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-			self:drawText(GlobalStorageSiK.TerminalChrome.truncateText(label, nameMaxW, UIFont.Small),
-				6, yMid, 0.85, 0.87, 0.9, 1, UIFont.Small)
+			self:drawText(GlobalStorageSiK.SiK_UI.truncateText(label, nameMaxW, UIFont.Small),
+				cols[1].x + cols[1].pad, yMid, 0.85, 0.87, 0.9, 1, UIFont.Small)
 			local seenText, sr, sg, sb = connectionLabel(m)
-			self:drawText(GlobalStorageSiK.TerminalChrome.truncateText(seenText, COL_SEEN_W, UIFont.Small),
+			self:drawText(GlobalStorageSiK.SiK_UI.truncateText(seenText, COL_SEEN_W, UIFont.Small),
 				seenX, yMid, sr, sg, sb, 1, UIFont.Small)
 		end
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
-		local editBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
-			seenX + COL_SEEN_W + 6, math.floor((ROW_H - BTN_H) / 2), btnW, BTN_H, T("IGUI_GS_AdminEditMember"), row, function()
+		local editBtn = GlobalStorageSiK.SiK_UI.createButton(
+			cols[3].x, math.floor((ROW_H - BTN_H) / 2), btnW, BTN_H, T("IGUI_GS_AdminEditMember"), row, function()
 				GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, m)
 			end)
 		row:addChild(editBtn)
@@ -720,20 +772,13 @@ function GS_AdminDashboardUI:onDeleteNetworkConfirm()
 	if not self._selectedNetworkId then return end
 	local networkId = self._selectedNetworkId
 	local dashboard = self
-	local function onResult(_, button)
-		if button and button.internal == "YES" then
-			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-				GlobalStorageSiK.NetClient.sendCommand("adminDeleteNetwork", { networkId = networkId, confirm = true })
-			end
-			dashboard._selectedNetworkId = nil
-			dashboard._selectedNetwork = nil
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_AdminDeleteNetworkConfirm", networkId), function()
+		if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
+			GlobalStorageSiK.NetClient.sendCommand("adminDeleteNetwork", { networkId = networkId, confirm = true })
 		end
-	end
-	local modal = ISModalDialog:new(0, 0, 460, 200, T("IGUI_GS_AdminDeleteNetworkConfirm", networkId), true, nil, onResult, nil)
-	modal:initialise()
-	modal:addToUIManager()
-	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
-	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
+		dashboard._selectedNetworkId = nil
+		dashboard._selectedNetwork = nil
+	end)
 end
 
 --- Reenganchado desde GS_Client.lua al recibir cada comando del servidor.

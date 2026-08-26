@@ -4,7 +4,13 @@ Esta API permite extender Global Storage sin depender de sus tablas internas. El
 
 ## Principio de responsabilidad
 
-El Core es propietario de autoridad SP/MP, acceso a red, registro, sesión, traslado temporal y devolución. El addon es propietario de sus ventanas, hooks vanilla o de terceros, validación funcional, significado de éxito/fallo, mensajes, traducciones, sandbox y logs.
+El Core es propietario de autoridad SP/MP, acceso a red, registro, sesión, traslado temporal, devolución y del framework visual compartido SiK UI. El addon es propietario del contenido y comportamiento de sus pestañas, hooks vanilla o de terceros, validación funcional, significado de éxito/fallo, mensajes, traducciones, sandbox y logs. Un addon no crea otra ventana del terminal ni duplica su superficie.
+
+El proveedor interno vigente es `GlobalStorageSiK.SiK_UI` (`GS_SiK_UI_Core.lua`). Sustituye por completo los nombres retirados Chrome/`createNeat*`; no existe un shim. La referencia pública completa para terceros se documentará después de validar en juego el contrato integrado. Los addons oficiales de este repositorio deben usar ya los nombres SiK UI.
+
+Desde Core `1.3.86-dev32`, el scroll normal y la lista virtual son también propios: `GlobalStorageSiK.TerminalScroll` concentra desplazamiento/barra/recorte y `GlobalStorageSiK.SiK_UI.VirtualList.create(...)` crea el pool virtual usado por Almacén.
+
+Desde `1.3.86-dev33`, `GlobalStorageSiK.SiK_UI.Table` recibe descriptores de columnas parametrizables (`key`, título, ancho fijo/fraccional/flexible, mínimos, alineación, padding y valores a medir) y comparte el layout resultante entre cabecera, filas y clics. Sus métricas visuales comunes viven en `Table.DEFAULTS`, con sobrescrituras por instancia. `SiK_UI.Modal/Window` centraliza confirmaciones, altura por contenido, Escape y geometría de editores; `SiK_UI.Palette` gobierna únicamente la apariencia local. Estos contratos siguen siendo internos durante la DEV: los addons oficiales pueden consumirlos, pero no se promete estabilidad pública a terceros hasta completar la prueba en juego y la documentación formal del framework.
 
 No accedas a variables `local`, registros internos ni tablas de persistencia. Si falta una primitiva general, propón una ampliación pequeña de esta API.
 
@@ -32,6 +38,45 @@ Funciones públicas:
 - `getDefinition(addonId)` y `listActive()`: consultan definiciones registradas.
 - `playerKnowsMagazine(player, addonId)`: comprueba el conocimiento del módulo.
 - `isInstalledOnTerminal(networkId, anchor, addonId)`: comprueba instalación en un terminal concreto.
+
+## Pestañas cliente declarativas: `GlobalStorageSiK.TerminalExtensions`
+
+Disponible desde código `client` mediante `require "GS_TerminalUI_Extensions"`. El addon registra una definición una sola vez; no construye, adjunta ni vuelve a pintar un panel por cada cambio de estado.
+
+```lua
+GlobalStorageSiK.TerminalExtensions.registerDefinition("example", {
+    module = Example.TerminalPanel,
+    titleKey = "IGUI_Example_Tab",
+    iconPath = "media/ui/Example/Tab.png",
+    panelField = "examplePanel",
+})
+```
+
+El módulo debe exponer `buildPanel(panel, terminal)` y `refresh(panel, terminal)`; `layout(panel, innerW, innerH)` es opcional. Si necesita instalar comportamiento adicional una sola vez sobre el panel, puede aportar `setupPanel(panel, terminal)` en la definición.
+
+Para reflejar la instalación de una disquetera/periférico o cualquier otra regla del addon:
+
+```lua
+GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal, "example", visible)
+```
+
+Al pasar a visible, el Core crea como máximo un panel para esa combinación `terminal + tabKey`, llama una sola vez a `buildPanel`/`setupPanel` y registra el icono. Ocultar retira el slot lateral, no destruye el panel; volver a mostrar reutiliza la misma instancia. Activar la pestaña adjunta exclusivamente ese panel al `contentHost`, aplica primero el layout y después llama a `refresh`. Esto evita ventanas superpuestas, `addChild` duplicados y reconstrucciones al recibir otro `terminalState`.
+
+`registerTab(terminal, tabKey, opts)` se conserva para compatibilidad con consumidores antiguos, pero el contrato recomendado para código nuevo y addons oficiales es `registerDefinition`.
+
+Los addons también pueden aportar una apertura interna al panel de staff sin que el Core conozca su implementación:
+
+```lua
+GlobalStorageSiK.TerminalExtensions.registerStaffAction("example.vanilla", {
+    labelKey = "IGUI_Example_OpenVanilla",
+    order = 30,
+    invoke = function(dashboard)
+        Example.openVanillaForStaff(dashboard)
+    end,
+})
+```
+
+`registerStaffAction(actionKey, opts)` es idempotente por clave. `getStaffActions()` devuelve un snapshot ordenado por `order` y después por clave; puede filtrar una acción mediante el callback opcional `isAvailable`. El Core solo presenta y ejecuta la acción. Detección de mods externos, elección de UI y sesiones siguen siendo responsabilidad del addon.
 
 ## Sesiones cliente: `GlobalStorageSiK.CraftSession`
 

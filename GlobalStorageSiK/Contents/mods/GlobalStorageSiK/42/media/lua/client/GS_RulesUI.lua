@@ -1,0 +1,387 @@
+--[[
+	GlobalStorageSiK - Utilidades compartidas de UI para el motor de reglas
+	AND/OR/NOT (dev26, ronda 2)
+	Descripción: piezas de presentación/edición de reglas {op, condition}
+	reutilizadas TANTO por el editor de contenedor (GS_TerminalUI_NodeEditor.lua)
+	COMO por el editor de zona (GS_TerminalUI_ZoneEditor.lua) - etiquetas
+	legibles, resumen en prosa, clonado, migración legacy y el detector
+	general de contradicciones. Sin esto, cada editor duplicaría la misma
+	lógica de interpretación de reglas. Ver Documentacion/GS_FilterRedesign_Plan.md.
+]]
+
+require "GS_I18n"
+require "GS_ItemTaxonomy"
+require "GS_Subcategories"
+require "GS_NodeFilters"
+
+GlobalStorageSiK.RulesUI = {}
+
+local T = GlobalStorageSiK.I18n.text
+
+GlobalStorageSiK.RulesUI.OPS = { "OR", "AND", "NOT" }
+GlobalStorageSiK.RulesUI.OP_TITLE_KEY = { OR = "IGUI_GS_NodeRulesOrTitle", AND = "IGUI_GS_NodeRulesAndTitle", NOT = "IGUI_GS_NodeRulesNotTitle" }
+GlobalStorageSiK.RulesUI.OP_ADD_KEY   = { OR = "IGUI_GS_NodeRulesAddOr",   AND = "IGUI_GS_NodeRulesAddAnd",   NOT = "IGUI_GS_NodeRulesAddNot" }
+
+-- Los 5 huecos de joyeria reales (ver GS_Subcategories.lua:JEWELRY_SLOT_BUCKET) -
+-- mismo enum ya establecido en varios ficheros del mod.
+local JEWELRY_SLOT_KEYS = { ring = true, necklace = true, wrist = true, earring = true, nose = true }
+
+--- Etiqueta legible de una clave de categoria/subcategoria/hoja de
+--- cualquier nivel (1, 2 o 3) - entiende los 2 prefijos de familia
+--- (EXT_GROUP_PREFIX, SUBGROUP_PREFIX) y las claves combinadas "::" (hueco
+--- de joyeria o de cualquier subcategoria vanilla, ej. Ropa por prenda).
+--- Extraida de GS_TerminalUI_NodeEditor.lua (dev26 ronda 2) para que el
+--- editor de zona use exactamente la misma logica de etiquetado.
+---@param key string
+---@return string
+function GlobalStorageSiK.RulesUI.categoryLabel(key)
+	if not key or key == "" then return "?" end
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	if key:sub(1, #EXT) == EXT then
+		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
+	end
+	if key:sub(1, #SUB) == SUB then
+		local rest = key:sub(#SUB + 1)
+		local sepPos = rest:find("::", 1, true)
+		if sepPos then
+			local groupKey = rest:sub(1, sepPos - 1)
+			local subKey = rest:sub(sepPos + 2)
+			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " - "
+				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subKey, groupKey)
+		end
+		return rest
+	end
+	local sepPos = key:find("::", 1, true)
+	if sepPos then
+		local mainPart = key:sub(1, sepPos - 1)
+		local slotPart = key:sub(sepPos + 2)
+		local mainLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(mainPart)
+		local slotLower = string.lower(slotPart)
+		local slotLabel
+		if JEWELRY_SLOT_KEYS[slotLower] and GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.jewelrySlotLabel then
+			slotLabel = GlobalStorageSiK.Subcategories.jewelrySlotLabel(slotLower)
+		else
+			slotLabel = GlobalStorageSiK.ItemTaxonomy.translateSubKey(slotPart, mainPart, nil) or slotPart
+		end
+		return mainLabel .. " - " .. slotLabel
+	end
+	local GSSub = GlobalStorageSiK.Subcategories
+	if GSSub and GSSub.isSubcategoryKey and GSSub.isSubcategoryKey(key) then
+		return GSSub.label(key)
+	end
+	return GlobalStorageSiK.ItemTaxonomy.translateMainKey(key)
+end
+
+--- Etiqueta legible de UNA condicion de regla: tipo "category" usa
+--- categoryLabel de arriba; el resto (name/weight/tag/item) reutiliza
+--- GS_NodeFilters.describe tal cual.
+---@param condition table
+---@return string
+function GlobalStorageSiK.RulesUI.describeCondition(condition)
+	if not condition then return "?" end
+	if condition.type == "category" then
+		return GlobalStorageSiK.RulesUI.categoryLabel(condition.value)
+	end
+	return GlobalStorageSiK.NodeFilters.describe(condition)
+end
+
+--- Copia profunda de una lista de reglas {op, condition}.
+---@param source table
+---@return table
+function GlobalStorageSiK.RulesUI.cloneRules(source)
+	local result = {}
+	for i = 1, #(source or {}) do
+		local rule = source[i]
+		local condition = {}
+		for k, v in pairs(rule.condition or {}) do condition[k] = v end
+		result[i] = { op = rule.op, condition = condition }
+	end
+	return result
+end
+
+--- Categoria legacy "basura": un codigo tecnico de una sola letra (B/F/W...)
+--- filtrado por metadata vanilla, suelto o como sub-nivel de un "main::sub"
+--- (ej. "Arma::W") - GS_ItemTaxonomy.readMainKey ya descarta este mismo
+--- patron al leer datos EN VIVO (ver isSingleAsciiDimension, mismo fichero),
+--- pero una categoria legacy ya guardada en node.categories de una sesion
+--- ANTERIOR a esa proteccion podia arrastrar uno de estos codigos sueltos.
+--- Sin este mismo filtro aqui, la migracion los convertia en una regla real
+--- que ni siquiera existe como opcion en el desplegable de categorias - bug
+--- real reportado por el usuario con captura ("Arma - W" duplicado, dev26
+--- ronda 4bis).
+---@param cat string|nil
+---@return boolean
+local function isJunkLegacyCategory(cat)
+	if not cat or cat == "" then return false end
+	if cat:match("^%s*[A-Za-z]%s*$") then return true end
+	local sepPos = cat:find("::", 1, true)
+	if sepPos then
+		local slotPart = cat:sub(sepPos + 2)
+		if slotPart:match("^%s*[A-Za-z]%s*$") then return true end
+	end
+	return false
+end
+
+--- Migra categorias/filtros legacy (pre-dev26) a la lista unificada de
+--- reglas, todas como OR - reproduce EXACTAMENTE la semantica anterior de
+--- GS_Router.matchSpecificity.
+---@param categories table|nil
+---@param filters table|nil
+---@return table
+function GlobalStorageSiK.RulesUI.migrateLegacyToRules(categories, filters)
+	local rules = {}
+	for _, cat in ipairs(categories or {}) do
+		if not isJunkLegacyCategory(cat) then
+			rules[#rules + 1] = { op = "OR", condition = { type = "category", value = cat } }
+		end
+	end
+	for _, filter in ipairs(filters or {}) do
+		local condition = {}
+		for k, v in pairs(filter or {}) do condition[k] = v end
+		rules[#rules + 1] = { op = "OR", condition = condition }
+	end
+	return rules
+end
+
+--- Frase-resumen legible de un protocolo de aceptacion completo.
+---@param rules table
+---@return string
+function GlobalStorageSiK.RulesUI.buildSummary(rules)
+	local orParts, andParts, notParts = {}, {}, {}
+	for i = 1, #(rules or {}) do
+		local rule = rules[i]
+		local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
+		if rule.op == "AND" then andParts[#andParts + 1] = label
+		elseif rule.op == "NOT" then notParts[#notParts + 1] = label
+		else orParts[#orParts + 1] = label end
+	end
+	if #orParts == 0 and #andParts == 0 and #notParts == 0 then
+		return T("IGUI_GS_NodeRulesSummaryUnrestricted")
+	end
+	local sentence = ""
+	if #orParts > 0 then
+		sentence = T("IGUI_GS_NodeRulesSummaryAccepts", table.concat(orParts, T("IGUI_GS_NodeRulesJoinOr")))
+	end
+	if #andParts > 0 then
+		sentence = sentence .. T("IGUI_GS_NodeRulesSummaryAlso", table.concat(andParts, T("IGUI_GS_NodeRulesJoinAnd")))
+	end
+	if #notParts > 0 then
+		sentence = sentence .. T("IGUI_GS_NodeRulesSummaryNever", table.concat(notParts, T("IGUI_GS_NodeRulesJoinNot")))
+	end
+	sentence = sentence:gsub("^%s+", "")
+	if sentence == "" then
+		return T("IGUI_GS_NodeRulesSummaryUnrestricted")
+	end
+	return sentence
+end
+
+--- Convierte un filtro de tipo "weight" en un rango [lo, hi] (nil = sin
+--- limite en ese extremo), para poder comparar solapamiento entre dos
+--- condiciones de peso distintas (detector de contradicciones).
+---@param condition table
+---@return number|nil lo, number|nil hi
+local function weightRange(condition)
+	local v1 = tonumber(condition.value)
+	if not v1 then return nil, nil end
+	local mode = condition.mode or "eq"
+	if mode == "gt" then return v1, nil
+	elseif mode == "gte" then return v1, nil
+	elseif mode == "lt" then return nil, v1
+	elseif mode == "lte" then return nil, v1
+	elseif mode == "between" then
+		local v2 = tonumber(condition.value2) or v1
+		return math.min(v1, v2), math.max(v1, v2)
+	end
+	return v1, v1 -- eq
+end
+
+--- true si una clave de regla de categoria es de nivel 1 (EXT_GROUP_PREFIX,
+--- ej. "Comida" entera) o nivel 2 (SUBGROUP_PREFIX, ej. "Comida > Perecedero"):
+--- ambas son mas AMPLIAS que una hoja exacta de nivel 3, y por tanto cubren
+--- (contienen) cualquier hoja mas especifica del mismo grupo.
+---@param key string
+---@return boolean
+local function isBroadCategoryRule(key)
+	if not key or key == "" then return false end
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	return key:sub(1, #EXT) == EXT or key:sub(1, #SUB) == SUB
+end
+
+--- Indice inverso (clave de regla de categoria en minusculas -> groupKey
+--- canonico), construido UNA vez por sesion recorriendo el catalogo completo
+--- (mismo patron que ItemTaxonomy.canonicalizeFilterRule) - permite resolver
+--- el grupo de una hoja de Nivel 3 (ej. "FoodPerishableMeat" -> "Food") SIN
+--- necesitar un item vivo, solo el catalogo de items del juego.
+local _categoryGroupKeyIndex = nil
+local function buildCategoryGroupKeyIndex()
+	if _categoryGroupKeyIndex then return _categoryGroupKeyIndex end
+	_categoryGroupKeyIndex = {}
+	local rows = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
+	for i = 1, #rows do
+		local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, rows[i].fullType, rows[i])
+		if ok and tax and tax.groupKey and tax.groupKey ~= "" and tax.mainCanon then
+			-- Mismas 4 formas de clave de hoja que ItemTaxonomy.collectLeafFilters.
+			local key
+			if tax.jewelrySlotKey then
+				key = tax.mainCanon .. "::" .. tax.jewelrySlotKey
+			elseif tax.hyphenLeafLabel then
+				key = tax.mainCanon
+			elseif tax.subCanon and tax.subCanon ~= "" then
+				key = tax.mainCanon .. "::" .. tax.subCanon
+			else
+				key = tax.mainCanon
+			end
+			_categoryGroupKeyIndex[string.lower(key)] = tax.groupKey
+		end
+	end
+	return _categoryGroupKeyIndex
+end
+
+--- Resuelve el groupKey canonico (Nivel 1) de CUALQUIER clave de regla de
+--- categoria, sea de Nivel 1, 2 o 3 - sin necesitar un item vivo.
+---@param key string
+---@return string|nil
+local function categoryRuleGroupKey(key)
+	if not key or key == "" then return nil end
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	if key:sub(1, #EXT) == EXT then
+		return key:sub(#EXT + 1)
+	end
+	if key:sub(1, #SUB) == SUB then
+		local rest = key:sub(#SUB + 1)
+		local sepPos = rest:find("::", 1, true)
+		if sepPos then return rest:sub(1, sepPos - 1) end
+		return rest
+	end
+	local index = buildCategoryGroupKeyIndex()
+	return index[string.lower(key)]
+end
+
+--- true si dos condiciones del MISMO tipo se solapan (misma categoria/tag/
+--- item exacto, jerarquia de categoria compartida, substring de nombre
+--- compartido, o rango de peso que se cruza). No es un detector
+--- matematicamente exhaustivo (ej. dos hojas exactas hermanas del mismo
+--- grupo, sin relacion padre/hijo entre ellas, no cuentan como solape) -
+--- cubre los casos directos y reales descritos en el plan de diseño
+--- (§4.4-quinquies).
+---@param a table condicion
+---@param b table condicion
+---@return boolean
+local function conditionsOverlap(a, b)
+	if not a or not b or a.type ~= b.type then return false end
+	if a.type == "category" then
+		local av, bv = string.lower(tostring(a.value or "")), string.lower(tostring(b.value or ""))
+		if av == bv then return true end
+		-- Jerarquia: un NOT/OR/AND de Nivel 1 o 2 (ej. "Comida" o "Comida >
+		-- Perecedero") cubre cualquier hoja mas especifica del MISMO grupo -
+		-- solo cuenta si al menos una de las dos reglas es "amplia" (Nivel
+		-- 1/2), nunca entre dos hojas exactas hermanas sin relacion.
+		if isBroadCategoryRule(a.value) or isBroadCategoryRule(b.value) then
+			local ga, gb = categoryRuleGroupKey(a.value), categoryRuleGroupKey(b.value)
+			if ga and gb and string.lower(ga) == string.lower(gb) then
+				return true
+			end
+		end
+		return false
+	end
+	if a.type == "tag" then
+		return string.lower(tostring(a.value or "")) == string.lower(tostring(b.value or ""))
+	end
+	if a.type == "item" then
+		return tostring(a.itemType or "") == tostring(b.itemType or "")
+	end
+	if a.type == "name" then
+		local av, bv = string.lower(tostring(a.value or "")), string.lower(tostring(b.value or ""))
+		if av == "" or bv == "" then return false end
+		return av:find(bv, 1, true) ~= nil or bv:find(av, 1, true) ~= nil
+	end
+	if a.type == "weight" then
+		local aLo, aHi = weightRange(a)
+		local bLo, bHi = weightRange(b)
+		local lo = math.max(aLo or -math.huge, bLo or -math.huge)
+		local hi = math.min(aHi or math.huge, bHi or math.huge)
+		return lo <= hi
+	end
+	return false
+end
+
+--- Resumen compacto de un protocolo de reglas para una celda de tabla
+--- estrecha (columna "Protocolo" de la lista de contenedores/zonas, dev26
+--- ronda 3). Prioridad para elegir QUE regla mostrar como texto: primera
+--- OR > primera AND > primera NOT - coherente con que OR define la
+--- aceptacion base, AND la restringe y NOT la excluye. hasOr/hasAnd/hasNot
+--- reflejan la composicion COMPLETA (para los 3 puntos de color), no solo
+--- la regla elegida como texto.
+---@param rules table|nil
+---@return table|nil { hasOr, hasAnd, hasNot, label, opKey, extraCount } - opKey "OR"|"AND"|"NOT"; nil si no hay ninguna regla
+function GlobalStorageSiK.RulesUI.compactSummary(rules)
+	rules = rules or {}
+	if #rules == 0 then return nil end
+	local hasOr, hasAnd, hasNot = false, false, false
+	local firstOr, firstAnd, firstNot = nil, nil, nil
+	for i = 1, #rules do
+		local rule = rules[i]
+		if rule.op == "OR" then
+			hasOr = true
+			firstOr = firstOr or rule
+		elseif rule.op == "AND" then
+			hasAnd = true
+			firstAnd = firstAnd or rule
+		elseif rule.op == "NOT" then
+			hasNot = true
+			firstNot = firstNot or rule
+		end
+	end
+	local primary, opKey = firstOr, "OR"
+	if not primary then primary, opKey = firstAnd, "AND" end
+	if not primary then primary, opKey = firstNot, "NOT" end
+	if not primary then return nil end
+	return {
+		hasOr = hasOr, hasAnd = hasAnd, hasNot = hasNot,
+		label = GlobalStorageSiK.RulesUI.describeCondition(primary.condition),
+		opKey = opKey,
+		extraCount = #rules - 1,
+	}
+end
+
+--- Detector general de contradicciones (§4.4-quinquies del plan): busca, en
+--- una lista de reglas YA GUARDADAS, alguna que quede neutralizada por
+--- newRule (un NOT contra un OR/AND que se solapa, o viceversa). Devuelve la
+--- PRIMERA regla en conflicto encontrada (o nil si ninguna).
+---@param existingRules table
+---@param newRule table {op, condition}
+---@return table|nil conflictingRule
+function GlobalStorageSiK.RulesUI.detectContradiction(existingRules, newRule)
+	if not newRule or not newRule.condition then return nil end
+	local newIsExclusion = newRule.op == "NOT"
+	for i = 1, #(existingRules or {}) do
+		local existing = existingRules[i]
+		local existingIsExclusion = existing.op == "NOT"
+		if existingIsExclusion ~= newIsExclusion and conditionsOverlap(existing.condition, newRule.condition) then
+			return existing
+		end
+	end
+	return nil
+end
+
+--- Version CRUZADA del detector (§4.4-quinquies: "cambiar la categoria de
+--- zona deriva en cambio de contenedores que contiene"): busca si una regla
+--- de ZONA nueva neutraliza alguna regla YA guardada de cualquier contenedor
+--- de esa zona. Devuelve el nombre del PRIMER contenedor en conflicto y su
+--- regla, o nil si ninguno.
+---@param newRule table {op, condition} - regla de zona a punto de guardarse
+---@param containerGroups table[] { name=string, rules=table } - un grupo por contenedor de la zona
+---@return string|nil containerName, table|nil conflictingRule
+function GlobalStorageSiK.RulesUI.detectCrossLevelContradiction(newRule, containerGroups)
+	for i = 1, #(containerGroups or {}) do
+		local group = containerGroups[i]
+		local conflict = GlobalStorageSiK.RulesUI.detectContradiction(group.rules, newRule)
+		if conflict then
+			return group.name, conflict
+		end
+	end
+	return nil, nil
+end

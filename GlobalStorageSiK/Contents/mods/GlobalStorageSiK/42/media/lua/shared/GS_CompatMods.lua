@@ -49,7 +49,19 @@
 	  contenedor nuestro. Nunca escribimos en su moddata.
 ]]
 
-require "GS_Network"
+-- BUG REAL reportado por Sistemas (2026-08-26): "GS_CompatMods.lua > recursive
+-- require(): .../GS_Network.lua" - este fichero tenia un `require "GS_Network"`
+-- a nivel de modulo que creaba un ciclo (GS_Network, en su propia cadena de
+-- requires, termina volviendo a requerir este fichero), dejando a Lua con la
+-- posibilidad real de entregar un modulo a medio inicializar segun el orden
+-- de carga - no llegaba a impedir el arranque, pero no es ruido inofensivo.
+-- Quitado sin sustituir por un require diferido: las 2 unicas llamadas a
+-- `GlobalStorageSiK.Network.findWorldObject` de este fichero viven DENTRO de
+-- funciones (`getContainerLabelText`/`pushContainerLabelText`), nunca se
+-- ejecutan durante la carga del fichero - para cuando el juego real las llame
+-- (tras un clic o refresco de UI), todos los ficheros compartidos ya se
+-- cargaron, `GlobalStorageSiK.Network` existe siempre. El require solo
+-- garantizaba orden de carga que aqui no hacia falta.
 
 GlobalStorageSiK.CompatMods = {}
 

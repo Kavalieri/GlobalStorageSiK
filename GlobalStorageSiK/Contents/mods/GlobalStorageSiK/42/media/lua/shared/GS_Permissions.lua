@@ -25,6 +25,83 @@ GlobalStorageSiK.Permissions.ROLE_MEMBER = "member"
 -- fue un admin de esta red", que de otra forma dejaria de encontrarlo.
 GlobalStorageSiK.Permissions.ROLE_DEAD = "dead"
 
+-- Agrupador de ModData.transmit (2026-08-25, bug real confirmado: reclamar
+-- una red justo despues de que una misma cuenta vuelva con un characterId
+-- nuevo podia reconciliar VARIAS redes vacantes en la misma pasada, y cada
+-- reconciliacion disparaba su propia llamada a ModData.transmit sin agrupar
+-- - hasta 3 difusiones COMPLETAS seguidas de todo el registro de permisos
+-- del servidor (todas las redes, todas las fichas de personaje, vivas y
+-- muertas) a TODOS los clientes conectados, cuando una sola bastaba.
+-- handleOwnerDeath ya evitaba esto (transmite una vez tras su propio bucle);
+-- el resto de puntos de escritura no. requestTransmit() sustituye cualquier
+-- llamada directa a ModData.transmit con esa clave: agrupa cualquier numero
+-- de mutaciones dentro del mismo tick en un unico envio via Events.OnTick,
+-- sin cambiar cuando el propio servidor ve la mutacion (ya esta aplicada en
+-- memoria antes de llamar aqui) - solo difiere unos milisegundos cuando se
+-- difunde a los clientes.
+local pendingPermissionsTransmit = false
+local permissionsTransmitTickInstalled = false
+
+-- Diagnostico de tamaño (2026-08-25, investigacion del cuelgue de cliente al
+-- reclamar tras morir): nunca existio ningun log que midiera CUANTO se envia
+-- en cada difusion de permisos - solo trazas narrativas de que paso, nunca de
+-- volumen. Cuenta redes y fichas de personaje (vivas+muertas, nunca se
+-- borran) en TODO el registro, no solo la red que motivo el cambio, porque
+-- ModData.transmit con esta clave siempre manda la tabla entera del servidor.
+-- Siempre visible (Log.warn, no depende de Modo depuracion) mientras dure
+-- esta investigacion - bajar a Log.info si se confirma que el tamaño no es
+-- la causa.
+local function logPermissionsTransmitSize()
+	if not GlobalStorageSiK.Log or not GlobalStorageSiK.Network or not GlobalStorageSiK.Network.getRegistry then
+		return
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local networks = registry and registry.networks
+	if not networks then return end
+	local networkCount, characterCount = 0, 0
+	for networkId in pairs(networks) do
+		networkCount = networkCount + 1
+		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+		if net and net.characterPermissions then
+			for _ in pairs(net.characterPermissions) do
+				characterCount = characterCount + 1
+			end
+		end
+	end
+	GlobalStorageSiK.Log.warn("Permissions", "transmitSize",
+		"networks=" .. tostring(networkCount) .. " characterRecordsTotal=" .. tostring(characterCount))
+end
+
+local function flushPermissionsTransmit()
+	permissionsTransmitTickInstalled = false
+	if Events and Events.OnTick then Events.OnTick.Remove(flushPermissionsTransmit) end
+	if not pendingPermissionsTransmit then return end
+	pendingPermissionsTransmit = false
+	if ModData and ModData.transmit then
+		logPermissionsTransmitSize()
+		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+	end
+end
+
+--- Difunde GlobalStorageSiK_Permissions a todos los clientes, agrupando
+--- cualquier numero de llamadas dentro del mismo tick/rafaga en un unico
+--- envio - usar SIEMPRE en vez de llamar a ModData.transmit directamente con
+--- GlobalStorageSiK.PERMISSIONS_MODDATA_KEY.
+function GlobalStorageSiK.Permissions.requestTransmit()
+	pendingPermissionsTransmit = true
+	if not ModData or not ModData.transmit then return end
+	if not Events or not Events.OnTick then
+		-- Fallback defensivo (no deberia pasar en runtime real): sin OnTick no
+		-- hay forma de agrupar, transmitir de inmediato en vez de perder el cambio.
+		flushPermissionsTransmit()
+		return
+	end
+	if not permissionsTransmitTickInstalled then
+		permissionsTransmitTickInstalled = true
+		Events.OnTick.Add(flushPermissionsTransmit)
+	end
+end
+
 --- Indica si deben aplicarse permisos (no en SP solo).
 ---@return boolean
 function GlobalStorageSiK.Permissions.shouldEnforce()
@@ -1370,9 +1447,7 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 			markRecordDead(staleRecord)
 			net.owner = ""
 			net.ownerCharacterId = nil
-			if ModData and ModData.transmit then
-				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
-			end
+			GlobalStorageSiK.Permissions.requestTransmit()
 		end
 	end
 	-- REDISEÑO explicito (2026-08-23, feedback directo del usuario: "los
@@ -1412,8 +1487,8 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 		--       herencia por cuenta.
 		if displayText(net.ownerAccountLogin) == "" then
 			local initialized = GlobalStorageSiK.Permissions.initializeOwner(net, player)
-			if initialized and ModData and ModData.transmit then
-				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			if initialized then
+				GlobalStorageSiK.Permissions.requestTransmit()
 			end
 			return initialized, initialized and nil or "identity_unavailable"
 		end
@@ -2883,9 +2958,7 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 		-- otra ficha que lo dijera) - no hace falta borrar nada aqui para
 		-- evitarlo.
 	end
-	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
-	end
+	GlobalStorageSiK.Permissions.requestTransmit()
 end
 
 --- Umbral de inactividad (ms) para dejar de "bloquear" la escalada a un
@@ -3079,9 +3152,7 @@ function GlobalStorageSiK.Permissions.claimVacantOwnership(player, networkId)
 	end
 	recordNetworkHistoryEvent(networkId, "claimed",
 		net.owner .. " (cuenta " .. tostring(net.ownerAccountLogin) .. ") reclamo la red - nivel=" .. tostring(tier))
-	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
-	end
+	GlobalStorageSiK.Permissions.requestTransmit()
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipClaimedMsg")
 end
 
@@ -3170,9 +3241,7 @@ function GlobalStorageSiK.Permissions.recoverOwnRole(player, networkId)
 	recordNetworkHistoryEvent(networkId, "role_recovered",
 		tostring(record.characterName) .. " (cuenta " .. tostring(record.accountUsername)
 			.. ") recupero su rol anterior: " .. tostring(role))
-	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
-	end
+	GlobalStorageSiK.Permissions.requestTransmit()
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermRoleRecoveredMsg")
 end
 
@@ -3266,8 +3335,6 @@ function GlobalStorageSiK.Permissions.adminClaimOwnership(player, networkId)
 	recordNetworkHistoryEvent(networkId, "claimed_by_admin",
 		tostring(net.owner) .. " (cuenta " .. tostring(net.ownerAccountLogin)
 			.. ") reclamo la propiedad como admin activo - dueño anterior inactivo: " .. tostring(previousOwner))
-	if ModData and ModData.transmit and GlobalStorageSiK.PERMISSIONS_MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
-	end
+	GlobalStorageSiK.Permissions.requestTransmit()
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipClaimedMsg")
 end

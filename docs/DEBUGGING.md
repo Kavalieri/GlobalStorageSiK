@@ -23,7 +23,22 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 
 ## Core
 
-`GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, UI y Router. `DebugModeUI` controla por separado volcados de árbol y solapes visuales. Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
+`GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, Router y el árbol **SiK UI** (ver más abajo). Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
+
+### Árbol "SiK UI" (dev36)
+
+Antes de dev36 existían tres interruptores sueltos, sin relación visible entre sí: `DebugModeUI` (clics/árbol de widgets/solapes, mecanismo propio distinto del resto), `DebugCatUI` (apertura de ventana + nombrado de nodo, mezclados en una sola categoría) y `DebugCatSearch` (caja de búsqueda). Los tres quedaron **retirados y sustituidos** por un único árbol de categorías `DebugCat`, con el mismo mecanismo estándar que Network/Craft/Inventory/Router, agrupado bajo el prefijo visible "SiK UI:" para poder depurar el framework de interfaz propio (`GS_SiK_UI_Core.lua`, `GS_SiK_UI_Table.lua`, `GS_TerminalUI_Scroll.lua`, `GS_TerminalUI_TabRail.lua`, `GS_TerminalUI_Extensions.lua`) por partes. El nombrado de nodo (`NodeNaming`), al no ser parte del framework visual sino lógica de negocio, pasó a su propia categoría independiente en vez de perderse.
+
+| Clave nueva | Sustituye a | Cubre |
+|---|---|---|
+| `DebugCatSiKUI` | `DebugModeUI` + la mitad "ventana" de `DebugCatUI` | Clics de botón, apertura/reutilización/refresco de la ventana del terminal, árbol de widgets y solapes (`GS_UIDebug.lua`). Traza general/maestra del framework. |
+| `DebugCatSiKUITable` | (nueva, sin logging previo) | Geometría de columnas resuelta por `SiK_UI.Table` (Almacén, Zonas y nodos, Red, Permisos...) — solo cuando el ancho disponible cambia de verdad. |
+| `DebugCatSiKUIScroll` | (nueva, sin logging previo) | Motor de scroll/lista virtual compartido: crecimiento del pool de filas y cambios de dataset. |
+| `DebugCatSiKUITabs` | (nueva, sin logging previo) | Barra de pestañas lateral + contrato de registro Core/addon: creación/reutilización de panel, visibilidad, clic de activación/cancelación. |
+| `DebugCatSiKUISearch` | `DebugCatSearch` | Caja de búsqueda de la pestaña Almacén (bytes vs. caracteres UTF-8 reales — diagnóstico de idiomas no-ASCII). |
+| `DebugCatNodeNaming` | mitad "nombrado" de `DebugCatUI` | Aplicación del nombre visible de un contenedor a su objeto en el mundo. |
+
+Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` primero (cubre clics/apertura/solapes); añade la sub-categoría concreta (`Table`/`Scroll`/`Tabs`/`Search`) solo si el problema está claramente en esa pieza — no las actives todas a la vez sin necesidad.
 
 ### Glosario de opciones del Core
 
@@ -31,7 +46,6 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 |---|---|---|
 | `DebugMode` | `Modo depuración (debug)` / `Debug mode` | Interruptor maestro. Por sí solo no activa ninguna categoría. |
 | `DebugRelayToClients` | `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` | Preparado por defecto. Envía por lotes acotados solo las líneas que otro logger haya activado. |
-| `DebugModeUI` | `>> Interfaz: clics y widgets` / `>> UI: clicks & widgets` | Clics, árbol de widgets, posiciones y solapes. Puede ser voluminoso. |
 | `DebugCatNetwork` | `>> Trazas de red` / `>> Network traces` | Resumen de comandos y sincronización. |
 | `DebugDetailNetwork` | `>>> DETALLE: payloads completos de red` / `>>> DETAIL: full network payloads` | Payloads completos; alto volumen. |
 | `DebugCatTerminalAccess` | `>> Acceso a terminal` / `>> Terminal access` | Manifest, registro, permisos, alcance y apertura. |
@@ -41,9 +55,14 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 | `DebugCatInventory` | `>> Inventario y transferencias` / `>> Inventory & transfers` | Depósitos, retiradas, snapshots y trabajos masivos resumidos. |
 | `DebugDetailInventory` | `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL: taxonomy and items` | Clasificación por objeto/tipo, consolidación por microlote y render por-frame del tooltip; volumen masivo. |
 | `DebugCatTooltip` | `>> Tooltip de red` / `>> Network tooltip` | Instalación/recuperación del hook, fallos y fallback del tooltip de cantidades. No registra cada frame. |
-| `DebugCatUI` | `>> Ventana del terminal (apertura)` / `>> Terminal window (opening)` | Apertura/reutilización de la ventana y nombrado de nodos. |
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
 | `DebugDetailRouter` | `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` | Tier y capacidad de cada candidato; alto volumen. |
+| `DebugCatSiKUI` | `>> SiK UI: clics y widgets` / `>> SiK UI: clicks & widgets` | Clics, apertura/reutilización/refresco de ventana, árbol de widgets y solapes. Traza general del framework — ver árbol "SiK UI" arriba. |
+| `DebugCatSiKUITable` | `>> SiK UI: geometría de tabla` / `>> SiK UI: table geometry` | Anchos de columna resueltos por `SiK_UI.Table`; solo al cambiar el ancho disponible. |
+| `DebugCatSiKUIScroll` | `>> SiK UI: scroll y lista virtual` / `>> SiK UI: scroll & virtual list` | Pool de filas y cambios de dataset del motor de scroll/lista virtual. |
+| `DebugCatSiKUITabs` | `>> SiK UI: pestañas y extensiones` / `>> SiK UI: tabs & extensions` | Registro/reutilización de panel, visibilidad y clic de pestaña. |
+| `DebugCatSiKUISearch` | `>> SiK UI: caja de búsqueda` / `>> SiK UI: search box` | Bytes vs. caracteres UTF-8 reales en el cuadro de búsqueda de Almacén. |
+| `DebugCatNodeNaming` | `>> Nombrado de terminal` / `>> Terminal naming` | Aplicación del nombre visible de un contenedor a su objeto en el mundo. |
 
 Las líneas del Core usan componente y evento estables. Operaciones largas deben emitir estados significativos, no una línea por tick. Si un estado no cambió, no se repite.
 

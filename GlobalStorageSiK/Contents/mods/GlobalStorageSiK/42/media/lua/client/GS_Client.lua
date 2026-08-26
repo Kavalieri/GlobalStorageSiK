@@ -393,16 +393,14 @@ local function onServerCommand(module, command, args)
 				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
 			elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.pendingInitialTab then
 				-- Ver terminalRegistered mas arriba: tras instalar un terminal
-				-- con exito, la ventana debe abrir directamente en Red > Nodos
-				-- en vez de en la pestaña por defecto (Almacen).
+				-- con exito, la ventana debe abrir directamente en Red (dev41:
+				-- Red ya ES "Zonas y nodos" directamente, sin sub-pestañas -
+				-- antes hacia falta un activateSubTab(ui, "nodos") aparte).
 				local tabKey = GlobalStorageSiK.Client.pendingInitialTab
 				GlobalStorageSiK.Client.pendingInitialTab = nil
 				local ui = GlobalStorageSiK.TerminalUI.instance
 				if ui and GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.activate then
 					GlobalStorageSiK.TerminalTabs.activate(ui, tabKey)
-					if tabKey == "network" and GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.activateSubTab then
-						GlobalStorageSiK.TerminalNetwork.activateSubTab(ui, "nodos")
-					end
 				end
 			end
 		else
@@ -415,6 +413,16 @@ local function onServerCommand(module, command, args)
 		end
 		if GlobalStorageSiK.TerminalConfig and GlobalStorageSiK.TerminalConfig.onNodeContentsReceived then
 			GlobalStorageSiK.TerminalConfig.onNodeContentsReceived(args)
+		end
+	elseif command == "zoneCapacity" then
+		-- dev26 ronda 4: indicador de ocupacion del editor de zona - a
+		-- diferencia de nodeContents (ya pedido siempre al abrir el editor de
+		-- contenedor), aqui el editor de zona pide esto explicitamente
+		-- (GS_TerminalUI_ZoneEditor.lua:setZone) porque no existe ningun otro
+		-- flujo que ya traiga este dato.
+		local zoneUi = GlobalStorageSiK.TerminalZoneEditor and GlobalStorageSiK.TerminalZoneEditor.instance
+		if zoneUi and zoneUi.zone and args and zoneUi.zone.id == args.zoneId and zoneUi.onCapacityReceived then
+			zoneUi:onCapacityReceived(args.capacity)
 		end
 	elseif command == "terminalManifest" then
 		local player = GlobalStorageSiK.NetClient.getPlayer()
@@ -593,10 +601,12 @@ local function onServerCommand(module, command, args)
 			rect = { x = mainUi:getX(), y = mainUi:getY(), w = mainUi:getWidth(), h = mainUi:getHeight() }
 		end
 		if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.showBlocked then
-			GlobalStorageSiK.TerminalUI.showBlocked(payload.reason, rect)
-			if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.refresh then
-				GlobalStorageSiK.TerminalBlockedUI.refresh(payload)
-			end
+			-- Un solo rebuild, con el payload YA completo (canClaimOwnership/
+			-- networkId/claimTier incluidos) - antes esto reconstruia el panel
+			-- dos veces por cada terminalBlocked recibido, la primera con datos
+			-- a medias (ver comentario de showBlocked). showBlocked acepta ahora
+			-- una tabla directamente, sin reconstruir nada por su cuenta.
+			GlobalStorageSiK.TerminalUI.showBlocked(payload, rect)
 		else
 			showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_BlockedTitle"))
 		end

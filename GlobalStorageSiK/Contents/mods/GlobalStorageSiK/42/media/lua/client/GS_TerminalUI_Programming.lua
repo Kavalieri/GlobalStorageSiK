@@ -15,7 +15,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_DiskProgramming"
 require "GS_CraftUtils"
 require "GS_NetClient"
@@ -54,7 +54,7 @@ local function orderedProgramIds()
 end
 
 local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -87,7 +87,7 @@ end
 
 -- Icono pequeño de UN ítem concreto por fullType (contador de disquetes en
 -- blanco, pedido explicito 2026-08-23: "este último también requiere su
--- icono") - misma fuente que ya usa GS_TerminalChrome.addRequirementLine
+-- icono") - misma fuente que ya usa SiK_UI.addRequirementLine
 -- para el resto del terminal, pero enrutado por TerminalScroll.addChild
 -- (esta pestaña usa scroll, no un panel modal plano como GS_AddonManageUI,
 -- donde addRequirementLine SÍ es seguro llamar tal cual).
@@ -155,7 +155,7 @@ end
 local function addStatusHeader(scroll, x, y, innerW, player)
 	local cardTop = y
 	local cardW = math.max(120, innerW - x * 2)
-	local card = GlobalStorageSiK.TerminalChrome.createSectionCard(x, cardTop, cardW, 10)
+	local card = GlobalStorageSiK.SiK_UI.createSectionCard(x, cardTop, cardW, 10)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 
 	local innerPad = 8
@@ -182,7 +182,7 @@ local function addStatusHeader(scroll, x, y, innerW, player)
 		T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1"), counterTextW, cr, cg, cb)
 	local contentBottom = math.max(counterBottom, afterHeader + SMALL_ICON_SIZE) + innerPad
 
-	GlobalStorageSiK.TerminalChrome.resizeSectionCard(card, x, cardTop, cardW, contentBottom - cardTop)
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(card, x, cardTop, cardW, contentBottom - cardTop)
 	return contentBottom
 end
 
@@ -195,10 +195,7 @@ local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	hdr.drawBackground = false
 	hdr.prerender = function(panel)
 		ISPanel.prerender(panel)
-		local patches = GlobalStorageSiK.TerminalChrome.getNeatPanelPatches()
-		if not GlobalStorageSiK.TerminalChrome.renderNinePatch(panel, patches.innerTitle, 0, 0, panel.width, panel.height, 0.2, 0.2, 0.2, 0.88) then
-			panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
-		end
+		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
 		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)
@@ -263,9 +260,6 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 	y = addSectionTitle(scroll, pad, y, "IGUI_GS_SectionProgramming", innerW)
 	y = addStatusHeader(scroll, pad, y, innerW, player)
 	y = y + BLOCK_GAP
-	local btnW = math.min(280, cardW)
-	local textX = pad + ICON_SIZE + 8
-	local textW = math.max(80, cardW - ICON_SIZE - 8)
 	-- Cada programa en su propia tarjeta enmarcada (pedido explicito
 	-- 2026-08-23: "separar estos también claramente, enmarcarlos, dividir
 	-- con algún separador") - antes eran bloques de texto sueltos sin borde
@@ -276,7 +270,7 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
 		local cardTop = y
 		local innerPad = 8
-		local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad, cardTop, cardW, 10)
+		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, cardW, 10)
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 
 		local blockY = y + innerPad
@@ -309,22 +303,25 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 		blockY = addWrappedLabel(scroll, pad + innerPad, blockY, T(statusKey), cardW - innerPad * 2, sr, sg, sb)
 		blockY = blockY + 4
 
-		-- BUG REAL cerrado (2026-08-23, pedido explicito: "el boton de grabar
-		-- no debería aparecer si no se cumplen las condiciones") - antes se
-		-- creaba SIEMPRE, incluso con "Aún no conoces esta receta" en rojo
-		-- justo encima; solo aparece cuando ambos requisitos (receta + disco
-		-- en blanco) estan listos.
-		if known and hasDisk then
-			local btn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad + innerPad, blockY, math.min(btnW, cardW - innerPad * 2), BTN_H, T("IGUI_GS_ProgrammingButton"), scroll, function()
+		-- Decision revertida (2026-08-26, pedido explicito del usuario): el
+		-- boton ya NO se oculta segun se cumplan los requisitos (2026-08-23,
+		-- ver historial) - ocultar/mostrar movia el resto de la tarjeta y de
+		-- la pestaña cada vez que cambiaba el estado. Ahora el boton SIEMPRE
+		-- se crea, a ancho completo como el resto del proyecto, y se pinta
+		-- "bloqueado" (atenuado, sin click) mientras falte receta o disco -
+		-- reserva siempre el mismo hueco, sin saltos de layout.
+		local ready = known and hasDisk
+		local btn = GlobalStorageSiK.SiK_UI.createButton(pad + innerPad, blockY, cardW - innerPad * 2, BTN_H,
+			T("IGUI_GS_ProgrammingButton"), scroll, function()
 				GlobalStorageSiK.NetClient.sendCommand("programDisk", { programId = id })
-			end)
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, btn)
-			blockY = blockY + BTN_H + innerPad
-		else
-			blockY = blockY + innerPad
+			end, nil, true, not ready)
+		if not ready then
+			btn:setTooltip(T(statusKey))
 		end
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, btn)
+		blockY = blockY + BTN_H + innerPad
 
-		GlobalStorageSiK.TerminalChrome.resizeSectionCard(card, pad, cardTop, cardW, blockY - cardTop)
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, cardW, blockY - cardTop)
 		y = blockY + BLOCK_GAP
 	end
 
@@ -333,22 +330,11 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 	GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)
 end
 
---- Asegura panel de Programación en el terminal.
+--- Configuracion adicional del panel de Programacion creado por el proveedor
+--- data-driven del Core.
+---@param panel ISPanel
 ---@param terminal GS_TerminalUI
-local function ensureProgrammingPanel(terminal)
-	if not terminal or terminal.programmingPanel then
-		return
-	end
-	local panel = ISPanel:new(0, 0, 10, 10)
-	panel:initialise()
-	panel.drawBackground = false
-	panel.clipChildren = true
-	panel:setScrollWithParent(false)
-	if panel.setScrollChildren then
-		panel:setScrollChildren(false)
-	end
-	terminal.programmingPanel = panel
-	GlobalStorageSiK.TerminalProgramming.buildPanel(panel, terminal)
+local function setupProgrammingPanel(panel, terminal)
 	-- BUG REAL cerrado (2026-08-23, pedido explicito del usuario): el estado
 	-- de cada tarjeta (¿conoce ya la receta? ¿tiene disquete en blanco?) se
 	-- calcula por completo en cliente (programReadiness/countBlankDisksNearby,
@@ -370,13 +356,15 @@ local function ensureProgrammingPanel(terminal)
 			GlobalStorageSiK.TerminalProgramming.refresh(p, p.terminalRef)
 		end
 	end
-	GlobalStorageSiK.TerminalExtensions.registerTab(terminal, "programming", {
-		panel = panel,
-		module = GlobalStorageSiK.TerminalProgramming,
-		titleKey = "IGUI_GS_TabProgramming",
-		iconPath = "media/ui/GS/GS_TabProgramming.png",
-	})
 end
+
+GlobalStorageSiK.TerminalExtensions.registerDefinition("programming", {
+	module = GlobalStorageSiK.TerminalProgramming,
+	titleKey = "IGUI_GS_TabProgramming",
+	iconPath = "media/ui/GS/GS_TabProgramming.png",
+	panelField = "programmingPanel",
+	setupPanel = setupProgrammingPanel,
+})
 
 --- Muestra/oculta la pestaña Programación según si el periférico Reader
 --- está instalado en esta red - sin él, la vía de siempre (disquetera
@@ -396,13 +384,7 @@ function GlobalStorageSiK.TerminalProgramming.syncTabVisibility(terminal)
 	local show = GlobalStorageSiK.Addons and GlobalStorageSiK.Addons.isInstalled(
 		state.networkId, state.terminalAnchor, "Reader"
 	)
-	if show then
-		ensureProgrammingPanel(terminal)
-	end
 	if GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal, "programming", show == true)
-	end
-	if show and terminal.activeTabKey == "programming" and terminal.programmingPanel then
-		GlobalStorageSiK.TerminalProgramming.refresh(terminal.programmingPanel, terminal)
 	end
 end

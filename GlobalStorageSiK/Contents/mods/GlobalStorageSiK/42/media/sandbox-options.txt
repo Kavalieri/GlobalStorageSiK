@@ -180,14 +180,6 @@ option GlobalStorageSiK.DebugRelayToClients
 	translation = GlobalStorageSiK_DebugRelayToClients,
 }
 
-option GlobalStorageSiK.DebugModeUI
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugModeUI,
-}
-
 option GlobalStorageSiK.DebugCatNetwork
 {
 	type = boolean,
@@ -260,14 +252,6 @@ option GlobalStorageSiK.DebugCatTooltip
 	translation = GlobalStorageSiK_DebugCatTooltip,
 }
 
-option GlobalStorageSiK.DebugCatUI
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatUI,
-}
-
 option GlobalStorageSiK.DebugCatRouter
 {
 	type = boolean,
@@ -276,12 +260,52 @@ option GlobalStorageSiK.DebugCatRouter
 	translation = GlobalStorageSiK_DebugCatRouter,
 }
 
-option GlobalStorageSiK.DebugCatSearch
+option GlobalStorageSiK.DebugCatNodeNaming
 {
 	type = boolean,
 	default = false,
 	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatSearch,
+	translation = GlobalStorageSiK_DebugCatNodeNaming,
+}
+
+option GlobalStorageSiK.DebugCatSiKUI
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSiKUI,
+}
+
+option GlobalStorageSiK.DebugCatSiKUITable
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSiKUITable,
+}
+
+option GlobalStorageSiK.DebugCatSiKUIScroll
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSiKUIScroll,
+}
+
+option GlobalStorageSiK.DebugCatSiKUITabs
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSiKUITabs,
+}
+
+option GlobalStorageSiK.DebugCatSiKUISearch
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatSiKUISearch,
 }
 
 option GlobalStorageSiK.DebugCatCompatCategories

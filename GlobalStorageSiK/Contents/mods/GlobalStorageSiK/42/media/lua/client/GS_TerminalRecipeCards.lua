@@ -8,7 +8,7 @@
 require "ISUI/ISPanel"
 require "GS_I18n"
 require "GS_CraftUtils"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_TerminalUI_Scroll"
 
 GlobalStorageSiK.TerminalRecipeCards = GlobalStorageSiK.TerminalRecipeCards or {}
@@ -30,7 +30,7 @@ local CRAFT_BTN_H = FONT_HGT_SMALL + 10
 ---@param g number
 ---@param b number
 local function pushWrappedLines(out, text, maxWidth, r, g, b)
-	for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxWidth, UIFont.Small)) do
+	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxWidth, UIFont.Small)) do
 		table.insert(out, { text = line, r = r, g = g, b = b })
 	end
 end
@@ -53,10 +53,10 @@ function GlobalStorageSiK.TerminalRecipeCards.measureBodyHeight(bodyLines, textW
 	for i = 1, #bodyLines do
 		local spec = bodyLines[i]
 		if spec.icon or spec.itemType then
-			local wrappedH = GlobalStorageSiK.TerminalChrome.countWrappedLines(spec.text, textWIcon, UIFont.Small, LINE_GAP)
+			local wrappedH = GlobalStorageSiK.SiK_UI.countWrappedLines(spec.text, textWIcon, UIFont.Small, LINE_GAP)
 			h = h + math.max(iconRowH, wrappedH)
 		else
-			h = h + GlobalStorageSiK.TerminalChrome.countWrappedLines(spec.text, textW, UIFont.Small, LINE_GAP)
+			h = h + GlobalStorageSiK.SiK_UI.countWrappedLines(spec.text, textW, UIFont.Small, LINE_GAP)
 		end
 	end
 	return h
@@ -87,14 +87,14 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 		pushWrappedLines(lines, wbLine, textWIcon, wbR, wbG, wbB)
 	end
 	if recipe.requireLight then
-		local _lp = GlobalStorageSiK.TerminalChrome.PALETTE
+		local _lp = GlobalStorageSiK.SiK_UI.PALETTE
 		local ltR = recipe.hasCraftLight and _lp.statusOk[1] or _lp.statusDanger[1]
 		local ltG = recipe.hasCraftLight and _lp.statusOk[2] or _lp.statusDanger[2]
 		local ltB = recipe.hasCraftLight and _lp.statusOk[3] or _lp.statusDanger[3]
 		local ltLine = recipe.hasCraftLight and T("IGUI_GS_ReqLightOk") or T("IGUI_GS_ReqLightMissing")
 		pushWrappedLines(lines, ltLine, textWIcon, ltR, ltG, ltB)
 	end
-	local _ip = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _ip = GlobalStorageSiK.SiK_UI.PALETTE
 	for j = 1, #(recipe.ingredients or {}) do
 		local ing = recipe.ingredients[j]
 		local colorR, colorG, colorB = _ip.statusDanger[1], _ip.statusDanger[2], _ip.statusDanger[3]
@@ -142,7 +142,7 @@ function GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, te
 			panel:drawRect(pad - fp, iconY - fp, REQ_ICON + fp * 2, REQ_ICON + fp * 2, 0.9, 0.08, 0.08, 0.08)
 			panel:drawRectBorder(pad - fp, iconY - fp, REQ_ICON + fp * 2, REQ_ICON + fp * 2, 0.8, spec.r or 1, spec.g or 1, spec.b or 1)
 			panel:drawTextureScaledAspect(icon, pad, iconY, REQ_ICON, REQ_ICON, 1, 1, 1, 1)
-			for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(spec.text, textWIcon, UIFont.Small)) do
+			for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(spec.text, textWIcon, UIFont.Small)) do
 				panel:drawText(line, textX, y, spec.r, spec.g, spec.b, 1, UIFont.Small)
 				y = y + lh
 			end
@@ -150,7 +150,7 @@ function GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, te
 				y = rowStart + iconRowH
 			end
 		else
-			for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(spec.text, textW, UIFont.Small)) do
+			for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(spec.text, textW, UIFont.Small)) do
 				panel:drawText(line, pad, y, spec.r, spec.g, spec.b, 1, UIFont.Small)
 				y = y + lh
 			end
@@ -211,20 +211,20 @@ function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, 
 		end
 		local title = liveRecipe.outputDisplay or liveRecipe.id
 		local bodyLines = GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(liveRecipe, panel.textW)
-		GlobalStorageSiK.TerminalChrome.drawCardBackground(panel, panel.titleHeight)
-		local _rcp = GlobalStorageSiK.TerminalChrome.PALETTE
+		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, panel.titleHeight)
+		local _rcp = GlobalStorageSiK.SiK_UI.PALETTE
 		panel:drawText(title, panel.contentPad, 3, _rcp.textPrimary[1], _rcp.textPrimary[2], _rcp.textPrimary[3], 1, UIFont.Small)
 		GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, panel.textW, panel.titleHeight + panel.contentPad, panel.contentPad)
 		if panel.craftBtn then
 			local canCraft = liveRecipe.canCraft == true
 			local newTitle = canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-			panel.craftBtn._gsNeatLabel = newTitle
+			panel.craftBtn._sikUiLabel = newTitle
 			panel.craftBtn:setEnable(canCraft)
 		end
 	end
 
 	local btnTitle = recipe.canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-	local craftBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	local craftBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, cardH - CRAFT_BTN_H - 6, 220, CRAFT_BTN_H, btnTitle, card, function()
 		if owner and owner.onCraftModRecipe then
 			owner:onCraftModRecipe(recipe.id)

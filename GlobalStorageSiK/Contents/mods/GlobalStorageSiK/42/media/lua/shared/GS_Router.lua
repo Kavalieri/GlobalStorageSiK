@@ -188,8 +188,144 @@ end
 ---@param entry table
 ---@param item InventoryItem
 ---@return number|nil
+--- Calcula el tier (1-4) con que UNA regla de categoria concreta acepta un
+--- item ya resuelto (category/subCategory/subKeys/rowContext calculados una
+--- sola vez por el llamante). Extraida de matchSpecificity (dev26, motor de
+--- reglas AND/OR/NOT - ver Documentacion/GS_FilterRedesign_Plan.md) para que
+--- tanto el camino legacy (entry.categories) como el nuevo (entry.rules,
+--- condicion tipo "category") compartan exactamente la misma logica de
+--- resolucion, sin duplicarla.
+---@param rule string
+---@param item InventoryItem
+---@param category string
+---@param subCategory string|nil
+---@param subKeys table
+---@param rowContext table
+---@return number|nil
+local function categoryRuleTier(rule, item, category, subCategory, subKeys, rowContext)
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+	if rule == "*" then
+		return 4
+	elseif GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule) then
+		for j = 1, #subKeys do
+			if subKeys[j] == rule then
+				return 1
+			end
+		end
+		return nil
+	elseif rule:sub(1, #SUB) == SUB then
+		-- Regla de NIVEL 2 (subcategoria elegida sin bajar a Nivel 3, ej.
+		-- "Food > FoodPerishable"): acepta cualquier item cuyas claves
+		-- canonicas groupKey Y subGroupKey coincidan. Las etiquetas traducidas
+		-- se aceptan solo como fallback legacy hasta migrar el nodo desde la UI.
+		local rest = rule:sub(#SUB + 1)
+		local sepPos = rest:find("::", 1, true)
+		if not sepPos then return nil end
+		local wantGroup = string.lower(rest:sub(1, sepPos - 1))
+		local wantSubGroup = string.lower(rest:sub(sepPos + 2))
+		local ftOk, fullType = pcall(function() return item:getFullType() end)
+		if not ftOk then return nil end
+		-- dev22: probar resolve() con DOS contextos distintos (vacio y
+		-- con category/subCategory del item vivo), ambos cacheados por
+		-- fullType (ver resolveCached arriba) - antes se llamaba
+		-- resolve() sin cache, hasta 2 veces por nodo evaluado (10-20
+		-- nodos por deposito) para el MISMO item, puro trabajo repetido.
+		local taxEmpty = resolveCached(fullType, "empty", {})
+		local taxRow = resolveCached(fullType, "row", rowContext)
+		local function matches(tax)
+			if not tax then return false end
+			local groupMatches = tax.groupKey and string.lower(tax.groupKey) == wantGroup
+				or (tax.groupLabel and string.lower(tax.groupLabel) == wantGroup)
+			local subMatches = tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup
+				or (tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup)
+			return groupMatches and subMatches
+		end
+		if matches(taxEmpty) or matches(taxRow) then
+			return 2
+		end
+		return nil
+	elseif rule:sub(1, #EXT) == EXT then
+		-- Regla de NIVEL 1 (familia completa, ej. "Comida" sola): acepta
+		-- cualquier item cuyo groupKey canonico coincida, tenga o no Nivel 2/3.
+		local group = string.lower(rule:sub(#EXT + 1))
+		local ftOk, fullType = pcall(function() return item:getFullType() end)
+		if not ftOk then return nil end
+		local tax = resolveCached(fullType, "empty", {})
+		if tax and ((tax.groupKey and string.lower(tax.groupKey) == group)
+			or (tax.groupLabel and string.lower(tax.groupLabel) == group)) then
+			return 3
+		end
+		return nil
+	elseif rule:find("::", 1, true) then
+		-- Regla "categoria::hueco" (joyeria, ropa por prenda, o cualquier
+		-- subcategoria vanilla con hueco - ver GS_ItemTaxonomy.lua:
+		-- collectLeafFilters). Tan especifica como una subcategoria GS (tier 1).
+		-- Se acepta el hueco tanto si es de joyeria (jewelrySlotKey,
+		-- agrupado) como si es la subcategoria vanilla cruda (subCategory,
+		-- ej. la prenda exacta de Ropa) - mismo formato de clave, dos
+		-- fuentes posibles segun la categoria del item.
+		local sepPos = rule:find("::", 1, true)
+		local mainPart = string.lower(rule:sub(1, sepPos - 1))
+		local slotPart = string.lower(rule:sub(sepPos + 2))
+		if string.lower(category) ~= mainPart then return nil end
+		if subCategory and string.lower(subCategory) == slotPart then
+			return 1
+		end
+		local ftOk, fullType = pcall(function() return item:getFullType() end)
+		if ftOk then
+			local tax = resolveCached(fullType, "row", rowContext)
+			if tax and tax.jewelrySlotKey == slotPart then
+				return 1
+			end
+		end
+		return nil
+	else
+		-- Regla de NIVEL 3 sin combo (hoja EC compuesta, ej. "Comida >
+		-- Perecedero > Carne" = clave cruda "FoodPerishableMeat" completa,
+		-- ver GS_ItemTaxonomy.collectLeafFilters "elseif tax.hyphenLeafLabel
+		-- then key = tax.mainCanon"). category (arriba, via
+		-- Router.getItemCategory del ITEM VIVO) deberia coincidir en crudo
+		-- con rule sin mas, pero por la misma cautela que Nivel 2 (dev22):
+		-- si el match directo falla, reintentar contra tax.mainCanon
+		-- resuelto via resolve() con rowContext antes de rendirse.
+		if categoryMatches(rule, category) then
+			return 1
+		end
+		local ftOk, fullType = pcall(function() return item:getFullType() end)
+		if ftOk then
+			local tax = resolveCached(fullType, "row", rowContext)
+			if tax and tax.mainCanon and categoryMatches(rule, tax.mainCanon) then
+				return 1
+			end
+		end
+		return nil
+	end
+end
+
+--- Calcula category/subCategory/subKeys/rowContext de un item una sola vez
+--- (compartido entre matchSpecificity legacy y evaluateContainerRules).
+---@param item InventoryItem
+---@return string, string|nil, table, table
+local function resolveItemRowContext(item)
+	local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
+		and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
+	local category = GlobalStorageSiK.Router.getItemCategory(item)
+	-- Subcategoria vanilla real del item (BodyLocation/perk - ej. la prenda
+	-- exacta de Ropa, o el hueco de joyeria en crudo).
+	local subCategory = GlobalStorageSiK.Router.getItemSubCategory(item)
+	local rowContext = { category = category, subCategory = subCategory }
+	return category, subCategory, subKeys, rowContext
+end
+
 function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	if not entry or not item then return 4 end
+	-- Motor nuevo (dev26): si el contenedor ya usa el modelo unificado
+	-- entry.rules (AND/OR/NOT), delega ahi por completo y no toca el camino
+	-- legacy de abajo. Ver Documentacion/GS_FilterRedesign_Plan.md §3.
+	if entry.rules and #entry.rules > 0 then
+		return GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
+	end
 	-- Filtros personalizados (nombre/peso/tag/ítem exacto): un ítem que
 	-- coincide con cualquiera de ellos se trata como maxima especificidad,
 	-- igual que una subcategoria GS exacta (tier 1) - el jugador definio la
@@ -199,137 +335,124 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	end
 	local rules = entry.categories
 	if not rules or #rules == 0 then return 4 end
-	-- Calcular subcategorías del ítem una sola vez
-	local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
-		and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
-	local category = GlobalStorageSiK.Router.getItemCategory(item)
-	-- Subcategoria vanilla real del item (BodyLocation/perk - ej. la prenda
-	-- exacta de Ropa, o el hueco de joyeria en crudo) - GlobalStorageSiK.Router.getItemSubCategory
-	-- ya existia pero nunca se usaba aqui: sin ella, CUALQUIER regla "::"
-	-- basada en subcategoria vanilla que no fuera joyeria (ej. Ropa por
-	-- prenda sin Extended Categories) nunca hacia match real al depositar.
-	local subCategory = GlobalStorageSiK.Router.getItemSubCategory(item)
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	-- BUG REAL sospechado (2026-08-16, "comida perecedera configurada en
-	-- congelador con Nivel 2 (Comida > Perecedero, sin Nivel 3) nunca llega
-	-- ahi"): las dos llamadas a ItemTaxonomy.resolve() de mas abajo (reglas
-	-- Nivel 1 y Nivel 2) pasaban un contexto de fila VACIO ({}), mientras que
-	-- collectSubFilters/collectLeafFilters (que construyen las opciones del
-	-- desplegable en la UI y SI resuelven bien "Perecedero" para items de
-	-- comida, confirmado en logs reales) siempre pasan la fila completa
-	-- (row.category/row.subCategory ya resueltos server-side). resolve() solo
-	-- usa esos campos como FALLBACK si el lookup por scriptItem falla, pero
-	-- si esa categoria compuesta (ej. via Extended Categories) no es
-	-- recuperable desde el ScriptItem "en frio" que usa este camino, el
-	-- resultado puede divergir silenciosamente del que vio el jugador al
-	-- configurar el filtro. Se pasa aqui el mismo category/subCategory ya
-	-- calculado arriba (via el ITEM VIVO, no fallback vacio) para cerrar ese
-	-- hueco sin duplicar logica.
-	local rowContext = { category = category, subCategory = subCategory }
+	local category, subCategory, subKeys, rowContext = resolveItemRowContext(item)
 	local bestTier = nil
 	for i = 1, #rules do
-		local rule = rules[i]
-		if rule == "*" then
-			bestTier = bestTier and math.min(bestTier, 4) or 4
-		elseif GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule) then
-			for j = 1, #subKeys do
-				if subKeys[j] == rule then
-					bestTier = 1
-					break
-				end
-			end
-		elseif rule:sub(1, #SUB) == SUB then
-			-- Regla de NIVEL 2 (subcategoria elegida sin bajar a Nivel 3, ej.
-			-- "Food > FoodPerishable"): acepta cualquier item cuyas claves
-			-- canonicas groupKey Y subGroupKey coincidan. Las etiquetas traducidas
-			-- se aceptan solo como fallback legacy hasta migrar el nodo desde la UI.
-			local rest = rule:sub(#SUB + 1)
-			local sepPos = rest:find("::", 1, true)
-			if sepPos then
-				local wantGroup = string.lower(rest:sub(1, sepPos - 1))
-				local wantSubGroup = string.lower(rest:sub(sepPos + 2))
-				local ftOk, fullType = pcall(function() return item:getFullType() end)
-				if ftOk then
-					-- dev22: probar resolve() con DOS contextos distintos (vacio y
-					-- con category/subCategory del item vivo), ambos cacheados por
-					-- fullType (ver resolveCached arriba) - antes se llamaba
-					-- resolve() sin cache, hasta 2 veces por nodo evaluado (10-20
-					-- nodos por deposito) para el MISMO item, puro trabajo repetido.
-					local taxEmpty = resolveCached(fullType, "empty", {})
-					local taxRow = resolveCached(fullType, "row", rowContext)
-					local function matches(tax)
-						if not tax then return false end
-						local groupMatches = tax.groupKey and string.lower(tax.groupKey) == wantGroup
-							or (tax.groupLabel and string.lower(tax.groupLabel) == wantGroup)
-						local subMatches = tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup
-							or (tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup)
-						return groupMatches and subMatches
-					end
-					if matches(taxEmpty) or matches(taxRow) then
-						bestTier = bestTier and math.min(bestTier, 2) or 2
-					end
-				end
-			end
-		elseif rule:sub(1, #EXT) == EXT then
-			-- Regla de NIVEL 1 (familia completa, ej. "Comida" sola): acepta
-			-- cualquier item cuyo groupKey canonico coincida, tenga o no Nivel 2/3.
-			local group = string.lower(rule:sub(#EXT + 1))
-			local ftOk, fullType = pcall(function() return item:getFullType() end)
-			if ftOk then
-				local tax = resolveCached(fullType, "empty", {})
-				if tax and ((tax.groupKey and string.lower(tax.groupKey) == group)
-					or (tax.groupLabel and string.lower(tax.groupLabel) == group)) then
-					bestTier = bestTier and math.min(bestTier, 3) or 3
-				end
-			end
-		elseif rule:find("::", 1, true) then
-			-- Regla "categoria::hueco" (joyeria, ropa por prenda, o cualquier
-			-- subcategoria vanilla con hueco - ver GS_ItemTaxonomy.lua:
-			-- collectLeafFilters). Tan especifica como una subcategoria GS (tier 1).
-			-- Se acepta el hueco tanto si es de joyeria (jewelrySlotKey,
-			-- agrupado) como si es la subcategoria vanilla cruda (subCategory,
-			-- ej. la prenda exacta de Ropa) - mismo formato de clave, dos
-			-- fuentes posibles segun la categoria del item.
-			local sepPos = rule:find("::", 1, true)
-			local mainPart = string.lower(rule:sub(1, sepPos - 1))
-			local slotPart = string.lower(rule:sub(sepPos + 2))
-			if string.lower(category) == mainPart then
-				if subCategory and string.lower(subCategory) == slotPart then
-					bestTier = 1
-				else
-					local ftOk, fullType = pcall(function() return item:getFullType() end)
-					if ftOk then
-						local tax = resolveCached(fullType, "row", rowContext)
-						if tax and tax.jewelrySlotKey == slotPart then
-							bestTier = 1
-						end
-					end
-				end
-			end
-		else
-			-- Regla de NIVEL 3 sin combo (hoja EC compuesta, ej. "Comida >
-			-- Perecedero > Carne" = clave cruda "FoodPerishableMeat" completa,
-			-- ver GS_ItemTaxonomy.collectLeafFilters "elseif tax.hyphenLeafLabel
-			-- then key = tax.mainCanon"). category (arriba, via
-			-- Router.getItemCategory del ITEM VIVO) deberia coincidir en crudo
-			-- con rule sin mas, pero por la misma cautela que Nivel 2 (dev22):
-			-- si el match directo falla, reintentar contra tax.mainCanon
-			-- resuelto via resolve() con rowContext antes de rendirse.
-			if categoryMatches(rule, category) then
-				bestTier = 1
-			else
-				local ftOk, fullType = pcall(function() return item:getFullType() end)
-				if ftOk then
-					local tax = resolveCached(fullType, "row", rowContext)
-					if tax and tax.mainCanon and categoryMatches(rule, tax.mainCanon) then
-						bestTier = 1
-					end
-				end
-			end
+		local tier = categoryRuleTier(rules[i], item, category, subCategory, subKeys, rowContext)
+		if tier then
+			bestTier = bestTier and math.min(bestTier, tier) or tier
 		end
 	end
 	return bestTier
+end
+
+--- Motor unificado de reglas AND/OR/NOT (dev26, ver
+--- Documentacion/GS_FilterRedesign_Plan.md §3.2). Formula:
+---   excluido_por_NOT = alguna regla NOT coincide con el item
+---   cumple_AND        = TODAS las reglas AND coinciden (vacio = sin restriccion)
+---   cumple_OR         = OR vacio, O al menos una regla OR coincide
+---   aceptado          = cumple_AND AND cumple_OR AND NOT excluido_por_NOT
+--- entry.rules vacio o ausente = sin restriccion (tier 4), identico al
+--- comportamiento legacy de entry.categories vacio - ver §4.3 "caso base"
+--- (afinidad sigue siendo el UNICO desempate cuando no se toca nada).
+---@param entry table
+---@param item InventoryItem
+---@return number|nil
+function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
+	local rules = entry and entry.rules
+	if not rules or #rules == 0 then return 4 end
+	local category, subCategory, subKeys, rowContext = resolveItemRowContext(item)
+
+	local function conditionTier(condition)
+		if not condition then return nil end
+		if condition.type == "category" then
+			return categoryRuleTier(condition.value, item, category, subCategory, subKeys, rowContext)
+		end
+		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then
+			return 1
+		end
+		return nil
+	end
+
+	local orTier, andTier = nil, nil
+	local hasOr, hasAnd = false, false
+	local andFailed = false
+
+	for i = 1, #rules do
+		local rule = rules[i]
+		local op = rule.op
+		local tier = conditionTier(rule.condition)
+		if op == "NOT" then
+			if tier then
+				return nil
+			end
+		elseif op == "AND" then
+			hasAnd = true
+			if not tier then
+				andFailed = true
+			else
+				andTier = andTier and math.min(andTier, tier) or tier
+			end
+		else
+			-- OR (op == "OR" o desconocido: tratar como OR por seguridad,
+			-- nunca dejar una regla mal etiquetada excluya silenciosamente)
+			hasOr = true
+			if tier then
+				orTier = orTier and math.min(orTier, tier) or tier
+			end
+		end
+	end
+
+	if hasAnd and (andFailed or not andTier) then return nil end
+	if hasOr and not orTier then return nil end
+
+	local resultTier = andTier
+	if orTier then
+		resultTier = resultTier and math.min(resultTier, orTier) or orTier
+	end
+	return resultTier or 4
+end
+
+--- Puerta binaria de zona (dev26, ronda 2 - ver
+--- Documentacion/GS_FilterRedesign_Plan.md §4.4-bis): las reglas de zona se
+--- evalúan ANTES que las del contenedor, con la MISMA formula AND/OR/NOT
+--- (reutiliza evaluateContainerRules pasandole {rules=zoneRules} - no hay
+--- nada especifico de "contenedor" en esa funcion, solo agrupa/combina
+--- condiciones). Zona sin reglas = totalmente transparente (no cambia nada
+--- del comportamiento actual). Un NOT de zona excluye siempre, igual que un
+--- NOT de contenedor - "las exclusiones de zona ganan siempre" se cumple
+--- automaticamente porque evaluateContainerRules ya prioriza NOT sobre todo
+--- lo demas.
+---@param zoneRules table|nil
+---@param item InventoryItem
+---@return boolean
+function GlobalStorageSiK.Router.zoneRulesAllow(zoneRules, item)
+	if not zoneRules or #zoneRules == 0 then
+		return true
+	end
+	return GlobalStorageSiK.Router.evaluateContainerRules({ rules = zoneRules }, item) ~= nil
+end
+
+--- Combina la puerta de zona (reglas Y exclusion de zona) con
+--- matchSpecificity del contenedor: un item debe pasar AMBOS niveles (zona Y
+--- contenedor) para ser aceptado. Punto de entrada unico para el enrutado
+--- con zona - pickDepositTarget/Auto-ordenar usan esto en vez de
+--- matchSpecificity directamente. zoneEnabled=false (dev26, ronda 2 - ver
+--- §4.5 del plan, "Excluir zona") rechaza sin mirar ni reglas ni contenedor,
+--- simetrico a como membership="excluded" ya rechaza un contenedor.
+---@param entry table
+---@param zoneRules table|nil
+---@param zoneEnabled boolean|nil
+---@param item InventoryItem
+---@return number|nil
+function GlobalStorageSiK.Router.matchWithZoneGate(entry, zoneRules, zoneEnabled, item)
+	if zoneEnabled == false then
+		return nil
+	end
+	if not GlobalStorageSiK.Router.zoneRulesAllow(zoneRules, item) then
+		return nil
+	end
+	return GlobalStorageSiK.Router.matchSpecificity(entry, item)
 end
 
 --- Comprueba si un nodo acepta un ítem concreto (incluye subcategorías GS y categoría vanilla).
@@ -534,7 +657,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		local preferredIndex = affinityIndex.nodeIndexById
 			and affinityIndex.nodeIndexById[preferredNodeId] or nil
 		local preferred = preferredIndex and liveNodes[preferredIndex] or nil
-		if preferred and GlobalStorageSiK.Router.matchSpecificity(preferred.entry or {}, item)
+		if preferred and GlobalStorageSiK.Router.matchWithZoneGate(preferred.entry or {}, preferred.zoneRules, preferred.zoneEnabled, item)
 			and GlobalStorageSiK.Router.containerHasSpace(preferred.container, item, character) then
 			if debugOn then
 				GlobalStorageSiK.Log.debug("Router", "RESULT preferred source nodeId=" .. preferredNodeId)
@@ -582,7 +705,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
 			local entry = live.entry or {}
-			local matchTier = GlobalStorageSiK.Router.matchSpecificity(entry, item)
+			local matchTier = GlobalStorageSiK.Router.matchWithZoneGate(entry, live.zoneRules, live.zoneEnabled, item)
 			local destinationTier = matchTier
 			if matchTier == 4 then
 				destinationTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(item, i, affinityIndex)
@@ -694,16 +817,26 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 	-- esta desactivado (la unica situacion en que el bucle de tiers de
 	-- arriba no llego a correr en absoluto).
 	if not autoSort then
-		local function nodeHasNoCategories(entry)
-			local rules = entry and entry.categories
-			return not rules or #rules == 0
+		-- dev26: un contenedor con entry.rules (motor nuevo) o con reglas de
+		-- ZONA no es "sin restriccion" aunque entry.categories legacy este
+		-- vacio - antes solo se miraba entry.categories, un contenedor
+		-- migrado a reglas (o cubierto por una regla de zona) se colaba aqui
+		-- como "acepta cualquier cosa" pese a tener restricciones reales.
+		local function nodeUnrestricted(live)
+			if live and live.zoneEnabled == false then return false end
+			local entry = live and live.entry
+			if entry and entry.rules and #entry.rules > 0 then return false end
+			local legacyRules = entry and entry.categories
+			if legacyRules and #legacyRules > 0 then return false end
+			if live and live.zoneRules and #live.zoneRules > 0 then return false end
+			return true
 		end
 
 		local hasAffinityCandidate = false
 		for affinityTier = 4, 5 do
 			for i = 1, #liveNodes do
 				local live = liveNodes[i]
-				local destinationTier = nodeHasNoCategories(live.entry)
+				local destinationTier = nodeUnrestricted(live)
 					and GlobalStorageSiK.Router.unrestrictedAffinityTier(item, i, affinityIndex) or nil
 				if destinationTier == affinityTier then
 					hasAffinityCandidate = true
@@ -724,7 +857,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
-			if nodeHasNoCategories(live.entry) and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
+			if nodeUnrestricted(live) and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then
 				return live
 			end
 		end

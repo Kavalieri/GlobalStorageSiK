@@ -77,7 +77,7 @@ local LABEL_H = FONT_HGT_SMALL + 6
 
 local function slotBorderColor(def, ctx)
 
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if not GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
 
 		return pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.7
@@ -228,7 +228,7 @@ function GlobalStorageSiK.TerminalAddonBay.addBay(scroll, x, y, innerW, defs, ct
 
 				else
 
-					local _fp = GlobalStorageSiK.TerminalChrome.PALETTE
+					local _fp = GlobalStorageSiK.SiK_UI.PALETTE
 					panel:drawText("?", slotX + sw / 2 - 4, sh / 2 - 8, _fp.textMuted[1], _fp.textMuted[2], _fp.textMuted[3], 1, UIFont.Small)
 
 				end
@@ -249,7 +249,7 @@ function GlobalStorageSiK.TerminalAddonBay.addBay(scroll, x, y, innerW, defs, ct
 
 			local tw = getTextManager():MeasureStringX(UIFont.Small, label)
 
-			local _lp = GlobalStorageSiK.TerminalChrome.PALETTE
+			local _lp = GlobalStorageSiK.SiK_UI.PALETTE
 			panel:drawText(label, slotX + math.floor((sw - tw) / 2), sh + 2, _lp.textSecondary[1], _lp.textSecondary[2], _lp.textSecondary[3], 1, UIFont.Small)
 
 			slotX = slotX + sw + SLOT_GAP

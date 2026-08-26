@@ -5,6 +5,7 @@
 ]]
 
 require "GS_TerminalUI"
+require "GS_TerminalUI_Extensions"
 require "GSSiK_Addon_Craft_Register"
 require "GS_NetworkCraftBridge"
 require "GS_NetworkCraftSession"
@@ -19,45 +20,12 @@ GlobalStorageSiK.TerminalTabs = GlobalStorageSiK.TerminalTabs or {}
 -- El sink de debug y los hooks de crafteo en red ya se registran en
 -- GSSiK_Addon_Craft_NetworkCraft.lua (migrado desde aqui, ver ese fichero).
 
---- Asegura panel craft en el terminal (solo addon activo).
----@param terminal GS_TerminalUI
-function GlobalStorageSiK.TerminalTabs.ensureCraftPanel(terminal)
-	if not terminal or terminal.craftPanel then
-		return
-	end
-	local panel = ISPanel:new(0, 0, 10, 10)
-	panel:initialise()
-	panel.drawBackground = false
-	panel.clipChildren = true
-	panel:setScrollWithParent(false)
-	if panel.setScrollChildren then
-		panel:setScrollChildren(false)
-	end
-	terminal.craftPanel = panel
-	GlobalStorageSiK.TerminalCraft.buildPanel(terminal.craftPanel, terminal)
-	terminal.tabViews = terminal.tabViews or {}
-	terminal.tabViews.craft = terminal.craftPanel
-end
-
----@param terminal GS_TerminalUI
----@param visible boolean
-function GlobalStorageSiK.TerminalTabs.setCraftTabVisible(terminal, visible)
-	if not terminal or not terminal.tabRail then
-		return
-	end
-	if visible then
-		GlobalStorageSiK.TerminalTabs.ensureCraftPanel(terminal)
-	end
-	terminal.tabRail:setCraftTabVisible(visible, {
-		key = "craft",
-		titleKey = "IGUI_GS_TabCraft",
-		panelField = "craftPanel",
-		iconPath = "media/ui/GS/GS_TabCraft.png",
-	})
-	if visible and terminal.activeTabKey == "craft" and terminal.craftPanel then
-		GlobalStorageSiK.TerminalCraft.refresh(terminal.craftPanel, terminal)
-	end
-end
+GlobalStorageSiK.TerminalExtensions.registerDefinition("craft", {
+	module = GlobalStorageSiK.TerminalCraft,
+	titleKey = "IGUI_GS_TabCraft",
+	iconPath = "media/ui/GS/GS_TabCraft.png",
+	panelField = "craftPanel",
+})
 
 --- Abre crafteo con contenedores de red.
 ---@param mode string
@@ -104,6 +72,22 @@ end
 function GS_TerminalUI:onOpenNeatCraft()
 	self:openNetworkCraft("neat")
 end
+
+GlobalStorageSiK.TerminalExtensions.registerStaffAction("craft.vanilla", {
+	labelKey = "IGUI_GS_CraftOpenVanilla",
+	order = 10,
+	invoke = function(dashboard)
+		if dashboard and dashboard.setVisible then
+			dashboard:setVisible(false)
+		end
+		local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
+		if terminal and terminal.openNetworkCraft then
+			terminal:openNetworkCraft("vanilla")
+		else
+			GlobalStorageSiK.CraftSession.openHandcraft("vanilla")
+		end
+	end,
+})
 
 --- Abre cocina (Project_Cook, mod externo opcional) con contenedores de red
 --- - misma sesion "Craft" que crafteo, distinto uiMode para diagnostico. Ver
@@ -154,16 +138,7 @@ function GS_TerminalUI:syncCraftTabVisibility()
 			player
 		)
 	end
-	if GlobalStorageSiK.TerminalTabs.setCraftTabVisible then
-		GlobalStorageSiK.TerminalTabs.setCraftTabVisible(self, show == true)
-	end
-	if show and self.activeTabKey == "craft" and self.craftPanel then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
-	end
-end
-
-function GS_TerminalUI:onCraftTabActivated()
-	if self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
+	if GlobalStorageSiK.TerminalExtensions then
+		GlobalStorageSiK.TerminalExtensions.setTabVisible(self, "craft", show == true)
 	end
 end

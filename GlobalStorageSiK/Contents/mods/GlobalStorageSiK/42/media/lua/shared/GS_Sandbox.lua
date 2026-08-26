@@ -365,16 +365,14 @@ function GlobalStorageSiK.Sandbox.debugRelayToClients()
 	return SandboxVars.GlobalStorageSiK.DebugRelayToClients ~= false
 end
 
---- Indica si el bloque de interfaz está activo (clicks, árbol de widgets,
---- solapes - ver GS_UIDebug.lua). DebugMode es el interruptor maestro; las
---- categorías normales y DETAIL siguen siendo opt-in para evitar ruido.
----@return boolean
-function GlobalStorageSiK.Sandbox.debugModeUI()
-	if not GlobalStorageSiK.Sandbox.debugMode() or not SandboxVars.GlobalStorageSiK then
-		return false
-	end
-	return SandboxVars.GlobalStorageSiK.DebugModeUI == true
-end
+-- dev36: debugModeUI() (interruptor DebugModeUI independiente para el
+-- bloque de interfaz - clicks, arbol de widgets, solapes, ver
+-- GS_UIDebug.lua) RETIRADA - unificada bajo el mecanismo generico
+-- debugCategoryEnabled("SiKUI") de aqui abajo, dentro del nuevo arbol de
+-- categorias "SiK UI" (pedido explicito del usuario, agrupar todo el debug
+-- de interfaz/framework bajo un unico esquema estandar en vez de un
+-- interruptor propio suelto). GS_UIDebug.enabled() ahora llama
+-- debugMode() + debugCategoryEnabled("SiKUI") directamente.
 
 --- Categorias de traza granulares dentro de debugMode() (a peticion del
 --- usuario, tras un log de prueba con decenas de lineas de NetTrace/
@@ -386,7 +384,7 @@ end
 --- En instalaciones nuevas todas quedan apagadas y el administrador activa
 --- solo el bloque que corresponda a su prueba. Una clave ausente de una
 --- partida anterior conserva el fallback historico para no ocultar trazas.
----@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"UI"|"Router"
+---@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
 	if not SandboxVars.GlobalStorageSiK then

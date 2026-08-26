@@ -1,5 +1,5 @@
 --[[
-	GlobalStorageSiK - Columna de pestañas estilo Neat Crafting / Neat Building
+	GlobalStorageSiK - Columna de pestanas SiK UI
 	Autor: SiK
 	Fecha: 2025-06-27
 ]]
@@ -7,7 +7,6 @@
 require "ISUI/ISPanel"
 require "ISUI/ISUIElement"
 require "GS_I18n"
-require "GS_Libs"
 
 GlobalStorageSiK.TerminalTabRail = {}
 
@@ -41,57 +40,70 @@ function GS_TerminalTabSlot:new(x, y, size, displayName, tabKey, iconPath, paren
 	o.iconSize = math.floor(size * 0.72)
 	o.tabIcon = iconPath and getTexture(iconPath) or nil
 	o.defaultBG = getTexture("media/ui/CategoryIcon/Deflaut.png")
-	o.neatBtn = nil
 	return o
 end
 
 function GS_TerminalTabSlot:initialise()
 	ISUIElement.initialise(self)
-	local NISq = GlobalStorageSiK.Libs.getNISquareButton()
-	if not NISq then
-		return
-	end
-	local tabKey = self.tabKey
-	local rail = self.parentRail
-	local slot = self
-	self.neatBtn = NISq:new(0, 0, self.width, self.tabIcon, rail, function()
-		if slot.isSelected then
-			return
-		end
-		if getSoundManager and getSoundManager().playUISound then
-			getSoundManager():playUISound("UIActivateButton")
-		end
-		if rail and rail.onTabActivated then
-			rail:onTabActivated(tabKey)
-		end
-	end)
-	self.neatBtn:initialise()
-	self.neatBtn:setActive(false)
-	self.neatBtn:setActiveColor(0.95, 0.5, 0.1)
-	self:addChild(self.neatBtn)
 end
 
 function GS_TerminalTabSlot:setSelected(selected)
 	self.isSelected = selected == true
-	if self.neatBtn and self.neatBtn.setActive then
-		self.neatBtn:setActive(self.isSelected)
+end
+
+-- Ruta de clic unica de SiK UI. El slot gobierna dibujo, captura y activacion.
+function GS_TerminalTabSlot:onMouseDown(x, y)
+	if self.isSelected then
+		return false
 	end
+	self._gsPressed = true
+	self:setCapture(true)
+	return true
+end
+
+function GS_TerminalTabSlot:onMouseUp(x, y)
+	if not self._gsPressed then
+		return false
+	end
+	self._gsPressed = false
+	self:setCapture(false)
+	local inside = x >= 0 and y >= 0 and x < self.width and y < self.height
+	if inside and not self.isSelected then
+		if getSoundManager and getSoundManager().playUISound then
+			getSoundManager():playUISound("UIActivateButton")
+		end
+		GlobalStorageSiK.Log.debug("SiKUITabs", "activate", "tabKey=" .. tostring(self.tabKey))
+		local rail = self.parentRail
+		if rail and rail.onTabActivated then
+			rail:onTabActivated(self.tabKey)
+		end
+	end
+	return true
+end
+
+function GS_TerminalTabSlot:onMouseUpOutside(x, y)
+	if not self._gsPressed then
+		return false
+	end
+	self._gsPressed = false
+	self:setCapture(false)
+	GlobalStorageSiK.Log.debug("SiKUITabs", "cancel (soltado fuera del slot)", "tabKey=" .. tostring(self.tabKey))
+	return true
 end
 
 function GS_TerminalTabSlot:prerender()
 end
 
 function GS_TerminalTabSlot:render()
-	if self.neatBtn then
-		return
-	end
 	local inset = 3
 	local btnW = self.width - inset * 2
 	local btnH = self.height - inset * 2
 	local btnX = inset
 	local btnY = inset
 	local bgA, bgR, bgG, bgB = 0.96, 0.05, 0.05, 0.05
-	if self.isSelected then
+	if self._gsPressed then
+		bgR, bgG, bgB = 0.08, 0.07, 0.06
+	elseif self.isSelected then
 		bgR, bgG, bgB = 0.12, 0.1, 0.08
 	elseif self:isMouseOver() then
 		bgR, bgG, bgB = 0.1, 0.1, 0.1
@@ -158,7 +170,7 @@ function GS_TerminalTabRail:new(x, y, w, h, terminal, tabDefs, footerTabDef)
 	return o
 end
 
---- Ancho mínimo de la columna (misma fórmula que Neat Crafting).
+--- Ancho mínimo de la columna lateral.
 ---@param tabDefs table[]|nil
 ---@return number
 function GlobalStorageSiK.TerminalTabRail.measureWidth(tabDefs)
@@ -204,17 +216,13 @@ function GS_TerminalTabRail:layoutSlots()
 			slot:setY(y)
 			slot:setWidth(self.itemHeight)
 			slot:setHeight(self.itemHeight)
-			if slot.neatBtn then
-				slot.neatBtn:setWidth(self.itemHeight)
-				slot.neatBtn:setHeight(self.itemHeight)
-			end
 			y = y + self.itemHeight + 4
 		end
 	end
 	-- BUG REAL encontrado (reportado: "Craft y Builder usan la misma
 	-- posicion"): esto antes reposicionaba solo self.craftSlot (una unica
 	-- ranura), pero Craft Y Builder (y Cook en el futuro) llaman ambos a
-	-- setCraftTabVisible - la segunda en añadirse pisaba la referencia de la
+	-- setDynamicTabVisible - la segunda en añadirse pisaba la referencia de la
 	-- primera, que se quedaba huerfana sin recolocarse nunca mas, en la
 	-- MISMA posicion que la nueva. self.dynamicSlots es una lista ordenada
 	-- (no un unico slot), cada una se coloca secuencialmente tras las fijas.
@@ -268,15 +276,8 @@ function GS_TerminalTabRail:showFlyoutForSlot(slot)
 		self.flyoutLbl.drawBackground = false
 		self.flyoutLbl.prerender = function(panel)
 			ISPanel.prerender(panel)
-			local patch = nil
-			if NinePatchTexture and NinePatchTexture.getSharedTexture then
-				patch = NinePatchTexture.getSharedTexture("media/ui/Neat_Crafting/Panel/CategoryBG_Normal.png")
-			end
-			if patch and patch.render then
-				patch:render(panel:getAbsoluteX(), panel:getAbsoluteY(), panel.width, panel.height, 0.12, 0.12, 0.12, 0.95)
-			else
-				panel:drawRect(0, 0, panel.width, panel.height, 0.95, 0.1, 0.1, 0.1)
-			end
+			panel:drawRect(0, 0, panel.width, panel.height, 0.95, 0.1, 0.1, 0.1)
+			panel:drawRectBorder(0, 0, panel.width, panel.height, 0.9, 0.4, 0.4, 0.4)
 		end
 		self.flyoutLbl.render = function(panel)
 			panel:drawText(panel._flyoutText or "", 8, 4, 0.92, 0.94, 0.96, 1, UIFont.Small)
@@ -294,8 +295,7 @@ end
 
 function GS_TerminalTabRail:onMouseMove()
 	for _, slot in pairs(self.tabSlots) do
-		local hover = slot.neatBtn and slot.neatBtn:isMouseOver() or slot:isMouseOver()
-		if hover then
+		if slot:isMouseOver() then
 			self:showFlyoutForSlot(slot)
 			return true
 		end
@@ -311,12 +311,7 @@ end
 
 function GS_TerminalTabRail:prerender()
 	ISPanel.prerender(self)
-	if NinePatchTexture and NinePatchTexture.getSharedTexture then
-		local bg = NinePatchTexture.getSharedTexture("media/ui/Neat_Crafting/Panel/CategoryBG_RightAngle.png")
-		if bg and bg.render then
-			bg:render(self:getAbsoluteX(), self:getAbsoluteY(), self.width - self.scrollBarWidth, self.height, 0.14, 0.14, 0.14, 0.96)
-		end
-	end
+	self:drawRect(0, 0, self.width - self.scrollBarWidth, self.height, 0.96, 0.08, 0.08, 0.08)
 	if self.footerSlot then
 		local sepY = self.footerSlot:getY() - 6
 		self:drawRect(self.padding, sepY, self.width - self.scrollBarWidth - self.padding * 2, 1, 0.45, 0.35, 0.35, 0.35)
@@ -349,7 +344,7 @@ end
 --- vía GS_TerminalUI_Extensions.setTabVisible o directamente).
 ---@param visible boolean
 ---@param def table|nil
-function GS_TerminalTabRail:setCraftTabVisible(visible, def)
+function GS_TerminalTabRail:setDynamicTabVisible(visible, def)
 	def = def or {}
 	local key = def.key or "craft"
 	self.dynamicSlots = self.dynamicSlots or {}

@@ -1,5 +1,5 @@
 --[[
-	GlobalStorageSiK - Terminal UI (NeatUI)
+	GlobalStorageSiK - Terminal UI (SiK UI)
 	Autor: SiK
 	Fecha: 2025-06-24
 ]]
@@ -20,8 +20,10 @@ require "GS_Libs"
 require "GS_BulkFilters"
 require "GS_NetClient"
 require "GS_Permissions"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Palette"
 require "GS_TerminalUI_Scroll"
+require "GS_SiK_UI_Table"
 require "GS_TerminalUI_Sections"
 require "GS_TerminalUI_Items"
 require "GS_TerminalUI_Config"
@@ -30,6 +32,7 @@ require "GS_TerminalUI_Extensions"
 require "GS_TerminalUI_Programming"
 require "GS_TerminalRecipes"
 require "GS_TerminalUI_Network"
+require "GS_TerminalUI_Options"
 require "GS_TerminalUI_Nodes"
 require "GS_TerminalUI_NodeEditor"
 require "GS_TerminalDrop"
@@ -146,10 +149,10 @@ function GS_TerminalUI:refreshActiveTabContent()
 		GlobalStorageSiK.TerminalItems.refresh(self.itemsListPanel, self, state.items or {})
 	elseif tab == "network" then
 		GlobalStorageSiK.TerminalNetwork.refreshScroll(self, state)
+	elseif tab == "config" then
+		GlobalStorageSiK.TerminalOptions.refreshScroll(self, state)
 	elseif tab == "addons" and self.addonsPanel then
 		GlobalStorageSiK.TerminalAddons.refresh(self.addonsPanel, self)
-	elseif tab == "craft" and self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
 	elseif tab == "blocked" and GlobalStorageSiK.TerminalBlockedPanel then
 		GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(self, true)
 	elseif GlobalStorageSiK.TerminalExtensions then
@@ -157,8 +160,8 @@ function GS_TerminalUI:refreshActiveTabContent()
 	end
 end
 
-local function createNeatButton(x, y, w, h, title, target, onClick)
-	return GlobalStorageSiK.TerminalChrome.createNeatButton(x, y, w, h, title, target, onClick)
+local function createButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
 end
 
 local function createTabPanel()
@@ -176,7 +179,10 @@ local function createTabPanel()
 end
 
 function GS_TerminalUI:new(x, y, width, height)
-	local o = ISPanel:new(x, y, width, height)
+	local palettePlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	GlobalStorageSiK.SiK_UI.Palette.load(palettePlayer)
+        local o = ISPanel:new(x, y, width, height)
 	setmetatable(o, self)
 	self.__index = self
 	o.moveWithMouse = false
@@ -184,7 +190,8 @@ function GS_TerminalUI:new(x, y, width, height)
 	o.headerHeight = math.floor(FONT_HGT_MEDIUM * 1.55)
 	o.sideTabItemHeight = math.floor(FONT_HGT_MEDIUM * 1.45)
 	o.sideTabGap = 4
-	o.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
+	local uiBg = GlobalStorageSiK.SiK_UI.PALETTE.bgHeader
+	o.backgroundColor = { r = uiBg[1], g = uiBg[2], b = uiBg[3], a = 0.98 }
 	o.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	o.terminalState = nil
 	o.minimumWidth = 900
@@ -250,6 +257,8 @@ function GS_TerminalUI:installMouseHandlers()
 			me:calculateLayout()
 			if me.activeTabKey == "network" then
 				GlobalStorageSiK.TerminalNetwork.syncScrollLayout(me)
+			elseif me.activeTabKey == "config" then
+				GlobalStorageSiK.TerminalOptions.syncScrollLayout(me)
 			elseif me.activeTabKey == "addons" and me.addonsPanel then
 				GlobalStorageSiK.TerminalAddons.syncScrollLayout(me.addonsPanel, me)
 			end
@@ -273,6 +282,8 @@ function GS_TerminalUI:installMouseHandlers()
 			me:calculateLayout()
 			if me.activeTabKey == "network" then
 				GlobalStorageSiK.TerminalNetwork.syncScrollLayout(me)
+			elseif me.activeTabKey == "config" then
+				GlobalStorageSiK.TerminalOptions.syncScrollLayout(me)
 			elseif me.activeTabKey == "addons" and me.addonsPanel then
 				GlobalStorageSiK.TerminalAddons.syncScrollLayout(me.addonsPanel, me)
 			end
@@ -309,6 +320,9 @@ function GS_TerminalUI:createChildren()
 	self.networkPanel = createTabPanel()
 	GlobalStorageSiK.TerminalNetwork.buildZonesSection(self, self.networkPanel)
 
+	self.configPanel = createTabPanel()
+	GlobalStorageSiK.TerminalOptions.buildSection(self, self.configPanel)
+
 	self.itemsPanel = createTabPanel()
 	self:buildItemsToolbar()
 
@@ -318,9 +332,13 @@ function GS_TerminalUI:createChildren()
 	self.blockedPanel = createTabPanel()
 	GlobalStorageSiK.TerminalBlockedPanel.build(self)
 
+	-- "Configuración" (dev41) va justo despues de Red en el riel principal -
+	-- "Addons" sigue como pestaña fija de PIE (footerTabDef, mas abajo), sin
+	-- relacion de orden con este array: insertar aqui no la desplaza.
 	local tabDefs = {
 		{ key = "items", titleKey = "IGUI_GS_TabWarehouse", panelField = "itemsPanel", iconPath = "media/ui/GS/GS_TabWarehouse.png" },
 		{ key = "network", titleKey = "IGUI_GS_TabNetwork", panelField = "networkPanel", iconPath = "media/ui/GS/GS_TabNetwork.png" },
+		{ key = "config", titleKey = "IGUI_GS_TabConfig", panelField = "configPanel", iconPath = "media/ui/GS/GS_TabConfig.png" },
 	}
 	self.footerTabDef = {
 		key = "addons",
@@ -331,7 +349,7 @@ function GS_TerminalUI:createChildren()
 	GlobalStorageSiK.TerminalTabs.build(self, tabDefs)
 	self.tabViews.blocked = self.blockedPanel
 
-	self.closeBtn = GlobalStorageSiK.TerminalChrome.createCloseButton(self, self, GS_TerminalUI.onClose)
+	self.closeBtn = GlobalStorageSiK.SiK_UI.createCloseButton(self, self, GS_TerminalUI.onClose)
 
 	self:calculateLayout()
 	GlobalStorageSiK.TerminalScroll.stripTerminalTree(self)
@@ -346,7 +364,7 @@ end
 function GS_TerminalUI:buildItemsToolbar()
 	local pad = self.padding
 	local rowH = FONT_HGT_SMALL + 8
-	local btnW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(T("IGUI_GS_Search"), UIFont.Small, 16, 56, 120)
+	local btnW = GlobalStorageSiK.SiK_UI.measureButtonWidth(T("IGUI_GS_Search"), UIFont.Small, 16, 56, 120)
 	local gap = 6
 	local y = pad
 
@@ -355,7 +373,7 @@ function GS_TerminalUI:buildItemsToolbar()
 	)
 	-- La accion conserva siempre la misma etiqueta. El estado y el resumen del
 	-- job viven en una fila separada para no truncar mensajes dentro del boton.
-	self.autoSortBtn = createNeatButton(0, y, 220, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
+	self.autoSortBtn = createButton(0, y, 220, FONT_HGT_SMALL + 8, T("IGUI_GS_Redistribute"), self, GS_TerminalUI.onRedistributeNetwork)
 	self.itemsPanel:addChild(self.autoSortBtn)
 	-- Hasta recibir el rol serializado por el servidor no se permite iniciar
 	-- una operación sensible. updateState lo habilita solo para owner/admin.
@@ -366,37 +384,37 @@ function GS_TerminalUI:buildItemsToolbar()
 	y = y + FONT_HGT_SMALL + gap
 
 	local statusH = FONT_HGT_SMALL + 6
-	self.autoSortStatusRow = GlobalStorageSiK.TerminalChrome.createStatusIndicatorRow(pad, y, 320, statusH)
+	self.autoSortStatusRow = GlobalStorageSiK.SiK_UI.createStatusIndicatorRow(pad, y, 320, statusH)
 	self.autoSortStatusRow.drawBackground = true
 	self.autoSortStatusRow.backgroundColor = { r = 0.075, g = 0.075, b = 0.09, a = 0.8 }
 	self.autoSortStatusRow.borderColor = { r = 0.18, g = 0.18, b = 0.22, a = 0.9 }
-	GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow(
+	GlobalStorageSiK.SiK_UI.setStatusIndicatorRow(
 		self.autoSortStatusRow, T("IGUI_GS_RedistributeIdle"), "muted", 320
 	)
 	self.itemsPanel:addChild(self.autoSortStatusRow)
 	y = y + statusH + gap
 
-	local _wpal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _wpal = GlobalStorageSiK.SiK_UI.PALETTE
 	self.itemsWeightLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_WeightUsage", "0.0", "0.0", "0"), _wpal.statusOk[1], _wpal.statusOk[2], _wpal.statusOk[3], 1, UIFont.Small, true)
 	self.itemsWeightLbl:initialise()
 	self.itemsPanel:addChild(self.itemsWeightLbl)
 	y = y + FONT_HGT_SMALL + gap
 
-	local _dpal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local _dpal = GlobalStorageSiK.SiK_UI.PALETTE
 	self.depositDropHint = ISLabel:new(pad, y, FONT_HGT_SMALL * 2, T("IGUI_GS_DropHint"), _dpal.textMuted[1], _dpal.textMuted[2], _dpal.textMuted[3], 1, UIFont.Small, true)
 	self.depositDropHint:initialise()
 	self.itemsPanel:addChild(self.depositDropHint)
 	y = y + FONT_HGT_SMALL + gap
 
 	local searchW = 220
-	local searchBox, searchEntry = GlobalStorageSiK.TerminalChrome.createNeatSearchBox(pad, y, searchW, rowH, self.itemsPanel, nil)
+	local searchBox, searchEntry = GlobalStorageSiK.SiK_UI.createSearchBox(pad, y, searchW, rowH, self.itemsPanel, nil)
 	self.itemsPanel:addChild(searchBox)
 	self.searchBox = searchBox
 	self.searchEntry = searchEntry
-	GlobalStorageSiK.TerminalChrome.bindSearchEntry(self, self.searchEntry)
+	GlobalStorageSiK.SiK_UI.bindSearchEntry(self, self.searchEntry)
 
 	local function styleFilterCombo(combo)
-		GlobalStorageSiK.TerminalChrome.styleComboBox(combo)
+		GlobalStorageSiK.SiK_UI.styleComboBox(combo)
 		combo:instantiate()
 		combo.filterKeys = { "" }
 		if combo.bringToTop then
@@ -452,7 +470,16 @@ function GS_TerminalUI:buildItemsToolbar()
 	self.itemsPanel:addChild(self.leafCategoryFilterCombo)
 	self._leafCategoryFilterKey = ""
 
-	self.searchBtn = createNeatButton(0, y, 120, rowH, T("IGUI_GS_Search"), self, GS_TerminalUI.onSearch)
+	-- Dev30: la lupa propia sustituye al boton textual "Buscar". Es la misma
+	-- accion real (no decorativa) y ocupa un cuadrado igual a la altura de la
+	-- fila para liberar ancho a la caja de texto sin mover los tres filtros.
+	self.searchBtn = GlobalStorageSiK.SiK_UI.createIconButton(
+		0, y, rowH,
+		GlobalStorageSiK.SiK_UI.getIconTexture("search"),
+		self,
+		GS_TerminalUI.onSearch
+	)
+	self.searchBtn:setTooltip(T("IGUI_GS_Search"))
 	self.itemsPanel:addChild(self.searchBtn)
 	y = y + rowH + gap
 
@@ -521,7 +548,7 @@ function GS_TerminalUI:calculateLayout()
 	local innerW = blockedMode and math.max(240, w - contentPad * 2) or contentW
 	local innerH = bodyH
 
-	local tabPanels = { self.networkPanel, self.itemsPanel, self.addonsPanel, self.craftPanel, self.blockedPanel }
+	local tabPanels = { self.networkPanel, self.configPanel, self.itemsPanel, self.addonsPanel, self.blockedPanel }
 	if self.extraTabs then
 		for _, entry in pairs(self.extraTabs) do
 			if entry.panel then
@@ -543,27 +570,28 @@ function GS_TerminalUI:calculateLayout()
 	end
 
 	GlobalStorageSiK.TerminalNetwork.layout(self, innerW, innerH)
+	GlobalStorageSiK.TerminalOptions.layout(self, innerW, innerH)
 
 	if self.itemsListPanel and self.itemsPanel then
-		local searchLabel = T("IGUI_GS_Search")
 		local rowH = FONT_HGT_SMALL + 8
 		local gap = 6
 		local hintH = FONT_HGT_SMALL * 2
 		local statusH = FONT_HGT_SMALL + 6
 		local contentW = innerW - pad * 2
 
-		-- Anchos de la fila de búsqueda (idénticos al cálculo previo).
-		local btnW = GlobalStorageSiK.TerminalChrome.measureNeatButtonWidth(searchLabel, UIFont.Small, 16, 56, 120)
+		-- La lupa usa exactamente la altura de la fila; al sustituir el boton
+		-- textual su ancho sobrante pasa al campo de busqueda.
+		local btnW = rowH
 		if self.searchBtn then
-			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(self.searchBtn)
-			btnW = self.searchBtn.width
+			self.searchBtn:setWidth(btnW)
+			self.searchBtn:setHeight(rowH)
 		end
 		-- 3 desplegables (Categoria/Subcategoria/Sub-subcategoria) en vez de
 		-- 2: cada uno mas estrecho para que quepan los 3 + buscador + boton.
 		local filterW = math.max(90, math.floor(contentW * 0.15))
 		local searchW = math.max(80, contentW - btnW - gap * 4 - filterW * 3)
 		if self.searchBox then
-			GlobalStorageSiK.TerminalChrome.layoutNeatSearchBox(self.searchBox, searchW, rowH)
+			GlobalStorageSiK.SiK_UI.layoutSearchBox(self.searchBox, searchW, rowH)
 		end
 		local searchWidget = self.searchBox or self.searchEntry
 
@@ -574,7 +602,7 @@ function GS_TerminalUI:calculateLayout()
 		}
 		col:place(self.itemsTitleLbl, FONT_HGT_SMALL)   -- título (solo x/y)
 		if self.autoSortBtn then
-			GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(self.autoSortBtn)
+			GlobalStorageSiK.SiK_UI.fitButtonToLabel(self.autoSortBtn)
 			self.autoSortBtn:setX(pad + contentW - self.autoSortBtn.width)
 			self.autoSortBtn:setY(pad)
 		end
@@ -610,15 +638,12 @@ function GS_TerminalUI:calculateLayout()
 	if self.addonsPanel then
 		GlobalStorageSiK.TerminalAddons.layout(self.addonsPanel, innerW, innerH)
 	end
-	if self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.layout(self.craftPanel, innerW, innerH)
-	end
 	if GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.layoutAll(self, innerW, innerH)
 	end
 	GlobalStorageSiK.TerminalScroll.applyTabScrollVisibility(self)
-	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedChrome then
-		GlobalStorageSiK.TerminalTabs.syncBlockedChrome(self)
+	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedFrame then
+		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
 end
 
@@ -633,6 +658,8 @@ function GS_TerminalUI:rebuildScrollContent()
 	local tab = self.activeTabKey or "items"
 	if tab == "network" then
 		GlobalStorageSiK.TerminalNetwork.syncScrollLayout(self)
+	elseif tab == "config" then
+		GlobalStorageSiK.TerminalOptions.syncScrollLayout(self)
 	elseif tab == "addons" and self.addonsPanel then
 		GlobalStorageSiK.TerminalAddons.syncScrollLayout(self.addonsPanel, self)
 	elseif tab == "items" and self.itemsListPanel then
@@ -642,8 +669,8 @@ function GS_TerminalUI:rebuildScrollContent()
 	end
 	GlobalStorageSiK.TerminalScroll.stripTerminalTree(self)
 	-- Verificación tras redimensionar: ningún elemento debe pisar a otro.
-	-- Cubre CUALQUIER pestaña activa (no solo bloqueo) - sandbox DebugModeUI,
-	-- desactivado no cuesta nada ni genera ruido.
+	-- Cubre CUALQUIER pestaña activa (no solo bloqueo) - sandbox DebugCatSiKUI
+	-- (dev36, antes DebugModeUI), desactivado no cuesta nada ni genera ruido.
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "resize->" .. tostring(self.activeTabKey))
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "resize->" .. tostring(self.activeTabKey))
@@ -652,14 +679,14 @@ end
 
 function GS_TerminalUI:prerender()
 	ISPanel.prerender(self)
-	GlobalStorageSiK.TerminalChrome.renderPanelBackground(self)
+	GlobalStorageSiK.SiK_UI.renderPanelBackground(self)
 	if self.accessMode == "blocked" then
-		GlobalStorageSiK.TerminalChrome.renderBlockedHeader(self)
+		GlobalStorageSiK.SiK_UI.renderBlockedHeader(self)
 	else
-		GlobalStorageSiK.TerminalChrome.renderHeader(self)
+		GlobalStorageSiK.SiK_UI.renderHeader(self)
 	end
-	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedChrome then
-		GlobalStorageSiK.TerminalTabs.syncBlockedChrome(self)
+	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedFrame then
+		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
 end
 
@@ -680,7 +707,7 @@ function GS_TerminalUI:applyCapacityState(cap)
 	local total = string.format("%.1f", effectiveCapacityNum)
 	local pct = tonumber(cap.percent) or 0
 	local status = cap.status or "ok"
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local r, g, b = pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
 	if status == "warning" then
 		r, g, b = pal.statusWarn[1], pal.statusWarn[2], pal.statusWarn[3]
@@ -806,6 +833,15 @@ function GS_TerminalUI:refreshFromState(state)
 						nodeId = row.nodeId,
 						gsSubKeysStr = row.gsSubKeysStr,
 						gsSubKeys = row.gsSubKeys,
+						-- BUG REAL reportado por el usuario (2026-08-26, captura real:
+						-- falta "Localizar objeto" del menu contextual y la columna
+						-- "Zona" siempre vacia): esta lista de campos NO incluia
+						-- `locations` (los nodos reales donde vive este fullType, ver
+						-- GS_Index.lua) - sin el, `data.locations` siempre llegaba nil
+						-- al cliente y las dos funciones que dependen de el
+						-- (openItemContextMenu, resolveZoneLabel via terminalState.
+						-- nodes) se quedaban sin datos con los que trabajar.
+						locations = row.locations,
 					}
 				end
 			end
@@ -834,6 +870,25 @@ function GS_TerminalUI:refreshFromState(state)
 		state.items = copy
 	end
 	self.terminalState = state or prev
+	-- BUG REAL reportado por el usuario (2026-08-26): sin energia, el
+	-- terminal se abria igualmente en Almacen (activeTabKey nil al abrir
+	-- nunca pasa por TerminalTabs.activate, que ya bloquea el CAMBIO a esa
+	-- pestaña pero no la apertura inicial por defecto). Fuerza el mismo
+	-- redirect a Red -> Red en cuanto llega el primer estado sin energia,
+	-- tanto en la apertura como si la red se queda sin ella mientras el
+	-- jugador esta viendo Almacen/Addons.
+	if GlobalStorageSiK.Sandbox.requiresPower()
+		and self.terminalState.powered == false
+		and (self.activeTabKey == nil or self.activeTabKey == "items" or self.activeTabKey == "addons") then
+		-- dev41: el resumen con el indicador de energia vive ahora en
+		-- Configuracion -> "Estado" (antes Red -> "Red"), tras mudar esa
+		-- sub-pestaña fuera de la pestaña Red (que se quedo solo con "Zonas y
+		-- nodos"). Mismo redirect, nueva casa.
+		if self.configPanel then
+			self.configPanel.activeSubTab = "estado"
+		end
+		self:activateTab("config")
+	end
 	if self.terminalState.redistributeActive == true then
 		self:setRedistributeState(true, T("IGUI_GS_RedistributeConfigLocked"), "warn")
 	elseif self._autoSortRunning then
@@ -886,17 +941,17 @@ function GS_TerminalUI:refreshFromState(state)
 		if GlobalStorageSiK.TerminalZoneEditor and GlobalStorageSiK.TerminalZoneEditor.syncZoneData then
 			GlobalStorageSiK.TerminalZoneEditor.syncZoneData(self.terminalState.zones or {})
 		end
+	elseif tab == "config" then
+		GlobalStorageSiK.TerminalOptions.refreshScroll(self, self.terminalState)
 	elseif tab == "addons" and self.addonsPanel then
 		GlobalStorageSiK.TerminalAddons.refresh(self.addonsPanel, self)
-	elseif tab == "craft" and self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
 	elseif GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.refreshActive(self, tab)
 	end
 	-- Programación va ANTES que Craft/Build para que, si el periférico Reader
 	-- ya está instalado cuando el terminal abre por primera vez, su pestaña
 	-- reclame su hueco en self.dynamicSlots (append-only, ver
-	-- GS_TerminalTabRail:setCraftTabVisible) antes que ellas.
+	-- GS_TerminalTabRail:setDynamicTabVisible) antes que ellas.
 	if self.syncProgrammingTabVisibility then
 		self:syncProgrammingTabVisibility()
 	end
@@ -1054,7 +1109,7 @@ function GS_TerminalUI:setRedistributeState(running, message, status)
 		self.terminalState.redistributeActive = self._autoSortRunning
 	end
 	if self.autoSortBtn then
-		self.autoSortBtn._gsNeatLabel = T("IGUI_GS_Redistribute")
+		self.autoSortBtn._sikUiLabel = T("IGUI_GS_Redistribute")
 		self.autoSortBtn.textColor = nil
 		local allowed = self:canUseAutoSort()
 		self.autoSortBtn:setEnable(not self._autoSortRunning and allowed)
@@ -1064,7 +1119,7 @@ function GS_TerminalUI:setRedistributeState(running, message, status)
 				or T("IGUI_GS_RedistributeAdminOnly"))
 		end
 	end
-	GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow(
+	GlobalStorageSiK.SiK_UI.setStatusIndicatorRow(
 		self.autoSortStatusRow,
 		message or (self._autoSortRunning and T("IGUI_GS_RedistributingNetwork") or T("IGUI_GS_RedistributeIdle")),
 		status or (self._autoSortRunning and "warn" or "muted"),

@@ -15,7 +15,7 @@ require "GS_Addons"
 require "GS_NetClient"
 require "GS_Permissions"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_TerminalUI_AddonBay"
 require "GS_TerminalRecipeCards"
 
@@ -38,7 +38,7 @@ local _refreshTickCounter = 0
 ---@return number
 local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	local title = T(titleKey)
-	local lbl = GlobalStorageSiK.TerminalChrome.createSectionLabel(x, y, title)
+	local lbl = GlobalStorageSiK.SiK_UI.createSectionLabel(x, y, title)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
 	return y + FONT_HGT_SMALL + 8
 end
@@ -53,7 +53,7 @@ end
 ---@param b number
 ---@return number
 local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -179,7 +179,6 @@ function GlobalStorageSiK.TerminalAddons.syncScrollLayout(panel, terminal)
 		end
 	end
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
-	GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
 	layoutAddonsScrollContent(scroll)
 	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
 	GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(scroll)
@@ -203,10 +202,18 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 	local networkId = state.networkId
 		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
 		or GlobalStorageSiK.Network.getDefaultNetworkId()
-	local installed = state.installedAddons or {}
-	local y = pad
+        local installed = state.installedAddons or {}
+        local y = pad
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer()
 
-	y = addSectionTitle(scroll, pad, y, "IGUI_GS_AddonsSectionTitle", innerW)
+	-- dev40 (pedido explicito del usuario, captura real: "no tiene mucho
+	-- sentido aqui, ademas es feisimo"): el selector de paleta se muda a la
+	-- pestaña Red -> sub-pestaña Red (GS_TerminalUI_NetworkStatus.lua) -
+	-- ubicacion provisional, se movera de nuevo cuando se rediseñe a fondo
+	-- esa pestaña, pero Addons deja de ser su sitio.
+
+        y = addSectionTitle(scroll, pad, y, "IGUI_GS_AddonsSectionTitle", innerW)
 	y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_AddonsIntro"), innerW - pad * 2, 0.62, 0.66, 0.7)
 	y = y + BLOCK_GAP
 
@@ -218,9 +225,7 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 		return
 	end
 
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
-
-	local defs = GlobalStorageSiK.AddonRegistry.listSorted()
+        local defs = GlobalStorageSiK.AddonRegistry.listSorted()
 	if #defs == 0 then
 		y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_AddonsEmpty"), innerW - pad * 2, 0.62, 0.64, 0.68)
 	else
@@ -244,6 +249,5 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 
 	GlobalStorageSiK.TerminalScroll.finish(scroll, y + pad)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
-	GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
 	GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(scroll)
 end

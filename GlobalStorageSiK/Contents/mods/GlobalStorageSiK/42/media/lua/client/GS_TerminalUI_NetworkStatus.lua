@@ -14,7 +14,8 @@ require "GS_Sandbox"
 require "GS_NetClient"
 require "GS_TerminalRegistry"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Palette"
 require "GS_TerminalUI_BlockedPanel"
 require "GS_PCAcquireUI"
 
@@ -47,7 +48,7 @@ end
 
 local function addIndicator(scroll, ui, key, x, y, colW)
 	local rowH = FONT_HGT_SMALL + 4
-	local row = GlobalStorageSiK.TerminalChrome.createStatusIndicatorRow(x, y, colW, rowH)
+	local row = GlobalStorageSiK.SiK_UI.createStatusIndicatorRow(x, y, colW, rowH)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
 	ui.stats[key] = row
 	return y + rowH + 2
@@ -56,7 +57,7 @@ end
 local function setText(lbl, text, r, g, b, maxW)
 	if not GlobalStorageSiK.TerminalScroll.isLiveWidget(lbl) then return end
 	if maxW and maxW > 40 then
-		text = GlobalStorageSiK.TerminalChrome.truncateText(text or "", maxW, UIFont.Small)
+		text = GlobalStorageSiK.SiK_UI.truncateText(text or "", maxW, UIFont.Small)
 	end
 	if lbl.setName then lbl:setName(text) elseif lbl.name ~= nil then lbl.name = text end
 	if r then lbl.r = r end
@@ -79,12 +80,12 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	ui.block1Y = y
 	ui.colW = colW
 
-	local card = GlobalStorageSiK.TerminalChrome.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
+	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
 	card._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 	ui.block1Card = card
 
-	local title = GlobalStorageSiK.TerminalChrome.createSectionLabel(leftX, y + 2, T("IGUI_GS_NetBlockOverview"))
+	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(leftX, y + 2, T("IGUI_GS_NetBlockOverview"))
 	ui.block1Title = title
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
 	y = y + FONT_HGT_SMALL + 8
@@ -99,7 +100,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	ui.networkNameLbl = ISLabel:new(leftX, ly, FONT_HGT_SMALL, "", 0.88, 0.9, 0.94, 1, UIFont.Small, true)
 	ui.networkNameLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.networkNameLbl)
-	ui.networkRenameBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	ui.networkRenameBtn = GlobalStorageSiK.SiK_UI.createButton(
 		leftX + nameW + 4, ly,
 		84, ENTRY_H, T("IGUI_GS_Rename"), scroll, function()
 			local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
@@ -135,7 +136,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	ry = addStat(scroll, ui, "statFuel",   rightX, ry, "")
 
 	-- Widget combinado: label de peso + barra de progreso en un único hijo del scroll.
-	-- Un solo hijo evita que NIScrollView resetee la X al actualizar el ancho.
+	-- Un solo hijo mantiene estable la X al actualizar el ancho del contenido.
 	local barH = math.max(10, math.floor(FONT_HGT_SMALL * 0.85))
 	local statBarH = FONT_HGT_SMALL + ROW_GAP + barH
 	local statWeightRow = ISPanel:new(rightX, ry, colW - 8, statBarH)
@@ -160,10 +161,10 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 		elseif b.capacityStatus == "critical" or b.capacityStatus == "full" then
 			fr, fg, fb = 0.9, 0.3, 0.25
 		else
-			fr, fg, fb = GlobalStorageSiK.TerminalChrome.getBarColor(fill)
+			fr, fg, fb = GlobalStorageSiK.SiK_UI.getBarColor(fill)
 		end
 		local bh = b._barH or 10
-		GlobalStorageSiK.TerminalChrome.drawProgressBar(b, 0, FONT_HGT_SMALL + ROW_GAP, b.width, bh, fill, fr, fg, fb)
+		GlobalStorageSiK.SiK_UI.drawProgressBar(b, 0, FONT_HGT_SMALL + ROW_GAP, b.width, bh, fill, fr, fg, fb)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, statWeightRow)
 	ui.stats.statWeight = statWeightRow
@@ -180,7 +181,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	ry = addStat(scroll, ui, "scanOffline",  rightX, ry, "", 0.82, 0.86, 0.92)
 	ry = addStat(scroll, ui, "scanOutOfRange", rightX, ry, "", 0.9, 0.7, 0.3)
 	local btnH = FONT_HGT_SMALL + 8
-	ui.rescanBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(rightX, ry, ACTION_BTN_MAX_W, btnH, T("IGUI_GS_RescanAll"), scroll, function()
+	ui.rescanBtn = GlobalStorageSiK.SiK_UI.createButton(rightX, ry, ACTION_BTN_MAX_W, btnH, T("IGUI_GS_RescanAll"), scroll, function()
 		if terminal.onRescanNetwork then terminal:onRescanNetwork() end
 	end)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.rescanBtn)
@@ -213,7 +214,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	}
 	local rangeMaxW = innerW - leftX - pad
 	for i = 1, #rangeTexts do
-		for _, line in ipairs(GlobalStorageSiK.TerminalChrome.wrapTextLines(rangeTexts[i], rangeMaxW, UIFont.Small)) do
+		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(rangeTexts[i], rangeMaxW, UIFont.Small)) do
 			local lbl = ISLabel:new(leftX, dy, FONT_HGT_SMALL, line, 0.7, 0.74, 0.78, 1, UIFont.Small, true)
 			lbl:initialise()
 			GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
@@ -230,7 +231,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	-- "Conseguir PC" tambien disponible aqui (no solo en la ventana de
 	-- bloqueo): con terminal a mano igualmente puede faltar un ordenador
 	-- libre para instalar un segundo/tercer terminal en otra zona.
-	ui.getPCBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+	ui.getPCBtn = GlobalStorageSiK.SiK_UI.createButton(
 		leftX, dy, math.min(260, rangeMaxW), coverageBtnH, T("IGUI_GS_PCAcquireOpenBtn"), scroll, function()
 			GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
 		end
@@ -239,10 +240,26 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	dy = dy + coverageBtnH + ROW_GAP
 
 	ui.block1EndY = math.max(ly, ry, dy) + 8
-	GlobalStorageSiK.TerminalChrome.resizeSectionCard(card,
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
 		pad - 4, ui.block1Y - 2,
 		innerW - (pad - 4) * 2, ui.block1EndY - ui.block1Y + 4)
-	return ui.block1EndY
+
+	-- dev40 (pedido explicito del usuario): selector de paleta de interfaz,
+	-- movido aqui desde la pestaña Addons (alli "no tenia mucho sentido") -
+	-- ubicacion provisional dentro de Red -> Red, se movera de nuevo cuando
+	-- se rediseñe esa sub-pestaña a fondo (pendiente, no es el momento).
+	-- FUERA de la tarjeta de resumen (ui.block1Card) a proposito - su propio
+	-- ancho/alto se calcula solo con ly/ry/dy, nunca con esto.
+	local paletteY = ui.block1EndY + 8
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer()
+	ui.paletteSelector = GlobalStorageSiK.SiK_UI.Palette.createSelector(
+		leftX, paletteY, innerW - leftX - pad, player, function()
+			if terminal and terminal.setDirty then terminal:setDirty(true) end
+		end)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.paletteSelector)
+	ui.paletteEndY = paletteY + ui.paletteSelector.height + 8
+	return ui.paletteEndY
 end
 
 --- Actualiza bloque 1.
@@ -250,7 +267,7 @@ end
 ---@param state table
 function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 	state = state or {}
-	local setInd = GlobalStorageSiK.TerminalChrome.setStatusIndicatorRow
+	local setInd = GlobalStorageSiK.SiK_UI.setStatusIndicatorRow
 	local colW = ui.colW or 120
 
 	local powered = state.powered ~= false
@@ -347,7 +364,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 	end
 	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
 		ui.rescanBtn:setEnable(not scanRunning)
-		ui.rescanBtn._gsNeatLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
+		ui.rescanBtn._sikUiLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
 		if scan.durationMs then
 			ui.rescanBtn:setTooltip(T("IGUI_GS_ScanMetricsTooltip",
 				scan.durationMs or 0, scan.nodesScanned or 0,
@@ -398,7 +415,7 @@ function GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
 	end
 	if ui.rescanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.rescanBtn, rightX)
-		GlobalStorageSiK.TerminalChrome.fitNeatButtonToLabel(ui.rescanBtn)
+		GlobalStorageSiK.SiK_UI.fitButtonToLabel(ui.rescanBtn)
 	end
 	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.networkNameLbl) then
 		local nameW = math.max(60, math.min(colW - 90, 180))
@@ -417,5 +434,9 @@ function GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
 		if ui.block1EndY then
 			ui.block1Card:setHeight(ui.block1EndY - ui.block1Y + 4)
 		end
+	end
+	if ui.paletteSelector and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.paletteSelector) then
+		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.paletteSelector, leftX)
+		GlobalStorageSiK.SiK_UI.Palette.layoutSelector(ui.paletteSelector, innerW - leftX - pad)
 	end
 end

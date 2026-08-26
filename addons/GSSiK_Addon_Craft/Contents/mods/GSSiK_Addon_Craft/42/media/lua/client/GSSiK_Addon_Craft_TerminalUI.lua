@@ -9,7 +9,7 @@ require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_Libs"
 require "GS_TerminalUI_Scroll"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
 require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Craft_Sandbox"
 
@@ -22,7 +22,7 @@ local BLOCK_GAP = 8
 local BTN_H = FONT_HGT_SMALL + 10
 
 local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, maxW, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -41,10 +41,7 @@ local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	hdr.drawBackground = false
 	hdr.prerender = function(panel)
 		ISPanel.prerender(panel)
-		local patches = GlobalStorageSiK.TerminalChrome.getNeatPanelPatches()
-		if not GlobalStorageSiK.TerminalChrome.renderNinePatch(panel, patches.innerTitle, 0, 0, panel.width, panel.height, 0.2, 0.2, 0.2, 0.88) then
-			panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
-		end
+		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
 		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)
@@ -66,7 +63,7 @@ function GlobalStorageSiK.TerminalCraft.buildPanel(panel, terminal)
 	-- scroll (nunca se mueve con el contenido, nunca desplaza nada), muy
 	-- discreta a propósito (pedido explicito: casi inapreciable).
 	local verText = "v" .. tostring(GSSiK_Addon_Craft.VERSION or "?")
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	panel.versionLbl = ISLabel:new(0, 0, FONT_HGT_SMALL, verText, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.5, UIFont.Small, true)
 	panel.versionLbl:initialise()
 	panel:addChild(panel.versionLbl)
@@ -110,9 +107,14 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 	local cardW = math.max(260, innerW - pad * 2)
 	local y = pad
 
+	-- dev39 (pedido explicito del usuario, extendido a "cualquier ventana de
+	-- crafteo/build"): el parrafo de 2 lineas bajo el titulo se sustituye por
+	-- un boton "?" junto al propio titulo, mismo patron ya usado en los
+	-- editores de nodo/zona - el texto completo sigue disponible, solo pasa
+	-- a vivir en el tooltip en vez de ocupar espacio siempre visible.
+	local titleY = y
 	y = addSectionTitle(scroll, pad, y, "IGUI_GS_SectionCraftRemote", innerW)
-	y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_CraftRemoteHint"), cardW, 0.62, 0.68, 0.72)
-	y = y + BLOCK_GAP
+	GlobalStorageSiK.SiK_UI.addBlockInfoBtn(scroll, pad + 8, titleY + 2, T("IGUI_GS_SectionCraftRemote"), T("IGUI_GS_CraftRemoteHint"), scroll)
 
 	local sessionStatus = GlobalStorageSiK.CraftSession.getStatus("Craft")
 	local statusText, statusR, statusG, statusB = nil, 0.5, 0.72, 0.55
@@ -150,33 +152,32 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 		y = y + BLOCK_GAP
 	end
 
-	local btnW = math.min(280, cardW)
-	local vanillaBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenVanilla"), scroll, function()
-		if terminal and terminal.onOpenVanillaCraft then
-			terminal:onOpenVanillaCraft()
-		end
-	end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, vanillaBtn)
-	y = y + BTN_H + 6
-
-	if GlobalStorageSiK.Libs.hasNeatCrafting() then
-		local neatBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenNeat"), scroll, function()
+	-- dev39: botones a ANCHO COMPLETO de la tarjeta (antes topados a 280px,
+	-- se veian estrechos/descentrados frente al resto de ventanas del mod) y
+	-- agrupados sin holgura extra entre ellos (misma norma "boton dinamico,
+	-- ancho completo, centrado" que el resto del ecosistema).
+	local hasNeatCrafting = GlobalStorageSiK.Libs.hasNeatCrafting()
+	local craftLabelKey = hasNeatCrafting and "IGUI_GS_CraftOpenNeat" or "IGUI_GS_CraftOpenVanilla"
+	local craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, cardW, BTN_H, T(craftLabelKey), scroll, function()
+		if hasNeatCrafting then
 			if terminal and terminal.onOpenNeatCraft then
 				terminal:onOpenNeatCraft()
 			end
-		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, neatBtn)
-		y = y + BTN_H + 6
-	end
+		elseif terminal and terminal.onOpenVanillaCraft then
+			terminal:onOpenVanillaCraft()
+		end
+	end, nil, true)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, craftBtn)
+	y = y + BTN_H + 6
 
 	-- Solo visible con Project_Cook instalado - sin el mod no hay nada que
 	-- abrir, y un boton "no hace nada" es peor que no mostrarlo.
 	if GlobalStorageSiK.Libs.hasProjectCook() then
-		local cookBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, T("IGUI_GS_CraftOpenCook"), scroll, function()
+		local cookBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, cardW, BTN_H, T("IGUI_GS_CraftOpenCook"), scroll, function()
 			if terminal and terminal.onOpenCook then
 				terminal:onOpenCook()
 			end
-		end)
+		end, nil, true)
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, cookBtn)
 		y = y + BTN_H + 6
 	end
@@ -199,17 +200,24 @@ function GlobalStorageSiK.TerminalCraft.refresh(panel, terminal)
 	-- resolvia a una sendBtn GLOBAL inexistente (nil) -> "attempted index
 	-- of non-table" al pulsar. Forward-declarar la local ANTES del closure
 	-- arregla la captura (el closure ve la misma celda, rellenada despues).
+	-- dev40 (pedido explicito del usuario, captura real: el icono "?" al lado
+	-- rompia el ancho/cuadrado del boton): en vez de un widget "?" aparte que
+	-- se come espacio de la fila, el propio boton lleva su tooltip pegado
+	-- (ISButton:setTooltip, mismo mecanismo que createInfoHintButton usa por
+	-- debajo) - pasar el raton por encima muestra la explicacion igual,
+	-- clicar sigue alternando el toggle, y el boton vuelve a ser ancho
+	-- completo/cuadrado de verdad, sin nada al lado.
 	local sendBtn
-	sendBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, btnW, BTN_H, sendLabel, scroll, function()
+	sendBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, cardW, BTN_H, sendLabel, scroll, function()
 		local nowActive = not (GlobalStorageSiK.CraftSession.sendResultToNetwork == true)
 		GlobalStorageSiK.CraftSession.sendResultToNetwork = nowActive
-		sendBtn._gsNeatLabel = nowActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
-		sendBtn._gsNeatActive = nowActive
-	end)
-	sendBtn._gsNeatActive = sendActive
+		sendBtn._sikUiLabel = nowActive and T("IGUI_GS_CraftSendResultOn") or T("IGUI_GS_CraftSendResultOff")
+		sendBtn._sikUiActive = nowActive
+	end, nil, true)
+	sendBtn._sikUiActive = sendActive
+	sendBtn:setTooltip(T("IGUI_GS_CraftSendResultHint"))
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, sendBtn)
 	y = y + BTN_H + 6
-	y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_CraftSendResultHint"), cardW, 0.55, 0.58, 0.62)
 
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)

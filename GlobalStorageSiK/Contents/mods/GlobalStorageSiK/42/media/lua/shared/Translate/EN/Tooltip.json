@@ -16,5 +16,6 @@
 	"Tooltip_GS_FloppyDisk_DriveInstall": "One program, one purpose: teaching a terminal to keep its own Floppy Drive plugged in, so it doesn't have to ride in your pockets anymore.",
 	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Disk Tools\": step-by-step instructions for writing the disk that installs the Floppy Drive into a terminal's network. Requires standing close enough to a terminal to bother.",
 	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Disk Tools\": step-by-step instructions for writing the disk that carries the GS network's own operating system. Requires standing close enough to a terminal to bother.",
-	"Tooltip_GS_Manual_SolderingIron": "A scrappy DIY guide to building your own soldering iron out of scavenged parts. Reading it alone won't get you anywhere - somebody has to actually allow this shortcut first."
+	"Tooltip_GS_Manual_SolderingIron": "A scrappy DIY guide to building your own soldering iron out of scavenged parts. Reading it alone won't get you anywhere - somebody has to actually allow this shortcut first.",
+	"Tooltip_GS_SolderingIron": "A well-worn soldering iron, put together by someone who clearly knew what they were doing."
 }

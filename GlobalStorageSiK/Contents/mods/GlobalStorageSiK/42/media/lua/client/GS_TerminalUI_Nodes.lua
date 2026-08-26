@@ -7,20 +7,24 @@
 
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
+require "GS_Config"
 require "GS_I18n"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Config"
 require "GS_TerminalUI_NodeEditor"
 require "GS_TerminalUI_ZoneEditor"
 require "GS_NodeHighlight"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Table"
+require "GS_RulesUI"
 
 GlobalStorageSiK.TerminalNodes = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local ROW_H = FONT_HGT_SMALL + 10
-local HEADER_H = FONT_HGT_SMALL + 10
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = TABLE_METRICS.rowHeight
+local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_POOL_SIZE = 24
 local MIN_EMBED_ROWS = 10
 local SCROLLBAR_RESERVE = 14
@@ -89,130 +93,152 @@ end
 ---@param font UIFont|nil
 ---@return string
 local function truncateText(text, maxW, font)
-	return GlobalStorageSiK.TerminalChrome.truncateText(text, maxW, font or UIFont.Small)
+	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, font or UIFont.Small)
 end
 
--- Ancho reservado para la columna "Tipos" (siempre alineada a la derecha) y
--- separacion minima antes de ella. Antes "Prioridad" se calculaba como
--- max(statusX+90, w-150) SIN tener en cuenta el ancho real reservado para
--- "Tipos", asi que en paneles anchos ambas cabeceras (y valores) terminaban
--- solapandose ("Prioridatipos"). Ahora Prioridad se alinea a la derecha
--- justo antes del hueco de Tipos, con un margen fijo entre ambas.
-local TYPES_COL_W = 60
 local COL_GAP = 16
 
--- "Estado"/"Prioridad" seguian solapandose en la cabecera pese al tope
--- matematico (ver computeNodeColumns) porque los anchos reservados eran
--- CONSTANTES ADIVINADAS (60/90px) que no tenian en cuenta el ancho REAL del
--- texto traducido con la fuente del juego - en ES/otros idiomas "Prioridad"
--- (+ la flecha de orden " ^"/" v" cuando esa es la columna activa) podia
--- medir mas de los 90px reservados, invadiendo el hueco de "Estado" aunque
--- las cuentas fueran "correctas" sobre el papel. Ahora se mide el texto real
--- con getTextManager() una vez y se cachea (mismo idioma toda la sesion).
-local _statusColW, _priorityColW
-local function statusColW()
-	if not _statusColW then
-		local w = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_ColStatus") or "")
-		_statusColW = math.max(50, math.floor(w) + 16)
-	end
-	return _statusColW
-end
-local function priorityColW()
-	if not _priorityColW then
-		-- Peor caso: columna activa de orden, con la flecha " v" anadida (ver headerLabel).
-		local w = getTextManager():MeasureStringX(UIFont.Small, (T("IGUI_GS_ColNodePriority") or "") .. " v")
-		_priorityColW = math.max(70, math.floor(w) + 16)
-	end
-	return _priorityColW
-end
+-- "Estado"/"Prioridad"/"% Ocupación" seguian solapandose con "Protocolo"
+-- pese al tope matematico por DOS motivos
+-- distintos, corregidos aqui a la vez (pedido explicito del usuario, con
+-- capturas): (1) los anchos reservados no median el texto REAL con la
+-- fuente del juego, y (2) el ancho de truncado de "Protocolo" (ver mas
+-- abajo, donde se dibuja) usaba como limite el borde derecho de la columna
+-- "Estado" en vez de su borde IZQUIERDO, dejando que un resumen de reglas
+-- largo se solapara visualmente con el texto de Estado. Cada columna
+-- estrecha ahora considera tambien el PEOR VALOR real que puede mostrar
+-- (p.ej. "Excluido"/"Excluded" en Estado, "100"/"100%" en Prioridad/
+-- Ocupación), no solo su cabecera - mostrar el valor completo importa mas
+-- que la cabecera.
+-- Anchos ESTANDARIZADOS y CENTRADOS (dev24/dev25): las 3 columnas usan el
+-- mismo criterio de alineacion (antes mezclado: Prioridad/% a la derecha,
+-- Estado a la izquierda) y valores siempre cortos (100, OK/OFF/ERR, 100%).
+-- BUG REAL de dev24 corregido en dev25 (captura del usuario: cabeceras
+-- "P.."/"Es.." truncadas e ilegibles in-game): un numero de pixeles fijo
+-- adivinado (34/42/46) bastaba para los VALORES pero no para las cabeceras
+-- ("Prio."/"Estado" son mas largas que "100"/"OK") - la reserva tiene que
+-- medir la fuente REAL del juego (como antes de dev24), incluyendo la
+-- cabecera CON la flecha de orden (" v"/" ^") ademas del peor valor corto -
+-- eso sigue dando un ancho pequeno y constante porque todos los textos son
+-- cortos, pero ya no se trunca nada. Desde dev33 esas medidas viven solo en
+-- NODE_TABLE_COLUMNS: cabecera, filas y deteccion de clic consumen el mismo
+-- layout resuelto por SiK_UI.Table.
 
---- Etiqueta completa de una categoria de nodo: si es una subcategoria GS,
---- muestra "Principal / Sub" (ej. "Comida / Perecedero") en vez de solo el
---- nombre de la subcategoria en crudo. Separador ASCII simple (" / ") para
---- evitar glifos que el font del juego no tenga y rendericen como "?".
----@param key string|nil
----@return string
--- Los 5 huecos de joyeria reales (ver GS_Subcategories.lua:JEWELRY_SLOT_BUCKET) -
--- mismo enum ya establecido, no una lista nueva.
-local JEWELRY_SLOT_KEYS_NODES = { ring = true, necklace = true, wrist = true, earring = true, nose = true }
+--- Color de texto por operador (mismo trio que las tarjetas de reglas de
+--- los editores y el modal "Anadir regla") - dev26 ronda 3, columna
+--- "Protocolo" (sustituye a la antigua "Categoria").
+local RULE_OP_TEXT_COLOR = {
+	OR  = GlobalStorageSiK.SiK_UI.PALETTE.ruleOr,
+	AND = GlobalStorageSiK.SiK_UI.PALETTE.ruleAnd,
+	NOT = GlobalStorageSiK.SiK_UI.PALETTE.ruleNot,
+}
+-- Azul apagado para "heredado de la zona, sin regla propia" - mismo tono
+-- que el bloque "Heredado de tu zona" del editor de contenedor.
+local INHERIT_COLOR = { 0.36, 0.48, 0.58 }
 
-local function fullCategoryLabel(key)
-	if not key or key == "" then
-		return T("IGUI_GS_CategoryAny")
-	end
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if key:sub(1, #EXT) == EXT then
-		-- El sufijo es una clave canonica; se traduce solo al pintar.
-		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
-	end
-	if key:sub(1, #SUB) == SUB then
-		-- Clave de Nivel 2: "groupKey::subGroupKey", independiente del idioma.
-		local rest = key:sub(#SUB + 1)
-		local sepPos = rest:find("::", 1, true)
-		if sepPos then
-			local groupKey = rest:sub(1, sepPos - 1)
-			local subKey = rest:sub(sepPos + 2)
-			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " / "
-				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subKey, groupKey)
+--- Decide que mostrar en la columna "Protocolo" para un contenedor: reglas
+--- PROPIAS (color por operador dominante, con "+N" si hay mas de una),
+--- heredadas de zona si no tiene propias pero la zona si (azul apagado, sin
+--- puntos), o "Global" (sin restriccion en ningun nivel) - nunca "Global"
+--- si la zona restringe, aunque el contenedor no tenga reglas propias (ver
+--- GS_Router.zoneRulesAllow: la zona filtra igual).
+---@param ownRules table|nil
+---@param zoneRules table|nil
+---@return string label, number r, number g, number b, boolean showDots
+local function nodeProtocolInfo(ownRules, zoneRules)
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	if ownRules and #ownRules > 0 then
+		local sum = GlobalStorageSiK.RulesUI.compactSummary(ownRules)
+		if sum then
+			local c = RULE_OP_TEXT_COLOR[sum.opKey] or pal.textPrimary
+			local label = sum.label
+			if sum.extraCount > 0 then
+				label = label .. " +" .. tostring(sum.extraCount)
+			end
+			return label, c[1], c[2], c[3], true
 		end
-		return rest
 	end
-	local sepPos = key:find("::", 1, true)
-	if sepPos then
-		-- Nivel 3 por combo (hueco de joyeria o subcategoria vanilla cruda).
-		local mainPart = key:sub(1, sepPos - 1)
-		local slotPart = key:sub(sepPos + 2)
-		local mainLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(mainPart)
-		local slotLower = string.lower(slotPart)
-		local slotLabel
-		if JEWELRY_SLOT_KEYS_NODES[slotLower] and GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.jewelrySlotLabel then
-			slotLabel = GlobalStorageSiK.Subcategories.jewelrySlotLabel(slotLower)
+	if zoneRules and #zoneRules > 0 then
+		local zsum = GlobalStorageSiK.RulesUI.compactSummary(zoneRules)
+		if zsum then
+			return zsum.label, INHERIT_COLOR[1], INHERIT_COLOR[2], INHERIT_COLOR[3], false
+		end
+	end
+	return T("IGUI_GS_ProtocolGlobal"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], false
+end
+
+-- Geometria fija del hueco de los 3 puntos de composicion en la columna
+-- Protocolo - unica fuente de verdad, reutilizada tanto al DIBUJAR los
+-- puntos como al RESERVAR el hueco cuando no se dibujan (herencia/Global).
+-- Antes el texto arrancaba en protocolX cuando no habia puntos y en
+-- protocolX+31 cuando si los habia, dejando la columna con el borde
+-- izquierdo escalonado fila a fila - "no bien cuadrada" (feedback directo
+-- del usuario con captura, dev26 ronda 4). Reservar SIEMPRE el mismo hueco
+-- cuadra la columna de verdad.
+local PROTOCOL_DOT_SIZE, PROTOCOL_DOT_GAP, PROTOCOL_DOTS_COUNT, PROTOCOL_TEXT_GAP = 6, 3, 3, 4
+local PROTOCOL_DOTS_RESERVED_W = PROTOCOL_DOTS_COUNT * (PROTOCOL_DOT_SIZE + PROTOCOL_DOT_GAP) + PROTOCOL_TEXT_GAP
+
+-- Modelo canónico de tabla SiK UI. Esta tabla fue la referencia visual para
+-- el resto del framework; desde dev33 su geometría deja de ser una excepción
+-- local y pasa por el mismo descriptor que usan cabecera, filas y clics.
+local NODE_TABLE_COLUMNS = {
+	{ key = "name", titleKey = "IGUI_GS_ColName", widthFraction = 0.15, minWidth = 80, pad = 0 },
+	{ key = "protocol", titleKey = "IGUI_GS_ColProtocol", flex = 1, minWidth = 60,
+		hardMinWidth = 60, pad = PROTOCOL_DOTS_RESERVED_W },
+	{ key = "priority", titleKey = "IGUI_GS_ColPriority", align = "center",
+		measureValues = { "100" }, measurePad = 12 },
+	{ key = "status", titleKey = "IGUI_GS_ColStatus", align = "center",
+		measureValues = { T("IGUI_GS_NodeStatusOk"), T("IGUI_GS_NodeStatusOffShort"),
+			T("IGUI_GS_NodeStatusErrorShort") }, measurePad = 12 },
+	{ key = "occupancy", titleKey = "IGUI_GS_ColOccupancy", align = "center",
+		measureValues = { "100%" }, measurePad = 12 },
+}
+local NODE_TABLE_OPTIONS = { left = 8, right = 8, gap = COL_GAP }
+
+--- Dibuja los 3 puntos de composicion (OR/AND/NOT - relleno si ese operador
+--- tiene al menos una regla propia, hueco si no) antes del texto de
+--- Protocolo. Devuelve la X donde debe empezar el texto (siempre
+--- x+PROTOCOL_DOTS_RESERVED_W).
+---@param panel ISUIElement
+---@param x number
+---@param yMid number
+---@param rules table
+---@return number textX
+local function drawProtocolDots(panel, x, yMid, rules)
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local hasOr, hasAnd, hasNot = false, false, false
+	for i = 1, #rules do
+		if rules[i].op == "OR" then hasOr = true
+		elseif rules[i].op == "AND" then hasAnd = true
+		elseif rules[i].op == "NOT" then hasNot = true end
+	end
+	local dy = yMid + math.floor((FONT_HGT_SMALL - PROTOCOL_DOT_SIZE) / 2)
+	local specs = { { hasOr, pal.ruleOr }, { hasAnd, pal.ruleAnd }, { hasNot, pal.ruleNot } }
+	local dx = x
+	for i = 1, #specs do
+		local on, color = specs[i][1], specs[i][2]
+		if on then
+			panel:drawRect(dx, dy, PROTOCOL_DOT_SIZE, PROTOCOL_DOT_SIZE, 1, color[1], color[2], color[3])
 		else
-			slotLabel = GlobalStorageSiK.ItemTaxonomy.translateSubKey(slotPart, mainPart, nil) or slotPart
+			panel:drawRectBorder(dx, dy, PROTOCOL_DOT_SIZE, PROTOCOL_DOT_SIZE, 0.5, 0.3, 0.3, 0.3)
 		end
-		return mainLabel .. " / " .. slotLabel
+		dx = dx + PROTOCOL_DOT_SIZE + PROTOCOL_DOT_GAP
 	end
-	local GSSub = GlobalStorageSiK.Subcategories
-	if GSSub and GSSub.isSubcategoryKey(key) then
-		local sub = GSSub.get(key)
-		local mainLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(sub and sub.parentCategory)
-		local subLabel = GSSub.label(key)
-		return mainLabel .. " / " .. subLabel
-	end
-	return GlobalStorageSiK.ItemTaxonomy.translateMainKey(key)
+	return x + PROTOCOL_DOTS_RESERVED_W
 end
 
---- Calcula las posiciones X de las columnas de la tabla de nodos a partir
---- del ancho disponible. Unica fuente de verdad para cabecera y filas.
+--- Calcula el layout completo de columnas de la tabla de nodos a partir del
+--- ancho disponible. Unica fuente de verdad para cabecera, filas y clics.
+--- Orden (pedido explicito del usuario, ronda de ajuste de espacio):
+--- Nombre, Protocolo, Prioridad, Estado, % Ocupación - Prioridad se mueve
+--- DESPUES de Protocolo (antes iba justo tras el Nombre) porque el resumen
+--- de reglas es la columna que mas espacio necesita de verdad; Nombre
+--- tambien se recorta a un ancho fijo modesto (se trunca con "...", el
+--- nombre completo nunca fue tan importante como poder leer el protocolo).
 ---@param w number
----@return number nameX, number catX, number statusX, number priorityRightX, number typesRightX
-local function computeNodeColumns(w)
-	local nameX = 8
-	local catX = math.max(110, math.floor(w * 0.22))
-	local typesRightX = w - 8
-	local priorityRightX = typesRightX - TYPES_COL_W - COL_GAP
-	local statusRightX = priorityRightX - priorityColW() - COL_GAP
-	-- "Estado" es de ancho FIJO y estrecho (solo "OK"/"ERROR" — ver
-	-- STATUS_COL_W); todo el espacio restante entre nombre y estado se lo
-	-- lleva "Categoria", que ahora necesita bastante mas sitio para el
-	-- formato combinado "Principal / Sub" (ej. "Comida / Perecedero").
-	--
-	-- IMPORTANTE: statusRightX - STATUS_COL_W es el UNICO valor que garantiza
-	-- hueco frente a "Prioridad" (por construccion: statusRightX ya descuenta
-	-- PRIORITY_COL_W + COL_GAP). Antes se usaba max(catX+170, ese valor), y en
-	-- paneles de ancho "estandar" catX+170 ganaba y se colaba por delante del
-	-- tope, solapando "Estado" con "Prioridad" en la cabecera. Ahora el tope
-	-- manda siempre; catX+170 solo actua como suelo minimo cuando aun asi
-	-- sobra sitio (paneles muy anchos), nunca puede empujar mas alla del tope.
-	local statusX = statusRightX - statusColW()
-	if statusX < catX + 4 then
-		-- Panel extremadamente estrecho: ya no hay forma de dar holgura
-		-- ideal, pero seguimos sin invadir "Prioridad" (ver arriba); el
-		-- minimo caso limite es pegar "Estado" justo tras "Categoria".
-		statusX = catX + 4
-	end
-	return nameX, catX, statusX, priorityRightX, typesRightX
+---@return table[]
+local function nodeColumnLayout(w)
+	return GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, NODE_TABLE_COLUMNS, NODE_TABLE_OPTIONS)
 end
 
 --- Texto de estado del nodo para la tabla: solo indica si su inventario es
@@ -222,20 +248,54 @@ end
 ---@param node table
 ---@return string
 local function nodeStatusText(node)
+	-- dev26, ronda 2 (ver §4.5 del plan): un contenedor EXCLUIDO es una
+	-- decision deliberada del jugador, no un fallo - antes compartia el
+	-- mismo texto "ERROR" que un contenedor offline/inaccesible, indistinguible
+	-- en la tabla. Ambos siguen en rojo, pero con su propia etiqueta.
+	-- dev24: esta tabla usa las variantes CORTAS (OFF/ERR/OK) para que el
+	-- descriptor reserve un hueco pequeno y constante - el texto largo
+	-- ("Excluded from network"/"ERROR") se sigue usando en el editor de
+	-- contenedor y en el detalle de zona, solo esta tabla es corta.
+	if node.membership == "excluded" then
+		return T("IGUI_GS_NodeStatusOffShort")
+	end
 	if node.offline or node.enabled == false then
-		return T("IGUI_GS_NodeStatusError")
+		return T("IGUI_GS_NodeStatusErrorShort")
 	end
 	return T("IGUI_GS_NodeStatusOk")
 end
 
---- Color del texto de estado: rojo si el inventario no es accesible, verde si OK.
+--- Color del texto de estado: rojo si excluido o el inventario no es accesible, verde si OK.
 ---@param node table
 ---@return number, number, number
 local function nodeStatusColor(node)
-	if node.offline or node.enabled == false then
+	if node.membership == "excluded" or node.offline or node.enabled == false then
 		return 0.92, 0.35, 0.3
 	end
 	return 0.45, 0.85, 0.45
+end
+
+--- Texto + color de la columna "% Ocupación" - mismos umbrales que la barra
+--- de la pestaña Almacén (GlobalStorageSiK.Config.WEIGHT_WARN_PERCENT/
+--- WEIGHT_CRITICAL_PERCENT), mismo lenguaje visual en toda la interfaz.
+--- `pct` ya viene trait-aware y capacidad-custom-aware desde el servidor
+--- (ver GS_NetworkCapacity.compute, perNode/perZone) - aqui solo se colorea,
+--- nunca se recalcula nada. nil cuando el contenedor esta offline/sin chunk
+--- o no expone capacidad legible - nunca se inventa un numero.
+---@param pct number|nil
+---@return string text, number r, number g, number b
+local function occupancyDisplay(pct)
+	if not pct then
+		return "—", 0.45, 0.48, 0.52
+	end
+	local warnPct = GlobalStorageSiK.Config.WEIGHT_WARN_PERCENT or 80
+	local critPct = GlobalStorageSiK.Config.WEIGHT_CRITICAL_PERCENT or 95
+	if pct >= critPct then
+		return pct .. "%", 0.92, 0.35, 0.3
+	elseif pct >= warnPct then
+		return pct .. "%", 0.92, 0.75, 0.35
+	end
+	return pct .. "%", 0.75, 0.78, 0.82
 end
 
 --- Ordena nodos por nombre visible (orden por defecto, sin cabecera clicada).
@@ -247,21 +307,26 @@ local function sortNodesByName(nodes)
 end
 
 --- Valor comparable de un nodo para una columna concreta de la tabla.
+--- "protocol" (dev26 ronda 3, antes "category"/"types") ordena por la
+--- regla propia mas relevante - no tiene en cuenta herencia de zona (un
+--- contenedor sin reglas propias siempre ordena como "", junto a los que
+--- de verdad son Global) - suficiente para ordenar, no para mostrar.
 ---@param node table
----@param column string "name"|"category"|"status"|"priority"|"types"
+---@param column string "name"|"protocol"|"status"|"priority"
 ---@return string|number
 local function nodeSortValue(node, column)
 	if column == "priority" then
 		return tonumber(node.priority) or 50
 	end
-	if column == "types" then
-		return tonumber(node.itemTypeCount) or 0
-	end
 	if column == "status" then
 		return nodeStatusText(node)
 	end
-	if column == "category" then
-		return fullCategoryLabel(node.categories and node.categories[1]):lower()
+	if column == "occupancy" then
+		return tonumber(node.occupancyPercent) or -1
+	end
+	if column == "protocol" then
+		local sum = node.rules and #node.rules > 0 and GlobalStorageSiK.RulesUI.compactSummary(node.rules) or nil
+		return sum and sum.label:lower() or ""
 	end
 	return (node.displayName or node.name or ""):lower()
 end
@@ -305,12 +370,18 @@ local function buildGroupedDisplayRows(nodes, zones, collapsedZones, sortColumn,
 
 	local zoneNames = {}
 	local zonePriorities = {}
+	local zoneEnabledMap = {}
+	local zoneRulesMap = {}
+	local zoneOccupancyMap = {}
 	local zoneOrder = {}
 	for i = 1, #zones do
 		local z = zones[i]
 		if z and z.id then
 			zoneNames[z.id] = z.name or z.id
 			zonePriorities[z.id] = tonumber(z.priority) or 50
+			zoneEnabledMap[z.id] = z.enabled ~= false
+			zoneRulesMap[z.id] = z.rules
+			zoneOccupancyMap[z.id] = z.occupancyPercent
 			zoneOrder[#zoneOrder + 1] = z.id
 		end
 	end
@@ -367,11 +438,14 @@ local function buildGroupedDisplayRows(nodes, zones, collapsedZones, sortColumn,
 			zoneName = zoneName,
 			count = #list,
 			zonePriority = zonePriorities[zoneId],
+			zoneEnabled = zoneEnabledMap[zoneId],
+			zoneRules = zoneRulesMap[zoneId],
+			zoneOccupancy = zoneOccupancyMap[zoneId],
 			collapsed = collapsed,
 		}
 		if not collapsed then
 			for j = 1, #list do
-				rows[#rows + 1] = { kind = "node", node = list[j] }
+				rows[#rows + 1] = { kind = "node", node = list[j], zoneRules = zoneRulesMap[zoneId] }
 			end
 		end
 	end
@@ -412,7 +486,7 @@ local function createNodeRow(scroll, listPanel, terminal)
 		local data = self.rowData
 		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
 		local w = self.width
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 
 		if not data then
 			return
@@ -420,53 +494,148 @@ local function createNodeRow(scroll, listPanel, terminal)
 
 		if data.kind == "zoneHeader" then
 			local hover = self:isMouseOver()
-			GlobalStorageSiK.TerminalChrome.drawZoneHeaderBackground(self, hover)
+			GlobalStorageSiK.SiK_UI.drawZoneHeaderBackground(self, hover)
 			local arrow = data.collapsed and "+ " or "- "
 			local title = arrow .. T("IGUI_GS_ZoneGroupHeader", data.zoneName or "—", data.count or 0)
-			local _, _, _, priorityRightX = computeNodeColumns(w)
-			local titleMaxW = math.max(40, priorityRightX - priorityColW() - 16)
-			self:drawText(truncateText(title, titleMaxW, UIFont.Small), 8, yMid, hover and 1 or pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+			local zoneExcluded = data.zoneEnabled == false
+			local columns = nodeColumnLayout(w)
+			local nameCol, protocolCol, priorityCol, statusCol, occupancyCol =
+				columns[1], columns[2], columns[3], columns[4], columns[5]
+			local nameX, protocolX, priorityX = nameCol.x, protocolCol.x, priorityCol.x
+			local titleMaxW = math.max(40, protocolX - 16)
+			local tr, tg, tb = pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3]
+			local titleTruncated = truncateText(title, titleMaxW, UIFont.Small)
+			self:drawText(titleTruncated, 8, yMid, hover and 1 or tr, tg, tb, 1, UIFont.Small)
+			-- Tooltip del nombre de zona, mismo motivo/patron que el de nombre
+			-- de contenedor mas abajo - solo si se trunco de verdad.
+			local overTitleCol = hover and self:getMouseX() >= 8 and self:getMouseX() < protocolX
+			if overTitleCol and titleTruncated ~= title then
+				if not self._gsNameTooltip then
+					self._gsNameTooltip = ISToolTip:new()
+					self._gsNameTooltip:initialise()
+					self._gsNameTooltip:instantiate()
+					self._gsNameTooltip:setOwner(self)
+				end
+				self._gsNameTooltip:setName(T("IGUI_GS_ColName"))
+				self._gsNameTooltip:setDescription(title)
+				self._gsNameTooltip:setVisible(true)
+				self._gsNameTooltip:addToUIManager()
+				self._gsNameTooltip:bringToTop()
+				-- BUG REAL confirmado (2026-08-25, captura del usuario: la
+				-- tarjeta se pintaba fija arriba a la derecha, sin relacion con
+				-- el cursor) - a un ISToolTip anadido a la raiz del UIManager
+				-- (addToUIManager) hay que decirle su posicion en pantalla cada
+				-- fotograma; nunca se llamaba setX/setY, se quedaba en el
+				-- ultimo valor por defecto. Mismo patron ya usado y funcional
+				-- en GS_ItemNetworkTooltip.lua (coordenadas GLOBALES de raton,
+				-- no self:getMouseX() que es relativo al panel).
+				self._gsNameTooltip:setX(getMouseX() + 16)
+				self._gsNameTooltip:setY(getMouseY() + 16)
+			elseif self._gsNameTooltip and self._gsNameTooltip:isVisible() then
+				self._gsNameTooltip:removeFromUIManager()
+				self._gsNameTooltip:setVisible(false)
+			end
 			if data.zonePriority then
-				self:drawTextRight(T("IGUI_GS_ZonePriorityValue", data.zonePriority), priorityRightX, yMid,
+				self:drawTextCentre(tostring(data.zonePriority), priorityCol.x + math.floor(priorityCol.width / 2), yMid,
 					pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 			end
+			-- Protocolo/Estado de la ZONA misma (dev26 ronda 3): antes el
+			-- "Excluido" de zona iba pegado al nombre como sufijo de texto,
+			-- mezclado con un dato distinto en la misma columna - ahora cada
+			-- dato vive en su propia columna, igual que en las filas de
+			-- contenedor.
+			local zLabel, zr, zg, zb, zDots = nodeProtocolInfo(data.zoneRules, nil)
+			local zTextX = protocolX + PROTOCOL_DOTS_RESERVED_W
+			if zDots then
+				drawProtocolDots(self, protocolX, yMid, data.zoneRules)
+			end
+			-- Truncar contra priorityX (borde IZQUIERDO/cercano de la
+			-- siguiente columna), nunca contra el borde lejano de Estado -
+			-- ese era exactamente el bug que dejaba el resumen de reglas
+			-- solapado con el texto de Estado (capturas del usuario).
+			self:drawText(truncateText(zLabel, priorityX - zTextX - 8, UIFont.Small), zTextX, yMid, zr, zg, zb, 1, UIFont.Small)
+			local zStatusText = zoneExcluded and T("IGUI_GS_NodeStatusOffShort") or T("IGUI_GS_NodeStatusOk")
+			local zsr, zsg, zsb = 0.45, 0.85, 0.45
+			if zoneExcluded then zsr, zsg, zsb = 0.92, 0.35, 0.3 end
+			self:drawTextCentre(zStatusText, statusCol.x + math.floor(statusCol.width / 2), yMid, zsr, zsg, zsb, 1, UIFont.Small)
+			local zOccText, zor, zog, zob = occupancyDisplay(data.zoneOccupancy)
+			self:drawTextCentre(zOccText, occupancyCol.x + math.floor(occupancyCol.width / 2), yMid, zor, zog, zob, 1, UIFont.Small)
 			return
 		end
 
 		local editorInst = GlobalStorageSiK.TerminalNodeEditor and GlobalStorageSiK.TerminalNodeEditor.instance
 		local isSelected = editorInst and editorInst.node and data.node and editorInst.node.id == data.node.id
-		GlobalStorageSiK.TerminalChrome.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), isSelected)
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), isSelected)
 
 		local node = data.node
 		if not node then
 			return
 		end
 
-		local nameX, catX, statusX, priorityRightX, typesRightX = computeNodeColumns(w)
+		local columns = nodeColumnLayout(w)
+		local nameCol, protocolCol, priorityCol, statusCol, occupancyCol =
+			columns[1], columns[2], columns[3], columns[4], columns[5]
+		local nameX, protocolX, priorityX = nameCol.x, protocolCol.x, priorityCol.x
 		local name = node.displayName or node.name or "?"
-		local cat = fullCategoryLabel(node.categories and node.categories[1])
 		local status = nodeStatusText(node)
 		local priority = tostring(node.priority or 50)
-		local types = tostring(node.itemTypeCount or 0)
-		local catW = statusX - catX - 8
-		self:drawText(truncateText(name, catX - nameX - 8, UIFont.Small), nameX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		self:drawText(truncateText(cat, catW, UIFont.Small), catX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		local sr, sg, sb = nodeStatusColor(node)
-		self:drawText(truncateText(status, priorityRightX - priorityColW() - statusX - 8, UIFont.Small), statusX, yMid, sr, sg, sb, 1, UIFont.Small)
-		self:drawTextRight(priority, priorityRightX, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(types, typesRightX, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		self:drawText(truncateText(name, protocolX - nameX - 8, UIFont.Small), nameX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		self:drawTextCentre(priority, priorityCol.x + math.floor(priorityCol.width / 2), yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 
-		-- Tooltip de la columna Categoria: texto COMPLETO sin truncar (con
-		-- niveles 1/2/3 desglosados, misma fuente que Almacen - ver
-		-- GS_TerminalUI_Items.lua) + cuantas categorias mas acepta el
-		-- contenedor si hay mas de una configurada.
-		local overCatCol = self:isMouseOver() and self:getMouseX() >= catX and self:getMouseX() < statusX
-		if overCatCol and node.categories and #node.categories > 0 then
-			local firstKey = node.categories[1]
-			local descLines = { T("IGUI_GS_CategoryTooltipMain", cat) }
-			if #node.categories > 1 then
-				descLines[#descLines + 1] = T("IGUI_GS_NodeMoreCategories", #node.categories - 1)
+		local label, pr, pg, pb, showDots = nodeProtocolInfo(node.rules, data.zoneRules)
+		local textX = protocolX + PROTOCOL_DOTS_RESERVED_W
+		if showDots then
+			drawProtocolDots(self, protocolX, yMid, node.rules)
+		end
+		-- Truncar contra priorityX, no contra statusColRightX (borde lejano
+		-- de Estado) - mismo bug/fix que en la fila de cabecera de zona.
+		self:drawText(truncateText(label, priorityX - textX - 8, UIFont.Small), textX, yMid, pr, pg, pb, 1, UIFont.Small)
+
+		local sr, sg, sb = nodeStatusColor(node)
+		self:drawTextCentre(status, statusCol.x + math.floor(statusCol.width / 2), yMid, sr, sg, sb, 1, UIFont.Small)
+
+		local occText, ocr, ocg, ocb = occupancyDisplay(node.occupancyPercent)
+		self:drawTextCentre(occText, occupancyCol.x + math.floor(occupancyCol.width / 2), yMid, ocr, ocg, ocb, 1, UIFont.Small)
+
+		-- Tooltip del Nombre (pedido explicito del usuario, 2026-08-25): la
+		-- columna trunca nombres largos con "..." sin forma de ver el nombre
+		-- completo - mismo patron que el tooltip de Protocolo de aqui abajo
+		-- (ISToolTip propio de la fila), solo se muestra si el nombre
+		-- realmente se trunco (nunca para un nombre que ya cabe entero).
+		local overNameCol = self:isMouseOver() and self:getMouseX() >= nameX and self:getMouseX() < protocolX
+		local nameTruncated = truncateText(name, protocolX - nameX - 8, UIFont.Small)
+		if overNameCol and nameTruncated ~= name then
+			if not self._gsNameTooltip then
+				self._gsNameTooltip = ISToolTip:new()
+				self._gsNameTooltip:initialise()
+				self._gsNameTooltip:instantiate()
+				self._gsNameTooltip:setOwner(self)
 			end
+			self._gsNameTooltip:setName(T("IGUI_GS_ColName"))
+			self._gsNameTooltip:setDescription(name)
+			self._gsNameTooltip:setVisible(true)
+			self._gsNameTooltip:addToUIManager()
+			self._gsNameTooltip:bringToTop()
+			-- BUG REAL (ver mismo arreglo en la fila de cabecera de zona, mas
+			-- arriba): sin setX/setY explicito cada fotograma, un ISToolTip
+			-- anadido a la raiz del UIManager se queda pintado en un punto fijo
+			-- de pantalla sin relacion con el raton.
+			self._gsNameTooltip:setX(getMouseX() + 16)
+			self._gsNameTooltip:setY(getMouseY() + 16)
+		elseif self._gsNameTooltip and self._gsNameTooltip:isVisible() then
+			self._gsNameTooltip:removeFromUIManager()
+			self._gsNameTooltip:setVisible(false)
+		end
+
+		-- Tooltip de la columna Protocolo (dev26 ronda 3, antes "Categoria"):
+		-- frase-resumen COMPLETA sin truncar (misma que en los editores, ver
+		-- GS_RulesUI.buildSummary) - mucho mas util que el viejo recuento de
+		-- categorias legacy.
+		local overProtocolCol = self:isMouseOver() and self:getMouseX() >= protocolX and self:getMouseX() < priorityX
+		if overProtocolCol and ((node.rules and #node.rules > 0) or (data.zoneRules and #data.zoneRules > 0)) then
+			local fullSummary = (node.rules and #node.rules > 0)
+				and GlobalStorageSiK.RulesUI.buildSummary(node.rules)
+				or T("IGUI_GS_NodeInheritedFromZone", node.zoneName or "?") .. " " .. GlobalStorageSiK.RulesUI.buildSummary(data.zoneRules)
 			if not self._gsCatTooltip then
 				self._gsCatTooltip = ISToolTip:new()
 				self._gsCatTooltip:initialise()
@@ -474,10 +643,15 @@ local function createNodeRow(scroll, listPanel, terminal)
 				self._gsCatTooltip:setOwner(self)
 			end
 			self._gsCatTooltip:setName(T("IGUI_GS_CategoryTooltipTitle"))
-			self._gsCatTooltip:setDescription(table.concat(descLines, " <LINE> "))
+			self._gsCatTooltip:setDescription(fullSummary)
 			self._gsCatTooltip:setVisible(true)
 			self._gsCatTooltip:addToUIManager()
 			self._gsCatTooltip:bringToTop()
+			-- BUG REAL (mismo hallazgo que el tooltip de Nombre, captura del
+			-- usuario "Categoría completa" pintada arriba a la derecha sin
+			-- relacion con el cursor): faltaba setX/setY cada fotograma.
+			self._gsCatTooltip:setX(getMouseX() + 16)
+			self._gsCatTooltip:setY(getMouseY() + 16)
 		elseif self._gsCatTooltip and self._gsCatTooltip:isVisible() then
 			self._gsCatTooltip:removeFromUIManager()
 			self._gsCatTooltip:setVisible(false)
@@ -587,18 +761,6 @@ local function ensureColumnHeader(panel)
 	panel.columnHeader.drawBackground = false
 	panel.columnHeader.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.columnHeader.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	--- Añade la flecha ▲/▼ al texto de cabecera si es la columna de orden activa.
-	---@param self ISPanel
-	---@param column string
-	---@param label string
-	---@return string
-	local function headerLabel(self, column, label)
-		if self.parentPanel and self.parentPanel.sortColumn == column then
-			return label .. (self.parentPanel.sortDir == "desc" and " v" or " ^")
-		end
-		return label
-	end
-
 	panel.columnHeader.prerender = function(self)
 		-- La cabecera se crea UNA sola vez (ensureColumnHeader hace early-return
 		-- si ya existe) con el ancho del panel EN ESE MOMENTO. Si la ventana se
@@ -611,39 +773,24 @@ local function ensureColumnHeader(panel)
 			self:setWidth(self.parentPanel.width)
 		end
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawTableHeaderLine(self)
-		local pal = GlobalStorageSiK.TerminalChrome.PALETTE
-		local w = self.width
-		local nameX, catX, statusX, priorityRightX, typesRightX = computeNodeColumns(w)
-		self:drawText(headerLabel(self, "name", T("IGUI_GS_ColName")), nameX, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(headerLabel(self, "category", T("IGUI_GS_ColCategory")), catX, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawText(headerLabel(self, "status", T("IGUI_GS_ColStatus")), statusX, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(headerLabel(self, "priority", T("IGUI_GS_ColNodePriority")), priorityRightX, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-		self:drawTextRight(headerLabel(self, "types", T("IGUI_GS_ColTypes")), typesRightX, 2, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		local host = self.parentPanel
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, NODE_TABLE_COLUMNS,
+			host and host.sortColumn or nil, not host or host.sortDir ~= "desc",
+			2, UIFont.Small, NODE_TABLE_OPTIONS)
 	end
 
 	--- Clic en una cabecera de columna: ordena por esa columna, un clic
 	--- alterna asc/desc, clicar otra columna reinicia a ascendente. Aplica a
-	--- las 5 columnas (Nombre/Categoria/Estado/Prioridad/Tipos).
+	--- las 5 columnas (Nombre/Prioridad/Protocolo/Estado/% Ocupación) - dev26
+	--- ronda 4bis, antes 4.
 	panel.columnHeader.onMouseUp = function(self, x, y)
 		local host = self.parentPanel
 		if not host then
 			return false
 		end
-		local w = self.width
-		local nameX, catX, statusX, priorityRightX, typesRightX = computeNodeColumns(w)
-		local column = nil
-		if x >= nameX and x < catX then
-			column = "name"
-		elseif x >= catX and x < statusX then
-			column = "category"
-		elseif x >= statusX and x < priorityRightX - priorityColW() then
-			column = "status"
-		elseif x >= priorityRightX - priorityColW() and x < typesRightX - TYPES_COL_W then
-			column = "priority"
-		elseif x >= typesRightX - TYPES_COL_W then
-			column = "types"
-		end
+		local layout = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, NODE_TABLE_COLUMNS, NODE_TABLE_OPTIONS)
+		local hit = GlobalStorageSiK.SiK_UI.Table.columnAtX(layout, x)
+		local column = hit and hit.key or nil
 		if not column then
 			return false
 		end
@@ -731,7 +878,7 @@ function GlobalStorageSiK.TerminalNodes.build(nodesPanel, terminal)
 	nodesPanel.nodesListPanel:setScrollWithParent(false)
 	nodesPanel.nodesListPanel.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.TerminalChrome.drawCardBackground(self, 0)
+		GlobalStorageSiK.SiK_UI.drawCardBackground(self, 0)
 	end
 	nodesPanel:addChild(nodesPanel.nodesListPanel)
 
@@ -900,54 +1047,64 @@ end
 ---@param ui table
 ---@param pad number
 ---@param y number
+---@param innerW number
 ---@return number y tras los botones
-function GlobalStorageSiK.TerminalNodes.buildZoneCreateButtons(scroll, terminal, ui, pad, y)
+function GlobalStorageSiK.TerminalNodes.buildZoneCreateButtons(scroll, terminal, ui, pad, y, innerW)
 	local btnH = FONT_HGT_SMALL + 8
-	local maxW = 220
+	local gap = 6
+	-- Ancho dinamico: los 3 botones se reparten SIEMPRE el ancho disponible a
+	-- partes iguales (fullWidth=true, ver GS_SiK_UI_Core.createButton)
+	-- en vez de encogerse cada uno a su etiqueta - antes quedaban pegados a la
+	-- izquierda con texto cortado ("+ Zona: edificio /.."), bug real con
+	-- captura del usuario.
+	local btnW = math.floor((innerW - pad * 2 - gap * 2) / 3)
 	local roomTitle = T("IGUI_GS_CreateRoomZone")
 	local structTitle = T("IGUI_GS_CreateStructureZone")
 	local selectTitle = T("IGUI_GS_CreateSelectionZone")
-	ui.nodesRoomZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad, y, maxW, btnH, roomTitle, scroll, function()
+	ui.nodesRoomZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, btnW, btnH, roomTitle, scroll, function()
 		terminal:onCreateRoomZone()
-	end)
+	end, nil, true)
 	ui.nodesRoomZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesRoomZoneBtn)
-	local roomW = ui.nodesRoomZoneBtn.width
-	ui.nodesStructureZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad + roomW + 6, y, maxW, btnH, structTitle, scroll, function()
+	ui.nodesStructureZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad + btnW + gap, y, btnW, btnH, structTitle, scroll, function()
 		terminal:onCreateStructureZone()
-	end)
+	end, nil, true)
 	ui.nodesStructureZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesStructureZoneBtn)
-	local structW = ui.nodesStructureZoneBtn.width
-	ui.nodesSelectZoneBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(pad + roomW + 6 + structW + 6, y, maxW, btnH, selectTitle, scroll, function()
+	ui.nodesSelectZoneBtn = GlobalStorageSiK.SiK_UI.createButton(pad + (btnW + gap) * 2, y, btnW, btnH, selectTitle, scroll, function()
 		terminal:onCreateSelectionZone()
-	end)
+	end, nil, true)
 	ui.nodesSelectZoneBtn._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesSelectZoneBtn)
 	return y + btnH + 10
 end
 
---- Reposiciona (sin recrear) los botones de crear zona ya existentes.
+--- Reposiciona (sin recrear) los botones de crear zona ya existentes -
+--- recalcula tambien el ancho por si la ventana se redimensiono.
 ---@param scroll ISPanel
 ---@param ui table
 ---@param pad number
 ---@param y number
+---@param innerW number
 ---@return number y tras los botones
-function GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y)
+function GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y, innerW)
 	local btnH = FONT_HGT_SMALL + 8
+	local gap = 6
+	local btnW = math.floor((innerW - pad * 2 - gap * 2) / 3)
 	if ui.nodesRoomZoneBtn then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRoomZoneBtn, pad)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRoomZoneBtn, y)
+		ui.nodesRoomZoneBtn._sikUiMaxW = btnW
 	end
-	local roomW = ui.nodesRoomZoneBtn and ui.nodesRoomZoneBtn.width or 0
 	if ui.nodesStructureZoneBtn then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesStructureZoneBtn, pad + roomW + 6)
+		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesStructureZoneBtn, pad + btnW + gap)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesStructureZoneBtn, y)
+		ui.nodesStructureZoneBtn._sikUiMaxW = btnW
 	end
-	local structW = ui.nodesStructureZoneBtn and ui.nodesStructureZoneBtn.width or 0
 	if ui.nodesSelectZoneBtn then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesSelectZoneBtn, pad + roomW + 6 + structW + 6)
+		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesSelectZoneBtn, pad + (btnW + gap) * 2)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesSelectZoneBtn, y)
+		ui.nodesSelectZoneBtn._sikUiMaxW = btnW
 	end
 	return y + btnH + 10
 end
@@ -962,9 +1119,14 @@ end
 function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
 	local pad = 8
 	local titleY = y
-	local infoMaxW = innerW - pad * 2
-	local infoLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_NodesPriorityHelp"), infoMaxW, UIFont.Small)
-	local infoH = #infoLines * (FONT_HGT_SMALL + 2) + 8
+	-- dev26 ronda 4quater (pedido explicito del usuario): "Contenedores de
+	-- red" (redundante con la pestana ya renombrada "Zonas y nodos") y el
+	-- parrafo de ayuda ("Clic en + de una zona...") se retiran de la vista
+	-- permanente - toda esa informacion vive ahora en el tooltip del "?"
+	-- junto a "Crea una nueva zona". El bloque de "Orden de destino" pasa de
+	-- un parrafo multi-linea siempre visible a una sola linea + su propio
+	-- "?" - mismo patron ya usado en los editores de contenedor/zona.
+	local infoH = FONT_HGT_SMALL + 8
 	local function heightFor(currentY)
 		-- La ayuda queda visible debajo de la tabla. Si la ventana crece, todo
 		-- el alto adicional se entrega al viewport virtual de filas; si es
@@ -975,33 +1137,29 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 	if not ui.nodesEmbedBuilt or not GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
 		ui.nodesEmbedBuilt = false
 		local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
-		for _, key in ipairs({ "nodesSectionTitle", "nodesHelpLbl", "nodesEmbedPanel",
-			"nodesRoomZoneBtn", "nodesStructureZoneBtn", "nodesSelectZoneBtn" }) do
+		for _, key in ipairs({ "nodesZoneTitleLbl", "nodesZoneInfoBtn", "nodesEmbedPanel",
+			"nodesRoomZoneBtn", "nodesStructureZoneBtn", "nodesSelectZoneBtn",
+			"nodesDestOrderLbl", "nodesDestOrderBtn" }) do
 			local w = ui[key]
 			if w and host then
 				GlobalStorageSiK.TerminalScroll.disposeChild(host, w)
 			end
 			ui[key] = nil
 		end
-		if ui.nodesPriorityInfoLbls and host then
-			for _, w in ipairs(ui.nodesPriorityInfoLbls) do
-				GlobalStorageSiK.TerminalScroll.disposeChild(host, w)
-			end
-		end
-		ui.nodesPriorityInfoLbls = nil
 		ui.collapsedZones = ui.collapsedZones or {}
-		ui.nodesSectionTitle = GlobalStorageSiK.TerminalChrome.createSectionLabel(pad, titleY, T("IGUI_GS_SectionNodes"))
-		ui.nodesSectionTitle._gsNetStatic = true
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesSectionTitle)
-		y = titleY + FONT_HGT_SMALL + 6
-		ui.nodesHelpLbl = GlobalStorageSiK.TerminalChrome.createHintLabel(pad, y, T("IGUI_GS_NodesHelpShort"))
-		ui.nodesHelpLbl._gsNetStatic = true
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesHelpLbl)
-		y = y + FONT_HGT_SMALL + 8
+		ui.nodesZoneTitleLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, titleY, T("IGUI_GS_CreateZoneTitle"))
+		ui.nodesZoneTitleLbl._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesZoneTitleLbl)
+		local zoneTitleW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_CreateZoneTitle"))
+		ui.nodesZoneInfoBtn = GlobalStorageSiK.SiK_UI.createInfoHintButton(
+			pad + zoneTitleW + 6, titleY, FONT_HGT_SMALL, scroll, T("IGUI_GS_NodesHelpShort"))
+		ui.nodesZoneInfoBtn._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesZoneInfoBtn)
+		y = titleY + FONT_HGT_SMALL + 8
 		-- Bloque de creacion de zonas, tambien disponible aqui (ademas de en
 		-- la seccion Zonas, que no se retira todavia) - primer paso hacia la
 		-- gestion unificada de zonas+contenedores desde un solo sitio.
-		y = GlobalStorageSiK.TerminalNodes.buildZoneCreateButtons(scroll, terminal, ui, pad, y)
+		y = GlobalStorageSiK.TerminalNodes.buildZoneCreateButtons(scroll, terminal, ui, pad, y, innerW)
 		ui.nodesEmbedHeight = heightFor(y)
 		ui.nodesEmbedPanel = ISPanel:new(0, y, innerW, ui.nodesEmbedHeight)
 		ui.nodesEmbedPanel:initialise()
@@ -1011,13 +1169,24 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		ui.nodesEmbedPanel.clipChildren = true
 		ui.nodesEmbedPanel.prerender = function(self)
 			ISPanel.prerender(self)
-			local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+			local pal = GlobalStorageSiK.SiK_UI.PALETTE
 			local br = pal.border
 			self:drawRectBorder(0, 0, self.width, self.height, 0.2, br[1] * 0.35, br[2] * 0.35, br[3] * 0.35)
 		end
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesEmbedPanel)
 		GlobalStorageSiK.TerminalNodes.build(ui.nodesEmbedPanel, terminal)
-		ui.nodesEmbedPanel._collapsedZones = ui.collapsedZones
+		-- El toggle "+/-" y refresh()/build() leen y escriben SIEMPRE en
+		-- nodesListPanel._collapsedZones (el panel interior de la lista, ver
+		-- self.listPanel en onMouseUp y `panel` en TerminalNodes.refresh) -
+		-- nunca en nodesEmbedPanel (el panel exterior). Asignar la tabla
+		-- persistida solo al exterior (como antes) la dejaba sin leer nunca:
+		-- cada reconstrucción (resize u otro caso que invalide el widget)
+		-- arrancaba con una nodesListPanel._collapsedZones nueva y vacía,
+		-- así que todas las zonas volvían a su colapso por defecto pese a
+		-- que ui.collapsedZones sí sobrevive entre reconstrucciones.
+		if ui.nodesEmbedPanel.nodesListPanel then
+			ui.nodesEmbedPanel.nodesListPanel._collapsedZones = ui.collapsedZones
+		end
 		ui.nodesEmbedPanel._onCollapseChanged = function()
 			GlobalStorageSiK.TerminalNodes.refresh(
 				ui.nodesEmbedPanel, terminal,
@@ -1031,45 +1200,41 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		end
 		ui.nodesEmbedBuilt = true
 		ui.nodesEmbedY = y
-		-- Bloque informativo inferior (pedido explicito): explica los 4
-		-- niveles de especificidad que usa GS_Router.matchSpecificity para
-		-- depositar/auto-ordenar, en el mismo texto plano que ya se usa para
-		-- explicarselo al jugador en el chat - evita que el sistema parezca
-		-- "aleatorio" cuando en realidad sigue un orden fijo y documentado.
 		local infoY = y + ui.nodesEmbedHeight + 8
-		ui.nodesPriorityInfoLbls = {}
-		for _, line in ipairs(infoLines) do
-			local lbl = ISLabel:new(pad, infoY, FONT_HGT_SMALL, line, 0.62, 0.66, 0.7, 1, UIFont.Small, true)
-			lbl:initialise()
-			lbl._gsNetStatic = true
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-			ui.nodesPriorityInfoLbls[#ui.nodesPriorityInfoLbls + 1] = lbl
-			infoY = infoY + FONT_HGT_SMALL + 2
-		end
-		ui.nodesPriorityInfoEndY = infoY
+		ui.nodesDestOrderLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, infoY, T("IGUI_GS_NodesDestOrderLabel"))
+		ui.nodesDestOrderLbl._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesDestOrderLbl)
+		local destOrderW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_NodesDestOrderLabel"))
+		ui.nodesDestOrderBtn = GlobalStorageSiK.SiK_UI.createInfoHintButton(
+			pad + destOrderW + 6, infoY, FONT_HGT_SMALL, scroll, T("IGUI_GS_NodesPriorityHelp"))
+		ui.nodesDestOrderBtn._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesDestOrderBtn)
+		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
 	else
-		if ui.nodesSectionTitle then
-			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesSectionTitle, pad)
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesSectionTitle, titleY)
+		if ui.nodesZoneTitleLbl then
+			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesZoneTitleLbl, pad)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesZoneTitleLbl, titleY)
 		end
-		y = titleY + FONT_HGT_SMALL + 6
-		if ui.nodesHelpLbl then
-			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesHelpLbl, pad)
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesHelpLbl, y)
+		if ui.nodesZoneInfoBtn then
+			local zoneTitleW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_CreateZoneTitle"))
+			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesZoneInfoBtn, pad + zoneTitleW + 6)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesZoneInfoBtn, titleY)
 		end
-		y = y + FONT_HGT_SMALL + 8
-		y = GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y)
+		y = titleY + FONT_HGT_SMALL + 8
+		y = GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, pad, y, innerW)
 		ui.nodesEmbedY = y
 		ui.nodesEmbedHeight = heightFor(y)
-		if ui.nodesPriorityInfoLbls and #ui.nodesPriorityInfoLbls > 0 then
-			local infoY = y + ui.nodesEmbedHeight + 8
-			for _, lbl in ipairs(ui.nodesPriorityInfoLbls) do
-				GlobalStorageSiK.TerminalScroll.setContentX(scroll, lbl, pad)
-				GlobalStorageSiK.TerminalScroll.setContentY(scroll, lbl, infoY)
-				infoY = infoY + FONT_HGT_SMALL + 2
-			end
-			ui.nodesPriorityInfoEndY = infoY
+		local infoY = y + ui.nodesEmbedHeight + 8
+		if ui.nodesDestOrderLbl then
+			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesDestOrderLbl, pad)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesDestOrderLbl, infoY)
 		end
+		if ui.nodesDestOrderBtn then
+			local destOrderW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_NodesDestOrderLabel"))
+			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesDestOrderBtn, pad + destOrderW + 6)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesDestOrderBtn, infoY)
+		end
+		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
 	end
 	local configEnabled = not terminal.canEditNetworkConfig
 		or terminal:canEditNetworkConfig(false)
@@ -1088,7 +1253,6 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			terminal.terminalState and terminal.terminalState.nodes or {},
 			terminal.terminalState and terminal.terminalState.categories or {}
 		)
-		local infoH = ui.nodesPriorityInfoLbls and (#ui.nodesPriorityInfoLbls * (FONT_HGT_SMALL + 2) + 8) or 0
 		return y + embedH + 12 + infoH
 	end
 	ui.nodesEmbedBuilt = false

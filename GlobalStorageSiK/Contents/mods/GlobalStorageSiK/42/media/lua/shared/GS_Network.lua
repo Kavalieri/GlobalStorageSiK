@@ -235,8 +235,8 @@ function GlobalStorageSiK.Network.createNetwork(player)
 	end
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
 	end
+	GlobalStorageSiK.Permissions.requestTransmit()
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
@@ -400,6 +400,25 @@ local function liveZonePriority(registry, entry)
 	return tonumber(zone and zone.priority) or tonumber(entry and entry.zonePriority) or 50
 end
 
+--- Reglas de zona (dev26, ronda 2 - ver GS_Router.zoneRulesAllow): resuelve
+--- entry.zoneId -> registry.zones[...].rules, mismo patron que
+--- liveZonePriority de arriba. nil si la zona no tiene reglas propias -
+--- GS_Router.zoneRulesAllow ya trata nil como "sin restriccion".
+local function liveZoneRules(registry, entry)
+	local zone = entry and entry.zoneId and registry.zones and registry.zones[entry.zoneId]
+	return zone and zone.rules or nil
+end
+
+--- true si la zona del nodo esta activa (dev26, ronda 2 - ver §4.5 del plan:
+--- "Excluir zona" simetrico a "Excluir contenedor"). Un nodo sin zona
+--- resuelta (caso raro) se trata como zona activa - nunca bloquea por una
+--- referencia rota. Ver GS_Router.matchWithZoneGate.
+local function liveZoneEnabled(registry, entry)
+	local zone = entry and entry.zoneId and registry.zones and registry.zones[entry.zoneId]
+	if not zone then return true end
+	return zone.enabled ~= false
+end
+
 function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
@@ -448,6 +467,8 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 					object = obj,
 					container = container,
 					zonePriority = liveZonePriority(registry, node),
+					zoneRules = liveZoneRules(registry, node),
+					zoneEnabled = liveZoneEnabled(registry, node),
 				})
 			elseif not container then
 				logLiveContainerMiss(nid, node, obj, container)
@@ -483,6 +504,8 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 						object = obj,
 						container = container,
 						zonePriority = liveZonePriority(registry, node),
+						zoneRules = liveZoneRules(registry, node),
+						zoneEnabled = liveZoneEnabled(registry, node),
 					})
 				elseif not container then
 					logLiveContainerMiss(nid, node, obj, container)
@@ -510,6 +533,8 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 				object = obj,
 				container = container,
 				zonePriority = liveZonePriority(registry, entry),
+				zoneRules = liveZoneRules(registry, entry),
+				zoneEnabled = liveZoneEnabled(registry, entry),
 			})
 		elseif not container then
 			logLiveContainerMiss(nid, entry, obj, container)

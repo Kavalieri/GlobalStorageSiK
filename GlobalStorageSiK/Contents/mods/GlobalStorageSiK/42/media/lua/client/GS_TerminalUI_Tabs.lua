@@ -1,6 +1,6 @@
 --[[
 
-	GlobalStorageSiK - Pestañas laterales (delega en GS_TerminalTabRail estilo Neat)
+	GlobalStorageSiK - Pestañas laterales (delega en GS_TerminalTabRail)
 
 	Autor: SiK
 
@@ -13,6 +13,8 @@
 require "ISUI/ISPanel"
 
 require "GS_I18n"
+
+require "GS_Sandbox"
 
 require "GS_TerminalUI_TabRail"
 
@@ -114,7 +116,7 @@ end
 
 
 
---- Construye columna lateral Neat y área de contenido.
+--- Construye la columna lateral SiK UI y el área de contenido.
 
 ---@param terminal GS_TerminalUI
 
@@ -256,15 +258,15 @@ end
 --- estar deshabilitados. Ahora el reordenamiento de capas solo se ejecuta la
 --- PRIMERA vez que se entra o se sale del modo bloqueado, no en cada frame.
 ---@param terminal GS_TerminalUI
-function GlobalStorageSiK.TerminalTabs.syncBlockedChrome(terminal)
+function GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 	if not terminal then
 		return
 	end
 	local blocked = terminal.accessMode == "blocked"
-	if terminal._gsBlockedChromeState == blocked then
+	if terminal._gsBlockedFrameState == blocked then
 		return
 	end
-	terminal._gsBlockedChromeState = blocked
+	terminal._gsBlockedFrameState = blocked
 	if terminal.tabRail then
 		if blocked then
 			if terminal.tabRail.hideFlyout then
@@ -302,6 +304,25 @@ end
 
 function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
+	-- BUG REAL reportado por el usuario (2026-08-26, captura real: "no hay
+	-- electricidad" solo se descubria al fallar una transferencia): sin
+	-- energia, el terminal dejaba navegar libremente a Almacen/Addons. Ahora
+	-- se redirige siempre a Configuracion -> sub-pestaña "Estado" (que ya
+	-- muestra el indicador de energia, ver GS_TerminalUI_NetworkStatus.lua:
+	-- valPower - mudada aqui en dev41 desde Red -> Red, que se quedo solo
+	-- con "Zonas y nodos") en vez de esas dos pestañas mientras la red no
+	-- tenga energia. Diseño pendiente de remodelar mas adelante (ver
+	-- comentario del usuario) - por ahora reutiliza el resumen ya
+	-- existente, no crea una pantalla nueva.
+	if (tabKey == "items" or tabKey == "addons")
+		and GlobalStorageSiK.Sandbox.requiresPower()
+		and terminal.terminalState and terminal.terminalState.powered == false then
+		tabKey = "config"
+		if terminal.configPanel then
+			terminal.configPanel.activeSubTab = "estado"
+		end
+	end
+
 	if not terminal.tabViews or not terminal.tabViews[tabKey] or not terminal.contentHost then
 
 		return
@@ -337,7 +358,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
 
 	-- CRITICO: calculateLayout() SIEMPRE antes de rellenar contenido de la
-	-- pestaña. Antes, onAddonsTabActivated/onCraftTabActivated (que llaman a
+	-- pestaña. Antes, los callbacks concretos de cada pestaña (que llaman a
 	-- su refresh()) se ejecutaban aqui, ANTES de calculateLayout() - refresh()
 	-- posiciona botones leyendo el ancho ACTUAL del scroll, que en ese
 	-- momento todavia era el de construccion (p.ej. 280x120 por defecto),
@@ -346,7 +367,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	-- calculateLayout) no coincidia con donde se habian colocado los
 	-- botones - visualmente parecia estar ahi pero el clic no llegaba.
 	-- Mismo patron de bug que ya se dio y se arreglo en otras pantallas de
-	-- este mod (ver comentario en syncBlockedChrome mas abajo) - la regla
+	-- este mod (ver comentario en syncBlockedFrame mas abajo) - la regla
 	-- general para CUALQUIER pantalla nueva: dimensionar primero, rellenar
 	-- despues, nunca al reves.
 	if terminal.calculateLayout then
@@ -358,12 +379,6 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	if tabKey == "addons" and terminal.onAddonsTabActivated then
 
 		terminal:onAddonsTabActivated()
-
-	end
-
-	if tabKey == "craft" and terminal.onCraftTabActivated then
-
-		terminal:onCraftTabActivated()
 
 	end
 
@@ -383,7 +398,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
 	end
 
-	GlobalStorageSiK.TerminalTabs.syncBlockedChrome(terminal)
+	GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 
 	-- DIAGNÓSTICO doble-interfaz (temporal v0.10.18.83)
 	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.debugDumpTree then
@@ -391,7 +406,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	end
 
 	-- Volcado completo del arbol + solapes en CUALQUIER pestaña activada, no
-	-- solo la de bloqueo (sandbox DebugModeUI) - a peticion expresa: poder
+	-- solo la de bloqueo (sandbox DebugCatSiKUI, dev36, antes DebugModeUI) - a peticion expresa: poder
 	-- evaluar cualquier ventana/pestaña del mod, y como se puede desactivar,
 	-- no representa ruido cuando no se necesita.
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
@@ -465,7 +480,7 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 
 	end
 
-	GlobalStorageSiK.TerminalTabs.syncBlockedChrome(terminal)
+	GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 
 	if GlobalStorageSiK.TerminalBlockedUI then
 

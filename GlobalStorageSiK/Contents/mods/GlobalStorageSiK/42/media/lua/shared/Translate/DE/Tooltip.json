@@ -16,5 +16,6 @@
 	"Tooltip_GS_FloppyDisk_DriveInstall": "Ein Programm, ein Zweck: bringt einem Terminal bei, sein eigenes Diskettenlaufwerk angeschlossen zu halten, statt es in deinen Taschen herumzuschleppen.",
 	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"GS Diskettenwerkzeuge\": Schritt für Schritt Anleitung, um die Diskette zu beschreiben, die das Diskettenlaufwerk im Netzwerk eines Terminals installiert. Erfordert genug Nähe zu einem Terminal, damit es sich überhaupt lohnt.",
 	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"GS Diskettenwerkzeuge\": Schritt für Schritt Anleitung, um die Diskette zu beschreiben, die das eigene Betriebssystem des GS-Netzwerks trägt. Erfordert genug Nähe zu einem Terminal, damit es sich überhaupt lohnt.",
-	"Tooltip_GS_Manual_SolderingIron": "Eine improvisierte Anleitung, um sich aus Schrottteilen einen eigenen Lötkolben zu bauen. Nur Lesen bringt nichts - jemand muss diese Abkürzung erst erlauben."
+	"Tooltip_GS_Manual_SolderingIron": "Eine improvisierte Anleitung, um sich aus Schrottteilen einen eigenen Lötkolben zu bauen. Nur Lesen bringt nichts - jemand muss diese Abkürzung erst erlauben.",
+	"Tooltip_GS_SolderingIron": "Ein abgenutzter Lötkolben, zusammengebaut von jemandem, der genau wusste, was er tat."
 }

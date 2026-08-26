@@ -1,6 +1,6 @@
 version=1
 id=3752437465
-title=GSSiK Addon - Builder [42.20+]
-description=GSSiK Addon - Builder [42.20+]
+title=GSSiK Addon - Builder
+description=GSSiK Addon - Builder
 tags=Build 42;Items;Multiplayer;Interface;QOL;Misc;Addons SiK
 visibility=public

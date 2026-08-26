@@ -10,6 +10,13 @@ Leer también las instrucciones del workspace y el `CLAUDE.md` más cercano ante
 - Si falta una capacidad, añadir la primitiva pública mínima y reutilizable. No trasladar al Core conocimiento de Craft, Builder, Neat Crafting, Neat Building o Project Cook.
 - Todo cambio de contrato actualiza juntos implementación, consumidores, `docs/ADDON_API.md`, validación y estas instrucciones.
 
+## Interfaz (UI) propia — obligatorio en Core y los 3 addons
+
+Referencia visual completa (maqueta por ventana, funciones Lua clave, detalles a tener en cuenta) en **`Documentacion/UI/`** (índice: `Documentacion/UI/README.md`) — empezar siempre ahí antes de tocar cualquier ventana, no en este fichero.
+
+- **Procedimiento obligatorio**: `Documentacion/UI/protocolo-validacion.html` — maquetar/actualizar el HTML de la ventana, enlazar o abrir el documento para que el usuario lo vea renderizado (nunca asumir validación solo por texto en el chat), iterar hasta confirmar, implementar en Lua, actualizar el mismo documento.
+- Reglas de estilo fijas (detalle en `Documentacion/UI/`): botón "?" para texto largo (`createInfoHintButton`); botones/desplegables/campos siempre vía `GlobalStorageSiK.SiK_UI` en `GS_SiK_UI_Core.lua`, nunca un widget suelto con estilo propio; un único estilo de título de bloque por ventana (`createSectionLabel`, excepción colores OR/AND/NOT); editores grandes vía `resolveEditorWindowSize()`/`resolveEditorWindowPos()`. Dependencia de NeatUI_Framework retirada por completo en dev36 — ningún `mod.info` (Core ni los 3 addons) la declara ya; framework propio `SiK_UI` autosuficiente. Las integraciones "Neat" que quedan (`hasNeatCrafting()`/`hasNeatBuilding()`) son detección opcional de otros mods de Workshop, sin relación con NeatUI_Framework.
+
 ## Concurrencia y release
 
 - Antes de delegar, declarar objetivo, archivos/subsistema en propiedad, interfaces permitidas y validacion esperada. Dividir por responsabilidades independientes; nunca compartir simultaneamente un hotspot.

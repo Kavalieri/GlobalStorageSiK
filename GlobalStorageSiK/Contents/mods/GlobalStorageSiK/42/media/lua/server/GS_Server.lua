@@ -345,6 +345,7 @@ local function serializeNodes(networkId, player)
 				zonePriority = tonumber(zone.priority) or 50,
 				categories = n.categories or {},
 				filters = n.filters or {},
+				rules = n.rules or {},
 				membership = n.membership or "auto",
 				offline = n.offline == true,
 				enabled = n.enabled ~= false,
@@ -400,6 +401,8 @@ local function serializeZones(networkId)
 				enabled = zone.enabled ~= false,
 
 				priority = zone.priority,
+
+				rules = zone.rules or {},
 
 				nodeCount = nodeCount,
 
@@ -471,6 +474,32 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	-- El filtrado por búsqueda se aplica en el cliente (idioma del jugador).
 
 	local nodesList = serializeNodes(networkId, player)
+	local zonesList = serializeZones(networkId)
+
+	-- % Ocupación por nodo/zona (dev26 ronda 4bis, columna nueva en
+	-- GS_TerminalUI_Nodes.lua) - UN solo compute() por refresco, reutilizado
+	-- tanto para el desglose de la lista como para la barra agregada de la
+	-- pestaña Almacén (capacity, mas abajo) - misma llamada, ya trait-aware
+	-- (personalBonus del player) y capacidad-custom-aware (container:getCapacity()
+	-- real, cualquier mod de expansion incluido), nunca dos pasadas.
+	local capacityStats = GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
+	for i = 1, #nodesList do
+		local perNode = capacityStats.perNode and capacityStats.perNode[nodesList[i].id]
+		nodesList[i].occupancyPercent = perNode and perNode.percent or nil
+	end
+	for i = 1, #zonesList do
+		local perZone = capacityStats.perZone and capacityStats.perZone[zonesList[i].id]
+		zonesList[i].occupancyPercent = perZone and perZone.percent or nil
+	end
+
+	-- Diagnostico de tamaño (2026-08-25, investigacion del cuelgue de cliente
+	-- al reclamar tras morir): nunca existio ningun log que midiera el
+	-- terminalState real que recibe el cliente (items/nodos/zonas), solo las
+	-- cifras del propio ZoneScanJob (que son del escaneo, no del payload
+	-- final enviado). Siempre visible mientras dure esta investigacion.
+	GlobalStorageSiK.Log.warn("Server", "terminalStateSize",
+		"network=" .. tostring(networkId) .. " items=" .. tostring(#rows)
+			.. " nodes=" .. tostring(#nodesList) .. " zones=" .. tostring(#zonesList))
 
 	return {
 
@@ -486,7 +515,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		scanActive = GlobalStorageSiK.ZoneScanJob.isActive(networkId),
 
-		zones = serializeZones(networkId),
+		zones = zonesList,
 
 		terminals = serializeTerminals(networkId),
 
@@ -506,9 +535,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		craftProbe = craftProbe,
 
-		capacity = GlobalStorageSiK.NetworkCapacity.serialize(
-			GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
-		),
+		capacity = GlobalStorageSiK.NetworkCapacity.serialize(capacityStats),
 
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
 
@@ -1336,19 +1363,24 @@ end
 ---@param networkId string
 ---@return table[] rows
 ---@return string source live|snapshot|empty
+--- @return table rows
+--- @return string source
+--- @return ItemContainer|nil container  -- solo en la rama "live" - dev26
+---   ronda 4, el indicador de ocupacion del editor de contenedor reutiliza
+---   este mismo objeto ya resuelto en vez de buscarlo otra vez.
 local function resolveNodeContents(node, networkId)
 	if not node then
-		return {}, "empty"
+		return {}, "empty", nil
 	end
 	local obj = GlobalStorageSiK.Network.findWorldObject(node)
 	local container = obj and GlobalStorageSiK.Utils.getObjectContainer(obj, node.containerIndex) or nil
 	if container then
-		return GlobalStorageSiK.ItemSnapshot.toRows(GlobalStorageSiK.ItemSnapshot.fromContainer(container)), "live"
+		return GlobalStorageSiK.ItemSnapshot.toRows(GlobalStorageSiK.ItemSnapshot.fromContainer(container)), "live", container
 	end
 	if node.itemSnapshot then
-		return GlobalStorageSiK.ItemSnapshot.toRows(node.itemSnapshot), "snapshot"
+		return GlobalStorageSiK.ItemSnapshot.toRows(node.itemSnapshot), "snapshot", nil
 	end
-	return {}, "empty"
+	return {}, "empty", nil
 end
 
 local TRANSFER_BUSY_MSG = "Red ocupada: otra transferencia en curso. Reintenta."
@@ -2223,6 +2255,65 @@ local function sanitizeNodeCategories(categories)
 	return result
 end
 
+--- Valida UNA condicion del motor de reglas AND/OR/NOT (dev26, ver
+--- Documentacion/GS_FilterRedesign_Plan.md). Tipo "category" reutiliza el
+--- mismo formato de clave que entry.categories (subcategoria GS, prefijo
+--- EXT/SUB, "categoria::hueco" o clave de hoja EC); el resto de tipos
+--- (name/weight/tag/item) reutiliza sanitizeNodeFilter tal cual, nunca se
+--- confia en la forma exacta que mando el cliente.
+---@param condition table
+---@return table|nil
+local function sanitizeRuleCondition(condition)
+	if type(condition) ~= "table" then return nil end
+	if condition.type == "category" then
+		local value = tostring(condition.value or ""):sub(1, 160)
+		if value == "" then return nil end
+		return { type = "category", value = value }
+	end
+	return sanitizeNodeFilter(condition)
+end
+
+--- Valida UNA regla completa {op="OR"|"AND"|"NOT", condition=...}.
+---@param rule table
+---@return table|nil
+local function sanitizeNodeRule(rule)
+	if type(rule) ~= "table" then return nil end
+	local op = rule.op
+	if op ~= "OR" and op ~= "AND" and op ~= "NOT" then return nil end
+	local condition = sanitizeRuleCondition(rule.condition)
+	if not condition then return nil end
+	return { op = op, condition = condition }
+end
+
+--- Valida una lista completa de reglas (reemplazo total, ej. pegado de
+--- plantilla) - mismo tope de 20 que categories/filters.
+---@param rules table
+---@return table
+local function sanitizeNodeRules(rules)
+	local result = {}
+	if type(rules) ~= "table" then return result end
+	for i = 1, math.min(#rules, 20) do
+		local clean = sanitizeNodeRule(rules[i])
+		if clean then result[#result + 1] = clean end
+	end
+	return result
+end
+
+--- Copia profunda de una lista de reglas YA validadas (sanitizeNodeRules) -
+--- usado por "Extender a la zona" para que cada contenedor destino reciba su
+--- propia tabla, nunca una referencia compartida entre nodos (un
+--- removeRuleIndex posterior en UN contenedor no debe mutar la lista de otro).
+local function cloneRuleList(rules)
+	local result = {}
+	for i = 1, #(rules or {}) do
+		local rule = rules[i]
+		local condition = {}
+		for k, v in pairs(rule.condition or {}) do condition[k] = v end
+		result[i] = { op = rule.op, condition = condition }
+	end
+	return result
+end
+
 local function cloneNodeFilters(filters)
 	local result = {}
 	for i = 1, #(filters or {}) do
@@ -2372,7 +2463,7 @@ local function onClientCommand(module, command, player, args)
 		if requireServerMod(player, command, networkId) then
 			local ok, reason = GlobalStorageSiK.Permissions.adminAddMember(networkId, args.characterId)
 			if ok then
-				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
 				if reason == "added" then
 					GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_add_member",
 						tostring(player:getUsername()) .. " (staff) añadio a characterId=" .. tostring(args.characterId))
@@ -2391,7 +2482,7 @@ local function onClientCommand(module, command, player, args)
 		if requireServerMod(player, command, networkId) then
 			local ok = GlobalStorageSiK.Permissions.adminSetMemberRole(networkId, args.characterId, args.role)
 			if ok then
-				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_role",
 					tostring(player:getUsername()) .. " (staff) cambio el rol de characterId="
 						.. tostring(args.characterId) .. " a " .. tostring(args.role))
@@ -2403,7 +2494,7 @@ local function onClientCommand(module, command, player, args)
 		if requireServerMod(player, command, networkId) then
 			local ok = GlobalStorageSiK.Permissions.adminRemoveMember(networkId, args.characterId)
 			if ok then
-				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_remove_member",
 					tostring(player:getUsername()) .. " (staff) quito a characterId=" .. tostring(args.characterId))
 			end
@@ -2414,7 +2505,7 @@ local function onClientCommand(module, command, player, args)
 		if requireServerMod(player, command, networkId) then
 			local ok, reason = GlobalStorageSiK.Permissions.adminSetOwner(networkId, args.characterId)
 			if ok then
-				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_owner",
 					tostring(player:getUsername()) .. " (staff) asigno propietario a characterId=" .. tostring(args.characterId))
 			end
@@ -2425,7 +2516,7 @@ local function onClientCommand(module, command, player, args)
 		if requireServerMod(player, command, networkId) then
 			local ok = GlobalStorageSiK.Permissions.adminReleaseOwnership(networkId)
 			if ok then
-				if ModData and ModData.transmit then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_release_ownership",
 					tostring(player:getUsername()) .. " (staff) libero la propiedad de la red")
 			end
@@ -2441,7 +2532,7 @@ local function onClientCommand(module, command, player, args)
 				-- Borra tanto la parte operativa (contenedores/terminales) como la
 				-- de permisos (ModData propia) - las dos hay que difundirlas.
 				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-				ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+				GlobalStorageSiK.Permissions.requestTransmit()
 			end
 			gsSendServerCommand(player, "actionResult", { ok = ok })
 		end
@@ -2451,18 +2542,42 @@ local function onClientCommand(module, command, player, args)
 		if sessionNet then
 			networkId = sessionNet
 		end
-		local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
-		if not allowed then
-			GlobalStorageSiK.TerminalAccess.clearSession(player)
-			sendTerminalBlocked(player, reason or "no_permission", networkId)
-			return
-		end
 		local proxRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
 		applyAccessHints(player, args)
 		local accessOk, accessMode, terminal, accessReason = GlobalStorageSiK.TerminalAccess.evaluate(
 			player, networkId, GlobalStorageSiK.TerminalAccess.getSessionAnchor(player),
 			{ sessionLock = sessionNet ~= nil, strictDistance = true }
 		)
+		-- BUG REAL confirmado (2026-08-25, investigacion del cuelgue de cliente
+		-- al morir y reclamar): antes se comprobaba el PERMISO
+		-- (Permissions.canAccess) usando el networkId que mandaba el CLIENTE,
+		-- ANTES de comprobar si habia siquiera un terminal real cerca. Ese
+		-- networkId puede venir de un fallback poco fiable cuando no hay sesion
+		-- activa (ultima red usada en CUALQUIER momento de la sesion, ver
+		-- resolveNetworkId en GS_TerminalAccessGuard.lua) - mostraba "red
+		-- vacante"/"sin permiso de acceso" para una red completamente distinta
+		-- y lejana, mucho antes de que el jugador estuviera cerca de ningun
+		-- terminal de verdad (reportado por el usuario: el aviso cambiaba
+		-- estando "varias celdas mas" lejos del rango real necesario para
+		-- reclamar). Ahora SIN sesion activa, el permiso solo se comprueba
+		-- contra una red que evaluate() ya haya confirmado tener un terminal
+		-- real dentro de su propio radio de escaneo (proxRange/wirelessRange,
+		-- ver terminal.networkId mas abajo) - si no hay ningun candidato real,
+		-- se informa directamente el motivo geometrico (no_terminal/
+		-- tablet_out_of_range/etc), nunca un motivo de permisos sobre una red
+		-- que el jugador ni siquiera tiene delante. CON sesion activa
+		-- (sessionNet ~= nil), el servidor YA sabe que esa es la red correcta
+		-- (estado propio del servidor, no un dato del cliente) y el permiso se
+		-- sigue comprobando exactamente igual que antes.
+		local permNetworkId = sessionNet or (terminal and terminal.networkId) or nil
+		if permNetworkId then
+			local allowed, reason = GlobalStorageSiK.Permissions.canAccess(player, permNetworkId)
+			if not allowed then
+				GlobalStorageSiK.TerminalAccess.clearSession(player)
+				sendTerminalBlocked(player, reason or "no_permission", permNetworkId)
+				return
+			end
+		end
 		if not accessOk then
 			GlobalStorageSiK.TerminalAccess.clearSession(player)
 			sendTerminalBlocked(player, accessReason)
@@ -2505,12 +2620,35 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
 			return
 		end
-		local rows, source = resolveNodeContents(node, networkId)
+		-- BUG DE SEGURIDAD real cerrado (2026-08-25, auditoria pre-release):
+		-- requireTerminalAccess solo comprueba el rol del jugador SOBRE
+		-- networkId (su propia red, siempre legitima) - nunca comprobaba que
+		-- el nodo pedido (args.nodeId, deducible a simple vista por
+		-- coordenadas+sprite) perteneciera de verdad a esa red. Cualquier
+		-- miembro podia leer el contenido en vivo de un contenedor de OTRA
+		-- red ajena. Mismo patron ya usado en updateZoneRules/setZonePriority
+		-- (zone.networkId ~= networkId), extendido aqui via la zona del nodo.
+		local nodeZone = registry.zones and node.zoneId and registry.zones[node.zoneId]
+		if not nodeZone or nodeZone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
+			return
+		end
+		local rows, source, liveContainer = resolveNodeContents(node, networkId)
 		gsSendServerCommand(player, "nodeContents", {
 			nodeId = args.nodeId,
 			rows = rows,
 			source = source,
 			suggestedCategory = suggestCategoryFromSnapshot(rows),
+			capacity = GlobalStorageSiK.NetworkCapacity.computeNode(liveContainer, player),
+		})
+
+	elseif command == "getZoneCapacity" then
+		if not requireTerminalAccess(player, networkId) then
+			return
+		end
+		gsSendServerCommand(player, "zoneCapacity", {
+			zoneId = args.zoneId,
+			capacity = GlobalStorageSiK.NetworkCapacity.computeZone(args.zoneId, player),
 		})
 
 	elseif command == "craftTerminalRecipe" then
@@ -3218,6 +3356,20 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
 			return
 		end
+		-- BUG DE SEGURIDAD real cerrado (2026-08-25, auditoria pre-release):
+		-- requireAdminAccess solo comprueba el rol del jugador SOBRE
+		-- networkId (su propia red, siempre legitima) - nunca comprobaba que
+		-- el nodo pedido (args.nodeId, deducible a simple vista por
+		-- coordenadas+sprite del objeto) perteneciera de verdad a esa red.
+		-- Cualquier admin de SU red podia reescribir reglas/prioridad/
+		-- nombre/membresia de un contenedor de OTRA red ajena. Mismo patron
+		-- ya usado en updateZoneRules/setZonePriority (zone.networkId ~=
+		-- networkId), extendido aqui via la zona del nodo.
+		local nodeZone = registry.zones and node.zoneId and registry.zones[node.zoneId]
+		if not nodeZone or nodeZone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
+			return
+		end
 		if args.membership == "excluded" then
 			node.membership = "excluded"
 			node.enabled = false
@@ -3251,11 +3403,14 @@ local function onClientCommand(module, command, player, args)
 		end
 		if args.priority ~= nil then
 			-- Escala 1-100, 1 = maxima prioridad (coherente con zone.priority).
-			local p = tonumber(args.priority)
-			if p then
-				p = math.floor(p + 0.5)
-				if p < 1 then p = 1 elseif p > 100 then p = 100 end
-			end
+			-- BUG REAL cerrado (2026-08-25, auditoria pre-release): un valor
+			-- no numerico (tonumber devuelve nil) dejaba node.priority en
+			-- nil sin mas, perdiendo la prioridad ya configurada - asimetrico
+			-- con GS_Zones.setPriority, que ya usaba "or 50" para el mismo
+			-- caso. Mismo valor por defecto aqui.
+			local p = tonumber(args.priority) or 50
+			p = math.floor(p + 0.5)
+			if p < 1 then p = 1 elseif p > 100 then p = 100 end
 			node.priority = p
 		end
 		if args.notes ~= nil then
@@ -3291,6 +3446,26 @@ local function onClientCommand(module, command, player, args)
 				table.remove(node.filters, idx)
 			end
 		end
+		if args.rules ~= nil then
+			-- Reemplazo completo del motor unificado AND/OR/NOT (dev26): pegado
+			-- de plantilla o guardado desde el nuevo editor. Mismo patron que
+			-- args.filters de arriba.
+			node.rules = sanitizeNodeRules(args.rules)
+		elseif args.addRule ~= nil then
+			local clean = sanitizeNodeRule(args.addRule)
+			if clean then
+				node.rules = node.rules or {}
+				if #node.rules < 20 then
+					table.insert(node.rules, clean)
+				end
+			end
+		end
+		if args.removeRuleIndex ~= nil then
+			local idx = tonumber(args.removeRuleIndex)
+			if idx and node.rules and node.rules[idx] then
+				table.remove(node.rules, idx)
+			end
+		end
 		if GlobalStorageSiK.NodeNaming and GlobalStorageSiK.NodeNaming.applyToNode then
 			GlobalStorageSiK.NodeNaming.applyToNode(node)
 		end
@@ -3311,6 +3486,14 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "applyNodeTemplateToZone" then
 		return (function()
+		-- "Extender a la zona" (dev26, ronda 2 - ver
+		-- Documentacion/GS_FilterRedesign_Plan.md §4.4-quater): aplica el
+		-- protocolo de aceptacion (reglas) de UN contenedor a TODOS los
+		-- contenedores actuales de su zona. La PRIORIDAD NUNCA viaja aqui -
+		-- queda siempre independiente por contenedor/zona, decision
+		-- explicita del usuario. Sustituye a la antigua seccion "Plantilla"
+		-- del editor de zona (categorias+filtros+prioridad), ya retirada de
+		-- la interfaz - un contenedor destino conserva su propia prioridad.
 		if not requireAdminAccess(player, networkId) then return end
 		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
@@ -3321,30 +3504,11 @@ local function onClientCommand(module, command, player, args)
 			})
 			return
 		end
-		local categories = sanitizeNodeCategories(args.categories)
-		local filters = {}
-		if type(args.filters) == "table" then
-			for i = 1, math.min(#args.filters, 20) do
-				local clean = sanitizeNodeFilter(args.filters[i])
-				if clean then filters[#filters + 1] = clean end
-			end
-		end
-		local priority = tonumber(args.priority)
-		if not priority then
-			gsSendServerCommand(player, "actionResult", {
-				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg"),
-			})
-			return
-		end
-		priority = math.floor(priority + 0.5)
-		if priority < 1 then priority = 1 elseif priority > 100 then priority = 100 end
+		local rules = sanitizeNodeRules(args.rules)
 		local updated = 0
 		for _, target in pairs(registry.nodes or {}) do
 			if target.zoneId == zone.id then
-				target.categories = {}
-				for i = 1, #categories do target.categories[i] = categories[i] end
-				target.filters = cloneNodeFilters(filters)
-				target.priority = priority
+				target.rules = cloneRuleList(rules)
 				updated = updated + 1
 			end
 		end
@@ -3424,6 +3588,69 @@ local function onClientCommand(module, command, player, args)
 		else
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
 		end
+		end)()
+
+	elseif command == "setZoneEnabled" then
+		return (function()
+		-- "Excluir zona" (dev26, ronda 2 - ver §4.5 del plan): simetrico a
+		-- excluir un contenedor. Una zona no tiene ningun rescan que le
+		-- reponga enabled=true sola (a diferencia de un nodo, ver
+		-- GS_ZoneRefresh.lua:105-108) - un booleano simple basta, sin
+		-- necesitar un campo "membership" propio como en los nodos.
+		if not requireAdminAccess(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local registry = GlobalStorageSiK.Zones.getRegistry()
+		local zone = registry.zones and registry.zones[args.zoneId]
+		if not zone or zone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
+			})
+			return
+		end
+		zone.enabled = args.enabled ~= false
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneUpdatedMsg") })
+		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
+
+	elseif command == "updateZoneRules" then
+		return (function()
+		-- Motor unificado AND/OR/NOT a nivel de ZONA (dev26, ronda 2 - ver
+		-- Documentacion/GS_FilterRedesign_Plan.md §4.4-bis): mismo patron que
+		-- updateNode/rules, reutiliza sanitizeNodeRule(s) tal cual (no hay
+		-- nada especifico de contenedor en esa validacion). Actua como
+		-- puerta binaria ANTES de las reglas de cada contenedor - ver
+		-- GS_Router.zoneRulesAllow/matchWithZoneGate.
+		if not requireAdminAccess(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local registry = GlobalStorageSiK.Zones.getRegistry()
+		local zone = registry.zones and registry.zones[args.zoneId]
+		if not zone or zone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
+			})
+			return
+		end
+		if args.rules ~= nil then
+			zone.rules = sanitizeNodeRules(args.rules)
+		elseif args.addRule ~= nil then
+			local clean = sanitizeNodeRule(args.addRule)
+			if clean then
+				zone.rules = zone.rules or {}
+				if #zone.rules < 20 then
+					table.insert(zone.rules, clean)
+				end
+			end
+		end
+		if args.removeRuleIndex ~= nil then
+			local idx = tonumber(args.removeRuleIndex)
+			if idx and zone.rules and zone.rules[idx] then
+				table.remove(zone.rules, idx)
+			end
+		end
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneUpdatedMsg") })
+		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
 
 	elseif command == "createZoneStructure" then
@@ -3631,7 +3858,7 @@ local function onClientCommand(module, command, player, args)
 				targetUsername, targetCharacterId)
 		end
 		if ok then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Log.info("Server", "transferOwnership", player:getUsername() .. " -> " .. newOwner)
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "owner_transferred",
 				tostring(player:getUsername()) .. " transfirio la propiedad a " .. tostring(newOwner)
@@ -3648,7 +3875,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
-		if changed then ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY) end
+		if changed then GlobalStorageSiK.Permissions.requestTransmit() end
 		GlobalStorageSiK.Log.info("Permissions", "addFactionMembers",
 			"network=" .. tostring(networkId)
 				.. " ok=" .. tostring(ok)
@@ -3726,7 +3953,7 @@ local function onClientCommand(module, command, player, args)
 				.. " changed=" .. tostring(changed)
 				.. " reason=" .. tostring(reason))
 		if changed then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_added",
 				tostring(player:getUsername()) .. " añadio a " .. loggedTarget)
 		end
@@ -3751,7 +3978,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok, message = GlobalStorageSiK.Permissions.leaveNetworkPlayer(networkId, player)
 		if ok then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_left",
 				tostring(player:getUsername()) .. " abandono la red voluntariamente")
 		end
@@ -3800,7 +4027,7 @@ local function onClientCommand(module, command, player, args)
 			for i = #(net.adminUsers or {}), 1, -1 do
 				if net.adminUsers[i] == target then table.remove(net.adminUsers, i) end
 			end
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_removed",
 				tostring(player:getUsername()) .. " quito acceso a " .. tostring(target ~= "" and target or targetId))
 		end
@@ -3824,7 +4051,7 @@ local function onClientCommand(module, command, player, args)
 			ok = GlobalStorageSiK.Permissions.setUserRole(networkId, args.username or "", args.role or "member")
 		end
 		if ok then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_role_changed",
 				tostring(player:getUsername()) .. " cambio el rol de "
 					.. tostring((args.characterId and args.characterId ~= "") and args.characterId or args.username)
@@ -3856,7 +4083,7 @@ local function onClientCommand(module, command, player, args)
 			tostring(args.username or ""),
 			deniedZoneIds)
 		if ok then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			local target = (args.characterId and args.characterId ~= "") and args.characterId or (args.username or "")
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "member_zone_access_changed",
 				tostring(player:getUsername()) .. " cambio el acceso por zona de " .. tostring(target)
@@ -3883,7 +4110,7 @@ local function onClientCommand(module, command, player, args)
 		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 		local factionOnlyEnabled = args.enabled == true
 		net.factionOnly = factionOnlyEnabled
-		ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+		GlobalStorageSiK.Permissions.requestTransmit()
 		GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_only_changed",
 			tostring(player:getUsername()) .. " "
 				.. (factionOnlyEnabled and "activo" or "desactivo") .. " el modo solo-faccion")
@@ -3928,7 +4155,7 @@ local function onClientCommand(module, command, player, args)
 		-- miembro, mismo mecanismo ya confirmado.
 		local ok, message, changed = GlobalStorageSiK.Permissions.addAllFactionMembers(networkId, player)
 		if changed then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_members_added",
 				tostring(player:getUsername()) .. " expandio su faccion a acceso individual")
 		end
@@ -3945,7 +4172,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		local ok = GlobalStorageSiK.Permissions.removeFaction(networkId, args.factionName)
 		if ok then
-			ModData.transmit(GlobalStorageSiK.PERMISSIONS_MODDATA_KEY)
+			GlobalStorageSiK.Permissions.requestTransmit()
 			GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "faction_removed",
 				tostring(player:getUsername()) .. " quito el acceso de faccion \"" .. tostring(args.factionName or "") .. "\"")
 		end

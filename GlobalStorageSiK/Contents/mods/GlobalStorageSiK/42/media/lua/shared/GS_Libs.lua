@@ -2,73 +2,12 @@
 	GlobalStorageSiK - Carga segura de librerías externas
 	Autor: SiK
 	Fecha: 2025-06-23
-	Descripción: NeatUI_Framework como dependencia oficial (widgets, NeatTool, scroll).
+	Descripción: Detección de integraciones funcionales de crafteo, construcción y cocina.
 ]]
 
 GlobalStorageSiK.Libs = GlobalStorageSiK.Libs or {}
 
---- Carga módulos NeatUI_Framework (patrón Neat_Rocco: require explícito).
----@return boolean
-function GlobalStorageSiK.Libs.loadNeatUIModules()
-	if GlobalStorageSiK.Libs._modulesLoaded ~= nil then
-		return GlobalStorageSiK.Libs._modulesLoaded
-	end
-	pcall(require, "neatui_framework/compat/nui_isuielement_compat")
-	pcall(require, "neatui_framework/ui/ni_squarebutton")
-	pcall(require, "neatui_framework/scrollview/niscrollview")
-	pcall(require, "neatui_framework/scrollview/nivirtualscrollview")
-	pcall(require, "neatui_framework/scrollview/nigridvirtualscrollview")
-	pcall(require, "neatui_framework/neattool/neattool_truncatetext")
-	pcall(require, "neatui_framework/neattool/neattool_3patch")
-	pcall(require, "neatui_framework/neattool/neattool_textrender")
-	GlobalStorageSiK.Libs._modulesLoaded = NI_SquareButton ~= nil
-	return GlobalStorageSiK.Libs._modulesLoaded
-end
-
---- Indica si NeatUI está disponible.
----@return boolean
-function GlobalStorageSiK.Libs.hasNeatUI()
-	if GlobalStorageSiK.Libs._neatUI ~= nil then
-		return GlobalStorageSiK.Libs._neatUI
-	end
-	GlobalStorageSiK.Libs._neatUI = GlobalStorageSiK.Libs.loadNeatUIModules()
-	return GlobalStorageSiK.Libs._neatUI
-end
-
---- Comprueba dependencias NeatUI usadas por el terminal (estilo NC_CheckNeatUIDependency).
----@return boolean
-function GlobalStorageSiK.Libs.hasNeatUIComplete()
-	if GlobalStorageSiK.Libs._neatUIComplete ~= nil then
-		return GlobalStorageSiK.Libs._neatUIComplete
-	end
-	if not GlobalStorageSiK.Libs.hasNeatUI() then
-		GlobalStorageSiK.Libs._neatUIComplete = false
-		return false
-	end
-	local ok = NinePatchTexture ~= nil
-		and NinePatchTexture.getSharedTexture ~= nil
-		and GlobalStorageSiK.Libs.getNeatTool() ~= nil
-	GlobalStorageSiK.Libs._neatUIComplete = ok == true
-	return GlobalStorageSiK.Libs._neatUIComplete
-end
-
---- Carga NeatTool (truncate, three-patch, etc.) si existe.
----@return table|nil
-function GlobalStorageSiK.Libs.getNeatTool()
-	if GlobalStorageSiK.Libs._neatTool ~= nil then
-		local cached = GlobalStorageSiK.Libs._neatTool
-		return cached ~= false and cached or nil
-	end
-	GlobalStorageSiK.Libs.loadNeatUIModules()
-	if NeatTool and NeatTool.ThreePatch then
-		GlobalStorageSiK.Libs._neatTool = NeatTool
-	else
-		GlobalStorageSiK.Libs._neatTool = false
-	end
-	return GlobalStorageSiK.Libs._neatTool or nil
-end
-
---- Trunca texto (NeatTool.truncateText del framework; fallback local).
+--- Trunca texto mediante el proveedor propio.
 ---@param text string
 ---@param maxWidth number
 ---@param font UIFont|nil
@@ -77,10 +16,6 @@ end
 function GlobalStorageSiK.Libs.truncateText(text, maxWidth, font, suffix)
 	font = font or UIFont.Small
 	suffix = suffix or ".."
-	local tool = GlobalStorageSiK.Libs.getNeatTool()
-	if tool and tool.truncateText then
-		return tool.truncateText(text, maxWidth, font, suffix)
-	end
 	maxWidth = math.floor(tonumber(maxWidth) or 0)
 	if maxWidth <= 0 or not text or text == "" then
 		return ""
@@ -109,30 +44,6 @@ function GlobalStorageSiK.Libs.truncateText(text, maxWidth, font, suffix)
 		return suffix
 	end
 	return string.sub(text, 1, best) .. suffix
-end
-
---- Renderiza dígitos con atlas NeatUI (NeatTool.renderText).
----@param panel ISUIElement
----@param text string
----@param x number
----@param y number
----@param size number|nil
----@param alpha number|nil
----@param r number|nil
----@param g number|nil
----@param b number|nil
----@param useOutline boolean|nil
----@return number width
-function GlobalStorageSiK.Libs.renderNeatDigits(panel, text, x, y, size, alpha, r, g, b, useOutline)
-	local tool = GlobalStorageSiK.Libs.getNeatTool()
-	if tool and tool.renderText and panel then
-		return tool.renderText(panel, text, x, y, size or 1, alpha or 1, r or 1, g or 1, b or 1, useOutline == true)
-	end
-	if panel and panel.drawText then
-		panel:drawText(text, x, y, r or 1, g or 1, b or 1, alpha or 1, UIFont.Small)
-		return getTextManager():MeasureStringX(UIFont.Small, text)
-	end
-	return 0
 end
 
 --- Indica si Neat Crafting está activo en la partida.
@@ -215,40 +126,4 @@ function GlobalStorageSiK.Libs.resolveBuildOpener(mode)
 		end
 	end
 	return ISEntityUI._NB_old_OpenBuildWindow or ISEntityUI.OpenBuildWindow
-end
-
---- Devuelve clase NI_SquareButton si NeatUI está cargado.
----@return table|nil
-function GlobalStorageSiK.Libs.getNISquareButton()
-	if not GlobalStorageSiK.Libs.hasNeatUI() then
-		return nil
-	end
-	return NI_SquareButton
-end
-
---- Devuelve clase NIScrollView si NeatUI está cargado.
----@return table|nil
-function GlobalStorageSiK.Libs.getNIScrollView()
-	if not GlobalStorageSiK.Libs.hasNeatUI() then
-		return nil
-	end
-	return NIScrollView
-end
-
---- Devuelve clase NIVirtualScrollView si NeatUI está cargado.
----@return table|nil
-function GlobalStorageSiK.Libs.getNIVirtualScrollView()
-	if not GlobalStorageSiK.Libs.hasNeatUI() then
-		return nil
-	end
-	return NIVirtualScrollView
-end
-
---- Devuelve clase NIGridVirtualScrollView si NeatUI está cargado.
----@return table|nil
-function GlobalStorageSiK.Libs.getNIGridVirtualScrollView()
-	if not GlobalStorageSiK.Libs.hasNeatUI() then
-		return nil
-	end
-	return NIGridVirtualScrollView
 end

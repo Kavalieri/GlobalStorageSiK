@@ -16,5 +16,6 @@
 	"Tooltip_GS_FloppyDisk_DriveInstall": "Um programa, um propósito: ensinar um terminal a manter seu próprio Drive de Disquete conectado, para que pare de andar nos seus bolsos.",
 	"Tooltip_GS_Manual_DriveInstall_DiskProgram": "\"Utilitários de Disco GS\": instruções passo a passo para gravar o disquete que instala o Drive de Disquete na rede de um terminal. Exige ficar perto o suficiente de um terminal para valer a pena.",
 	"Tooltip_GS_Manual_NetworkDisk_DiskProgram": "\"Utilitários de Disco GS\": instruções passo a passo para gravar o disquete que carrega o próprio sistema operacional da rede GS. Exige ficar perto o suficiente de um terminal para valer a pena.",
-	"Tooltip_GS_Manual_SolderingIron": "Um guia improvisado para construir seu próprio ferro de solda com peças recuperadas. Só ler não leva a lugar nenhum - alguém precisa ter liberado esse atalho antes."
+	"Tooltip_GS_Manual_SolderingIron": "Um guia improvisado para construir seu próprio ferro de solda com peças recuperadas. Só ler não leva a lugar nenhum - alguém precisa ter liberado esse atalho antes.",
+	"Tooltip_GS_SolderingIron": "Um ferro de solda desgastado, montado por alguém que sabia exatamente o que estava fazendo."
 }

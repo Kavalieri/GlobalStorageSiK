@@ -13,7 +13,7 @@
 	Un clic en CUALQUIER fila de la tabla de miembros abre esta ventana,
 	incluida la propia fila del jugador que la abre.
 
-	Ancho estandar (TerminalChrome.STANDARD_MODAL_W) y alto SIEMPRE calculado
+	Ancho estandar (SiK_UI.STANDARD_MODAL_W) y alto SIEMPRE calculado
 	desde el contenido real (wrapTextLines por cada linea que pueda superar
 	el ancho, nunca una altura fija adivinada) - antes esta ventana tenia
 	h=300 fijo y el texto largo se salia del panel sin wrapear. Ver también
@@ -23,12 +23,12 @@
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISComboBox"
-require "ISUI/ISModalDialog"
 require "ISUI/ISScrollingListBox"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
-require "GS_TerminalUI_Chrome"
+require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Window"
 
 GlobalStorageSiK.TerminalMemberEditor = {}
 GlobalStorageSiK.TerminalMemberEditor.instance = nil
@@ -40,7 +40,7 @@ local PAD = 14
 local LINE_GAP = 6
 local BTN_H = FONT_HGT_SMALL + 10
 local ENTRY_H = FONT_HGT_SMALL + 8
-local PANEL_W = GlobalStorageSiK.TerminalChrome.STANDARD_MODAL_W
+local PANEL_W = GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W
 
 GS_MemberEditorUI = ISPanel:derive("GS_MemberEditorUI")
 
@@ -65,7 +65,7 @@ end
 ---@param b number
 ---@return number nextY
 local function addWrappedLine(panel, x, y, w, text, r, g, b)
-	local lines = GlobalStorageSiK.TerminalChrome.wrapTextLines(text, w, UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, w, UIFont.Small)
 	for i = 1, #lines do
 		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
 		lbl:initialise()
@@ -81,7 +81,7 @@ function GS_MemberEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.TerminalChrome.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildLayout()
@@ -181,17 +181,8 @@ function GS_MemberEditorUI:onRemoveAccess()
 		end
 		self:closeAfterAction()
 	end
-	local function onResult(_, button)
-		if button and button.internal == "YES" then
-			doRemove()
-		end
-	end
-	local modal = ISModalDialog:new(0, 0, 400, 180,
-		T("IGUI_GS_PermRemoveConfirm", data.displayName or data.name or "?"), true, nil, onResult, nil)
-	modal:initialise()
-	modal:addToUIManager()
-	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
-	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
+	GlobalStorageSiK.SiK_UI.Modal.confirm(
+		T("IGUI_GS_PermRemoveConfirm", data.displayName or data.name or "?"), doRemove)
 end
 
 --- Abandona la red uno mismo (fila propia) - siempre permitido sin importar
@@ -200,20 +191,10 @@ end
 function GS_MemberEditorUI:onLeaveNetwork()
 	if not self.terminal or not self.terminal.onLeaveNetwork then return end
 	local terminal = self.terminal
-	local function onResult(_, button)
-		if button and button.internal == "YES" then
-			terminal:onLeaveNetwork()
-			if terminal.refreshNetworkPanel then
-				terminal:refreshNetworkPanel()
-			end
-		end
-	end
-	local confirmLines = GlobalStorageSiK.TerminalChrome.wrapTextLines(T("IGUI_GS_MemberEditorLeaveConfirm"), 360, UIFont.Small)
-	local modal = ISModalDialog:new(0, 0, 400, 120 + (#confirmLines * (FONT_HGT_SMALL + 2)), T("IGUI_GS_MemberEditorLeaveConfirm"), true, nil, onResult, nil)
-	modal:initialise()
-	modal:addToUIManager()
-	modal:setX(getCore():getScreenWidth() / 2 - modal.width / 2)
-	modal:setY(getCore():getScreenHeight() / 2 - modal.height / 2)
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_MemberEditorLeaveConfirm"), function()
+		terminal:onLeaveNetwork()
+		if terminal.refreshNetworkPanel then terminal:refreshNetworkPanel() end
+	end)
 	self:destroy()
 end
 
@@ -225,7 +206,7 @@ function GS_MemberEditorUI:buildLayout()
 	local viewerRole = self.viewerRole or "member"
 	local isOwnerViewer = viewerRole == "owner"
 	local isAdminViewer = viewerRole == "admin" or isOwnerViewer
-	local pal = GlobalStorageSiK.TerminalChrome.PALETTE
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 
 	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_MemberEditorTitle"), 0.95, 0.95, 0.95, 1, UIFont.Medium, true)
 	title:initialise()
@@ -302,19 +283,19 @@ function GS_MemberEditorUI:buildLayout()
 			y = y + listH + 5
 
 			local halfW = math.floor((textW - 6) / 2)
-			self.selectAllZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			self.selectAllZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
 				pad, y, halfW, BTN_H, T("IGUI_GS_MemberZoneSelectAll"), self, function()
 					self:setAllZonesAllowed(true)
 				end)
 			self:addChild(self.selectAllZonesBtn)
-			self.deselectAllZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			self.deselectAllZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
 				pad + halfW + 6, y, textW - halfW - 6, BTN_H,
 				T("IGUI_GS_MemberZoneDeselectAll"), self, function()
 					self:setAllZonesAllowed(false)
 				end)
 			self:addChild(self.deselectAllZonesBtn)
 			y = y + BTN_H + 5
-			self.saveZonesBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+			self.saveZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
 				pad, y, textW, BTN_H, T("IGUI_GS_MemberZoneSave"), self, function()
 					self:onSaveZoneAccess()
 				end)
@@ -336,14 +317,14 @@ function GS_MemberEditorUI:buildLayout()
 		local applyW = 110
 		self.roleCombo = ISComboBox:new(pad, y, textW - applyW - 6, ENTRY_H, self, nil)
 		self.roleCombo:initialise()
-		GlobalStorageSiK.TerminalChrome.styleComboBox(self.roleCombo)
+		GlobalStorageSiK.SiK_UI.styleComboBox(self.roleCombo)
 		self._roleOptions = { "member", "admin" }
 		self.roleCombo:addOption(T("IGUI_GS_PermRoleMember"))
 		self.roleCombo:addOption(T("IGUI_GS_PermRoleAdmin"))
 		self.roleCombo.selected = (data.kind == "admin") and 2 or 1
 		self:addChild(self.roleCombo)
 
-		self.applyRoleBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.applyRoleBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad + textW - applyW, y, applyW, ENTRY_H, T("IGUI_GS_MemberEditorApplyRoleBtn"), self, function()
 				self:onApplyRole()
 			end)
@@ -355,7 +336,7 @@ function GS_MemberEditorUI:buildLayout()
 	-- sea uno mismo) ────────────────────────────────────────────────────
 	local canTransfer = isOwnerViewer and not self.isSelf and data.kind == "user"
 	if canTransfer then
-		self.transferBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.transferBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorTransferBtn", data.displayName or data.name or "?"), self, function()
 				self:onTransferOwnership(true)
 			end)
@@ -374,7 +355,7 @@ function GS_MemberEditorUI:buildLayout()
 		end
 	end
 	if canRemove then
-		self.removeBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.removeBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorRemoveBtn"), self, function()
 				self:onRemoveAccess()
 			end)
@@ -386,7 +367,7 @@ function GS_MemberEditorUI:buildLayout()
 	-- dispara sucesion automatica igual que al morir) ──────────────────
 	local canLeave = self.isSelf and data.kind ~= "faction"
 	if canLeave then
-		self.leaveBtn = GlobalStorageSiK.TerminalChrome.createNeatButton(
+		self.leaveBtn = GlobalStorageSiK.SiK_UI.createButton(
 			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorLeaveBtn"), self, function()
 				self:onLeaveNetwork()
 			end)
@@ -402,8 +383,8 @@ function GS_MemberEditorUI:buildLayout()
 
 	y = y + pad
 	self:setHeight(y)
-	GlobalStorageSiK.TerminalChrome.layoutModalChrome(self, pad)
-	GlobalStorageSiK.TerminalChrome.centerModal(self)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
+	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 --- Abre (o reemplaza) el editor de un miembro concreto.
@@ -446,7 +427,7 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 
 	-- Posicion/alto provisionales - buildLayout() recalcula el alto real
 	-- segun el contenido (numero de lineas envueltas, botones visibles) y
-	-- se re-centra el mismo con TerminalChrome.centerModal al final.
+	-- se re-centra el mismo con SiK_UI.centerModal al final.
 	local ui = GS_MemberEditorUI:new(0, 0, PANEL_W, 100)
 	ui.terminal = terminal
 	ui.data = data

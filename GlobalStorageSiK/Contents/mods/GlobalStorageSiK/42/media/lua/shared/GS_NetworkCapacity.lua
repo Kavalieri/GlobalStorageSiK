@@ -116,10 +116,18 @@ function GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(snapshot)
 end
 
 --- Acumula peso/capacidad de un nodo (vivo, offline o sin chunk).
+--- Devuelve ADEMAS el peso usado y la capacidad EFECTIVA (ya con bonus
+--- personal sumado) de ESTE nodo en concreto - dev26 ronda 4bis, para que
+--- compute() pueda construir un desglose por-nodo/por-zona (columna
+--- "% Ocupación" de la lista) SIN releer contenedores en vivo una segunda
+--- vez; son exactamente los mismos numeros que ya calculaba para el
+--- agregado de red, solo que ahora tambien se devuelven.
 ---@param totals table
 ---@param node table
 ---@param liveEntry table|nil
 ---@param player IsoPlayer|nil  -- si se pasa, suma tambien su bonus personal real (Organizado/etc.)
+---@return number used
+---@return number|nil effectiveCapacity
 local function accumulateNode(totals, node, liveEntry, player)
 	if liveEntry and liveEntry.container then
 		local used, capacity, personalBonus = readContainerWeights(liveEntry.container, player)
@@ -161,7 +169,7 @@ local function accumulateNode(totals, node, liveEntry, player)
 			totals.partialEstimate = true
 		end
 		totals.liveNodes = totals.liveNodes + 1
-		return
+		return used, capacity and (capacity + (personalBonus or 0)) or nil
 	end
 
 	if node.offline == true then
@@ -170,8 +178,10 @@ local function accumulateNode(totals, node, liveEntry, player)
 		totals.unloadedNodes = totals.unloadedNodes + 1
 	end
 
+	local used = 0
 	if node.itemSnapshot then
-		totals.usedWeight = totals.usedWeight + GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(node.itemSnapshot)
+		used = GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(node.itemSnapshot)
+		totals.usedWeight = totals.usedWeight + used
 		totals.partialEstimate = true
 	else
 		totals.partialEstimate = true
@@ -179,9 +189,10 @@ local function accumulateNode(totals, node, liveEntry, player)
 
 	if node.storedCapacity and node.storedCapacity > 0 then
 		totals.totalCapacity = totals.totalCapacity + node.storedCapacity
-	else
-		totals.partialEstimate = true
+		return used, node.storedCapacity
 	end
+	totals.partialEstimate = true
+	return used, nil
 end
 
 --- Calcula estadísticas de capacidad de una red.
@@ -205,6 +216,13 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 		offlineNodes = 0,
 		unloadedNodes = 0,
 		partialEstimate = false,
+		-- dev26 ronda 4bis: desglose por-nodo/por-zona, subproducto GRATIS de
+		-- este mismo barrido (ya se recorre cada nodo de la red en cada
+		-- refresco de terminal para el agregado - ver GS_Server.lua:512) - lo
+		-- usa la columna "% Ocupación" de GS_TerminalUI_Nodes.lua sin ninguna
+		-- lectura de contenedor adicional.
+		perNode = {},
+		perZone = {},
 	}
 
 	local liveById = {}
@@ -224,7 +242,20 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local zone = registry.zones and registry.zones[node.zoneId]
 			if zone and zone.networkId == networkId and zone.enabled ~= false then
 				counted[node.id] = true
-				accumulateNode(totals, node, liveById[node.id], player)
+				local nodeUsed, nodeCap = accumulateNode(totals, node, liveById[node.id], player)
+				if nodeCap and nodeCap > 0 then
+					totals.perNode[node.id] = {
+						usedWeight = math.floor(nodeUsed * 10 + 0.5) / 10,
+						capacity = math.floor(nodeCap * 10 + 0.5) / 10,
+						percent = math.min(100, math.floor((nodeUsed / nodeCap) * 100 + 0.5)),
+					}
+				end
+				if node.zoneId then
+					local z = totals.perZone[node.zoneId] or { usedWeight = 0, capacity = 0 }
+					z.usedWeight = z.usedWeight + nodeUsed
+					z.capacity = z.capacity + (nodeCap or 0)
+					totals.perZone[node.zoneId] = z
+				end
 			end
 		end
 	end
@@ -236,9 +267,29 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local entry = network.containers[i]
 			if entry and entry.id and not counted[entry.id] then
 				counted[entry.id] = true
-				accumulateNode(totals, entry, liveById[entry.id], player)
+				local nodeUsed, nodeCap = accumulateNode(totals, entry, liveById[entry.id], player)
+				if nodeCap and nodeCap > 0 then
+					totals.perNode[entry.id] = {
+						usedWeight = math.floor(nodeUsed * 10 + 0.5) / 10,
+						capacity = math.floor(nodeCap * 10 + 0.5) / 10,
+						percent = math.min(100, math.floor((nodeUsed / nodeCap) * 100 + 0.5)),
+					}
+				end
+				if entry.zoneId then
+					local z = totals.perZone[entry.zoneId] or { usedWeight = 0, capacity = 0 }
+					z.usedWeight = z.usedWeight + nodeUsed
+					z.capacity = z.capacity + (nodeCap or 0)
+					totals.perZone[entry.zoneId] = z
+				end
 			end
 		end
+	end
+
+	-- Cierra perZone con su % final (usedWeight/capacity ya acumulados arriba).
+	for _, z in pairs(totals.perZone) do
+		z.usedWeight = math.floor(z.usedWeight * 10 + 0.5) / 10
+		z.capacity = math.floor(z.capacity * 10 + 0.5) / 10
+		z.percent = (z.capacity > 0) and math.min(100, math.floor((z.usedWeight / z.capacity) * 100 + 0.5)) or nil
 	end
 
 	-- El bonus personal se suma DESPUES de acumular todos los nodos, como
@@ -268,6 +319,80 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 	totals.percent = percent
 	totals.status = status
 	return totals
+end
+
+--- Peso/capacidad de UN contenedor en vivo - mismo camino que accumulateNode
+--- pero para un unico contenedor en vez de sumar toda la red. dev26 ronda 4,
+--- indicador de ocupacion en el editor de contenedor: se pide sobre la marcha
+--- desde getNodeContents (mismo momento en que el servidor ya resuelve el
+--- objeto en vivo para leer las filas), no un escaneo de red aparte. Sin
+--- contenedor en vivo (offline/chunk sin cargar) o sin capacidad legible,
+--- nil - el cliente ya sabe mostrar "sin dato" en ese caso.
+---@param container ItemContainer|nil
+---@param player IsoPlayer|nil
+---@return table|nil
+function GlobalStorageSiK.NetworkCapacity.computeNode(container, player)
+	if not container then
+		return nil
+	end
+	local used, capacity, personalBonus = readContainerWeights(container, player)
+	if not capacity or capacity <= 0 then
+		return nil
+	end
+	local effective = capacity + (personalBonus or 0)
+	local percent = math.min(100, math.floor((used / effective) * 100 + 0.5))
+	return {
+		usedWeight = math.floor(used * 10 + 0.5) / 10,
+		capacity = math.floor(effective * 10 + 0.5) / 10,
+		percent = percent,
+	}
+end
+
+--- Peso/capacidad de UNA zona (solo sus nodos, no toda la red) - mismo motor
+--- que compute() filtrado a un unico zoneId, para el indicador de ocupacion
+--- del editor de zona sin tener que escanear la red entera. Nodos offline/
+--- sin chunk cargado dentro de la zona se saltan (mismo criterio que
+--- accumulateNode - partialEstimate marca que el numero puede quedarse corto).
+---@param zoneId string
+---@param player IsoPlayer|nil
+---@return table|nil
+function GlobalStorageSiK.NetworkCapacity.computeZone(zoneId, player)
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local zone = registry.zones and registry.zones[zoneId]
+	if not zone then
+		return nil
+	end
+	local totals = {
+		usedWeight = 0, totalCapacity = 0, personalBonus = 0,
+		liveNodes = 0, offlineNodes = 0, unloadedNodes = 0, partialEstimate = false,
+	}
+	local liveById = {}
+	local live = GlobalStorageSiK.Network.getLiveContainers(zone.networkId)
+	for i = 1, #live do
+		local entry = live[i].entry
+		if entry and entry.id then
+			liveById[entry.id] = live[i]
+		end
+	end
+	for _, node in pairs(registry.nodes or {}) do
+		if node.zoneId == zoneId and node.enabled ~= false and node.membership ~= "excluded" and node.id then
+			accumulateNode(totals, node, liveById[node.id], player)
+		end
+	end
+	if totals.totalCapacity <= 0 and (totals.personalBonus or 0) <= 0 then
+		return nil
+	end
+	local effectiveCapacity = totals.totalCapacity + (totals.personalBonus or 0)
+	local percent = 0
+	if effectiveCapacity > 0 then
+		percent = math.min(100, math.floor((totals.usedWeight / effectiveCapacity) * 100 + 0.5))
+	end
+	return {
+		usedWeight = math.floor(totals.usedWeight * 10 + 0.5) / 10,
+		capacity = math.floor(effectiveCapacity * 10 + 0.5) / 10,
+		percent = percent,
+		partialEstimate = totals.partialEstimate == true,
+	}
 end
 
 --- Redondea y serializa para envío al cliente.

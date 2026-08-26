@@ -19,29 +19,12 @@ GSSiK_Addon_Builder = GSSiK_Addon_Builder or {}
 -- El sink de debug y los hooks de construccion en red ya se registran en
 -- GSSiK_Addon_Builder_NetworkBuild.lua (migrado desde aqui, ver ese fichero).
 
---- Asegura panel build en el terminal (solo addon activo).
----@param terminal GS_TerminalUI
-local function ensureBuildPanel(terminal)
-	if not terminal or terminal.buildPanel then
-		return
-	end
-	local panel = ISPanel:new(0, 0, 10, 10)
-	panel:initialise()
-	panel.drawBackground = false
-	panel.clipChildren = true
-	panel:setScrollWithParent(false)
-	if panel.setScrollChildren then
-		panel:setScrollChildren(false)
-	end
-	terminal.buildPanel = panel
-	GlobalStorageSiK.TerminalBuilder.buildPanel(panel, terminal)
-	GlobalStorageSiK.TerminalExtensions.registerTab(terminal, "build", {
-		panel = panel,
-		module = GlobalStorageSiK.TerminalBuilder,
-		titleKey = "IGUI_GS_TabBuilder",
-		iconPath = "media/ui/GS/GS_TabBuilder.png",
-	})
-end
+GlobalStorageSiK.TerminalExtensions.registerDefinition("build", {
+	module = GlobalStorageSiK.TerminalBuilder,
+	titleKey = "IGUI_GS_TabBuilder",
+	iconPath = "media/ui/GS/GS_TabBuilder.png",
+	panelField = "buildPanel",
+})
 
 --- Abre construcción con contenedores de red.
 ---@param mode string
@@ -89,6 +72,22 @@ function GS_TerminalUI:onOpenNeatBuild()
 	self:openNetworkBuild("neat")
 end
 
+GlobalStorageSiK.TerminalExtensions.registerStaffAction("builder.vanilla", {
+	labelKey = "IGUI_GS_CraftOpenBuildVanilla",
+	order = 20,
+	invoke = function(dashboard)
+		if dashboard and dashboard.setVisible then
+			dashboard:setVisible(false)
+		end
+		local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
+		if terminal and terminal.openNetworkBuild then
+			terminal:openNetworkBuild("vanilla")
+		else
+			GlobalStorageSiK.CraftSession.openBuild("vanilla")
+		end
+	end,
+})
+
 --- Muestra/oculta la pestaña Build según addon instalado en este terminal
 --- y, si el acceso es inalámbrico, según la tableta que lleve el jugador.
 function GS_TerminalUI:syncBuildTabVisibility()
@@ -103,13 +102,7 @@ function GS_TerminalUI:syncBuildTabVisibility()
 			player
 		)
 	end
-	if show then
-		ensureBuildPanel(self)
-	end
 	if GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.setTabVisible(self, "build", show == true)
-	end
-	if show and self.activeTabKey == "build" and self.buildPanel then
-		GlobalStorageSiK.TerminalBuilder.refresh(self.buildPanel, self)
 	end
 end

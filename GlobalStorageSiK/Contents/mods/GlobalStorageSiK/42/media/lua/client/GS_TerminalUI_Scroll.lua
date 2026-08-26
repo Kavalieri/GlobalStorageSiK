@@ -1,15 +1,16 @@
 --[[
-	GlobalStorageSiK - Motor de scroll (NeatUI_Framework nativo)
+	GlobalStorageSiK - Motor de scroll SiK UI
 	Autor: SiK
 	Fecha: 2025-06-25
 	Descripción:
-	  mode "panel" + NeatUI -> NIScrollView (addScrollChild, setScrollHeight)
-	  mode "rows"  -> pool legacy o NIVirtualScrollView
-	  mode "panel" sin NeatUI -> ISPanel + contentPanel (fallback)
-	  Referencia: docs/NEATUI_FRAMEWORK.md — no destruir NIScrollBar ni dibujar barra duplicada.
+	  mode "panel"       -> ISPanel + contentPanel + barra SiK UI
+	  mode "rows"        -> pool manual acotado
+	  mode "sik_virtual" -> lista virtual propia con pool reutilizable
+	El contrato no depende de clases de scroll externas.
 ]]
 
 require "ISUI/ISPanel"
+require "GS_SiK_UI_Core"
 
 GlobalStorageSiK.TerminalScroll = {}
 
@@ -25,20 +26,6 @@ local function applyScrollStyle(scroll)
 	scroll.drawBackground = false
 	scroll.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	scroll.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-end
-
---- Barras NeatUI siempre visibles cuando hay desborde (sin auto-ocultar).
----@param scroll ISUIElement|nil
-local function configureScrollbarVisibility(scroll)
-	if not scroll then
-		return
-	end
-	if scroll.setAutoHideScrollbar then
-		scroll:setAutoHideScrollbar(false)
-	end
-	if scroll.setShowScrollBars then
-		scroll:setShowScrollBars(true)
-	end
 end
 
 ---@param scroll ISPanel
@@ -80,28 +67,18 @@ local function installViewportClip(scroll)
 	end
 end
 
---- Dibuja barra vertical propia (thumb NeatUI si está disponible).
+--- Dibuja la barra vertical propia de SiK UI.
 ---@param scroll ISPanel|nil
 function GlobalStorageSiK.TerminalScroll.drawScrollBar(scroll)
 	if not scroll or scroll._gsScrollBarsHidden then
 		return
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) then
-		return
-	end
 	local viewH = scroll.height or 0
 	local contentH = scroll._gsContentHeight or viewH
-	if scroll._gsScrollMode == "neat_virtual" and scroll.dataSource then
+	if scroll._gsScrollMode == "sik_virtual" and scroll.dataSource then
 		local ih = scroll.itemHeight or 40
 		local pad = scroll.padding or 0
 		contentH = math.max(viewH, #scroll.dataSource * ih + pad * 2)
-	elseif scroll._gsScrollMode == "neat" and scroll.getScrollHeight then
-		local ok, sh = pcall(function()
-			return scroll:getScrollHeight()
-		end)
-		if ok and sh and sh > contentH then
-			contentH = sh
-		end
 	end
 	if contentH <= viewH + 2 then
 		return
@@ -118,20 +95,13 @@ function GlobalStorageSiK.TerminalScroll.drawScrollBar(scroll)
 	end
 	local thumbW = math.max(6, SCROLLBAR_W - 6)
 	local thumbX = trackX + math.floor((SCROLLBAR_W - thumbW) / 2)
-	local drawn = false
-	if NinePatchTexture and NinePatchTexture.getSharedTexture then
-		local ok, patch = pcall(function()
-			return NinePatchTexture.getSharedTexture("media/ui/NeatUI/ScrollView/ScrollBar_V.png")
-		end)
-		if ok and patch and patch.render then
-			local bright = 0.85
-			patch:render(scroll:getAbsoluteX() + thumbX, scroll:getAbsoluteY() + thumbY, thumbW, thumbH, bright, bright, bright, 0.85)
-			drawn = true
-		end
-	end
-	if not drawn then
-		scroll:drawRect(thumbX, thumbY, thumbW, thumbH, 0.9, 0.38, 0.38, 0.42)
-	end
+	local active = scroll._gsDraggingScroll == true
+	local mouseX = scroll.getMouseX and scroll:getMouseX() or -1
+	local hover = scroll.isMouseOver and scroll:isMouseOver()
+		and mouseX >= (scroll.width or 0) - SCROLLBAR_W - (scroll._gsBarRightPad or 0)
+	local alpha = active and 1 or (hover and 0.92 or 0.76)
+	scroll:drawRect(thumbX, thumbY, thumbW, thumbH, alpha, 0.42, 0.46, 0.52)
+	scroll:drawRectBorder(thumbX, thumbY, thumbW, thumbH, 0.9, 0.58, 0.62, 0.68)
 end
 
 ---@param scroll ISPanel|nil
@@ -245,7 +215,7 @@ function GlobalStorageSiK.TerminalScroll.contentBottomInset()
 	return TAB_BOTTOM_INSET
 end
 
---- Filas de pool necesarias para un viewport (misma fórmula que NIVirtualScrollView).
+--- Filas de pool necesarias para un viewport, incluidas las filas de guarda.
 ---@param viewH number
 ---@param rowH number
 ---@param buffer number|nil
@@ -274,13 +244,7 @@ function GlobalStorageSiK.TerminalScroll.bottomPad()
 	return CONTENT_BOTTOM_PAD
 end
 
----@param scroll ISPanel|nil
----@return boolean
-function GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll)
-	return scroll and (scroll._gsScrollMode == "neat" or scroll._gsScrollMode == "neat_virtual")
-end
-
---- Posiciona un hijo en coordenadas de contenido (NIScrollView aplica getYScroll internamente).
+--- Posiciona un hijo en coordenadas de contenido.
 ---@param scroll ISPanel|nil
 ---@param child ISUIElement|nil
 ---@param contentY number
@@ -288,15 +252,10 @@ function GlobalStorageSiK.TerminalScroll.setContentY(scroll, child, contentY)
 	if not scroll or not child or not child.setY then
 		return
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) and scroll.getYScroll then
-		child._gsContentY = contentY
-		child:setY(contentY + (scroll:getYScroll() or 0))
-	else
-		child:setY(contentY)
-	end
+	child:setY(contentY)
 end
 
---- Posiciona un hijo en X de contenido (NIScrollView).
+--- Posiciona un hijo en X de contenido.
 ---@param scroll ISPanel|nil
 ---@param child ISUIElement|nil
 ---@param contentX number
@@ -304,52 +263,7 @@ function GlobalStorageSiK.TerminalScroll.setContentX(scroll, child, contentX)
 	if not scroll or not child or not child.setX then
 		return
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) and scroll.getXScroll then
-		child._gsContentX = contentX
-		child:setX(contentX + (scroll:getXScroll() or 0))
-	else
-		child:setX(contentX)
-	end
-end
-
---- Evita que updateScroll de NIScrollView desplace de nuevo tras un layout manual.
----@param scroll ISPanel|nil
-function GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
-	if scroll and scroll.lastX ~= nil and scroll.getXScroll then
-		scroll.lastX = scroll:getXScroll() or 0
-		scroll.lastY = scroll:getYScroll() or 0
-	end
-end
-
---- Elimina y destruye hijos de NIScrollView (removeScrollChild no destruye por sí solo).
----@param scroll ISPanel|nil
-function GlobalStorageSiK.TerminalScroll.disposeNeatScrollChildren(scroll)
-	if not scroll then
-		return
-	end
-	if scroll.scrollChildren then
-		while #scroll.scrollChildren > 0 do
-			local child = scroll.scrollChildren[1]
-			if scroll.removeScrollChild then
-				scroll:removeScrollChild(child)
-			end
-			GlobalStorageSiK.TerminalScroll.disposeChild(scroll, child)
-		end
-	end
-	if scroll.childrenInOrder then
-		for i = #scroll.childrenInOrder, 1, -1 do
-			local child = scroll.childrenInOrder[i]
-			if child and not GlobalStorageSiK.TerminalScroll.isNeatScrollBar(child) then
-				GlobalStorageSiK.TerminalScroll.disposeChild(scroll, child)
-			end
-		end
-	end
-	if scroll.setScrollHeight then
-		scroll:setScrollHeight(0)
-	end
-	if scroll.resetScroll then
-		scroll:resetScroll()
-	end
+	child:setX(contentX)
 end
 
 ---@param scroll ISPanel|nil
@@ -358,19 +272,13 @@ function GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	if not scroll then
 		return 0
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) and scroll.getYScroll then
-		return math.max(0, -(scroll:getYScroll() or 0))
-	end
-	if scroll._gsScrollMode == "neat_virtual" and scroll.scrollOffset ~= nil then
-		return math.max(0, scroll.scrollOffset or 0)
-	end
 	return scroll._gsScrollOffset or 0
 end
 
 --- Desplaza contentPanel (modo panel).
 ---@param scroll ISPanel
 function GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)
-	if not scroll or GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) then
+	if not scroll then
 		return
 	end
 	if scroll._gsScrollMode ~= "panel" or not scroll.contentPanel then
@@ -385,32 +293,13 @@ function GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, offset)
 	if not scroll then
 		return
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) and scroll.setYScroll then
-		offset = math.max(0, offset or 0)
-		scroll._gsScrollOffset = offset
-		scroll:setYScroll(-offset)
-		if scroll.updateScroll then
-			scroll:updateScroll()
-		end
-		GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
-		return
-	end
-	if scroll._gsScrollMode == "neat_virtual" and scroll.setScrollOffsetDirect then
-		offset = math.max(0, offset or 0)
-		scroll:setScrollOffsetDirect(offset)
-		scroll._gsScrollOffset = scroll.scrollOffset or offset
-		if scroll.refreshItems then
-			scroll.visibleStartIndex = -1
-			scroll.visibleEndIndex = -1
-			scroll:refreshItems()
-		end
-		return
-	end
 	offset = math.max(0, offset or 0)
 	offset = math.min(offset, maxScrollOffset(scroll))
 	scroll._gsScrollOffset = offset
 	if scroll._gsScrollMode == "panel" then
 		GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)
+	elseif scroll._gsScrollMode == "sik_virtual" and scroll.refreshItems then
+		scroll:refreshItems()
 	end
 end
 
@@ -456,32 +345,117 @@ local function disposeScrollChild(scroll, child)
 	GlobalStorageSiK.TerminalScroll.disposeChild(scroll, child)
 end
 
---- Crea scroll NeatUI (NIScrollView) para paneles con hijos reales.
----@param parent ISUIElement
----@param x number
----@param y number
----@param w number
----@param h number
----@return ISUIElement
-function GlobalStorageSiK.TerminalScroll.createNeat(parent, x, y, w, h)
-	local NIScroll = GlobalStorageSiK.Libs.getNIScrollView()
-	if not NIScroll then
-		return GlobalStorageSiK.TerminalScroll.createLegacy(parent, x, y, w, h, "panel")
+--- Instala el contrato de lista virtual SiK UI sobre un scroll de filas.
+---@param scroll ISPanel
+---@param itemHeight number
+---@param padding number
+local function installVirtualListApi(scroll, itemHeight, padding)
+	scroll._gsScrollMode = "sik_virtual"
+	scroll.itemHeight = math.max(1, itemHeight or 40)
+	scroll.padding = math.max(0, padding or 0)
+	scroll.dataSource = {}
+	scroll.itemPool = {}
+	scroll.visibleStartIndex = 0
+	scroll.visibleEndIndex = 0
+
+        function scroll:setConfig(nextItemHeight, nextPadding)
+                self.itemHeight = math.max(1, nextItemHeight or self.itemHeight or 40)
+                self.padding = math.max(0, nextPadding or 0)
+                self._gsContentHeight = #self.dataSource * self.itemHeight + self.padding * 2
+                GlobalStorageSiK.TerminalScroll.setScrollOffset(
+                        self, GlobalStorageSiK.TerminalScroll.getScrollOffset(self))
 	end
-	local scroll = NIScroll:new(x, y, w, h)
-	configureScrollbarVisibility(scroll)
-	scroll:initialise()
-	scroll:setScrollDirection("vertical")
-	scroll:setScrollSensitivity(40)
-	scroll.gsTerminalScroll = true
-	scroll._gsScrollMode = "neat"
-	scroll._gsScrollOffset = 0
-	scroll._gsContentHeight = h
-	parent:addChild(scroll)
-	return scroll
+
+	function scroll:setOnCreateItem(callback)
+		self.onCreateItem = callback
+		self:refreshItems()
+	end
+
+	function scroll:setOnUpdateItem(callback)
+		self.onUpdateItem = callback
+		self:refreshItems()
+	end
+
+	function scroll:ensureItemPool()
+		if type(self.onCreateItem) ~= "function" then
+			return
+		end
+		local needed = GlobalStorageSiK.TerminalScroll.rowPoolSizeForViewport(
+			self.height or self.itemHeight, self.itemHeight, 2)
+		local before = #self.itemPool
+		while #self.itemPool < needed do
+			local row = self.onCreateItem()
+			if not row then
+				break
+			end
+			row._gsVirtualRow = true
+			row:setVisible(false)
+			GlobalStorageSiK.TerminalScroll.addChild(self, row)
+			row.onMouseWheel = function(_, del)
+				return self:onMouseWheel(del)
+			end
+			self.itemPool[#self.itemPool + 1] = row
+		end
+		-- dev36 (debug SiK UI): crecer el pool es un evento raro (primera
+		-- construccion o resize a un viewport mayor), nunca por fotograma -
+		-- seguro loguearlo siempre que ocurra de verdad.
+		if #self.itemPool ~= before then
+			GlobalStorageSiK.Log.debug("SiKUIScroll", "ensureItemPool grow",
+				string.format("%d->%d needed=%d viewport=%d rowH=%d", before, #self.itemPool, needed,
+					self.height or self.itemHeight, self.itemHeight))
+		end
+	end
+
+	function scroll:refreshItems()
+		self:ensureItemPool()
+		local data = self.dataSource or {}
+		local rowH = math.max(1, self.itemHeight or 1)
+		local offset = GlobalStorageSiK.TerminalScroll.getScrollOffset(self)
+		local contentOffset = math.max(0, offset - (self.padding or 0))
+		local firstIndex = math.floor(contentOffset / rowH) + 1
+		local rowY = (self.padding or 0) + (firstIndex - 1) * rowH - offset
+		local rowW = GlobalStorageSiK.TerminalScroll.contentWidth(self)
+		local lastIndex = math.min(#data, firstIndex + #self.itemPool - 1)
+		self.visibleStartIndex = #data > 0 and firstIndex or 0
+		self.visibleEndIndex = #data > 0 and lastIndex or 0
+		for i = 1, #self.itemPool do
+			local row = self.itemPool[i]
+			local dataIndex = firstIndex + i - 1
+			local value = data[dataIndex]
+			if value then
+				row:setX(4)
+				row:setY(rowY + (i - 1) * rowH)
+				row:setWidth(rowW)
+				row:setHeight(rowH)
+				row.rowIndex = dataIndex
+				if type(self.onUpdateItem) == "function" then
+					self.onUpdateItem(row, value, dataIndex)
+				end
+				row:setVisible(true)
+			else
+				row.rowIndex = nil
+				row:setVisible(false)
+			end
+		end
+	end
+
+        function scroll:setDataSource(data, preserveOffset)
+                local saved = preserveOffset and GlobalStorageSiK.TerminalScroll.getScrollOffset(self) or 0
+                self.dataSource = type(data) == "table" and data or {}
+                self._gsContentHeight = #self.dataSource * self.itemHeight + self.padding * 2
+                self._gsScrollOffset = math.max(0, math.min(saved, maxScrollOffset(self)))
+                GlobalStorageSiK.Log.debug("SiKUIScroll", "setDataSource",
+                        string.format("items=%d preserveOffset=%s offset=%d->%d", #self.dataSource,
+                                tostring(preserveOffset == true), saved, self._gsScrollOffset))
+                self:refreshItems()
+        end
+
+	GlobalStorageSiK.TerminalScroll.bindScrollEvents(scroll, function()
+		scroll:refreshItems()
+	end)
 end
 
---- Crea lista virtual NeatUI (NIVirtualScrollView).
+--- Crea una lista virtual propia SiK UI con pool de filas reutilizable.
 ---@param parent ISUIElement
 ---@param x number
 ---@param y number
@@ -489,23 +463,15 @@ end
 ---@param h number
 ---@param itemHeight number
 ---@param padding number|nil
----@return ISUIElement|nil
+---@return ISPanel
 function GlobalStorageSiK.TerminalScroll.createVirtual(parent, x, y, w, h, itemHeight, padding)
-	local NIVirtual = GlobalStorageSiK.Libs.getNIVirtualScrollView()
-	if not NIVirtual then
-		return nil
-	end
-	local scroll = NIVirtual:new(x, y, w, h)
-	scroll:initialise()
-	configureScrollbarVisibility(scroll)
-	scroll:setConfig(itemHeight, padding or 0)
-	scroll.gsTerminalScroll = true
-	scroll._gsScrollMode = "neat_virtual"
-	scroll._gsScrollOffset = 0
-	scroll._gsContentHeight = h
-	parent:addChild(scroll)
+	local scroll = GlobalStorageSiK.TerminalScroll.createLegacy(parent, x, y, w, h, "sik_virtual")
+	installVirtualListApi(scroll, itemHeight, padding or 0)
 	return scroll
 end
+
+GlobalStorageSiK.SiK_UI.VirtualList = GlobalStorageSiK.SiK_UI.VirtualList or {}
+GlobalStorageSiK.SiK_UI.VirtualList.create = GlobalStorageSiK.TerminalScroll.createVirtual
 
 --- Scroll legacy (ISPanel + barra propia o pool manual).
 ---@param parent ISUIElement
@@ -548,7 +514,7 @@ function GlobalStorageSiK.TerminalScroll.createLegacy(parent, x, y, w, h, mode)
 	return scroll
 end
 
---- Crea scroll del terminal (NeatUI por defecto en modo panel).
+--- Crea scroll de panel o filas usando siempre el motor propio SiK UI.
 ---@param parent ISUIElement
 ---@param x number
 ---@param y number
@@ -558,13 +524,10 @@ end
 ---@return ISPanel|ISUIElement
 function GlobalStorageSiK.TerminalScroll.create(parent, x, y, w, h, mode)
 	mode = mode or "panel"
-	if mode == "panel" and GlobalStorageSiK.Libs.getNIScrollView() then
-		return GlobalStorageSiK.TerminalScroll.createNeat(parent, x, y, w, h)
-	end
 	return GlobalStorageSiK.TerminalScroll.createLegacy(parent, x, y, w, h, mode)
 end
 
---- Scroll con hijos clicables (botones, filas, combos). Evita NIScrollView que puede tragar clics.
+--- Scroll con hijos clicables (botones, filas, combos).
 ---@param parent ISUIElement
 ---@param x number
 ---@param y number
@@ -580,9 +543,6 @@ end
 function GlobalStorageSiK.TerminalScroll.childHost(scroll)
 	if not scroll then
 		return nil
-	end
-	if scroll._gsScrollMode == "neat" or scroll._gsScrollMode == "neat_virtual" then
-		return scroll
 	end
 	return scroll.contentPanel or scroll
 end
@@ -608,20 +568,6 @@ end
 ---@param child ISUIElement
 function GlobalStorageSiK.TerminalScroll.addChild(scroll, child)
 	if not scroll or not child then
-		return
-	end
-	if scroll._gsScrollMode == "neat_virtual" then
-		return
-	end
-	if scroll._gsScrollMode == "neat" and scroll.addScrollChild then
-		if child._gsContentY == nil then
-			local sy = scroll:getYScroll() or 0
-			local sx = scroll:getXScroll() or 0
-			child._gsContentY = (child.y or (child.getY and child:getY()) or 0) - sy
-			child._gsContentX = (child.x or (child.getX and child:getX()) or 0) - sx
-		end
-		scroll:addScrollChild(child)
-		child:setVisible(true)
 		return
 	end
 	local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
@@ -657,23 +603,9 @@ function GlobalStorageSiK.TerminalScroll.clear(scroll, preserveOffset)
 	end
 	local saved = preserveOffset and GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll) or 0
 
-	if scroll._gsScrollMode == "neat_virtual" then
+	if scroll._gsScrollMode == "sik_virtual" then
 		if scroll.setDataSource then
-			scroll:setDataSource({}, false)
-		end
-		if scroll.setYScroll then
-			scroll:setYScroll(0)
-		end
-		GlobalStorageSiK.TerminalScroll.resetPosition(scroll)
-		return
-	end
-
-	if scroll._gsScrollMode == "neat" and scroll.scrollChildren then
-		GlobalStorageSiK.TerminalScroll.disposeNeatScrollChildren(scroll)
-		if preserveOffset then
-			GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
-		else
-			GlobalStorageSiK.TerminalScroll.resetPosition(scroll)
+			scroll:setDataSource({}, preserveOffset == true)
 		end
 		return
 	end
@@ -718,18 +650,9 @@ function GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentHeight)
 	end
 	local saved = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	scroll._gsContentHeight = math.max(0, (contentHeight or 0) + CONTENT_BOTTOM_PAD)
-	if scroll._gsScrollMode == "neat_virtual" then
-		if scroll.updateScrollMetrics then
-			scroll:updateScrollMetrics()
-		end
-		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
-		return
-	end
-	if scroll._gsScrollMode == "neat" and scroll.setScrollHeight then
-		scroll:setScrollHeight(scroll._gsContentHeight)
-		if scroll.updateScroll then
-			scroll:updateScroll()
-		end
+	if scroll._gsScrollMode == "sik_virtual" then
+		scroll._gsContentHeight = #(scroll.dataSource or {}) * (scroll.itemHeight or 1)
+			+ (scroll.padding or 0) * 2
 		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 		return
 	end
@@ -748,11 +671,6 @@ function GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	end
 	local w = scroll.width or 0
 	local pad = 8
-	if scroll._gsScrollMode == "neat" or scroll._gsScrollMode == "neat_virtual" then
-		local barW = GlobalStorageSiK.TerminalChrome and GlobalStorageSiK.TerminalChrome.scrollBarWidth
-			and GlobalStorageSiK.TerminalChrome.scrollBarWidth() or SCROLLBAR_W
-		return math.max(120, w - pad * 2 - barW)
-	end
 	local contentH = scroll._gsContentHeight or 0
 	local viewH = scroll.height or 0
 	local needsBar = contentH > viewH + 2
@@ -773,16 +691,11 @@ function GlobalStorageSiK.TerminalScroll.resize(scroll, w, h)
 	local saved = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	scroll:setWidth(w)
 	scroll:setHeight(h)
-	if scroll._gsScrollMode == "neat" or scroll._gsScrollMode == "neat_virtual" then
-		if scroll._gsScrollMode == "neat_virtual" and scroll.setScrollOffsetDirect then
-			GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
-		elseif scroll.updateScroll then
-			scroll:updateScroll()
-			GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
-		else
-			GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
+	if scroll._gsScrollMode == "sik_virtual" then
+		if scroll.ensureItemPool then
+			scroll:ensureItemPool()
 		end
-		GlobalStorageSiK.TerminalScroll.resetNeatScrollDelta(scroll)
+		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 		return
 	end
 	if scroll.contentPanel then
@@ -799,14 +712,7 @@ local function disposeUiChild(parent, child)
 	GlobalStorageSiK.TerminalScroll.disposeChild(parent, child)
 end
 
-function GlobalStorageSiK.TerminalScroll.isNeatScrollBar(widget)
-	if not widget then
-		return false
-	end
-	return widget.Type == "NIScrollBar"
-end
-
---- Barra vanilla de PZ (huérfana); no confundir con NIScrollBar del framework.
+--- Barra vanilla de PZ huérfana.
 ---@param widget ISUIElement|nil
 ---@return boolean
 function GlobalStorageSiK.TerminalScroll.isVanillaScrollBar(widget)
@@ -822,7 +728,7 @@ function GlobalStorageSiK.TerminalScroll.isScrollBarWidget(widget)
 	return GlobalStorageSiK.TerminalScroll.isVanillaScrollBar(widget)
 end
 
---- Elimina solo ISScrollBar vanilla huérfanas (no NIScrollBar).
+--- Elimina solo ISScrollBar vanilla huérfanas.
 ---@param scroll ISUIElement|nil
 function GlobalStorageSiK.TerminalScroll.stripVanillaScrollBarGhosts(scroll)
 	if not scroll or not scroll.childrenInOrder then
@@ -848,33 +754,13 @@ function GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(root, depth)
 	GlobalStorageSiK.TerminalScroll.stripVanillaScrollBarGhosts(root)
 	for i = 1, #root.childrenInOrder do
 		local child = root.childrenInOrder[i]
-		if child and child.childrenInOrder and not GlobalStorageSiK.TerminalScroll.isNeatScrollBar(child) then
+		if child and child.childrenInOrder then
 			GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(child, depth + 1)
 		end
 	end
 end
 
----@deprecated No hookear render de NeatUI; la barra la gestiona NIScrollView.
-function GlobalStorageSiK.TerminalScroll.installCustomBarRender(scroll)
-end
-
----@deprecated No interferir con updateScroll de NeatUI.
-function GlobalStorageSiK.TerminalScroll.installScrollBarGuard(scroll)
-end
-
----@deprecated Solo limpia ISScrollBar vanilla; nunca toca NIScrollBar.
----@param scroll ISPanel|nil
-function GlobalStorageSiK.TerminalScroll.stripNativeBarWidgets(scroll)
-	GlobalStorageSiK.TerminalScroll.stripVanillaScrollBarGhosts(scroll)
-end
-
----@deprecated Alias de stripVanillaScrollBarGhosts para compatibilidad.
----@param scroll ISPanel|nil
-function GlobalStorageSiK.TerminalScroll.suppressNativeScrollBars(scroll)
-	GlobalStorageSiK.TerminalScroll.stripVanillaScrollBarGhosts(scroll)
-end
-
---- Elimina ISScrollBar vanilla del subárbol (no NIScrollBar).
+--- Elimina ISScrollBar vanilla del subárbol.
 ---@param root ISUIElement|nil
 ---@param depth number|nil
 function GlobalStorageSiK.TerminalScroll.destroyAllScrollBarWidgets(root, depth)
@@ -908,35 +794,6 @@ function GlobalStorageSiK.TerminalScroll.purgeTerminalNativeBars(terminal)
 	GlobalStorageSiK.TerminalScroll.destroyAllScrollBarWidgets(terminal, 0)
 end
 
---- Reposiciona la barra vertical de NeatUI a la derecha del scroll.
----@param scroll ISUIElement|nil
----@deprecated Usar suppressNativeScrollBars
-function GlobalStorageSiK.TerminalScroll.layoutRightScrollBar(scroll)
-	if not scroll or not GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) then
-		return
-	end
-	local bar = scroll.vscroll or scroll.scrollBarV
-	if not bar or not bar.setX then
-		return
-	end
-	local w = scroll.width or 0
-	local h = scroll.height or 0
-	local bw = bar.width or SCROLLBAR_W
-	bar:setX(math.max(0, w - bw))
-	bar:setY(0)
-	bar:setHeight(h)
-	bar:setVisible(true)
-end
-
----@param scroll ISUIElement|nil
-function GlobalStorageSiK.TerminalScroll.fixNeatScrollBar(scroll)
-	GlobalStorageSiK.TerminalScroll.suppressNativeScrollBars(scroll)
-end
-
----@param scroll ISUIElement|nil
-function GlobalStorageSiK.TerminalScroll.removeDuplicateScrollBars(scroll)
-	GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(scroll)
-end
 
 ---@param terminal GS_TerminalUI|nil
 function GlobalStorageSiK.TerminalScroll.stripTabPanelGhosts(terminal)
@@ -966,15 +823,6 @@ function GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, visible)
 	if not scroll then
 		return
 	end
-	if GlobalStorageSiK.TerminalScroll.isNeatScroll(scroll) then
-		if scroll.setShowScrollBars then
-			scroll:setShowScrollBars(visible ~= false)
-		end
-		if scroll.setAutoHideScrollbar then
-			scroll:setAutoHideScrollbar(false)
-		end
-		return
-	end
 	scroll._gsScrollBarsHidden = visible == false
 end
 
@@ -991,26 +839,24 @@ function GlobalStorageSiK.TerminalScroll.applyTabScrollVisibility(terminal)
 		terminal.addonsPanel and terminal.addonsPanel.addonsScroll,
 		terminal.blockedScroll,
 	}
-	-- Sub-pestañas de la pestaña Red (cada una tiene su propio scroll)
+	-- Scroll único de la pestaña Red ("Zonas y nodos")
 	if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.getAllTabScrolls then
 		local netScrolls = GlobalStorageSiK.TerminalNetwork.getAllTabScrolls(terminal)
 		for i = 1, #netScrolls do tabScrolls[#tabScrolls + 1] = netScrolls[i] end
+	end
+	-- Sub-pestañas de la pestaña Configuración (Admin | Estado), cada una con su propio scroll
+	if GlobalStorageSiK.TerminalOptions and GlobalStorageSiK.TerminalOptions.getAllTabScrolls then
+		local optScrolls = GlobalStorageSiK.TerminalOptions.getAllTabScrolls(terminal)
+		for i = 1, #optScrolls do tabScrolls[#tabScrolls + 1] = optScrolls[i] end
 	end
 	for _, scroll in pairs(tabScrolls) do
 		if scroll then
 			local viewH = scroll.height or 0
 			local contentH = scroll._gsContentHeight or viewH
-			if scroll._gsScrollMode == "neat_virtual" and scroll.dataSource then
+			if scroll._gsScrollMode == "sik_virtual" and scroll.dataSource then
 				local ih = scroll.itemHeight or 40
 				local pad = scroll.padding or 0
 				contentH = math.max(viewH, #scroll.dataSource * ih + pad * 2)
-			elseif scroll._gsScrollMode == "neat" and scroll.getScrollHeight then
-				local ok, sh = pcall(function()
-					return scroll:getScrollHeight()
-				end)
-				if ok and sh and sh > contentH then
-					contentH = sh
-				end
 			end
 			GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, contentH > viewH + 2)
 		end
@@ -1032,6 +878,10 @@ function GlobalStorageSiK.TerminalScroll.stripTerminalTree(terminal)
 	if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.getAllTabScrolls then
 		local netScrolls = GlobalStorageSiK.TerminalNetwork.getAllTabScrolls(terminal)
 		for i = 1, #netScrolls do scrolls[#scrolls + 1] = netScrolls[i] end
+	end
+	if GlobalStorageSiK.TerminalOptions and GlobalStorageSiK.TerminalOptions.getAllTabScrolls then
+		local optScrolls = GlobalStorageSiK.TerminalOptions.getAllTabScrolls(terminal)
+		for i = 1, #optScrolls do scrolls[#scrolls + 1] = optScrolls[i] end
 	end
 	for i = 1, #scrolls do
 		local scroll = scrolls[i]
