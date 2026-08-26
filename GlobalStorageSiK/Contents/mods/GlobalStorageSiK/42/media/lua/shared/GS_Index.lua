@@ -49,10 +49,10 @@ local function mergeLiveContainer(byType, container, nodeId)
 		return
 	end
 	local snap = GlobalStorageSiK.ItemSnapshot.fromContainer(container)
-	for fullType, row in pairs(snap) do
-		local existing = byType[fullType]
+	for groupKey, row in pairs(snap) do
+		local existing = byType[groupKey]
 		if not existing then
-			byType[fullType] = {
+			byType[groupKey] = {
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -63,10 +63,11 @@ local function mergeLiveContainer(byType, container, nodeId)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaTitle = row.mediaTitle,
 				count = row.count,
 				nodeId = nodeId,
 			}
-			addLocation(byType[fullType], nodeId, row.count)
+			addLocation(byType[groupKey], nodeId, row.count)
 		else
 			existing.count = existing.count + row.count
 			addLocation(existing, nodeId, row.count)
@@ -81,10 +82,10 @@ local function mergeNodeSnapshot(byType, node)
 	if not node or not node.itemSnapshot then
 		return
 	end
-	for fullType, row in pairs(node.itemSnapshot) do
-		local existing = byType[fullType]
+	for groupKey, row in pairs(node.itemSnapshot) do
+		local existing = byType[groupKey]
 		if not existing then
-			byType[fullType] = {
+			byType[groupKey] = {
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -95,10 +96,11 @@ local function mergeNodeSnapshot(byType, node)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaTitle = row.mediaTitle,
 				count = row.count or 0,
 				nodeId = node.id,
 			}
-			addLocation(byType[fullType], node.id, row.count or 0)
+			addLocation(byType[groupKey], node.id, row.count or 0)
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
 			addLocation(existing, node.id, row.count or 0)
@@ -288,12 +290,19 @@ end
 --- por separado (no usa esta funcion para sus filas, solo para su tooltip).
 ---@param player IsoPlayer
 ---@param fullType string
+---@param mediaTitle string|nil si viene informado (cinta VHS/radio con
+---  contenido concreto, ver GS_ItemSnapshot.recordedMediaTitleFromItem),
+---  cuenta SOLO filas con ese mismo fullType+mediaTitle exacto, ignorando el
+---  agrupado por familia de variantes (2026-08-26, fix de agrupacion de
+---  VHS - "no podemos ver si ya tenemos un vhs determinado en el tooltip").
+---  Sin esto, el tooltip sumaba TODAS las cintas VHS de la red sin importar
+---  que habilidad enseñaba cada una, dando una cifra enganosa.
 ---@return table[], boolean out { name, count } ordenado por nombre; hasAnyNetwork indica si el jugador tiene AL MENOS una red accesible (para distinguir, en el tooltip, "no tienes redes todavia" de "tienes redes pero este item no esta en ninguna")
-function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType)
+function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaTitle)
 	if not player or not fullType or not GlobalStorageSiK.Network then
 		return {}, false
 	end
-	local familyKey = GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey
+	local familyKey = (not mediaTitle) and GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey
 		and GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey(fullType) or fullType
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
@@ -310,8 +319,12 @@ function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType)
 						and node.enabled ~= false and node.offline ~= true then
 					local snapshot = node.itemSnapshot
 					if snapshot then
-						for rowType, row in pairs(snapshot) do
-							if GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey(rowType) == familyKey then
+						for _, row in pairs(snapshot) do
+							if mediaTitle then
+								if row.fullType == fullType and row.mediaTitle == mediaTitle then
+									total = total + (row.count or 0)
+								end
+							elseif GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey(row.fullType) == familyKey then
 								total = total + (row.count or 0)
 							end
 						end

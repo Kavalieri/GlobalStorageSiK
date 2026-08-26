@@ -96,19 +96,15 @@ local function memberIdentityKey(value)
 	return string.lower(value)
 end
 
-local function trimDisplay(value)
-	return (tostring(value or ""):gsub("^%s*(.-)%s*$", "%1"))
-end
-
 --- Etiqueta humana separada de la identidad operativa. El nombre exacto del
 --- personaje es lo que ve el jugador; cuenta e ID nunca sustituyen esa etiqueta.
 --- Los homónimos del selector se desambiguan después con un sufijo de ID.
+--- Prioridad unica compartida con GS_AdminDashboard.lua - ver
+--- GlobalStorageSiK.Permissions.resolveMemberDisplayName (2026-08-26,
+--- revision tecnica: las 2 interfaces tenian antes un orden de campos
+--- distinto, podian mostrar un nombre diferente para el mismo miembro).
 local function memberDisplayLabel(entry)
-	local displayName = trimDisplay(entry and entry.displayName)
-	local characterName = trimDisplay(entry and entry.name)
-	local username = trimDisplay(entry and entry.username)
-	return characterName ~= "" and characterName
-		or (displayName ~= "" and displayName or username)
+	return GlobalStorageSiK.Permissions.resolveMemberDisplayName(entry)
 end
 
 --- Construye índices desde memberEntries, que es la lista autoritativa ya
@@ -125,12 +121,23 @@ local function buildExistingMemberLookup(perms)
 	if entries then
 		for i = 1, #entries do
 			local entry = entries[i]
-			local id = entry and tostring(entry.id or "") or ""
-			local name = memberIdentityKey(entry and entry.name)
-			if id ~= "" then ids[id] = true end
-			if name ~= "" then
-				allNames[name] = true
-				if id == "" or entry.legacy == true then legacyNames[name] = true end
+			-- BUG REAL (2026-08-26): una ficha ROLE_DEAD (vida terminada, real o
+			-- por una reconciliacion que despues resulta erronea) NUNCA debe
+			-- contar como "ya es miembro" - su nombre/ID quedan huerfanos en
+			-- characterPermissions solo para auditoria (ver GS_AdminDashboard).
+			-- Sin este filtro, isExistingMember() la trataba como ocupada y
+			-- ocultaba a un jugador REALMENTE conectado del selector "añadir
+			-- miembro" (aparece "fallecido" para el sistema aunque siga vivo
+			-- con un characterId nuevo) - imposible re-añadirlo desde el picker
+			-- normal hasta que alguien lo notara y limpiara la ficha a mano.
+			if entry and entry.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
+				local id = tostring(entry.id or "")
+				local name = memberIdentityKey(entry.name)
+				if id ~= "" then ids[id] = true end
+				if name ~= "" then
+					allNames[name] = true
+					if id == "" or entry.legacy == true then legacyNames[name] = true end
+				end
 			end
 		end
 		return ids, legacyNames, allNames

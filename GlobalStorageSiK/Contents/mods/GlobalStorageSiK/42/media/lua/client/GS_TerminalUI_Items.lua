@@ -583,12 +583,26 @@ end
 ---@param terminal GS_TerminalUI|nil
 ---@param data table|nil
 ---@return string
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, propuesta de mejora futura de
+-- Desarrollo tras validar dev20 - "cachear resolveZoneLabel() por fila y
+-- referencia de terminalState.nodes; la ordenacion por zona todavia puede
+-- recorrer ubicaciones y nodos por cada fila"): memorizado por fila, con
+-- INVALIDACION explicita contra la referencia de `nodes` usada - la lista de
+-- nodos puede cambiar (renombrar zona, mover terminal) SIN que la fila del
+-- item se reemplace (a diferencia de items/precio, que si generan filas
+-- nuevas en cada sync) - cachear solo por fila sin comprobar `nodes` daria
+-- una zona obsoleta tras ese tipo de cambio.
+local zoneLabelCache = setmetatable({}, { __mode = "k" })
 local function resolveZoneLabel(terminal, data)
 	local locations = data and data.locations
 	if not terminal or not locations or #locations == 0 then
 		return "—"
 	end
 	local nodes = terminal.terminalState and terminal.terminalState.nodes or {}
+	local cached = zoneLabelCache[data]
+	if cached and cached.nodes == nodes then
+		return cached.label
+	end
 	local zoneName, multiple = nil, false
 	for i = 1, #locations do
 		local zn = findNodeZoneName(nodes, locations[i].nodeId) or T("IGUI_GS_ProtocolGlobal")
@@ -598,10 +612,9 @@ local function resolveZoneLabel(terminal, data)
 			multiple = true
 		end
 	end
-	if multiple then
-		return T("IGUI_GS_ColZoneMultiple")
-	end
-	return zoneName or "—"
+	local label = multiple and T("IGUI_GS_ColZoneMultiple") or (zoneName or "—")
+	zoneLabelCache[data] = { nodes = nodes, label = label }
+	return label
 end
 
 --- Ordena filas según clave y dirección.
@@ -609,21 +622,48 @@ end
 ---@param sortKey string
 ---@param ascending boolean
 ---@return table[]
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, propuesta de mejora futura de
+-- Desarrollo tras validar dev20 - "mantener claves de ordenacion estables por
+-- fila para displayName/category; sus resoluciones profundas ya estan
+-- cacheadas (dev20), pero la propia tabla de claves se reconstruye en cada
+-- ordenacion"): "displayName"/"category" son puras por fila (dependen solo
+-- de row.fullType/row.displayName/row.worldSprite/row.category/
+-- row.subCategory, que nunca cambian sin que el servidor entregue una fila
+-- NUEVA - ver comentario de itemSearchHaystackCache en GS_I18n.lua sobre esta
+-- misma invariante) - memorizadas de forma persistente por fila+clave, no
+-- solo dentro de una llamada a sortRows. "zone" NO se memoriza aqui (tiene su
+-- propia cache con invalidacion por referencia de nodos, ver
+-- resolveZoneLabel) y "count" es ya trivial (lectura directa de campo, cachearla
+-- no aportaria nada).
+local sortKeyValueCache = setmetatable({}, { __mode = "k" })
 local function sortKeyValue(row, sortKey, terminal)
 	if sortKey == "count" then
 		return row.count or 0
 	end
-	if sortKey == "category" then
-		if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
-			return string.lower(GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row).fullLabel)
-		end
-		return string.lower(tostring(row.category or ""))
-	end
 	if sortKey == "zone" then
 		return string.lower(resolveZoneLabel(terminal, row))
 	end
-	local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
-	return string.lower(tostring(name or row.fullType or ""))
+	local rowCache = sortKeyValueCache[row]
+	if rowCache and rowCache[sortKey] ~= nil then
+		return rowCache[sortKey]
+	end
+	local value
+	if sortKey == "category" then
+		if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
+			value = string.lower(GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row).fullLabel)
+		else
+			value = string.lower(tostring(row.category or ""))
+		end
+	else
+		local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
+		value = string.lower(tostring(name or row.fullType or ""))
+	end
+	if not rowCache then
+		rowCache = {}
+		sortKeyValueCache[row] = rowCache
+	end
+	rowCache[sortKey] = value
+	return value
 end
 
 --- Ordena filas según clave y dirección.
@@ -637,25 +677,22 @@ local function sortRows(rows, sortKey, ascending, terminal)
 	for i = 1, #rows do
 		sorted[i] = rows[i]
 	end
-	-- Precalculado UNA vez por fila (O(N)) ANTES de ordenar para las claves
-	-- cuya resolucion no es gratis, en vez de dentro del comparador de
-	-- table.sort - que llama a sortKeyValue O(N log N) veces (dos por
-	-- comparacion). "zone" recorre data.locations x terminalState.nodes sin
-	-- indice (ver resolveZoneLabel); "category" ya llamaba a
-	-- ItemTaxonomy.resolve, mismo tipo de coste desde antes de esta ronda.
-	-- Sin este cache, ordenar por Zona en una red con un catalogo grande
-	-- multiplicaria ese coste por O(N log N) en vez de O(N) - justo el riesgo
-	-- de rendimiento senalado al revisar data.locations.
-	local cache = nil
-	if sortKey == "zone" or sortKey == "category" then
-		cache = {}
-		for i = 1, #sorted do
-			cache[sorted[i]] = sortKeyValue(sorted[i], sortKey, terminal)
-		end
-	end
+	-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, reportado por un miembro de
+	-- la comunidad con telemetria real de servidor dedicado: red de 1286
+	-- tipos/188 nodos, refreshItemsTab en 1157ms, 1069ms solo del sort -
+	-- "displayName", la clave POR DEFECTO, resolvia I18n.itemDisplayName() DOS
+	-- VECES POR COMPARACION, ~26000 llamadas para 1286 filas). Cerrado en 2
+	-- pasos: primero (dev18) un cache local de UNA pasada por sortRows;
+	-- despues (dev20/dev21, propuesta de mejora futura de Desarrollo tras
+	-- validar dev20) sortKeyValue() paso a memorizar sus propios resultados de
+	-- forma PERSISTENTE por fila (sortKeyValueCache, arriba) - ya no hace
+	-- falta ninguna tabla intermedia aqui, el propio comparador puede llamar a
+	-- sortKeyValue() directamente en cada comparacion: la primera vez que se
+	-- ve una fila hace el trabajo real, cualquier ordenacion posterior (o
+	-- reordenar mientras se escribe en el buscador) son lecturas O(1).
 	table.sort(sorted, function(a, b)
-		local av = cache and cache[a] or sortKeyValue(a, sortKey, terminal)
-		local bv = cache and cache[b] or sortKeyValue(b, sortKey, terminal)
+		local av = sortKeyValue(a, sortKey, terminal)
+		local bv = sortKeyValue(b, sortKey, terminal)
 		if av == bv then
 			return (a.fullType or "") < (b.fullType or "")
 		end

@@ -225,6 +225,28 @@ local isCharacterNameAmbiguous
 --- UTF-8: la normalización solo se usa al comparar, nunca al presentar.
 ---@param player IsoPlayer|nil
 ---@return string
+--- Resuelve el mejor nombre disponible para mostrar un miembro/entry
+--- serializado (memberEntries, filas de picker, etc.), con UNA prioridad
+--- fija - antes cada interfaz (pestaña normal de permisos, panel de soporte
+--- de staff) tenia su propio orden de campos DISTINTO (name>displayName>
+--- username en una, displayName>name en la otra), lo que podia mostrar un
+--- resultado diferente para el MISMO miembro segun que ventana se abriera
+--- (bug real senalado en revision tecnica 2026-08-26, plausible explicacion
+--- adicional del reporte "nombre chino se ve mal en un panel pero no en el
+--- otro"). Unica fuente de verdad para ambas interfaces desde ahora.
+---@param entry table|nil { characterName?, displayName?, name?, username? }
+---@return string
+function GlobalStorageSiK.Permissions.resolveMemberDisplayName(entry)
+	if not entry then return "" end
+	local characterName = displayText(entry.characterName)
+	if characterName ~= "" then return characterName end
+	local displayName = displayText(entry.displayName)
+	if displayName ~= "" then return displayName end
+	local name = displayText(entry.name)
+	if name ~= "" then return name end
+	return displayText(entry.username)
+end
+
 function GlobalStorageSiK.Permissions.getCharacterName(player)
 	if not player then
 		return ""
@@ -291,15 +313,28 @@ local function getPlayerUsername(player)
 	return ok and displayText(value) or ""
 end
 
-local function getSteamIdForUsername(username, player)
+-- BUG REAL DE SEGURIDAD cerrado (2026-08-26, revision tecnica de Desarrollo
+-- tras probar en TEST, log real: steamId="7.656119799703734E16" en vez de
+-- "76561197997037351"): IsoPlayer:getSteamID() devuelve un `long` de Java
+-- (confirmado con javap) - Kahlua lo marshalla como numero Lua (double de
+-- 64 bits), que NO puede representar exactamente enteros de 17 digitos como
+-- un SteamID64 (pierde precision por encima de 2^53, la perdida ocurre en
+-- el marshalling, antes de que este codigo vea el valor - ningun tostring/
+-- string.format posterior la recupera). Este campo SI se usa en una
+-- comprobacion real anti-suplantacion (ver comparaciones displayText(net.
+-- ownerSteamId) == currentSteamId mas abajo en este fichero) - un valor
+-- redondeado podia no coincidir nunca con el steamId "bueno" capturado en
+-- otro momento via la API de String, provocando un falso rechazo de
+-- alguien legitimo. getSteamIDFromUsername(username) (confirmado con
+-- javap: devuelve java.lang.String, nunca pasa por un numero Lua) es la
+-- UNICA fuente usada ahora - si falla/esta vacia, se deja steamId vacio
+-- (ya tratado como "sin verificar, no bloquea" en todas las comprobaciones
+-- que lo leen) en vez de caer a un valor numerico que puede ser
+-- silenciosamente incorrecto.
+local function getSteamIdForUsername(username)
 	username = displayText(username)
 	if username ~= "" and getSteamIDFromUsername then
 		local ok, value = pcall(getSteamIDFromUsername, username)
-		value = ok and displayText(value) or ""
-		if value ~= "" and value ~= "0" and value ~= "-1" then return value end
-	end
-	if player and player.getSteamID then
-		local ok, value = pcall(function() return player:getSteamID() end)
 		value = ok and displayText(value) or ""
 		if value ~= "" and value ~= "0" and value ~= "-1" then return value end
 	end
@@ -312,7 +347,6 @@ local CHARACTER_UUID_KEY = "GS_CharacterUUID"
 -- duplicar el literal, con riesgo real de que diverjan si esta clave cambia.
 GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY = CHARACTER_UUID_KEY
 local characterUuidSequence = 0
-local identityUuidSeen = {}
 
 -- Cache de UUID por sesion (2026-08-21, segundo intento tras revertir la
 -- version que escribia un campo nuevo sobre el objeto IsoPlayer - eso
@@ -351,12 +385,50 @@ local function identityDiagnosticFields(player)
 		local ok, value = pcall(function() return player:getOnlineID() end)
 		if ok and value ~= nil then onlineId = tostring(value) end
 	end
-	return " characterName=" .. permissionLogText(
-		GlobalStorageSiK.Permissions.getCharacterName(player), 128)
+	-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+	-- probar en TEST, "sqlId=" siempre vacio en el log real): IsoPlayer no
+	-- expone getSqlId() en B42.20.4 (confirmado con javap) - el campo nunca
+	-- puede tener valor. Mostrarlo vacio en cada linea de diagnostico daba
+	-- una falsa sensacion de respaldo disponible que nunca llega a existir.
+	-- Retirado del log (getPersistentSqlId sigue existiendo para el campo
+	-- de auditoria record.sqlId, sin cambios, marcado ya como "diagnostico
+	-- opcional, no identidad").
+	-- Diagnostico CJK pedido explicitamente (2026-08-26, preparacion pruebas
+	-- 风。): "ver ?? no implica que el servidor haya recibido ??" - characterName
+	-- y username son ya campos separados (nunca se confunden entre si en este
+	-- log), pero para poder diferenciar en la proxima ronda "cadena correcta,
+	-- fuente sin glifo" de "sustitucion real por U+003F" o "corte a mitad de
+	-- caracter" se vuelcan tambien los puntos de codigo Unicode reales del
+	-- nombre de personaje (fuente: getForename+getSurname via
+	-- getCharacterName), nunca el texto tal como lo renderizaria el cliente.
+	-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras el
+	-- banco CJK de 4 vidas en DEV15): el campo se llamaba "nameBytes" y
+	-- volcaba #characterName como si fuera longitud UTF-8 - en Kahlua/PZ toda
+	-- cadena esta respaldada por un java.lang.String, `#text` cuenta UNIDADES
+	-- UTF-16, no bytes (confirmado matematicamente: los "puntos de codigo"
+	-- falsos que dio DEV15, p.ej. U+E802 para "风 。", coinciden exacto con
+	-- tratar 3 unidades UTF-16 como si fueran continuacion de 1 secuencia
+	-- UTF-8 de 3 bytes). Renombrado a nameUtf16Units (lo que realmente mide)
+	-- y el propio decodificador (GS_Libs.unicodeCodepoints) ahora combina
+	-- pares subrogados en vez de decodificar como UTF-8.
+	local characterName = GlobalStorageSiK.Permissions.getCharacterName(player)
+	-- BUG REAL cerrado (2026-08-26, recomendacion no bloqueante de Desarrollo
+	-- tras dev8: "steamId= siempre vacio en el log real, incluso en el propio
+	-- servidor de pruebas - anadir campos de telemetria explicitos en vez de
+	-- seguir registrando un valor vacio sin contexto"): un `steamId=` vacio
+	-- por si solo no distingue "la API fallo" de "este jugador nunca tuvo
+	-- SteamID resoluble" - `steamIdSource` deja constancia explicita de que
+	-- unica fuente se intento (getSteamIDFromUsername, ver comentario de
+	-- getSteamIdForUsername mas arriba - la unica que no pierde precision al
+	-- pasar por un numero Lua) y si tuvo exito o no.
+	local steamId = getSteamIdForUsername(getPlayerUsername(player))
+	local steamIdSource = steamId ~= "" and "username_lookup" or "unavailable"
+	return " characterName=" .. permissionLogText(characterName, 128)
+		.. " nameUtf16Units=" .. tostring(#tostring(characterName or ""))
+		.. " nameCodepoints=" .. GlobalStorageSiK.Libs.formatCodepoints(characterName, 12)
 		.. " username=" .. permissionLogText(getPlayerUsername(player), 128)
-		.. " steamId=" .. permissionLogText(getSteamIdForUsername(
-			getPlayerUsername(player), player), 64)
-		.. " sqlId=" .. tostring(getPersistentSqlId(player) or "")
+		.. " steamId=" .. permissionLogText(steamId, 64)
+		.. " steamIdSource=" .. steamIdSource
 		.. " onlineId=" .. permissionLogText(onlineId, 32)
 end
 
@@ -404,14 +476,21 @@ local function getOrCreateCharacterUuid(player, reason)
 	local existing = tostring(data[CHARACTER_UUID_KEY] or "")
 	if validCharacterUuid(existing) then
 		if player then characterUuidCache[player] = existing end
-		if not identityUuidSeen[existing] then
-			identityUuidSeen[existing] = true
-			if GlobalStorageSiK.Log then
-				GlobalStorageSiK.Log.info("Identity", "characterUuidReused",
-					"reason=" .. tostring(reason or "lookup")
-						.. " characterId=character:" .. existing
-						.. identityDiagnosticFields(player))
-			end
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- probar en TEST): antes se gateaba por "esta cadena de UUID ya se
+		-- registro alguna vez en este proceso" - la cache por-objeto-jugador
+		-- de la linea de arriba (characterUuidCache[player]) YA garantiza que
+		-- esta funcion solo se ejecuta hasta aqui una vez por conexion/sesion
+		-- (un player Lua nuevo en cada reconexion) - aquel segundo filtro por
+		-- valor de UUID solo servia para que la SEGUNDA reconexion en
+		-- adelante del MISMO personaje dejara de confirmar nada, justo la
+		-- prueba que Desarrollo necesitaba ver ("una linea por conexion, no
+		-- una por UUID en toda la vida del proceso"). Retirado.
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.info("Identity", "characterUuidReused",
+				"reason=" .. tostring(reason or "lookup")
+					.. " characterId=character:" .. existing
+					.. identityDiagnosticFields(player))
 		end
 		return existing
 	end
@@ -419,7 +498,6 @@ local function getOrCreateCharacterUuid(player, reason)
 	local value = generateCharacterUuid()
 	data[CHARACTER_UUID_KEY] = value
 	if player then characterUuidCache[player] = value end
-	identityUuidSeen[value] = true
 	if player.transmitModData then
 		pcall(function() player:transmitModData() end)
 	end
@@ -673,6 +751,18 @@ function GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, eventType, d
 	recordNetworkHistoryEvent(networkId, eventType, detail)
 end
 
+--- Vacia el historial de auditoria de una red (pedido explicito 2026-08-26,
+--- "por si el usuario quiere iniciar un historial nuevo, efectivo") - NUNCA
+--- toca miembros, roles ni ownership, solo este registro informativo.
+---@param networkId string
+---@return boolean
+function GlobalStorageSiK.Permissions.clearNetworkHistory(networkId)
+	if not networkId or networkId == "" then return false end
+	local historyByNetwork = getHistoryRegistry()
+	historyByNetwork[networkId] = {}
+	return true
+end
+
 --- Lee el historico de una red para el panel de soporte. Copia superficial
 --- (nunca la tabla interna) para que el llamante pueda serializarla en un
 --- payload de red sin arriesgar mutarla por accidente.
@@ -843,11 +933,24 @@ local function migrateLegacyCharacterRecord(net, player)
 			end
 		end
 	end
+	-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+	-- probar en TEST): la version anterior de este bloque intentaba un
+	-- respaldo via IsoPlayer:getSqlId() - metodo que NO EXISTE en B42.20.4
+	-- (confirmado con javap sobre projectzomboid.jar: IsoPlayer solo expone
+	-- el CAMPO publico "sqlId", sin getter), asi que ese respaldo nunca podia
+	-- activarse - codigo muerto. Ademas, aunque se consiguiera leer, sqlId
+	-- identifica una FILA de la base de datos de guardado, no una vida: la
+	-- misma fila puede reasignarse a un personaje nuevo (cuenta+mundo+slot
+	-- reciclados), asi que "mismo sqlId" nunca demuestra "misma vida" y no
+	-- debe usarse para autorizar nada. Retirado sin sustituto - un candidato
+	-- sin coincidencia de nombre/cuenta se queda sin migrar (el jugador
+	-- necesitara que un admin lo reasigne a mano via el panel de soporte).
 	if not legacy then return nil end
 	net.characterPermissions[legacyId] = nil
 	net.characterPermissions[characterId] = legacy
 	mergeZoneDenials(net, legacyId, characterId)
-	local role = legacy.role
+	local role = legacy.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD and legacy.role
+		or (legacy.priorRole or GlobalStorageSiK.Permissions.ROLE_MEMBER)
 	local record = bindCharacter(net, player, role)
 	consumeLegacyMembership(net, record.name, record.username)
 	logIdentityMigration(net, "member", legacyId, characterId, username)
@@ -1387,7 +1490,17 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	-- personajes con el mismo nombre, que nunca coincide con el nombre
 	-- actual sin sufijo) - se usa la cuenta (ownerAccountLogin), la unica
 	-- señal estable que no depende del nombre de personaje.
-	if (not net.ownerCharacterId or net.ownerCharacterId == "") and net.owner and net.owner ~= "" and characterId ~= "" then
+	-- Acotado a "una sola vez por red" (2026-08-26, revision tecnica de
+	-- Desarrollo): esta reparacion existe para migrar datos de un esquema
+	-- LEGACY concreto (anterior a 2026-08-22, sin ownerCharacterId enlazado)
+	-- - dejarla activa para siempre en canAccess() significa que CUALQUIER
+	-- corrupcion parcial futura que deje ownerCharacterId vacio (por el
+	-- motivo que sea, no solo el caso legacy original) otorgaria ownership
+	-- automaticamente a la primera cuenta coincidente que se conecte, sin
+	-- intervencion humana. net.ownerLinkRepairedOnce se fija tras la primera
+	-- reparacion real y bloquea cualquier repeticion en esa misma red.
+	if (not net.ownerCharacterId or net.ownerCharacterId == "") and net.owner and net.owner ~= ""
+		and characterId ~= "" and not net.ownerLinkRepairedOnce then
 		local ownerAccountKey = normalizeName(net.ownerAccountLogin)
 		local myAccountKey = normalizeName(username)
 		if ownerAccountKey ~= "" and ownerAccountKey == myAccountKey then
@@ -1395,12 +1508,13 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 				GlobalStorageSiK.Log.warn("Permissions", "ownerLinkRepaired",
 					networkId .. ": " .. tostring(net.owner) .. " (cuenta " .. tostring(username)
 						.. ") recuperado sin ownerCharacterId enlazado (datos de una version anterior) - "
-						.. "re-enlazado a characterId=" .. characterId)
+						.. "re-enlazado a characterId=" .. characterId .. " (reparacion unica de esta red)")
 			end
 			recordNetworkHistoryEvent(networkId, "owner_link_repaired",
 				tostring(net.owner) .. " (cuenta " .. tostring(username) .. ") re-enlazado como propietario: "
 					.. "faltaba ownerCharacterId, datos de una version anterior")
 			bindCharacter(net, player, GlobalStorageSiK.Permissions.ROLE_OWNER)
+			net.ownerLinkRepairedOnce = true
 		end
 	end
 	-- RECONCILIACION QUIRURGICA (2026-08-22): red de pruebas real confirmo
@@ -1422,32 +1536,89 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 	-- dependiendo del panel de soporte GM/moderacion (accion humana
 	-- explicita), a proposito - no hay forma segura de automatizarlo sin
 	-- arriesgar un falso positivo que expulse a un dueño realmente activo.
+	-- Motivo especifico para la UI (2026-08-26, revision tecnica de
+	-- Desarrollo): "denied" generico hacia que el panel de bloqueo mostrara
+	-- "Sin terminal cercano" para un caso que en realidad es "esta cuenta
+	-- tiene otra vida en esta red, puede reclamarla" - mensaje enganoso, no
+	-- un problema de deteccion de terminal. Si esta rama detecta el caso,
+	-- se propaga hasta el return final SOLO si ninguna otra comprobacion
+	-- posterior (rol propio ya vigente, etc.) concede acceso de otra forma.
+	local rotationUnprovenReason = nil
 	if net.owner and net.owner ~= "" and net.ownerCharacterId and net.ownerCharacterId ~= ""
 		and net.ownerCharacterId ~= characterId then
 		local ownerAccountKey = normalizeName(net.ownerAccountLogin)
 		local myAccountKey = normalizeName(username)
 		if ownerAccountKey ~= "" and ownerAccountKey == myAccountKey and characterId ~= "" then
-			if GlobalStorageSiK.Log then
-				GlobalStorageSiK.Log.warn("Permissions", "ownerReconciled",
-					networkId .. ": cuenta " .. tostring(username) .. " vuelve con characterId nuevo ("
-						.. characterId .. ", antes " .. tostring(net.ownerCharacterId)
-						.. ") - vida anterior de " .. tostring(net.owner)
-						.. " se da por terminada, red pasa a vacante para reclamo explicito")
-			end
-			recordNetworkHistoryEvent(networkId, "owner_reconciled",
-				tostring(net.owner) .. " (cuenta " .. tostring(username) .. ") reconciliado automaticamente: "
-					.. "vida anterior terminada sin evento de muerte procesado, red pasa a vacante")
-			-- BUG REAL cerrado (2026-08-22, confirmado: "no tengo modo de ver la
-			-- marca Muerto"): esta rama nunca marcaba la ficha del personaje como
-			-- fallecida, solo limpiaba el puntero de red - la ficha se quedaba
-			-- viva-en-apariencia para siempre, indistinguible de un miembro
-			-- activo en la UI. Se marca aqui tambien (mismo escritor unico que
-			-- handleOwnerDeath, ver markRecordDead).
 			local staleRecord = net.characterPermissions and net.characterPermissions[net.ownerCharacterId]
-			markRecordDead(staleRecord)
-			net.owner = ""
-			net.ownerCharacterId = nil
-			GlobalStorageSiK.Permissions.requestTransmit()
+			local confirmedDead = staleRecord and staleRecord.role == GlobalStorageSiK.Permissions.ROLE_DEAD
+			if confirmedDead then
+				-- Muerte YA confirmada por el camino normal (handleOwnerDeath /
+				-- markRecordDead ya marco esta ficha ROLE_DEAD antes de que esta
+				-- cuenta volviera a conectar) - aqui SI es seguro vaciar la red
+				-- para reclamo explicito, la vida anterior termino de verdad.
+				if GlobalStorageSiK.Log then
+					GlobalStorageSiK.Log.warn("Permissions", "ownerReconciled",
+						networkId .. ": cuenta " .. tostring(username) .. " vuelve con characterId nuevo ("
+							.. characterId .. ", antes " .. tostring(net.ownerCharacterId)
+							.. ") - muerte de " .. tostring(net.owner)
+							.. " ya confirmada (ROLE_DEAD), red pasa a vacante para reclamo explicito")
+				end
+				recordNetworkHistoryEvent(networkId, "owner_reconciled",
+					tostring(net.owner) .. " (cuenta " .. tostring(username) .. ") reconciliado: "
+						.. "muerte ya confirmada, red pasa a vacante")
+				net.owner = ""
+				net.ownerCharacterId = nil
+				GlobalStorageSiK.Permissions.requestTransmit()
+			else
+				-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+				-- probar en TEST): la version anterior de esta rama daba por hecho
+				-- que "misma cuenta, characterId distinto, sin ROLE_DEAD" solo podia
+				-- significar "vida anterior terminada sin evento de muerte
+				-- procesado" - inferencia NUNCA demostrada y ya refutada por casos
+				-- reales (comunidad china, reportes de Kava): el UUID de modData
+				-- puede perderse/regenerarse por una falla de persistencia del
+				-- motor SIN que el personaje haya muerto. Vaciar la red y marcar
+				-- la ficha anterior como fallecida en ese caso es destruir datos
+				-- reales sobre una suposicion no probada. Ahora, sin una muerte YA
+				-- confirmada (ROLE_DEAD) por el camino normal, NO se toca
+				-- ownership/roles/estado de muerte - se deja constancia de la
+				-- rotacion sin destruir nada, igual que ya se hace a proposito para
+				-- cualquier rol que no sea owner (ver comentario mas arriba: "no
+				-- hay señal fiable... sigue dependiendo del panel de soporte GM").
+				-- Recuperacion sin intervencion automatica de canAccess: la propia
+				-- cuenta puede reclamar explicitamente via canClaimVacantOwnership
+				-- Nivel 0 (arreglado 2026-08-26, ya no exige vacante para el
+				-- propietario original) - un clic deliberado, nunca un efecto
+				-- secundario de conectar. Si tampoco reclama, Admin Dashboard
+				-- ("Liberar propiedad") sigue disponible como via de soporte.
+				rotationUnprovenReason = "identity_rotation_unproven"
+				-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo:
+				-- "271 identityRotationUnproven en una sola conexion" - el sondeo
+				-- periodico de la ventana de bloqueo repite canAccess() cada pocos
+				-- segundos, sin throttle esta linea se repetia sin parar mientras
+				-- la ventana siguiera abierta). Mismo throttle ya usado para
+				-- canAccessDenied (30s por combinacion characterId+networkId).
+				if shouldLogDenied(characterId, networkId) then
+					if GlobalStorageSiK.Log then
+						GlobalStorageSiK.Log.warn("Permissions", "identityRotationUnproven",
+							networkId .. ": cuenta " .. tostring(username) .. " vuelve con characterId nuevo ("
+								.. characterId .. ", antes " .. tostring(net.ownerCharacterId)
+								.. ") sin muerte confirmada de " .. tostring(net.owner)
+								.. " - NO se toca ownership/roles/muerte automaticamente, reclamo propio disponible")
+					end
+					-- BUG REAL cerrado (2026-08-26, pedido explicito: "todo cambio debe
+					-- guardarse tambien en el historial, que no habremos actualizado
+					-- debidamente"): esta rama solo escribia en consola, nunca en el
+					-- historial de auditoria visible desde el panel de soporte - a
+					-- diferencia de la rama confirmedDead de arriba, que si lo hace.
+					-- Mismo throttle que el log (30s) para no llenar los 40 huecos de
+					-- HISTORY_MAX_ENTRIES con la misma reconexion repetida.
+					recordNetworkHistoryEvent(networkId, "identity_rotation_unproven",
+						tostring(username) .. " vuelve con un personaje nuevo (" .. tostring(characterName)
+							.. ") sin muerte confirmada de " .. tostring(net.owner)
+							.. " - reclamo propio disponible, sin cambios automaticos")
+				end
+			end
 		end
 	end
 	-- REDISEÑO explicito (2026-08-23, feedback directo del usuario: "los
@@ -1577,7 +1748,7 @@ function GlobalStorageSiK.Permissions.canAccess(player, networkId)
 				.. " characterId=" .. tostring(characterId) .. " characterName=" .. tostring(characterName)
 				.. " username=" .. tostring(username))
 	end
-	return false, "denied"
+	return false, rotationUnprovenReason or "denied"
 end
 
 local function collectOnlineCharacterRecords(requestingPlayer)
@@ -1894,7 +2065,7 @@ end
 -- ============================================================================
 
 --- Resumen de TODAS las redes del registro, para el selector del panel.
----@return table[] { networkId, label, owner, ownerAccountLogin, memberCount, terminalCount, vacant }
+---@return table[] { networkId, label, owner, ownerAccountLogin, memberCount, activeMemberCount, terminalCount, vacant }
 function GlobalStorageSiK.Permissions.adminListNetworks()
 	-- Cruce entre las dos ModData (operativa para nombre/terminales, propia
 	-- de permisos para identidad/miembros - separacion de responsabilidades,
@@ -1906,8 +2077,20 @@ function GlobalStorageSiK.Permissions.adminListNetworks()
 	local out = {}
 	for networkId, net in pairs(registry.networks or {}) do
 		local permNet = GlobalStorageSiK.Permissions.getPermNet(networkId)
-		local memberCount = 0
-		for _ in pairs((permNet and permNet.characterPermissions) or {}) do memberCount = memberCount + 1 end
+		-- BUG REAL COSMETICO cerrado (2026-08-26, hallazgo de Desarrollo -
+		-- "la interfaz seguira mostrando N miembros contando tambien a los
+		-- fallecidos"): memberCount (ahora recordsTotal, se mantiene el nombre
+		-- de campo original memberCount por compatibilidad con cualquier
+		-- consumidor existente) cuenta TODAS las fichas, incluidas ROLE_DEAD
+		-- conservadas a proposito - activeMemberCount excluye esas para poder
+		-- mostrar ambos numeros por separado en la UI.
+		local memberCount, activeMemberCount = 0, 0
+		for _, record in pairs((permNet and permNet.characterPermissions) or {}) do
+			memberCount = memberCount + 1
+			if not record or record.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
+				activeMemberCount = activeMemberCount + 1
+			end
+		end
 		local terminalCount = 0
 		if GlobalStorageSiK.TerminalRecord and GlobalStorageSiK.TerminalRecord.countActive then
 			terminalCount = GlobalStorageSiK.TerminalRecord.countActive(net) or 0
@@ -1928,6 +2111,7 @@ function GlobalStorageSiK.Permissions.adminListNetworks()
 			owner = owner,
 			ownerAccountLogin = ownerAccountLogin,
 			memberCount = memberCount,
+			activeMemberCount = activeMemberCount,
 			terminalCount = terminalCount,
 			vacant = vacant,
 		}
@@ -2029,10 +2213,34 @@ end
 --- sigue funcionando para quien corresponda despues.
 ---@param networkId string
 ---@return boolean
+-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras probar
+-- en TEST): esta funcion solo vaciaba la CACHE (net.owner/ownerCharacterId),
+-- nunca tocaba la ficha del propietario en net.characterPermissions - se
+-- quedaba con role="owner" internamente, contradiciendo la propia regla
+-- documentada en bindCharacter ("esta ficha es la UNICA fuente de verdad").
+-- Efecto real observado: al reclamar despues, bindCharacter degradaba esa
+-- ficha huerfana a ROLE_MEMBER como efecto secundario silencioso de su
+-- invariante "un solo owner vivo" - la vida antigua quedaba viva-como-
+-- miembro, con acceso a la red, en vez de fallecida como corresponde a esta
+-- herramienta de recuperacion. Ahora se marca ROLE_DEAD de forma explicita y
+-- atomica AQUI MISMO, antes de vaciar la cache - nunca existe un estado
+-- intermedio "cache vacante + ficha todavia diciendo owner". Desarrollo
+-- propuso separar esto en 3 operaciones distintas (liberar conservando
+-- acceso / confirmar muerte y liberar / transferir) - "Liberar propiedad"
+-- es la herramienta de soporte para una red atascada sin muerte confirmada,
+-- asi que "confirmar muerte y liberar" es el comportamiento correcto para
+-- ESTA accion; las otras 2 variantes quedan para una ronda futura si hace
+-- falta.
+---@param networkId string
+---@return boolean
 function GlobalStorageSiK.Permissions.adminReleaseOwnership(networkId)
-	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return false end
+	local oldOwnerId = net.ownerCharacterId
+	local oldOwnerRecord = oldOwnerId and net.characterPermissions and net.characterPermissions[oldOwnerId]
+	if oldOwnerRecord then
+		markRecordDead(oldOwnerRecord)
+	end
 	net.owner = ""
 	net.ownerCharacterId = nil
 	return true
@@ -2208,7 +2416,16 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 		rosterParts[#rosterParts + 1] = "m:" .. id .. ":" .. tostring(entry.role or "")
 			.. ":" .. tostring(entry.username or "")
 			.. ":" .. tostring(entry.characterName or entry.name or "")
-		if id ~= "" then
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- probar en TEST): una red con historial real (vidas anteriores ya
+		-- marcadas ROLE_DEAD, esperado y normal con el tiempo) contaba esas
+		-- fichas fallecidas en el mismo grupo que la vida VIVA actual, asi
+		-- que cualquier cuenta con unas pocas muertes en su historial
+		-- disparaba possibleIdentityRotation en CADA sincronizacion aunque
+		-- solo hubiera una vida realmente activa - ruido constante, sin
+		-- valor diagnostico. Una ficha muerta es historial esperado, nunca
+		-- evidencia de rotacion - se excluye de la deteccion.
+		if id ~= "" and entry.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
 			local groupKey = normalizeName(entry.username) .. "\31"
 				.. normalizeName(entry.characterName or entry.name)
 			if groupKey ~= "\31" then
@@ -2243,9 +2460,31 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	local rosterSignature = table.concat(rosterParts, "|")
 	if permissionRosterLogSignatures[networkId] ~= rosterSignature then
 		permissionRosterLogSignatures[networkId] = rosterSignature
+		-- BUG REAL cerrado (2026-08-26, hallazgo de Desarrollo sobre dev13 -
+		-- "contadores enganosos"): "members=" contaba TODO memberEntries,
+		-- incluidas las fichas ROLE_DEAD de vidas anteriores conservadas a
+		-- proposito (una red con historial real de muertes daba "10 miembros"
+		-- cuando solo 1-2 seguian realmente activos). Desglosado en campos
+		-- separados sin ambiguedad - "members=" se conserva tal cual para no
+		-- romper ningun parser externo que ya lo lea, pero ahora
+		-- recordsTotal/activeMembers/deadRecords/ownerCount dejan claro que
+		-- parte de ese numero es historial, no gente con acceso real hoy.
+		local deadRecords, ownerCount = 0, 0
+		for i = 1, #memberEntries do
+			local role = memberEntries[i].role
+			if role == GlobalStorageSiK.Permissions.ROLE_DEAD then
+				deadRecords = deadRecords + 1
+			elseif role == GlobalStorageSiK.Permissions.ROLE_OWNER then
+				ownerCount = ownerCount + 1
+			end
+		end
 		GlobalStorageSiK.Log.info("Permissions", "permissionRoster",
 			"network=" .. tostring(networkId)
 				.. " members=" .. tostring(#memberEntries)
+				.. " recordsTotal=" .. tostring(#memberEntries)
+				.. " activeMembers=" .. tostring(#memberEntries - deadRecords)
+				.. " deadRecords=" .. tostring(deadRecords)
+				.. " ownerCount=" .. tostring(ownerCount)
 				.. " online=" .. tostring(#onlineCharacters)
 				.. " faction=" .. tostring(#factionMembers)
 				.. " candidates=" .. tostring(#pickerCandidates)
@@ -2686,7 +2925,8 @@ function GlobalStorageSiK.Permissions.countBackupMembers(networkId)
 	local count = 0
 	local seen = {}
 	for characterId, record in pairs(net.characterPermissions or {}) do
-		if isModernCharacterId(characterId) and characterId ~= net.ownerCharacterId and record then
+		if isModernCharacterId(characterId) and characterId ~= net.ownerCharacterId and record
+			and record.role ~= GlobalStorageSiK.Permissions.ROLE_DEAD then
 			count = count + 1
 			seen[normalizeName(record.name)] = true
 			seen[normalizeName(record.username)] = true
@@ -2887,18 +3127,22 @@ function GlobalStorageSiK.Permissions.handleOwnerDeath(deadPlayerOrName)
 		or displayText(deadPlayerOrName)
 	local deadCharacterId = deadPlayer and GlobalStorageSiK.Permissions.getCharacterId(deadPlayer) or ""
 	local deadCharacterKey = normalizeName(deadCharacterName)
-	if deadCharacterKey == "" then
-		-- BUG REAL posible (2026-08-21, sospecha ante reporte de red "fantasma"
-		-- sin sucesion procesada): antes este return era silencioso. Si el
-		-- nombre viniera vacio justo en el instante de morir, la vacante nunca
-		-- se marcaria y la red quedaria con un ownerCharacterId de un UUID
-		-- muerto para siempre, sin activar ningun camino de recuperacion.
+	-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo): esta
+	-- guarda exigia un NOMBRE no vacio para procesar la muerte, mezclando
+	-- presentacion con identidad - un descriptor de personaje defectuoso o
+	-- un nombre Unicode temporalmente irresoluble (mismo problema ya
+	-- documentado con SurvivorDesc y nombres chinos) bloqueaba la vacante
+	-- entera aunque el UUID (la identidad real) fuera perfectamente valido.
+	-- Ahora solo se abandona si NO hay forma de identificar al personaje de
+	-- NINGUNA manera (ni UUID ni nombre) - el nombre pasa a ser solo una
+	-- etiqueta de auditoria en los logs/historial, nunca una condicion para
+	-- marcar la vida como terminada.
+	if deadCharacterId == "" and deadCharacterKey == "" then
 		-- Log SIEMPRE visible (no gateado por Modo depuracion) para poder
 		-- confirmar si esto llega a pasar de verdad.
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.error("Permissions", "handleOwnerDeath",
-				"nombre de personaje vacio al morir - vacante NO procesada para ninguna red, characterId="
-					.. tostring(deadCharacterId))
+				"ni UUID ni nombre disponibles al morir - vacante NO procesada para ninguna red")
 		end
 		return
 	end
@@ -3038,31 +3282,48 @@ function GlobalStorageSiK.Permissions.canClaimVacantOwnership(player, networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
 	if not net then return false, nil end
-	if net.ownerCharacterId and net.ownerCharacterId ~= "" then return false, nil end
 	if displayText(net.ownerAccountLogin) == "" then return false, nil end
 	local characterId = GlobalStorageSiK.Permissions.getCharacterId(player)
 	local myRecord = characterId ~= "" and net.characterPermissions and net.characterPermissions[characterId] or nil
 	local nowTs = nowMs()
-	-- Nivel 0 (prioridad maxima, SIN esperar a que nadie deje de bloquear):
-	-- la cuenta que era propietaria ORIGINAL DE LA RED siempre puede
-	-- reclamar su propia red, la tenga quien la tenga en custodia temporal.
-	-- Decision explicita (2026-08-22): un member DE RED (o incluso un admin
-	-- DE RED) con custodia temporal NO deberia poder dejar fuera para
-	-- siempre - o durante un umbral de inactividad arbitrario - al dueño
-	-- real solo por seguir "activo". Los niveles 1-3 de abajo son para
-	-- CUALQUIER OTRA cuenta (antiguos admins DE RED, nadie), nunca para el
-	-- propietario original, que ya queda resuelto aqui. Mismo
-	-- anti-suplantacion que bindOwnerIdentity: si hay steamId guardado, debe
-	-- coincidir con el actual, el username solo no basta.
+	-- Nivel 0 (prioridad maxima, SIN esperar a que nadie deje de bloquear,
+	-- y SIN exigir vacante): la cuenta que era propietaria ORIGINAL DE LA
+	-- RED siempre puede reclamar su propia red, la tenga quien la tenga en
+	-- custodia temporal. Decision explicita (2026-08-22): un member DE RED
+	-- (o incluso un admin DE RED) con custodia temporal NO deberia poder
+	-- dejar fuera para siempre - o durante un umbral de inactividad
+	-- arbitrario - al dueño real solo por seguir "activo". Los niveles 1-3
+	-- de abajo son para CUALQUIER OTRA cuenta (antiguos admins DE RED,
+	-- nadie), nunca para el propietario original, que ya queda resuelto
+	-- aqui. Mismo anti-suplantacion que bindOwnerIdentity: si hay steamId
+	-- guardado, debe coincidir con el actual, el username solo no basta.
+	--
+	-- BUG REAL DE REGRESION cerrado (2026-08-26, encontrado en pruebas
+	-- reales tras dev6/dev9: "esto si funcionaba antes, alguna guarda
+	-- retirada nos habilitaba el acceso y ahora no"): este Nivel 0 quedaba
+	-- SIEMPRE inalcanzable porque el chequeo de vacante (net.ownerCharacterId
+	-- ~= "") se hacia ANTES, incondicional para TODOS los niveles. Desde que
+	-- dev6 dejo de vaciar la red automaticamente sobre una rotacion de UUID
+	-- no confirmada (identityRotationUnproven, correcto - evita declarar
+	-- muertes falsas), la red YA NUNCA vuelve a quedar vacante sola, asi que
+	-- la propia cuenta original - el caso MEJOR verificado de todos, con
+	-- comprobacion de SteamID incluida - se quedaba bloqueada para siempre
+	-- salvo intervencion manual de staff. Movido el chequeo de vacante
+	-- DESPUES de este bloque: el Nivel 0 ya no exige vacante (la propia
+	-- cuenta puede reclamar lo suyo este quien este puesto ahora mismo),
+	-- los niveles 1-3 (para CUALQUIER OTRA cuenta) siguen exigiendola sin
+	-- cambios - no se abre ningun hueco de seguridad nuevo, solo se repara
+	-- el caso que ya estaba pensado para funcionar asi desde el principio.
 	local myAccount = normalizeName(getPlayerUsername(player))
 	if myAccount ~= "" and myAccount == normalizeName(net.ownerAccountLogin) then
-		local currentSteamId = getSteamIdForUsername(getPlayerUsername(player), player)
+		local currentSteamId = getSteamIdForUsername(getPlayerUsername(player))
 		local steamOk = displayText(net.ownerSteamId) == "" or currentSteamId == ""
 			or displayText(net.ownerSteamId) == currentSteamId
 		if steamOk then
 			return true, "owner"
 		end
 	end
+	if net.ownerCharacterId and net.ownerCharacterId ~= "" then return false, nil end
 	local blockingAdminExists = false
 	local blockingMemberExists = false
 	for _, record in pairs(net.characterPermissions or {}) do
@@ -3337,4 +3598,47 @@ function GlobalStorageSiK.Permissions.adminClaimOwnership(player, networkId)
 			.. ") reclamo la propiedad como admin activo - dueño anterior inactivo: " .. tostring(previousOwner))
 	GlobalStorageSiK.Permissions.requestTransmit()
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_PermOwnershipClaimedMsg")
+end
+
+--- Pedido explicito (2026-08-26, revision tecnica de Desarrollo tras el
+--- banco CJK de DEV15): "un reinicio sin ningun jugador puede no generar
+--- actividad de permisos hasta la siguiente conexion" - para demostrar de
+--- forma inequivoca que una red sobrevivio intacta a un reinicio SIN
+--- clientes conectados (no solo que estaba correcta cuando por fin conecto
+--- alguien), se vuelca el estado de cada red nada mas arrancar el proceso,
+--- ANTES de que ningun jugador haya podido tocar nada. Log SIEMPRE visible
+--- (no gateado por Modo depuracion, mismo criterio que identityBootstrap y
+--- el resto de trazas "captura el instante" de esta ronda) - una linea por
+--- red, formato de campos separados para grep/diff facil entre reinicios.
+function GlobalStorageSiK.Permissions.logSessionStart()
+	if not GlobalStorageSiK.isAuthoritative() or not GlobalStorageSiK.Log then
+		return
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local networks = registry and registry.networks
+	if not networks then
+		return
+	end
+	local sessionId = tostring(nowMs())
+	for networkId in pairs(networks) do
+		local net = GlobalStorageSiK.Permissions.getPermNet(networkId)
+		local recordsTotal = 0
+		for _ in pairs((net and net.characterPermissions) or {}) do
+			recordsTotal = recordsTotal + 1
+		end
+		GlobalStorageSiK.Log.warn("Permissions", "SESSION_START",
+			"build=" .. tostring(GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION or "?")
+				.. " sessionId=" .. sessionId
+				.. " network=" .. tostring(networkId)
+				.. " ownerCharacterId=" .. tostring(net and net.ownerCharacterId or "")
+				.. " ownerAccountLogin=" .. tostring(net and net.ownerAccountLogin or "")
+				.. " networkVacant=" .. tostring(not (net and net.ownerCharacterId and net.ownerCharacterId ~= ""))
+				.. " characterRecordsTotal=" .. tostring(recordsTotal))
+	end
+end
+
+if Events and Events.OnInitGlobalModData then
+	Events.OnInitGlobalModData.Add(function()
+		GlobalStorageSiK.Permissions.logSessionStart()
+	end)
 end

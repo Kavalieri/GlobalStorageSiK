@@ -216,7 +216,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUITabs": "   >> SiK UI: pestañas y extensiones",
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUITabs_tooltip": "Requiere Modo depuración activado. Traza la barra de pestañas lateral y el contrato de registro de pestañas entre Core y addons: creación/reutilización de panel, cambios de visibilidad, y activación/cancelación de clic en una pestaña.",
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch": "   >> SiK UI: caja de búsqueda",
-	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch_tooltip": "Requiere Modo depuración activado. Traza cada cambio en el cuadro de búsqueda de la pestaña Almacén: longitud en bytes frente a caracteres UTF-8 reales, y el texto recibido. Pensado para diagnosticar la búsqueda en idiomas no-ASCII (chino, japonés, coreano...).",
+	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch_tooltip": "Requiere Modo depuración activado. Traza cada cambio en el cuadro de búsqueda de la pestaña Almacén: longitud en unidades UTF-16 frente a caracteres Unicode reales, y el texto recibido. Pensado para diagnosticar la búsqueda en idiomas no-ASCII (chino, japonés, coreano...).",
 	"Sandbox_GlobalStorageSiK_DebugCatNodeNaming": "   >> Nombrado de terminal",
 	"Sandbox_GlobalStorageSiK_DebugCatNodeNaming_tooltip": "Requiere Modo depuración activado. Aplicación del nombre visible de un contenedor a su objeto en el mundo (nombre en menú/inventario). Distinto de las entradas \"SiK UI:\" de arriba - esto es lógica de nombrado, no el framework de interfaz."
 }

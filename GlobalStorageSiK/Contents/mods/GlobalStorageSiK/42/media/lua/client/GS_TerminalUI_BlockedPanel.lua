@@ -76,6 +76,12 @@ local READER_STATUS_EXCLUDED_REASONS = {
 	network_vacant = true,
 	denied = true,
 	no_permission = true,
+	-- Motivo nuevo (2026-08-26, ver GS_Permissions.lua canAccess): misma
+	-- categoria que "denied"/"network_vacant" - la tarjeta de lector tampoco
+	-- se pinta con este motivo, excluir desde el primer momento evita
+	-- repetir el bug real ya cerrado el 2026-08-25 (escaneo de proximidad
+	-- recalculandose sin parar para un motivo que nunca pinta nada).
+	identity_rotation_unproven = true,
 }
 
 local function reasonNeedsReaderStatus(reason)
@@ -340,43 +346,41 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		installBtnW = math.floor((textW - 8) / 2)
 	end
 
+	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
+	-- criterio ya aplicado a Programacion/PC/disquetera): antes este boton se
+	-- dejaba SIEMPRE activo y solo avisaba con un halo note al pulsar si
+	-- faltaba algo (comentario historico: un boton desactivado no procesaba
+	-- el clic en absoluto en PZ, asi que un jugador con requisitos en verde
+	-- podia ver el boton "sin efecto" sin explicacion). El nuevo patron
+	-- "locked" ya resuelve eso con un tooltip explicito en vez de necesitar
+	-- el clic para avisar - se pinta bloqueado de verdad mientras falte algo,
+	-- y se refresca solo cuando cambia el estado real (stateSignature/
+	-- applyRefreshIfNeeded, cada REFRESH_TICKS), igual de "tiempo real" que
+	-- el resto de indicadores de esta misma tarjeta.
 	local btn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, btnY, installBtnW, CRAFT_BTN_H, T("IGUI_GS_InstallReaderCardBtn"), card, function()
 			local p = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-			-- Re-revalida SIEMPRE en el momento del clic (el panel puede llevar
-			-- un rato sin refrescarse - ver stateSignature más arriba). Antes,
-			-- si algo cambiaba entre que se pintó la tarjeta y el clic (el
-			-- jugador se movió un paso, el ordenador dejó de estar "libre"),
-			-- el botón simplemente no hacía NADA sin explicar por qué - un
-			-- jugador reportó justo esto: los 3 requisitos en verde pero
-			-- "Instalar aquí" sin efecto. Ahora siempre hay un aviso.
 			local st = installReaderStatus(p)
 			if st.allReady then
 				-- Igual que el menu contextual del disquete: inicia la
 				-- instalacion directamente, sin abrir ningun dialogo antes.
 				-- El dialogo de red nueva/existente se abre solo al terminar.
 				GlobalStorageSiK.InstallTerminalReader.begin(p, st.target)
-			elseif p and p.setHaloNote then
-				local msg
-				if not st.hasReader then
-					msg = T("IGUI_GS_InstallReaderNeedReaderShort")
-				elseif not st.hasDisk then
-					msg = T("IGUI_GS_InstallReaderNeedDiskShort")
-				elseif st.computerState == "installed" then
-					msg = T("IGUI_GS_InstallReaderComputerInstalledShort")
-				else
-					msg = T("IGUI_GS_InstallReaderComputerNoneShort")
-				end
-				p:setHaloNote(msg, 220, 180, 100, 300)
 			end
-		end, nil, true)
-	-- NUNCA deshabilitar este boton: un boton desactivado no llega a
-	-- procesar el clic en absoluto en PZ, asi que la logica de arriba (que
-	-- SI explica con un aviso por que no puede instalar) nunca se ejecutaba
-	-- - el jugador solo veia un boton muerto, sin ningun mensaje. Un boton
-	-- de la interfaz siempre debe reaccionar al clic; si la accion no puede
-	-- completarse, se avisa (ya lo hace el onClick de arriba), nunca se
-	-- deja de responder sin mas.
+		end, nil, true, not status.allReady)
+	if not status.allReady then
+		local msg
+		if not status.hasReader then
+			msg = T("IGUI_GS_InstallReaderNeedReaderShort")
+		elseif not status.hasDisk then
+			msg = T("IGUI_GS_InstallReaderNeedDiskShort")
+		elseif status.computerState == "installed" then
+			msg = T("IGUI_GS_InstallReaderComputerInstalledShort")
+		else
+			msg = T("IGUI_GS_InstallReaderComputerNoneShort")
+		end
+		btn:setTooltip(msg)
+	end
 	card.installBtn = btn
 	card:addChild(btn)
 

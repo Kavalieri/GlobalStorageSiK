@@ -7,6 +7,7 @@
 require "ISUI/ISPanel"
 require "ISUI/ISUIElement"
 require "GS_I18n"
+require "GS_Libs"
 
 GlobalStorageSiK.TerminalTabRail = {}
 
@@ -52,9 +53,19 @@ function GS_TerminalTabSlot:setSelected(selected)
 end
 
 -- Ruta de clic unica de SiK UI. El slot gobierna dibujo, captura y activacion.
+-- BUG REAL cerrado (2026-08-26, reportado: "si pulso otra vez sobre Almacen
+-- ya activo, se activa Addons en su lugar"): un slot YA seleccionado
+-- devolvia `false` aqui (sin capturar el evento) - un clic sin consumir en
+-- PZ sigue probando al siguiente elemento en el mismo z-order/se propaga al
+-- padre, y si otro slot de la misma cola (p.ej. Addons) resulta alcanzado
+-- por ese fallthrough, procesa el clic como propio y activa esa pestaña sin
+-- que el usuario la pulsara realmente. Un clic sobre la pestaña YA activa
+-- debe ser un no-op silencioso, nunca dejar el evento sin dueño - se
+-- consume igualmente (return true) pero sin fijar _gsPressed/capturar,
+-- asi que onMouseUp tampoco reactiva nada.
 function GS_TerminalTabSlot:onMouseDown(x, y)
 	if self.isSelected then
-		return false
+		return true
 	end
 	self._gsPressed = true
 	self:setCapture(true)
@@ -125,9 +136,14 @@ function GS_TerminalTabSlot:render()
 	if self.tabIcon then
 		self:drawTextureScaledAspect(self.tabIcon, iconX, iconY, iconSize, iconSize, a, r, g, b)
 	else
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- dev16): string.sub(text,1,1) corta solo la primera UNIDAD UTF-16 -
+		-- si el nombre empieza por un caracter fuera del BMP (p.ej. `𠮷`) deja
+		-- solo el subrogado alto huerfano (glifo roto). GS_Libs.firstCodepointText
+		-- devuelve siempre el primer caracter Unicode completo.
 		local firstChar = ""
 		if self.displayName and #self.displayName > 0 then
-			firstChar = string.sub(self.displayName, 1, 1)
+			firstChar = GlobalStorageSiK.Libs.firstCodepointText(self.displayName)
 		end
 		if self.defaultBG then
 			self:drawTextureScaled(self.defaultBG, iconX, iconY, iconSize, iconSize, a, r, g, b)

@@ -1238,8 +1238,19 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 	end
 	local configEnabled = not terminal.canEditNetworkConfig
 		or terminal:canEditNetworkConfig(false)
+	-- Auditoria de botones (2026-08-26): antes se deshabilitaban con la
+	-- textura gris generica de setEnable y SIN ningun tooltip explicando el
+	-- motivo (permiso insuficiente) - un jugador sin permisos solo veia los
+	-- 3 botones apagados, sin saber por que. Ahora usan el mismo aspecto
+	-- "bloqueado" del resto del proyecto, con tooltip.
 	for _, button in ipairs({ ui.nodesRoomZoneBtn, ui.nodesStructureZoneBtn, ui.nodesSelectZoneBtn }) do
-		if button then button:setEnable(configEnabled) end
+		if button then
+			button:setEnable(configEnabled)
+			button._sikUiLocked = not configEnabled
+			if not configEnabled then
+				button:setTooltip(T("IGUI_GS_NodesConfigNoPermission"))
+			end
+		end
 	end
 
 	local embedH = ui.nodesEmbedHeight or heightFor(y)

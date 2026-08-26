@@ -89,7 +89,12 @@ end
 ---@param m table
 ---@return string
 local function memberLabel(m)
-	local name = m.displayName or m.name or "?"
+	-- Prioridad unica compartida con GS_TerminalUI_Permissions.lua - ver
+	-- GlobalStorageSiK.Permissions.resolveMemberDisplayName (2026-08-26,
+	-- revision tecnica: las 2 interfaces tenian antes un orden de campos
+	-- distinto, podian mostrar un nombre diferente para el mismo miembro).
+	local resolved = GlobalStorageSiK.Permissions.resolveMemberDisplayName(m)
+	local name = resolved ~= "" and resolved or "?"
 	local account = (m.username and m.username ~= "") and m.username or "?"
 	return name .. " (" .. account .. ")"
 end
@@ -121,12 +126,75 @@ end
 -- ============================================================================
 GS_AdminHistoryUI = ISPanel:derive("GS_AdminHistoryUI")
 
+local HISTORY_RESIZE_GRAB = 14
+local HISTORY_MIN_W = 420
+local HISTORY_MIN_H = 320
+-- Cuantas entradas recientes copia "Copiar reciente" al portapapeles (pedido
+-- explicito: "un margen razonable para cubrir el rango de tiempo que nos
+-- interesa" - los eventos ya vienen mas-reciente-primero desde el servidor,
+-- HISTORY_MAX_ENTRIES en GS_Permissions.lua acota a 40 por red como maximo
+-- real, asi que 100 ya cubre TODO el historial disponible de cualquier red).
+local HISTORY_COPY_COUNT = 100
+
+--- Redimensionado en esquina inferior derecha, arrastre por cabecera - mismo
+--- patron ya usado en GS_TerminalUI.lua/NodeEditor/ZoneEditor (2026-08-26,
+--- primera vez que se aplica a una ventana del panel de soporte, pedido
+--- explicito: "la ventana de staff/historial debe ser tambien
+--- redimensionable").
+function GS_AdminHistoryUI:installMouseHandlers()
+	self.onMouseDown = function(me, x, y)
+		if x >= me.width - HISTORY_RESIZE_GRAB and y >= me.height - HISTORY_RESIZE_GRAB then
+			me.resizing = true
+			me:setCapture(true)
+			return true
+		end
+		if y >= 0 and y < me.headerHeight and x < me.width - 36 then
+			me.moving = true
+			me:setCapture(true)
+			return true
+		end
+		return ISPanel.onMouseDown(me, x, y)
+	end
+	self.onMouseUp = function(me, x, y)
+		if me.resizing or me.moving then
+			me.resizing = false
+			me.moving = false
+			me:setCapture(false)
+			me:refreshEvents()
+			return true
+		end
+		return ISPanel.onMouseUp(me, x, y)
+	end
+	self.onMouseUpOutside = self.onMouseUp
+	self.onMouseMove = function(me, dx, dy)
+		if me.resizing then
+			me:setWidth(math.max(me.minimumWidth, me.width + dx))
+			me:setHeight(math.max(me.minimumHeight, me.height + dy))
+			GlobalStorageSiK.TerminalScroll.resize(me.eventScroll,
+				me.width - PAD * 2, me.height - me.scrollTopY - PAD)
+			return true
+		end
+		if me.moving then
+			me:setX(me.x + dx)
+			me:setY(me.y + dy)
+			return true
+		end
+		return ISPanel.onMouseMove(me, dx, dy)
+	end
+	self.onMouseMoveOutside = self.onMouseMove
+end
+
 function GS_AdminHistoryUI:initialise()
 	ISPanel.initialise(self)
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
+	self.minimumWidth = HISTORY_MIN_W
+	self.minimumHeight = HISTORY_MIN_H
+	self.resizable = true
+	self.resizing = false
+	self.moving = false
 	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
@@ -149,10 +217,61 @@ function GS_AdminHistoryUI:initialise()
 		end
 		scrollY = scrollY + 4
 	end
+	-- Fila de acciones (2026-08-26, pedido explicito): copiar el historial
+	-- reciente al portapapeles y borrarlo si se quiere empezar de cero -
+	-- ninguna de las dos toca redes/permisos, solo el registro de auditoria.
+	local actionBtnW = math.floor((self.width - PAD * 2 - 8) / 2)
+	self.copyBtn = GlobalStorageSiK.SiK_UI.createButton(
+		PAD, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryCopy"), self, function()
+			self:onCopyRecent()
+		end)
+	self:addChild(self.copyBtn)
+	self.clearBtn = GlobalStorageSiK.SiK_UI.createButton(
+		PAD + actionBtnW + 8, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryClear"), self, function()
+			self:onClearHistory()
+		end)
+	GlobalStorageSiK.SiK_UI.applyDangerButton(self.clearBtn)
+	self:addChild(self.clearBtn)
+	scrollY = scrollY + BTN_H + LINE_GAP
+	self.scrollTopY = scrollY
 	self.eventScroll = GlobalStorageSiK.TerminalScroll.create(
 		self, PAD, scrollY, self.width - PAD * 2, self.height - scrollY - PAD)
 	self:refreshEvents()
+	self:installMouseHandlers()
 	GlobalStorageSiK.SiK_UI.centerModal(self)
+end
+
+--- Copia al portapapeles las HISTORY_COPY_COUNT entradas mas recientes (ya
+--- vienen mas-reciente-primero) en texto plano, una linea por evento -
+--- pedido explicito 2026-08-26 para poder pegar el rango de tiempo que
+--- interesa en un reporte/chat sin tener que hacer capturas de pantalla.
+function GS_AdminHistoryUI:onCopyRecent()
+	local events = self.events or {}
+	local lines = {}
+	local count = math.min(#events, HISTORY_COPY_COUNT)
+	for i = 1, count do
+		local ev = events[i]
+		lines[#lines + 1] = os.date("%Y-%m-%d %H:%M:%S", math.floor((ev.ts or 0) / 1000))
+			.. " - " .. tostring(ev.type) .. ": " .. tostring(ev.detail or "")
+	end
+	Clipboard.setClipboard(table.concat(lines, "\n"))
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
+	if player and player.setHaloNote then
+		player:setHaloNote(T("IGUI_GS_AdminHistoryCopied", count), 180, 220, 160, 350)
+	end
+end
+
+--- Vacia el historial de auditoria de la red actual (nunca toca miembros,
+--- roles ni ownership) - pedido explicito 2026-08-26, "por si el usuario
+--- quiere iniciar un historial nuevo, efectivo". Revalidado en servidor
+--- (isServerStaff), igual que el resto de acciones de este panel.
+function GS_AdminHistoryUI:onClearHistory()
+	if not self.networkId or not GlobalStorageSiK.NetClient or not GlobalStorageSiK.NetClient.sendCommand then
+		return
+	end
+	GlobalStorageSiK.NetClient.sendCommand("adminClearNetworkHistory", { networkId = self.networkId })
+	self.events = {}
+	self:refreshEvents()
 end
 
 function GS_AdminHistoryUI:destroy()
@@ -203,15 +322,19 @@ end
 
 ---@param events table[]
 ---@param networkLabel string|nil
-function GlobalStorageSiK.AdminDashboard.showHistory(events, networkLabel)
+---@param networkId string|nil
+function GlobalStorageSiK.AdminDashboard.showHistory(events, networkLabel, networkId)
 	if GlobalStorageSiK.AdminDashboard.historyInstance then
 		GlobalStorageSiK.AdminDashboard.historyInstance:destroy()
 	end
 	local sw, sh = getCore():getScreenWidth(), getCore():getScreenHeight()
-	local w, h = math.min(520, sw - 60), math.min(560, sh - 60)
+	-- Tamano por defecto ampliado (2026-08-26, pedido explicito: "debe ser
+	-- mas grande") - sigue redimensionable a mano por si hace falta mas.
+	local w, h = math.min(720, sw - 60), math.min(760, sh - 60)
 	local ui = GS_AdminHistoryUI:new((sw - w) / 2, (sh - h) / 2, w, h)
 	ui.events = events or {}
 	ui.networkLabel = networkLabel or ""
+	ui.networkId = networkId
 	ui:initialise()
 	ui:addToUIManager()
 	GlobalStorageSiK.AdminDashboard.historyInstance = ui
@@ -253,9 +376,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 	local textW = self.width - pad * 2
 	local m = self.member
 
-	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_AdminMemberEditorTitle"),
-		0.95, 0.95, 0.95, 1, UIFont.Medium, true)
-	title:initialise()
+	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_AdminMemberEditorTitle"))
 	self:addChild(title)
 	y = y + FONT_HGT_MEDIUM + LINE_GAP
 
@@ -359,16 +480,133 @@ end
 -- ============================================================================
 GS_AdminDashboardUI = ISPanel:derive("GS_AdminDashboardUI")
 
+local ADMIN_RESIZE_GRAB = 14
+local ADMIN_MIN_W = 520
+local ADMIN_MIN_H = 480
+
+--- Redimensionado en esquina + arrastre por cabecera, mismo patron ya
+--- probado en GS_TerminalUI.lua/NodeEditor/ZoneEditor (2026-08-26, pedido
+--- explicito: "el panel de staff debe ser tambien redimensionable"). Este
+--- panel construye TODO su contenido de una vez en buildStaticFrame() con
+--- anchos derivados de self.width en el momento de construir - en vez de
+--- reflow parcial (arriesgado con tantos widgets encadenados por posicion Y
+--- acumulada), se reconstruye entero (rebuildAfterResize, reutiliza los
+--- datos ya cacheados _networks/_members, sin llamada a servidor ni
+--- parpadeo de "vacio").
+--- BUG REAL DE UX cerrado (2026-08-26, "no escala en tiempo real y se
+--- actualiza luego. Arreglar para no dificultar procedimientos"): antes solo
+--- se reconstruia al SOLTAR el arrastre - la ventana se quedaba con el
+--- tamano viejo mientras se arrastraba, dando la sensacion de que el
+--- redimensionado no respondia. rebuildAfterResize() ya era seguro de llamar
+--- repetidamente (nunca golpea el servidor), asi que ahora tambien se llama
+--- DURANTE el arrastre, con un debounce de ADMIN_REFLOW_DEBOUNCE_MS para no
+--- reconstruir en cada pixel de movimiento del raton (decenas de veces por
+--- segundo) - el reflow se ve fluido sin recalcular el layout mas de lo
+--- necesario. El mouseUp final SIEMPRE reconstruye sin condicion, para que
+--- el ultimo delta (que pudo caer dentro de la ventana de debounce) nunca se
+--- pierda.
+local ADMIN_REFLOW_DEBOUNCE_MS = 100
+function GS_AdminDashboardUI:installMouseHandlers()
+	self.onMouseDown = function(me, x, y)
+		if x >= me.width - ADMIN_RESIZE_GRAB and y >= me.height - ADMIN_RESIZE_GRAB then
+			me.resizing = true
+			me._lastReflowMs = nil
+			me:setCapture(true)
+			return true
+		end
+		if y >= 0 and y < me.headerHeight and x < me.width - 36 then
+			me.moving = true
+			me:setCapture(true)
+			return true
+		end
+		return ISPanel.onMouseDown(me, x, y)
+	end
+	self.onMouseUp = function(me, x, y)
+		if me.resizing then
+			me.resizing = false
+			me:setCapture(false)
+			me:rebuildAfterResize()
+			return true
+		end
+		if me.moving then
+			me.moving = false
+			me:setCapture(false)
+			return true
+		end
+		return ISPanel.onMouseUp(me, x, y)
+	end
+	self.onMouseUpOutside = self.onMouseUp
+	self.onMouseMove = function(me, dx, dy)
+		if me.resizing then
+			me:setWidth(math.max(me.minimumWidth, me.width + dx))
+			me:setHeight(math.max(me.minimumHeight, me.height + dy))
+			local nowMs = getTimestampMs and getTimestampMs() or 0
+			if not me._lastReflowMs or (nowMs - me._lastReflowMs) >= ADMIN_REFLOW_DEBOUNCE_MS then
+				me._lastReflowMs = nowMs
+				me:rebuildAfterResize()
+			end
+			return true
+		end
+		if me.moving then
+			me:setX(me.x + dx)
+			me:setY(me.y + dy)
+			return true
+		end
+		return ISPanel.onMouseMove(me, dx, dy)
+	end
+	self.onMouseMoveOutside = self.onMouseMove
+end
+
+--- Reconstruye el marco entero al tamano nuevo (ver comentario de
+--- installMouseHandlers) conservando posicion en pantalla - buildStaticFrame
+--- llama a centerModal al final (pensado para la construccion inicial), asi
+--- que aqui se restaura la posicion previa despues para no "saltar" al
+--- centro cada vez que se suelta el asa de redimensionado.
+function GS_AdminDashboardUI:rebuildAfterResize()
+	local x, y = self:getX(), self:getY()
+	self:clearChildren()
+	self:buildStaticFrame()
+	-- BUG REAL cerrado (2026-08-26, reportado en pruebas reales: "no tenemos
+	-- como cerrar la ventana, el boton desaparece al reescalar"): el boton de
+	-- cerrar lo crea/posiciona setupModalPanel() UNA vez en initialise() como
+	-- hijo directo del panel, FUERA de buildStaticFrame() - clearChildren()
+	-- lo borraba junto con todo lo demas y nunca se recreaba. No se puede
+	-- volver a llamar setupModalPanel() entero aqui (tambien reinstalaria
+	-- setupHeaderDrag(), que chocaria con los manejadores de arrastre/resize
+	-- propios de installMouseHandlers) - se recrea solo el boton
+	-- (createCloseButton) y se reposiciona con layoutModalFrame(), las 2
+	-- unicas funciones responsables de el.
+	GlobalStorageSiK.SiK_UI.createCloseButton(self, self, function() self:destroy() end)
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, self.padding)
+	self:setX(x)
+	self:setY(y)
+	if self._networks then
+		self:refreshNetworkList(self._networks)
+	end
+	if self._selectedNetworkId then
+		self:refreshInfoLines()
+	end
+	if self._members then
+		self:refreshMemberPanel(self._members)
+	end
+end
+
 function GS_AdminDashboardUI:initialise()
 	ISPanel.initialise(self)
 	self.backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.98 }
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
+	self.minimumWidth = ADMIN_MIN_W
+	self.minimumHeight = ADMIN_MIN_H
+	self.resizable = true
+	self.resizing = false
+	self.moving = false
 	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
 		self:destroy()
 	end, PAD)
 	self:buildStaticFrame()
+	self:installMouseHandlers()
 	self:requestNetworkList()
 	self:requestOnlinePlayers()
 end
@@ -458,7 +696,14 @@ function GS_AdminDashboardUI:refreshOnlinePlayersCombo()
 	end
 	self.addMemberCombo.selected = newSelected
 	if self.addMemberBtn then
-		self.addMemberBtn:setEnable(#self._addMemberOptions > 0)
+		local hasOptions = #self._addMemberOptions > 0
+		-- _sikUiLocked (auditoria de botones, 2026-08-26): aspecto atenuado
+		-- del proyecto en vez de la textura gris generica de setEnable.
+		self.addMemberBtn._sikUiLocked = not hasOptions
+		self.addMemberBtn:setEnable(hasOptions)
+		if not hasOptions and self.addMemberBtn.setTooltip then
+			self.addMemberBtn:setTooltip(T("IGUI_GS_AdminNoPlayersOnline"))
+		end
 	end
 end
 
@@ -585,13 +830,13 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	self.releaseBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminReleaseOwnership"), self, function()
 			self:onReleaseOwnership()
-		end)
+		end, nil, true)
 	self:addChild(self.releaseBtn)
 
 	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), self, function()
 			self:onDeleteNetworkConfirm()
-		end)
+		end, nil, true)
 	GlobalStorageSiK.SiK_UI.applyDangerButton(self.deleteBtn)
 	self:addChild(self.deleteBtn)
 
@@ -662,7 +907,13 @@ function GS_AdminDashboardUI:refreshInfoLines()
 			lines[#lines + 1] = T("IGUI_GS_AdminInfoOwner", net.owner or "?")
 		end
 		lines[#lines + 1] = T("IGUI_GS_AdminInfoAccount", (net.ownerAccountLogin ~= "" and net.ownerAccountLogin) or "?")
-		lines[#lines + 1] = T("IGUI_GS_AdminNetworkCounts", net.memberCount or 0, net.terminalCount or 0)
+		-- BUG REAL COSMETICO cerrado (2026-08-26, hallazgo de Desarrollo -
+		-- "N miembros" incluia fichas ROLE_DEAD conservadas a proposito, dando
+		-- la impresion de mas gente con acceso real de la que hay): separa
+		-- activos de historico en 2 numeros explicitos en vez de sumarlos.
+		local deadRecords = math.max(0, (net.memberCount or 0) - (net.activeMemberCount or net.memberCount or 0))
+		lines[#lines + 1] = T("IGUI_GS_AdminNetworkCounts",
+			net.activeMemberCount or net.memberCount or 0, deadRecords, net.terminalCount or 0)
 	end
 	for i = 1, INFO_LINE_COUNT do
 		self.infoLbls[i]:setName(lines[i] or "")
@@ -756,8 +1007,19 @@ function GS_AdminDashboardUI:onSetOwner(characterId)
 	end
 end
 
+--- BUG REAL encontrado (auditoria de botones, 2026-08-26): sin red
+--- seleccionada, este boton no hacia absolutamente nada al pulsarlo - ni
+--- aviso, ni bloqueo visual, un boton "muerto" en la practica. Ahora avisa
+--- con un halo note, mismo patron ya usado en el resto del proyecto para
+--- "revalida y avisa" en vez de fallar en silencio.
 function GS_AdminDashboardUI:onReleaseOwnership()
-	if not self._selectedNetworkId then return end
+	if not self._selectedNetworkId then
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
+		if player and player.setHaloNote then
+			player:setHaloNote(T("IGUI_GS_AdminNoNetworkSelected"), 220, 180, 100, 300)
+		end
+		return
+	end
 	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		GlobalStorageSiK.NetClient.sendCommand("adminReleaseOwnership", { networkId = self._selectedNetworkId })
 	end
@@ -769,7 +1031,13 @@ end
 --- estado que ya existe hoy si una red se rompe por otra via), ofreciendo la
 --- tarjeta de "instalar aqui" para re-vincularlo. Confirmacion obligatoria.
 function GS_AdminDashboardUI:onDeleteNetworkConfirm()
-	if not self._selectedNetworkId then return end
+	if not self._selectedNetworkId then
+		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
+		if player and player.setHaloNote then
+			player:setHaloNote(T("IGUI_GS_AdminNoNetworkSelected"), 220, 180, 100, 300)
+		end
+		return
+	end
 	local networkId = self._selectedNetworkId
 	local dashboard = self
 	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_AdminDeleteNetworkConfirm", networkId), function()
@@ -817,7 +1085,7 @@ function GlobalStorageSiK.AdminDashboard.onNetworkHistory(networkId, events)
 		-- que red pertenece ese historial"): el mismo label que ya usa el
 		-- combo de red (nombre + cuenta del propietario + id interno).
 		local label = (ui._selectedNetwork and ui._selectedNetwork.label) or networkId
-		GlobalStorageSiK.AdminDashboard.showHistory(events, label)
+		GlobalStorageSiK.AdminDashboard.showHistory(events, label, networkId)
 	end
 end
 

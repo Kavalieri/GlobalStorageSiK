@@ -134,7 +134,22 @@ local function flush()
 	if queueHead > queueTail and dropped == 0 then return end
 	local recipients = onlineSubscribers()
 	if #recipients == 0 then
-		clearQueue()
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo +
+		-- reporte directo del usuario: "el relay deberia reenviar TODAS las
+		-- trazas SRV, si no aparecen es que no se reenvian o el servidor no
+		-- las ve"): onlineSubscribers() da de baja una cuenta del relay en
+		-- el instante en que no aparece en getOnlinePlayers() - un hueco
+		-- TRANSITORIO real durante el ciclo muerte->reaparicion (el
+		-- IsoPlayer viejo desaparece, el nuevo tarda en registrarse; el
+		-- cliente vuelve a suscribirse solo via Events.OnCreatePlayer, ver
+		-- GS_DebugRelayClient.lua). Vaciar la cola entera aqui destruye para
+		-- siempre cualquier linea generada justo en ese hueco (ej.
+		-- "OnPlayerDeath fired" del propio servidor) sin que el evento
+		-- autoritativo haya fallado en absoluto - un falso "no se disparo"
+		-- causado por el transporte, no por el evento. Ya no se vacia por
+		-- esto: la cola sigue acotada por MAX_QUEUE_LINES (256) y se entrega
+		-- en cuanto la cuenta vuelva a aparecer online (re-suscripcion
+		-- automatica tras respawn).
 		return
 	end
 	local payload = takeBatch()

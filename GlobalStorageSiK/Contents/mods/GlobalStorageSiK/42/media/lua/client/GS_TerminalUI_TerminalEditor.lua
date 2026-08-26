@@ -146,8 +146,7 @@ function GS_TerminalEditorUI:buildLayout()
 	local textW = self.width - pad * 2
 	local row = self.row
 
-	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_TerminalEditorTitle"), 0.95, 0.95, 0.95, 1, UIFont.Medium, true)
-	title:initialise()
+	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_TerminalEditorTitle"))
 	self:addChild(title)
 	y = y + FONT_HGT_MEDIUM + LINE_GAP
 

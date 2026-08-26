@@ -300,12 +300,12 @@ function GS_ZoneEditorUI:ensureForm()
 	-- GS_TerminalUI_NodeEditor.lua - el bloque de informacion siempre
 	-- precede al campo editable, en las dos ventanas).
 	local zContainerCount = zoneContainerCount(self.zone, self.terminal)
-	self.statsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZoneStatsLine", zContainerCount), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.statsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZoneStatsLine", zContainerCount), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 	self.statsLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.statsLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.occupancyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, occupancyLabelText(self.capacityInfo), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.occupancyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, occupancyLabelText(self.capacityInfo), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 	self.occupancyLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
@@ -362,7 +362,7 @@ function GS_ZoneEditorUI:ensureForm()
 
 	local summary = GlobalStorageSiK.RulesUI.buildSummary(self.zone and self.zone.rules)
 	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(summary, innerW, UIFont.Small)) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.8, 0.85, 1, UIFont.Small, true)
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 		lbl:initialise()
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
 		y = y + FONT_HGT_SMALL + 2
@@ -594,7 +594,7 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 			shown = shown + 1
 			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
 			label = GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small)
-			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, 0.85, 0.9, 0.95, 1, UIFont.Small, true)
+			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[1], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[2], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[3], 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
 
@@ -615,7 +615,7 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 		end
 	end
 	if shown == 0 then
-		local emptyLbl = ISLabel:new(4, CHIP_PAD, FONT_HGT_SMALL, T("IGUI_GS_NodeRulesEmpty"), 0.45, 0.48, 0.52, 1, UIFont.Small, true)
+		local emptyLbl = ISLabel:new(4, CHIP_PAD, FONT_HGT_SMALL, T("IGUI_GS_NodeRulesEmpty"), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 		emptyLbl:initialise()
 		host:addChild(emptyLbl)
 	end

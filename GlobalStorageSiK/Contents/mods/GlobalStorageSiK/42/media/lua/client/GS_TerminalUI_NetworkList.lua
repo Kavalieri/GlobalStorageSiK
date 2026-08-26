@@ -78,13 +78,19 @@ local function refreshSelectedNetworkInfo(ui, state)
 	end
 
 	if ui.netUseBtn then
+		-- _sikUiLocked (2026-08-26, auditoria de botones): SOLO el aspecto
+		-- visual (atenuado, sin la textura gris generica de setEnable) - el
+		-- gating real de clic sigue en setEnable, igual que en el resto de
+		-- botones migrados a este patron esta ronda.
 		local canUse = row and (row.activeTerminals or 0) > 0
+		ui.netUseBtn._sikUiLocked = not canUse
 		ui.netUseBtn:setEnable(canUse == true)
 		ui.netUseBtn:setTooltip(canUse and T("IGUI_GS_NetUseSelectedHint")
 			or T("IGUI_GS_NetReactivateViaTerminal"))
 	end
 	if ui.netDeleteBtn then
 		local canDelete = row and row.activeTerminals == 0 and row.isOwner == true
+		ui.netDeleteBtn._sikUiLocked = not canDelete
 		ui.netDeleteBtn:setEnable(canDelete == true)
 		ui.netDeleteBtn:setTooltip(row and row.activeTerminals ~= 0
 			and T("IGUI_GS_NetworkDeleteActive")
@@ -164,19 +170,19 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 			GlobalStorageSiK.NetClient.sendNetworkCommand("rescanNetwork", nid, {
 				searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or "",
 			})
-		end)
+		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netUseBtn)
 	ui.netRefreshBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + btnW + ROW_GAP, y, btnW, BTN_H + 2, T("IGUI_GS_NetRefreshList"), scroll, function()
 			GlobalStorageSiK.NetClient.sendCommand("getNetworkList", {})
-		end)
+		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netRefreshBtn)
 	y = y + BTN_H + 10
 
 	ui.netDeleteBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad, y, comboW, BTN_H + 2, T("IGUI_GS_NetworkDeleteSuspended"), scroll, function()
 			showDeleteConfirm(terminal, selectedNetworkRow(ui, terminal and terminal.terminalState or {}))
-		end)
+		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netDeleteBtn)
 	y = y + BTN_H + 10
 	ui.netListBlockEndY = y

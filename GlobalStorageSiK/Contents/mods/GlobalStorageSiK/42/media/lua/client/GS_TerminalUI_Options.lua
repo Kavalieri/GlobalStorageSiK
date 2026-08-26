@@ -60,7 +60,13 @@ local function isTabUiHealthy(scroll, ui, key)
 	if key == "estado" then
 		return live(ui.stats and ui.stats.valPower) and live(ui.netListCard)
 	elseif key == "admin" then
-		return live(ui.termTableHost) and live(ui.floppyBlockCard)
+		-- BUG REAL encontrado (2026-08-26, al tocar este fichero por otro
+		-- motivo): comprobaba ademas "ui.floppyBlockCard", un campo que ya no
+		-- existe desde que la Disquetera se convirtio en addon (ver
+		-- comentario historico en GS_TerminalUI_Network.lua) - live(nil) daba
+		-- SIEMPRE false, asi que esta sub-pestaña se reconstruia entera en
+		-- CADA sincronizacion en vez de solo cuando de verdad hacia falta.
+		return live(ui.termTableHost)
 	end
 	return false
 end

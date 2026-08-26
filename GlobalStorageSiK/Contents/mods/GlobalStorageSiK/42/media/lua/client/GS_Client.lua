@@ -523,7 +523,7 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "itemNetworkCounts" then
 		if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived then
-			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType, args and args.networks or {}, args and args.hasAnyNetwork)
+			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType, args and args.networks or {}, args and args.hasAnyNetwork, args and args.mediaTitle)
 		end
 	elseif command == "networkList" then
 		if not GlobalStorageSiK.Client then

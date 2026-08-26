@@ -42,15 +42,34 @@ local ACCENT_MAP = {
 --- fuera seguro.
 ---@param s string
 ---@return string
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, reportado por un miembro de
+-- la comunidad con telemetria real de servidor dedicado - red de 1286 tipos/
+-- 188 nodos, refreshItemsTab en 1157ms; el resto del informe, no solo el
+-- sort ya arreglado arriba en GS_TerminalUI_Items.lua, senalaba
+-- concretamente esta funcion: "asciiLower hace 47 pasadas por llamada (1
+-- gsub + 46 acentos), y el haystack de busqueda la llama ~10 veces por
+-- fila"): un catalogo de items tiene un universo ACOTADO de nombres/
+-- categorias que se repiten en cientos de filas - memorizar el resultado
+-- por cadena de entrada evita repetir las 47 pasadas de gsub para el MISMO
+-- texto en cada fila que lo comparte, sin tocar la logica de normalizacion
+-- en si. Cache simple por valor de cadena (no debil - el universo de
+-- textos de items/categorias es pequeño y estable durante toda la sesion,
+-- nunca crece sin limite como pasaria con IDs unicos por fila).
+local asciiLowerCache = {}
 function GlobalStorageSiK.I18n.asciiLower(s)
 	if not s or s == "" then
 		return s or ""
 	end
-	s = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
-	for accented, base in pairs(ACCENT_MAP) do
-		s = s:gsub(accented, base)
+	local cached = asciiLowerCache[s]
+	if cached ~= nil then
+		return cached
 	end
-	return s
+	local result = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
+	for accented, base in pairs(ACCENT_MAP) do
+		result = result:gsub(accented, base)
+	end
+	asciiLowerCache[s] = result
+	return result
 end
 
 GlobalStorageSiK.I18n.DEFAULTS = {
@@ -803,12 +822,33 @@ function GlobalStorageSiK.I18n.getScriptItem(fullType)
 end
 
 --- Nombre estable por tipo (sin variaciones de instancia: botellas, contenido, etc.).
+--- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, revision tecnica de
+--- Desarrollo tras dev18 - "se ha pasado de ~26000 resoluciones por refresco
+--- a ~1286, pero no al escenario completamente memorizado"): esta funcion
+--- solo memorizaba la consulta a ScriptManager (cachedScriptItem), no su
+--- PROPIO resultado final - cada fila seguia reintentando
+--- getItemNameFromFullType()/instanceItem()/script:getDisplayName() en cada
+--- ordenacion por nombre (la clave por defecto). Es pura por `fullType` (el
+--- unico parametro, `worldSprite` no la afecta - se resuelve ANTES en
+--- itemDisplayName() via moveableDisplayNameFromSprite, con retorno
+--- temprano si aplica) - segura de memorizar sin cache separada por sprite.
 ---@param fullType string|nil
 ---@return string
+local typeDisplayNameCache = {}
 function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if not fullType or fullType == "" then
 		return "?"
 	end
+	local cached = typeDisplayNameCache[fullType]
+	if cached ~= nil then
+		return cached
+	end
+	local result = GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
+	typeDisplayNameCache[fullType] = result
+	return result
+end
+
+function GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
 	local earlyScript = cachedScriptItem(fullType)
 	local hasScript = earlyScript ~= nil
 	-- getItemNameFromFullType imprime un error Java aunque esté dentro de pcall
@@ -1100,9 +1140,24 @@ end
 --- Texto buscable de una fila de ítem (idioma del cliente + inglés del servidor + fullType).
 ---@param row table|nil
 ---@return string
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, mismo informe de telemetria
+-- real que el fix de asciiLower de arriba - "nada en el camino de busqueda
+-- esta memorizado"): filterItemRows() llama a esto para CADA fila en CADA
+-- pulsacion de tecla del buscador, recalculando itemDisplayName/
+-- ItemTaxonomy.resolve/categoria/asciiLower entero desde cero aunque la fila
+-- no haya cambiado desde la ultima tecla. Cache por REFERENCIA de fila
+-- (clave debil, __mode="k") - las filas del catalogo son objetos estables
+-- mientras la pestaña no se reconstruye (refreshItemsTab crea filas NUEVAS,
+-- asi que la cache vieja simplemente deja de usarse y el recolector de
+-- basura libera las entradas sin que haga falta invalidarla a mano).
+local itemSearchHaystackCache = setmetatable({}, { __mode = "k" })
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	if not row then
 		return ""
+	end
+	local cached = itemSearchHaystackCache[row]
+	if cached ~= nil then
+		return cached
 	end
 	local fullType = row.fullType or ""
 	local parts = {}
@@ -1140,7 +1195,9 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		addPart(shortName)
 	end
 
-	return GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
+	local haystack = GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
+	itemSearchHaystackCache[row] = haystack
+	return haystack
 end
 
 --- Filtra filas de ítems por consulta (cliente: nombres localizados + inglés).

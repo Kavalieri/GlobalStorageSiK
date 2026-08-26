@@ -182,7 +182,7 @@ function GS_FilterEditorUI:buildLayout()
 	local y = self.headerHeight + pad
 
 	-- Tipo de filtro
-	local typeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterTypeLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local typeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterTypeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	typeLbl:initialise()
 	self:addChild(typeLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -235,7 +235,7 @@ end
 --- helpers compartidos de GS_TerminalUI_Config.lua (mismo catalogo completo,
 --- no solo lo que la red tiene ahora).
 function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
-	local mainLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryMainLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local mainLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryMainLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	mainLbl:initialise()
 	self:addChild(mainLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -247,7 +247,7 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self:addChild(self.catMainCombo)
 	y = y + ENTRY_H + 8
 
-	local subLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategorySubLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local subLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategorySubLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	subLbl:initialise()
 	self:addChild(subLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -259,7 +259,7 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self:addChild(self.catSubCombo)
 	y = y + ENTRY_H + 8
 
-	local leafLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryLeafLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local leafLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryLeafLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	leafLbl:initialise()
 	self:addChild(leafLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -285,7 +285,7 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 end
 
 function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
-	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	modeLbl:initialise()
 	self:addChild(modeLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -300,7 +300,7 @@ function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
 	self:addChild(self.nameModeCombo)
 	y = y + ENTRY_H + 8
 
-	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterValueLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterValueLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	valLbl:initialise()
 	self:addChild(valLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -315,7 +315,7 @@ function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
 end
 
 function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
-	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	modeLbl:initialise()
 	self:addChild(modeLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -336,7 +336,7 @@ function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
 	local idx = self.weightModeCombo.selected or 1
 	local mode = WEIGHT_MODES[idx] or "eq"
 
-	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterWeightValueLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterWeightValueLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	valLbl:initialise()
 	self:addChild(valLbl)
 	y = y + FONT_HGT_SMALL + 2
@@ -379,7 +379,7 @@ function GS_FilterEditorUI:buildTagFields(pad, innerW, y)
 end
 
 function GS_FilterEditorUI:buildItemFields(pad, innerW, y)
-	local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterItemSearchLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
+	local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterItemSearchLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 	hintLbl:initialise()
 	self:addChild(hintLbl)
 	y = y + FONT_HGT_SMALL + 2

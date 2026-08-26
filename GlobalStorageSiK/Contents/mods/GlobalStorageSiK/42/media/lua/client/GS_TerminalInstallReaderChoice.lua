@@ -124,6 +124,10 @@ local function refreshRecoverySelection(panel)
 			and T("IGUI_GS_NetLinkAction") or T("IGUI_GS_NetReactivateAction"))
 			or T("IGUI_GS_NetLinkAction")
 		panel.networkActionBtn._sikUiLabel = label
+		-- _sikUiLocked (2026-08-26, auditoria de botones): aspecto visual
+		-- atenuado en vez de la textura gris generica de setEnable - el
+		-- gating real de clic sigue en setEnable.
+		panel.networkActionBtn._sikUiLocked = row == nil
 		panel.networkActionBtn:setEnable(row ~= nil)
 	end
 end
@@ -296,8 +300,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	local y = pad
 	local textW = self.width - pad * 2
 
-	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_InstallReaderTitle"), 0.95, 0.95, 0.95, 1, UIFont.Medium, true)
-	title:initialise()
+	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_InstallReaderTitle"))
 	self:addChild(title)
 	y = y + FONT_HGT_MEDIUM + LINE_GAP
 

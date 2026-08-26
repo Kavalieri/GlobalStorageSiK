@@ -41,7 +41,7 @@ local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	hdr.drawBackground = false
 	hdr.prerender = function(panel)
 		ISPanel.prerender(panel)
-		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
+		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, 0)
 		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)

@@ -469,12 +469,12 @@ function GS_NodeEditorUI:ensureForm()
 	-- nivel de UN contenedor en el mod, solo agregada de red completa (ver
 	-- GS_NetworkCapacity.lua) - queda para una ronda dedicada aparte.
 	local itemCount, typeCount = nodeItemStats(self.node)
-	self.statsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeStatsLine", itemCount, typeCount), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.statsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeStatsLine", itemCount, typeCount), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 	self.statsLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.statsLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.occupancyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, occupancyLabelText(nodeCapacityInfo(node)), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.occupancyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, occupancyLabelText(nodeCapacityInfo(node)), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 	self.occupancyLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
@@ -732,7 +732,7 @@ function GS_NodeEditorUI:ensureForm()
 		and T("IGUI_GS_NodeConfigTemplateReadyRules", template.sourceName or "?", #(template.rules or {}), template.priority or 50)
 		or T("IGUI_GS_NodeConfigTemplateEmpty")
 	local statusText = GlobalStorageSiK.SiK_UI.truncateText(templateStatus, innerW, UIFont.Small)
-	self.configTemplateStatusLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, statusText, 0.5, 0.54, 0.58, 1, UIFont.Small, true)
+	self.configTemplateStatusLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, statusText, GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 	self.configTemplateStatusLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.configTemplateStatusLbl)
 	y = y + FONT_HGT_SMALL + 6
@@ -921,7 +921,7 @@ function GS_NodeEditorUI:refreshRulesSummary()
 	local summary = buildRulesSummary(rules)
 	local sy = 0
 	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(summary, host.width, UIFont.Small)) do
-		local lbl = ISLabel:new(0, sy, FONT_HGT_SMALL, line, 0.75, 0.8, 0.85, 1, UIFont.Small, true)
+		local lbl = ISLabel:new(0, sy, FONT_HGT_SMALL, line, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
 		lbl:initialise()
 		host:addChild(lbl)
 		sy = sy + FONT_HGT_SMALL + 2
@@ -957,7 +957,7 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 			shown = shown + 1
 			local label = describeCondition(rule.condition)
 			label = GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small)
-			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, 0.85, 0.9, 0.95, 1, UIFont.Small, true)
+			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[1], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[2], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[3], 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
 
@@ -978,7 +978,7 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 		end
 	end
 	if shown == 0 then
-		local emptyLbl = ISLabel:new(4, CHIP_PAD, FONT_HGT_SMALL, T("IGUI_GS_NodeRulesEmpty"), 0.45, 0.48, 0.52, 1, UIFont.Small, true)
+		local emptyLbl = ISLabel:new(4, CHIP_PAD, FONT_HGT_SMALL, T("IGUI_GS_NodeRulesEmpty"), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
 		emptyLbl:initialise()
 		host:addChild(emptyLbl)
 	end

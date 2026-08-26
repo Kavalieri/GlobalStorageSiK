@@ -10,6 +10,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
+require "GS_Sandbox"
 require "GS_PCAcquire"
 require "GS_SiK_UI_Core"
 require "TimedActions/GS_AcquirePCAction"
@@ -149,6 +150,22 @@ function GS_PCAcquireUI:buildLayout()
 	end
 	self._lastSig = table.concat(sigParts, "")
 	y = y + 10
+
+	-- Nota "vas a necesitar un soldador" (pedido 2026-08-26, "puertas de
+	-- entrada" del ecosistema) - solo cuando EnableSolderingIronCraft esta
+	-- desactivado (por defecto): el jugador ve el requisito en rojo en el
+	-- checklist de arriba pero no sabe POR QUE no puede fabricarlo el mismo -
+	-- reutiliza el mismo texto ya usado en el tooltip del propio soldador
+	-- (GS_ItemNetworkTooltip.lua), sin duplicar la redaccion.
+	if not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled() then
+		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_SolderingIronFindHint"), textW, UIFont.Small)) do
+			local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.62, 0.68, 0.72, 1, UIFont.Small, true)
+			hintLbl:initialise()
+			self:addChild(hintLbl)
+			y = y + FONT_HGT_SMALL + LINE_GAP
+		end
+		y = y + 6
+	end
 
 	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
 	-- criterio aplicado a Programacion/disquetera): antes el boton se dejaba

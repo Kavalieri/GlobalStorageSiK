@@ -25,6 +25,7 @@ require "GS_BulkFilters"
 require "GS_InventorySync"
 
 require "GS_Index"
+require "GS_ItemSnapshot"
 
 require "GS_TransferLock"
 
@@ -166,7 +167,17 @@ end
 
 ---@return string[] sourceNodeIds
 
-local function withdrawUnits(player, fullType, networkId, units, destContainer)
+--- Comprueba si un item fisico es una cinta VHS/radio con el mismo
+--- contenido exacto que pide la fila (2026-08-26, fix de agrupacion de VHS).
+---@param item InventoryItem
+---@param mediaTitle string
+---@return boolean
+local function matchesMediaTitle(item, mediaTitle)
+	local name = GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
+	return name ~= nil and name == mediaTitle
+end
+
+local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle)
 
 	destContainer = destContainer or player:getInventory()
 
@@ -219,6 +230,13 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer)
 
 				if not item or item.getFullType == nil or item:getFullType() ~= fullType then
 
+					j = j + 1
+
+				elseif mediaTitle and not matchesMediaTitle(item, mediaTitle) then
+
+					-- Mismo fullType generico (ej. VHS Tape) pero contenido
+					-- distinto (otra habilidad) - no es la fila que se pidio,
+					-- seguir buscando en vez de retirar la cinta equivocada.
 					j = j + 1
 
 				elseif not sourceContains(container, item) then
@@ -453,7 +471,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle)
 
 	if not player or not fullType or fullType == "" then
 
@@ -485,7 +503,7 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(player, fullType, networkId, target, destContainer)
+	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(player, fullType, networkId, target, destContainer, mediaTitle)
 
 	if moved > 0 then
 

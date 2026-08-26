@@ -15,6 +15,7 @@ require "GS_SiK_UI_Core"
 require "GS_TerminalCatalog"
 require "GS_TerminalUI_TerminalEditor"
 require "GS_SiK_UI_Table"
+require "GS_PCAcquireUI"
 
 GlobalStorageSiK.TerminalNetworkTerminals = {}
 
@@ -237,6 +238,21 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	ui.termPurgeBtn._gsNetStatic = true
 	ui.termPurgeBtn:setVisible(false)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termPurgeBtn)
+	y = y + BTN_H + 10
+
+	-- "Conseguir PC" mudado aqui desde la sub-pestaña Estado (2026-08-26,
+	-- pedido explicito del usuario: "tiene mas sentido en la pestaña de
+	-- admin, bajo el bloque de terminales, que es donde lo podemos
+	-- necesitar") - misma accion, mismo GS_PCAcquireUI.lua, nueva ubicacion.
+	-- Siempre visible (a diferencia de termPurgeBtn, que solo aparece si hay
+	-- terminales ausentes/suspendidos) - su Y real se fija en layoutRows,
+	-- justo debajo de la tabla o de termPurgeBtn si este esta visible.
+	ui.getPCBtn = GlobalStorageSiK.SiK_UI.createButton(
+		pad, y, innerW - pad * 2, BTN_H + 2, T("IGUI_GS_PCAcquireOpenBtn"), scroll, function()
+			GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
+		end, nil, true)
+	ui.getPCBtn._gsNetStatic = true
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.getPCBtn)
 
 	y = y + BTN_H + 10
 	ui.termBlockEndY = y
@@ -300,8 +316,15 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 			ui.termPurgeBtn:setY(ui.termTableY + host:getHeight() + 4)
 		end
 	end
+	-- "Conseguir PC" siempre visible, justo debajo de la tabla - o de
+	-- termPurgeBtn si esta visible, para no solapar (mismo hueco que antes
+	-- reservaba termBlockEndY, ahora con un boton mas debajo).
 	if ui.termTableY then
-		ui.termBlockEndY = ui.termTableY + host:getHeight() + (hasMissing and (BTN_H + 14) or 8)
+		local afterTableY = ui.termTableY + host:getHeight() + (hasMissing and (BTN_H + 14) or 8)
+		if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
+			ui.getPCBtn:setY(afterTableY)
+		end
+		ui.termBlockEndY = afterTableY + BTN_H + 10
 		if ui.termBlockCard and ui.termBlockY then
 			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
 		end
@@ -386,6 +409,9 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
 	end
 	if ui.termPurgeBtn then
 		ui.termPurgeBtn:setWidth(math.min(240, tableW))
+	end
+	if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
+		ui.getPCBtn:setWidth(tableW)
 	end
 	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 	if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then

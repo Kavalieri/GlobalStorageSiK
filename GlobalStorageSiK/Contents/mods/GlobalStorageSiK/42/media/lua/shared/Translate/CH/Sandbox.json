@@ -213,7 +213,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUITabs": "   >> SiK UI: tabs & extensions",
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUITabs_tooltip": "Requires Debug mode ON. Traces the side tab rail and the Core/add-on tab-registration contract: panel creation/reuse, visibility toggles, and tab click activation/cancellation.",
 	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch": "   >> SiK UI: search box",
-	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch_tooltip": "Requires Debug mode ON. Traces every change in the Items tab search box: byte length vs real UTF-8 character length, and the received text. Meant for diagnosing search in non-ASCII languages (Chinese, Japanese, Korean...).",
+	"Sandbox_GlobalStorageSiK_DebugCatSiKUISearch_tooltip": "Requires Debug mode ON. Traces every change in the Items tab search box: UTF-16 unit length vs real Unicode character length, and the received text. Meant for diagnosing search in non-ASCII languages (Chinese, Japanese, Korean...).",
 	"Sandbox_GlobalStorageSiK_DebugCatNodeNaming": "   >> Terminal naming",
 	"Sandbox_GlobalStorageSiK_DebugCatNodeNaming_tooltip": "Requires Debug mode ON. Applying a container's display name to its in-world object (menu/inventory name). Separate from the \"SiK UI:\" entries above - this is naming logic, not the UI framework itself."
 }

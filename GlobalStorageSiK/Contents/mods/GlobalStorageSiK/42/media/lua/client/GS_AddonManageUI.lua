@@ -189,6 +189,15 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	local textW = self.width - pad * 2
 	local btnLabel = isInstalled and T("IGUI_GS_AddonUninstallBtn") or T("IGUI_GS_AddonInstallBtn")
 	local searchQuery = self.terminal and self.terminal.searchEntry and self.terminal.searchEntry:getText() or ""
+	-- Ancho total + boton "bloqueado" (2026-08-26, pedido explicito del
+	-- usuario: "las ventanas de instalacion de addons no estan actualizadas
+	-- correctamente, botones y demas") - antes sin fullWidth (se encogia al
+	-- texto) y con :setEnable() vanilla (textura gris generica, distinta del
+	-- resto del proyecto). El chequeo de "revalida en el momento del clic"
+	-- de mas abajo se conserva como red de seguridad para el hueco entre
+	-- refrescos, igual que ya se acepto en Programacion/PC/disquetera al
+	-- migrar a este mismo patron.
+	local locked = isInstalled and (canUninstall ~= true) or (not isInstalled and canInstall ~= true)
 	local actionBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, btnLabel, self, function()
 		-- BUG REAL encontrado (reportado: "si no tenemos antena en el
 		-- inventario no da feedback, falla en silencio aunque el boton
@@ -222,11 +231,9 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 			GlobalStorageSiK.NetClient.sendCommand("uninstallAddon", { addonId = def.id, searchQuery = searchQuery })
 		end
 		self:destroy()
-	end)
-	if not isInstalled then
-		actionBtn:setEnable(canInstall == true)
-	else
-		actionBtn:setEnable(canUninstall == true)
+	end, nil, true, locked)
+	if locked then
+		actionBtn:setTooltip(T("IGUI_GS_CraftMissing"))
 	end
 	self:addChild(actionBtn)
 	return y + BTN_H + pad
@@ -252,9 +259,10 @@ function GS_AddonManageUI:buildLayout()
 	local textW = self.width - pad * 2
 	local y = self.headerHeight + pad
 
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local descLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T(def.descKey or "IGUI_GS_AddonDescGeneric"), textW, UIFont.Small)
 	for _, line in ipairs(descLines) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.78, 0.82, 1, UIFont.Small, true)
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small, true)
 		lbl:initialise()
 		self:addChild(lbl)
 		y = y + FONT_HGT_SMALL + 2
@@ -274,7 +282,7 @@ function GS_AddonManageUI:buildLayout()
 	local isInstalled = installed[def.id] ~= nil
 
 	if not modActive then
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonStatusModOff"), 0.72, 0.55, 0.45, 1, UIFont.Small, true)
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonStatusModOff"), pal.statusDanger[1], pal.statusDanger[2], pal.statusDanger[3], 1, UIFont.Small, true)
 		lbl:initialise()
 		self:addChild(lbl)
 		y = y + FONT_HGT_SMALL + 8
@@ -288,7 +296,7 @@ function GS_AddonManageUI:buildLayout()
 	local installedItemType = isInstalled and installed[def.id].itemType or nil
 	if installedItemType then
 		local itemName = GlobalStorageSiK.I18n.typeDisplayName(installedItemType)
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonInstalledItem", itemName), 0.5, 0.72, 0.55, 1, UIFont.Small, true)
+		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonInstalledItem", itemName), pal.statusOk[1], pal.statusOk[2], pal.statusOk[3], 1, UIFont.Small, true)
 		lbl:initialise()
 		self:addChild(lbl)
 		y = y + FONT_HGT_SMALL + 8
@@ -345,8 +353,7 @@ function GS_AddonManageUI:buildLayout()
 		local hasUninstallDisk = uninstallDiskItem and inv and (inv:getItemCountRecurse(uninstallDiskItem) or 0) >= 1
 		canUninstall = hasReader and (not uninstallDiskItem or hasUninstallDisk == true)
 
-		local reqLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonReqUninstallTitle"), 0.82, 0.85, 0.9, 1, UIFont.Small, true)
-		reqLbl:initialise()
+		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqUninstallTitle"))
 		self:addChild(reqLbl)
 		y = y + FONT_HGT_SMALL + 6
 
@@ -394,8 +401,7 @@ function GS_AddonManageUI:buildLayout()
 		local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
 		canInstall = hasReader and hasModule and hasDisk and hasMagazine
 
-		local reqLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonReqInstallTitle"), 0.82, 0.85, 0.9, 1, UIFont.Small, true)
-		reqLbl:initialise()
+		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqInstallTitle"))
 		self:addChild(reqLbl)
 		y = y + FONT_HGT_SMALL + 6
 

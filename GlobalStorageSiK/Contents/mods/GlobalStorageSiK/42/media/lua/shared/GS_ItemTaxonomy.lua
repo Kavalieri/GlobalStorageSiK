@@ -725,7 +725,36 @@ end
 ---@param fullType string|nil
 ---@param row table|nil
 ---@return table { mainKey: string, subKey: string, mainLabel: string, subLabel: string, fullLabel: string }
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, revision tecnica de
+-- Desarrollo tras dev18 - "ItemTaxonomy.resolve() no tiene cache general por
+-- fila/fullType; el haystack evita repetirla al seguir escribiendo, pero
+-- filtros por categoria y algunas ordenaciones todavia pueden resolverla
+-- repetidamente"): esta funcion es pura respecto a
+-- fullType+row.category+row.subCategory+row.gsSubKeysStr (los unicos campos
+-- de `row` que lee - confirmado leyendo el cuerpo completo) - memorizada por
+-- esa firma compuesta, pedida explicitamente por Desarrollo.
+local itemTaxonomyResolveCache = {}
 function GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
+	row = row or {}
+	-- gsSubKeysStr es el campo real usado en la practica (ver comentario mas
+	-- abajo: el array gsSubKeys anidado no sobrevive la transmision de red) -
+	-- se incluye tambien un volcado del array por si algun caller server-side
+	-- lo rellena directamente sin pasar por gsSubKeysStr, para no cachear mal
+	-- en ese caso residual.
+	local gsSubKeysRaw = row.gsSubKeys and table.concat(row.gsSubKeys, ",") or ""
+	local cacheKey = tostring(fullType) .. "\31" .. tostring(row.category or "")
+		.. "\31" .. tostring(row.subCategory or "") .. "\31" .. tostring(row.gsSubKeysStr or "")
+		.. "\31" .. gsSubKeysRaw
+	local cached = itemTaxonomyResolveCache[cacheKey]
+	if cached ~= nil then
+		return cached
+	end
+	local result = GlobalStorageSiK.ItemTaxonomy._resolveUncached(fullType, row)
+	itemTaxonomyResolveCache[cacheKey] = result
+	return result
+end
+
+function GlobalStorageSiK.ItemTaxonomy._resolveUncached(fullType, row)
 	row = row or {}
 	local scriptItem = scriptForFullType(fullType)
 

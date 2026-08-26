@@ -9,6 +9,7 @@
 require "GS_NetClient"
 require "GS_I18n"
 require "GS_Index"
+require "GS_ItemSnapshot"
 require "GS_Sandbox"
 require "GS_Log"
 require "GS_ItemTaxonomy"
@@ -47,6 +48,31 @@ local function getCachedTaxonomy(fullType)
 end
 local hooksInstalled = false
 local activeRenderWrapper = nil
+-- "original" que capturaba el wrapper activo AL INSTALARSE - necesario para
+-- poder DESMONTAR limpiamente (uninstallHooks, ver mas abajo) sin depender
+-- de una variable local atrapada dentro del closure de installHooks().
+local activeOriginalRender = nil
+
+-- BUG REAL DE REINSTALACION PREMATURA cerrado (2026-08-26, segundo hallazgo
+-- de Desarrollo sobre el fix de dev26 - "el monitor sigue activo despues de
+-- uninstallHooks(), su contador global no se pausa ni se reinicia durante la
+-- transicion entre vidas"): sin esto, la secuencia real seria: GS desmonta
+-- al morir -> el jugador permanece unos segundos en la pantalla de
+-- muerte/creacion -> pasan los 180 ticks de HOOK_MONITOR_INTERVAL_TICKS ->
+-- el monitor REINSTALA el wrapper GS ANTES de que exista el personaje nuevo
+-- -> Magic Accessories dispara su OnCreatePlayer y captura ESE wrapper GS
+-- recien reinstalado como fallback -> mismo ciclo que dev26 pretendia cerrar.
+-- `suspendedForLifeTransition` (junto con `_hookTickCount`, declarado aqui en
+-- vez de junto a monitorTooltipHook mas abajo para que uninstallHooks() y el
+-- handler de OnCreatePlayer puedan compartir el mismo upvalue) congela el
+-- monitor por completo durante la transicion - solo se reactiva desde el
+-- propio Events.OnCreatePlayer de GS, DESPUES de que el personaje nuevo ya
+-- existe, dejando que el retraso normal de instalacion (180 ticks) permita
+-- que Magic Accessories (u otro mod) termine de reclamar su propio hook
+-- ANTES de que GS vuelva a envolver nada - la cadena resultante es siempre
+-- GS-nuevo -> Magic-nuevo -> render base, nunca una capturada a medio hacer.
+local suspendedForLifeTransition = false
+local _hookTickCount = 0
 
 -- Todos los wrappers GS comparten estas guardas. Es importante que no vivan
 -- dentro de installHooks(): si otro mod sustituye ISToolTipInv.render despues
@@ -57,6 +83,26 @@ local activeRenderWrapper = nil
 local renderingInstances = {}
 local failCooldownUntil = setmetatable({}, { __mode = "k" })
 local FAIL_COOLDOWN_MS = 8000
+
+-- BUG REAL DE CICLO cerrado (2026-08-26, diagnostico real de Desarrollo tras
+-- un cuelgue de cliente reproducido: "morir y crear una vida nueva, luego
+-- desplegar el inventario"): un wrapper GS INACTIVO (el de la vida anterior,
+-- capturado dentro de la cadena de Magic Accessories cuando este ultimo se
+-- re-apropia de ISToolTipInv.render en su propio OnCreatePlayer) delegaba
+-- SIEMPRE a su "original" sin ninguna guarda ("if wrapper ~= activeRenderWrapper
+-- then return original(self,...) end") - si ese "original" resulta ser Magic
+-- Accessories, y Magic a su vez cae de vuelta en ESTE mismo wrapper GS
+-- inactivo (via su propio fallback_render capturado en el momento equivocado),
+-- se forma un ciclo GS-viejo -> Magic -> GS-viejo -> Magic... que crece sin
+-- limite - la guarda `renderingInstances` NUNCA se aplicaba en absoluto a un
+-- wrapper inactivo, solo protegia al wrapper ACTIVO actual. Contador de
+-- profundidad de DELEGACION compartido por TODOS los wrappers GS (activos e
+-- inactivos) para la misma instancia de tooltip - si se supera el limite,
+-- se corta con el render minimo propio (safeFallbackRender, nunca vuelve a
+-- llamar a nada ajeno) en vez de seguir delegando indefinidamente. Claves
+-- debiles: la instancia de tooltip puede destruirse a mitad de un ciclo real.
+local delegationDepth = setmetatable({}, { __mode = "k" })
+local MAX_DELEGATION_DEPTH = 6
 local FAIL_LOG_COOLDOWN_MS = 3000
 local lastFailLogAt = 0
 local lastFailSig = nil
@@ -79,20 +125,34 @@ function GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
 	cache = {}
 end
 
---- Recibe la respuesta del servidor con los conteos por red de un fullType.
+--- Clave de cache/pending: fullType a secas para el caso normal,
+--- fullType+mediaTitle para cintas VHS/radio (2026-08-26, fix de agrupacion
+--- de VHS) - sin esto, dos cintas de distinta habilidad pero mismo fullType
+--- generico compartirian la misma entrada de cache y una tapaba a la otra.
+---@param fullType string
+---@param mediaTitle string|nil
+---@return string
+local function countsCacheKey(fullType, mediaTitle)
+	return mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType
+end
+
+--- Recibe la respuesta del servidor con los conteos por red de un fullType
+--- (+ mediaTitle si es una cinta VHS/radio con contenido concreto).
 ---@param fullType string|nil
 ---@param networks table[]
 ---@param hasAnyNetwork boolean|nil si el jugador tiene AL MENOS una red accesible (independientemente de si este fullType esta en ella) - distingue "no tienes redes todavia" de "no esta en ninguna de tus redes"
-function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork)
+---@param mediaTitle string|nil
+function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle)
 	if not fullType then
 		return
 	end
-	cache[fullType] = {
+	local key = countsCacheKey(fullType, mediaTitle)
+	cache[key] = {
 		networks = networks or {},
 		hasAnyNetwork = hasAnyNetwork and true or false,
 		ts = getTimestampMs and getTimestampMs() or 0,
 	}
-	pending[fullType] = nil
+	pending[key] = nil
 end
 
 --- En singleplayer real (no anfitrion), isClient()/isServer() son ambos
@@ -107,22 +167,23 @@ local function isTrueSingleplayer()
 	return not (isClient and isClient()) and not (isServer and isServer())
 end
 
-local function requestCounts(fullType)
-	if pending[fullType] then
+local function requestCounts(fullType, mediaTitle)
+	local key = countsCacheKey(fullType, mediaTitle)
+	if pending[key] then
 		return
 	end
 	if isTrueSingleplayer() then
 		local player = GlobalStorageSiK.NetClient.getPlayer()
 		if player and GlobalStorageSiK.Index and GlobalStorageSiK.Index.getNetworkCountsForItem then
-			local ok, networks, hasAnyNetwork = pcall(GlobalStorageSiK.Index.getNetworkCountsForItem, player, fullType)
+			local ok, networks, hasAnyNetwork = pcall(GlobalStorageSiK.Index.getNetworkCountsForItem, player, fullType, mediaTitle)
 			if ok then
-				GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork)
+				GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle)
 			end
 		end
 		return
 	end
-	pending[fullType] = true
-	GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", { fullType = fullType })
+	pending[key] = true
+	GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", { fullType = fullType, mediaTitle = mediaTitle })
 end
 
 --- Devuelve conteos cacheados y dispara refresco en segundo plano si caducó.
@@ -131,12 +192,14 @@ end
 --- de que llegue el primer dato) de "ya consultado y de verdad no esta en
 --- ninguna red" (aqui si hay que avisar, a peticion del usuario).
 ---@param fullType string
+---@param mediaTitle string|nil
 ---@return table[]|nil, boolean loaded, boolean hasAnyNetwork
-local function getCachedCounts(fullType)
-	local entry = cache[fullType]
+local function getCachedCounts(fullType, mediaTitle)
+	local key = countsCacheKey(fullType, mediaTitle)
+	local entry = cache[key]
 	local now = getTimestampMs and getTimestampMs() or 0
 	if not entry or (now - entry.ts) >= CACHE_TTL_MS then
-		requestCounts(fullType)
+		requestCounts(fullType, mediaTitle)
 	end
 	if not entry then
 		return nil, false, false
@@ -150,9 +213,10 @@ end
 --- ya conoce al instante (sin ronda de red). Misma cache/TTL/fuente que el
 --- tooltip global: informacion consistente en los dos sitios.
 ---@param fullType string
+---@param mediaTitle string|nil
 ---@return table[]|nil, boolean
-function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType)
-	return getCachedCounts(fullType)
+function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType, mediaTitle)
+	return getCachedCounts(fullType, mediaTitle)
 end
 
 local NET_FONT = UIFont.Small
@@ -565,7 +629,32 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	-- ligero - mas caro de recuperar y mas motivo para no reintentar cada
 	-- pocos segundos mientras el jugador siga con el raton quieto encima.
 	local wrapper
+	local wrapperBody
+	-- Contador de profundidad de delegacion (ver comentario de
+	-- delegationDepth mas arriba) - envuelve TODO el cuerpo real del wrapper,
+	-- incluida la rama de wrapper inactivo, que es precisamente donde se
+	-- formaba el ciclo con Magic Accessories (delegaba a "original" sin
+	-- ninguna guarda). Si se supera el limite, se corta con el render minimo
+	-- propio en vez de seguir la cadena.
 	wrapper = function(self, ...)
+		local depth = (delegationDepth[self] or 0) + 1
+		delegationDepth[self] = depth
+		if depth > MAX_DELEGATION_DEPTH then
+			delegationDepth[self] = depth - 1
+			if delegationDepth[self] <= 0 then delegationDepth[self] = nil end
+			pcall(safeFallbackRender, self)
+			return
+		end
+		local ok, result = pcall(wrapperBody, self, ...)
+		delegationDepth[self] = delegationDepth[self] and (delegationDepth[self] - 1) or nil
+		if delegationDepth[self] and delegationDepth[self] <= 0 then delegationDepth[self] = nil end
+		if not ok then
+			pcall(safeFallbackRender, self)
+			return
+		end
+		return result
+	end
+	wrapperBody = function(self, ...)
 		-- Si un mod de terceros capturo un wrapper GS anterior y despues GS
 		-- recupero la posicion exterior, ese wrapper viejo seguira apareciendo
 		-- dentro de la cadena. Debe limitarse a delegar: solo el wrapper activo
@@ -654,7 +743,13 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 						end
 					end
 
-					local networks, loaded, hasAnyNetwork = getCachedCounts(fullType)
+					-- mediaTitle (2026-08-26, fix de agrupacion de VHS): si el
+					-- item bajo el raton es una cinta VHS/radio con contenido
+					-- concreto, contar SOLO cintas con ese mismo contenido en
+					-- vez de sumar todas las del fullType generico.
+					local mediaTitle = GlobalStorageSiK.ItemSnapshot and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
+						and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(self.item)
+					local networks, loaded, hasAnyNetwork = getCachedCounts(fullType, mediaTitle)
 					if networks and #networks > 0 then
 						for i = 1, #networks do
 							lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
@@ -699,6 +794,7 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	end
 
 	activeRenderWrapper = wrapper
+	activeOriginalRender = original
 	ISToolTipInv.render = wrapper
 	hooksInstalled = true
 	if recoveringOuterPosition then
@@ -706,6 +802,77 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 			"hook chain changed; GS outer wrapper restored")
 	end
 	return true
+end
+
+--- Desmonta limpiamente el wrapper GS activo, restaurando el "original" que
+--- tenia capturado, y limpia todo el estado de sesion del tooltip. BUG REAL
+--- DE CICLO cerrado (2026-08-26, diagnostico real de Desarrollo): morir y
+--- crear una vida nueva dispara Events.OnCreatePlayer, momento en el que
+--- Magic Accessories (confirmado) vuelve a apropiarse de ISToolTipInv.render
+--- capturando el wrapper GS ENTONCES activo como su propio fallback. El
+--- monitor de GS (mas abajo) detecta el cambio y envuelve a Magic de nuevo -
+--- pero el wrapper GS anterior sigue vivo, atrapado DENTRO de la cadena de
+--- Magic, delegando sin guarda (ver delegationDepth arriba) y formando un
+--- ciclo GS-viejo -> Magic -> GS-viejo -> Magic... que cuelga el render.
+--- Llamado desde GS_TerminalDeathCleanup.lua ANTES de que la vida nueva
+--- pueda disparar su propio OnCreatePlayer (por tanto antes de que Magic
+--- tenga ocasion de volver a capturar nada de GS) - restaura a Magic (o a
+--- quien fuera el "original") como propietario legitimo del slot, y deja que
+--- el monitor periodico vuelva a envolverlo una unica vez, ya con la cadena
+--- limpia. Idempotente: seguro de llamar aunque los hooks no estuvieran
+--- instalados (p.ej. ISToolTipInv no disponible en esta build).
+function GlobalStorageSiK.ItemNetworkTooltip.uninstallHooks()
+	-- BUG REAL cerrado (2026-08-26, hallazgo de Desarrollo): el `return`
+	-- temprano por "no hooksInstalled" saltaba TAMBIEN la limpieza de estado
+	-- de sesion (cache/pending/cooldowns/profundidad) - esta funcion puede
+	-- llamarse desde una muerte donde los hooks nunca llegaron a instalarse
+	-- (ISToolTipInv no disponible todavia, feature desactivada, etc.) y aun
+	-- asi conviene dejar el estado limpio para la vida siguiente. La limpieza
+	-- de abajo se ejecuta SIEMPRE, incondicionalmente.
+	-- BUG REAL cerrado (2026-08-26, hallazgo de Desarrollo): "reason" se
+	-- inicializaba a "not_installed" y solo se reasignaba en la rama de
+	-- fallo - la rama de exito (restored=true) nunca lo tocaba, asi que
+	-- podia imprimirse la combinacion contradictoria "restored=true
+	-- reason=not_installed". Cada rama asigna ahora su propio motivo.
+	local restored = false
+	local reason = "not_installed"
+	if hooksInstalled then
+		if ISToolTipInv and activeRenderWrapper and ISToolTipInv.render == activeRenderWrapper then
+			ISToolTipInv.render = activeOriginalRender
+			restored = true
+			reason = "restored_original"
+		else
+			-- Otro mod ya habia cambiado ISToolTipInv.render ANTES de esta
+			-- muerte (no somos el wrapper mas externo) - restaurar aqui
+			-- pisaria ese cambio ajeno sin necesidad. No se toca el slot,
+			-- solo se limpian las referencias propias.
+			reason = "current_slot_changed"
+		end
+	end
+	activeRenderWrapper = nil
+	activeOriginalRender = nil
+	hooksInstalled = false
+	-- Suspende el monitor por completo hasta el proximo Events.OnCreatePlayer
+	-- de GS (ver arriba) - sin esto, el monitor periodico podia reinstalar el
+	-- wrapper GS DURANTE la pantalla de muerte/creacion, antes de que el
+	-- personaje nuevo existiera, dejando a Magic Accessories capturarlo de
+	-- nuevo como fallback en su propio OnCreatePlayer (mismo ciclo de dev26).
+	suspendedForLifeTransition = true
+	_hookTickCount = 0
+	-- Estado de sesion vinculado a la vida anterior (instancias de tooltip
+	-- en curso, cooldowns de fallo, consultas de red pendientes/cacheadas) -
+	-- pedido explicito de Desarrollo: nada de esto debe sobrevivir al
+	-- desmontaje, aunque tecnicamente las claves debiles ya evitarian una
+	-- fuga de memoria a largo plazo.
+	renderingInstances = {}
+	failCooldownUntil = setmetatable({}, { __mode = "k" })
+	delegationDepth = setmetatable({}, { __mode = "k" })
+	pending = {}
+	cache = {}
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.warn("ItemNetworkTooltip",
+			"tooltipHookUninstall restored=" .. tostring(restored) .. " reason=" .. reason)
+	end
 end
 
 -- Espera a que el resto de la UI/mods hayan instalado sus hooks y despues
@@ -721,8 +888,14 @@ end
 -- la posicion exterior no duplica nuestra informacion.
 local INSTALL_DELAY_TICKS = 180
 local HOOK_MONITOR_INTERVAL_TICKS = 60
-local _hookTickCount = 0
 local function monitorTooltipHook()
+	-- BUG REAL DE REINSTALACION PREMATURA cerrado (ver comentario de
+	-- suspendedForLifeTransition arriba) - mientras el jugador este entre
+	-- vidas (muerto/creando personaje), el monitor no cuenta ticks ni
+	-- reinstala nada, pase el tiempo que pase en esa pantalla.
+	if suspendedForLifeTransition then
+		return
+	end
 	_hookTickCount = _hookTickCount + 1
 	if _hookTickCount < INSTALL_DELAY_TICKS then
 		return
@@ -736,6 +909,16 @@ local function monitorTooltipHook()
 	end
 	GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 end
+-- Reactiva el monitor DESPUES de que el personaje nuevo ya exista - deja que
+-- el retraso normal de INSTALL_DELAY_TICKS permita a Magic Accessories (u
+-- otro mod que tambien parchee ISToolTipInv.render en su propio
+-- OnCreatePlayer) terminar de reclamar su hook ANTES de que GS vuelva a
+-- envolver nada, evitando volver a capturar una cadena a medio formar.
+local function onCreatePlayerResumeMonitor()
+	suspendedForLifeTransition = false
+	_hookTickCount = 0
+end
 if FEATURE_ENABLED then
 	Events.OnTick.Add(monitorTooltipHook)
+	Events.OnCreatePlayer.Add(onCreatePlayerResumeMonitor)
 end

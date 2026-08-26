@@ -219,17 +219,23 @@ function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, 
 			local canCraft = liveRecipe.canCraft == true
 			local newTitle = canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
 			panel.craftBtn._sikUiLabel = newTitle
+			-- Mismo patron ya migrado en Programacion/PC/disquetera (2026-08-26,
+			-- auditoria de botones): _sikUiLocked es SOLO el aspecto visual
+			-- (atenuado, sin la textura gris generica de setEnable), pero el
+			-- gating real de clic sigue viviendo en setEnable - un boton
+			-- ISButton deshabilitado no procesa el clic en absoluto en PZ.
+			panel.craftBtn._sikUiLocked = not canCraft
 			panel.craftBtn:setEnable(canCraft)
 		end
 	end
 
 	local btnTitle = recipe.canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
 	local craftBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, cardH - CRAFT_BTN_H - 6, 220, CRAFT_BTN_H, btnTitle, card, function()
+		pad, cardH - CRAFT_BTN_H - 6, textW, CRAFT_BTN_H, btnTitle, card, function()
 		if owner and owner.onCraftModRecipe then
 			owner:onCraftModRecipe(recipe.id)
 		end
-	end)
+	end, nil, true, recipe.canCraft ~= true)
 	craftBtn:setEnable(recipe.canCraft == true)
 	card.craftBtn = craftBtn
 	card:addChild(craftBtn)

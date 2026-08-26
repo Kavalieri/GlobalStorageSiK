@@ -208,8 +208,7 @@ function GS_MemberEditorUI:buildLayout()
 	local isAdminViewer = viewerRole == "admin" or isOwnerViewer
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 
-	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_MemberEditorTitle"), 0.95, 0.95, 0.95, 1, UIFont.Medium, true)
-	title:initialise()
+	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_MemberEditorTitle"))
 	self:addChild(title)
 	y = y + FONT_HGT_MEDIUM + LINE_GAP
 

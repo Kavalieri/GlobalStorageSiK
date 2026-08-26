@@ -264,6 +264,27 @@ function GlobalStorageSiK.SiK_UI.createSectionLabel(x, y, text)
 	return lbl
 end
 
+--- Crea el titulo de una ventana modal (fuente Medium, blanco-ish) - antes
+--- repetido a mano de forma IDENTICA en 5 ficheros distintos
+--- (GS_AdminDashboard.lua x3, GS_TerminalUI_MemberEditor.lua,
+--- GS_TerminalUI_TerminalEditor.lua, GS_TerminalInstallReaderChoice.lua):
+--- ISLabel:new(pad, y, FONT_HGT_MEDIUM, texto, 0.95, 0.95, 0.95, 1,
+--- UIFont.Medium, true). Distinto de createSectionLabel (fuente Small, para
+--- sub-secciones DENTRO de una ventana) - este es para el titulo de la
+--- ventana/modal en si. Cero cambio visual: mismo tamaño/color de siempre,
+--- solo deja de repetirse el literal.
+---@param x number
+---@param y number
+---@param text string
+---@return ISLabel
+function GlobalStorageSiK.SiK_UI.createWindowTitleLabel(x, y, text)
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local fontHgtMedium = getTextManager():getFontHeight(UIFont.Medium)
+	local lbl = ISLabel:new(x, y, fontHgtMedium, text, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Medium, true)
+	lbl:initialise()
+	return lbl
+end
+
 --- Crea etiqueta de hint secundario.
 ---@param x number
 ---@param y number
@@ -1139,31 +1160,33 @@ end
 --- Cuenta caracteres UTF-8 reales (no bytes) de un string - cada caracter
 --- chino/CJK ocupa 3 bytes en UTF-8, asi que usar #text (longitud en BYTES)
 --- como si fueran caracteres es incorrecto para cualquier idioma no-ASCII.
---- Solo cuenta bytes de inicio de caracter (que no son continuacion 0x80-0xBF),
---- sin necesidad de trocear el string entero como utf8Chars() mas abajo.
---- Devuelve tambien "wide" (true si el texto contiene algun caracter de 3+
---- bytes) para poder relajar el umbral minimo en CJK (ver bindSearchEntry) -
---- los acentos latinos (a/e/i/o/u con tilde, n con virgulilla, etc.) son
---- SIEMPRE de 2 bytes en UTF-8 (rango Latin-1 Supplement), mientras que
---- chino/japones/coreano son SIEMPRE de 3 bytes - basta mirar el byte lider
---- (>=0xE0) para distinguir "occidental con acentos" de "CJK" sin necesitar
---- detectar el idioma de la UI ni mantener una lista de idiomas.
+--- BUG REAL DE ARQUITECTURA cerrado (2026-08-26, revision tecnica de
+--- Desarrollo tras el banco CJK de DEV15): esta funcion trataba `#str`/
+--- `string.byte` como bytes UTF-8 - en Kahlua/PZ las cadenas son unidades
+--- UTF-16 (java.lang.String), asi que para el BMP (chino/japones/coreano
+--- comun) cada unidad ya es un caracter completo (contaba bien por
+--- coincidencia), pero un caracter fuera del BMP (par subrogado, 2 unidades)
+--- se contaba como 2 caracteres en vez de 1. Delega ahora en
+--- GlobalStorageSiK.Libs.unicodeLength (cuenta caracteres Unicode reales,
+--- combinando pares subrogados). "wide" (algun caracter que necesita mas
+--- ancho visual - acentos latinos SIEMPRE quedan por debajo de U+0800,
+--- chino/japones/coreano y cualquier caracter fuera del BMP SIEMPRE por
+--- encima) distingue CJK de "occidental con acentos" sin necesitar detectar
+--- el idioma de la UI ni mantener una lista de idiomas - el umbral U+0800
+--- conserva la misma frontera semantica que ya tenia el chequeo de bytes
+--- anterior, aplicada ahora al punto de codigo real en vez de al byte.
 ---@param str string
 ---@return number length
 ---@return boolean wide
-local function utf8Length(str)
-	local count = 0
+local function unicodeCharLengthAndWidth(str)
 	local wide = false
 	for i = 1, #str do
-		local b = string.byte(str, i)
-		if b < 0x80 or b >= 0xC0 then
-			count = count + 1
-		end
-		if b >= 0xE0 then
+		if string.byte(str, i) >= 0x0800 then
 			wide = true
+			break
 		end
 	end
-	return count, wide
+	return GlobalStorageSiK.Libs.unicodeLength(str), wide
 end
 
 function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
@@ -1174,7 +1197,7 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 		searchEntry:setPlaceholderText(T("IGUI_GS_SearchPlaceholder"))
 	end
 
-	-- Se mantiene en 3, pero medido en CARACTERES UTF-8 REALES (utf8Length),
+	-- Se mantiene en 3, pero medido en CARACTERES UNICODE REALES (unicodeCharLengthAndWidth),
 	-- no en bytes como antes - ese es el bug real que se corrige aqui, no el
 	-- numero en si. Con el bug (#text = bytes), un solo caracter chino (3
 	-- bytes) ya colaba el umbral de "3" por accidente; con el fix, "3" es
@@ -1209,7 +1232,7 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 	searchEntry.onTextChange = function()
 		local text = searchEntry:getText() or ""
 		cancelPending()
-		local charCount, wide = utf8Length(text)
+		local charCount, wide = unicodeCharLengthAndWidth(text)
 		-- FASE DEV busqueda en idiomas no-ASCII (2026-08-17, feedback comunidad
 		-- china: "buscar en chino no da ninguna reaccion"): traza gateada por
 		-- Modo Debug (sandbox) del texto recibido crudo en bytes y en
@@ -1254,28 +1277,30 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 	end
 end
 
---- Trocea un string UTF-8 en su lista de caracteres reales (1-4 bytes cada
---- uno), sin partir nunca un caracter multibyte por la mitad. Manual, byte
---- a byte segun el prefijo UTF-8 - NO se puede usar la libreria "utf8" de
---- Lua 5.3+, Kahlua (el interprete que usa PZ) no la expone (mismo tipo de
---- suposicion equivocada que ya causo el bug real de next() en
---- GS_Addons.lua: nunca dar por hecho que existe una funcion de stdlib sin
---- comprobarlo primero).
+--- Trocea un string en su lista de caracteres Unicode reales, sin partir
+--- nunca un par subrogado por la mitad. BUG REAL DE ARQUITECTURA cerrado
+--- (2026-08-26, revision tecnica de Desarrollo tras el banco CJK de DEV15):
+--- la version anterior trataba las unidades UTF-16 subyacentes (ver
+--- GS_Libs.unicodeCodepoints para el analisis completo) como bytes lider
+--- UTF-8, agrupando 3-4 unidades CJK reales en un solo "caracter" falso -
+--- NO se puede usar la libreria "utf8" de Lua 5.3+, Kahlua (el interprete
+--- que usa PZ) no la expone (mismo tipo de suposicion equivocada que ya
+--- causo el bug real de next() en GS_Addons.lua: nunca dar por hecho que
+--- existe una funcion de stdlib sin comprobarlo primero) - manual, unidad a
+--- unidad, agrupando solo pares subrogados reales via isLowSurrogateAt.
 ---@param str string
 ---@return string[]
-local function utf8Chars(str)
+local function unicodeChars(str)
 	local chars = {}
 	local i = 1
 	local len = #str
 	while i <= len do
-		local b = string.byte(str, i)
 		local charLen = 1
-		if b >= 0xF0 then
-			charLen = 4
-		elseif b >= 0xE0 then
-			charLen = 3
-		elseif b >= 0xC0 then
-			charLen = 2
+		if GlobalStorageSiK.Libs.isLowSurrogateAt(str, i + 1) then
+			local unit = string.byte(str, i)
+			if unit >= 0xD800 and unit <= 0xDBFF then
+				charLen = 2
+			end
 		end
 		table.insert(chars, string.sub(str, i, i + charLen - 1))
 		i = i + charLen
@@ -1293,7 +1318,7 @@ end
 local function splitLongToken(token, tm, font, maxWidth)
 	local chunks = {}
 	local current = ""
-	local chars = utf8Chars(token)
+	local chars = unicodeChars(token)
 	for i = 1, #chars do
 		local ch = chars[i]
 		local candidate = current .. ch

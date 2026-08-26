@@ -1067,9 +1067,19 @@ local function sendTerminalBlocked(player, reason, networkId)
 	if GlobalStorageSiK.Server.pushTerminalManifest then
 		GlobalStorageSiK.Server.pushTerminalManifest(player)
 	end
+	-- BUG REAL DE REGRESION cerrado (2026-08-26, mismo hallazgo que el fix de
+	-- Nivel 0 en canClaimVacantOwnership): este chequeo solo se hacia con
+	-- reason=="network_vacant" - un motivo que dev6 ya NO produce nunca
+	-- (identityRotationUnproven no vacia la red, llega aqui como "denied").
+	-- Aunque se arreglara canClaimVacantOwnership para permitir el Nivel 0
+	-- (propia cuenta) sin exigir vacante, esta llamada nunca se ejecutaba
+	-- para ese caso - el boton de reclamo no aparecia jamas. Mismo criterio
+	-- que ya se aplica un poco mas abajo para canRecoverOwnRole (comentario
+	-- propio: "no depende de que reason sea network_vacant en concreto"):
+	-- se independiza del motivo exacto, la propia funcion ya decide
+	-- correctamente cuando SI y cuando NO se puede reclamar.
 	local canClaim, claimTier = false, nil
-	if reason == "network_vacant" and networkId
-		and GlobalStorageSiK.Permissions.canClaimVacantOwnership then
+	if networkId and GlobalStorageSiK.Permissions.canClaimVacantOwnership then
 		canClaim, claimTier = GlobalStorageSiK.Permissions.canClaimVacantOwnership(player, networkId)
 	end
 	-- Independiente de canClaim/claimTier a proposito: "recuperar mi propio
@@ -2324,6 +2334,76 @@ local function cloneNodeFilters(filters)
 	return result
 end
 
+--- Arranque de identidad/estado para una vida que acaba de conectar (o
+--- crearse). Extraida a funcion compartida (2026-08-26, revision tecnica de
+--- Desarrollo tras probar en TEST): antes vivia solo dentro del hook
+--- Events.OnCreatePlayer del servidor - confirmado con 3 reconexiones
+--- reales en TEST que ese hook NUNCA se disparo en el dedicado (ausencia
+--- total de "onCreatePlayer preExistingUuid" en el log, siempre visible,
+--- no gateado), asi que TODO esto (identidad, manifest de terminales, regalo
+--- retroactivo de recetas de manual, limpieza de watcher) se quedaba sin
+--- ejecutar en cada reconexion, resolviendose solo de forma perezosa al
+--- primer runtime_lookup. Ahora se llama tambien desde el comando
+--- "identityHello" (ver GS_IdentityHello.lua, cliente) que SI llega de forma
+--- fiable - se mantiene ademas el hook OnCreatePlayer por si acaso dispara en
+--- otros contextos (SP real, host LAN); llamar esto dos veces para la misma
+--- vida es seguro, cada paso ya esta pensado para poder repetirse
+--- (initializeCharacterIdentity cachea, pushTerminalManifest/
+--- ensureManualRecipesGranted ya se llaman tambien desde handleOpenTerminal).
+---@param player IsoPlayer
+---@param reason string
+local function runIdentityBootstrap(player, reason)
+	if not player or not GlobalStorageSiK.isAuthoritative() then
+		return
+	end
+	-- DIAGNOSTICO DIRIGIDO (2026-08-19, feedback comunidad china; ampliado
+	-- 2026-08-26): traza SIEMPRE visible (no gateada por Modo depuracion, a
+	-- proposito - el momento de conectar es el unico instante en que se
+	-- puede capturar esto) del UUID que YA tenia este personaje en su
+	-- modData ANTES de que initializeCharacterIdentity toque nada, mas
+	-- conteo de claves de modData y longitud en bytes del nombre real (ver
+	-- comentario extenso junto al bloque original) para distinguir "se
+	-- perdio solo nuestra clave" de "se perdio la tabla modData entera".
+	if GlobalStorageSiK.Log and player.getModData then
+		local okPre, preData = pcall(function() return player:getModData() end)
+		local preUuid = okPre and preData
+			and tostring(preData[GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY] or "") or "<sin_modData>"
+		local keyCount = 0
+		if okPre and preData then
+			for _ in pairs(preData) do keyCount = keyCount + 1 end
+		end
+		local okName, forename, surname = pcall(function()
+			local desc = player.getDescriptor and player:getDescriptor() or nil
+			return desc and desc.getForename and desc:getForename() or "",
+				desc and desc.getSurname and desc:getSurname() or ""
+		end)
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- dev16): se llamaba "nameBytes" pero #text en Kahlua/PZ cuenta
+		-- unidades UTF-16, no bytes (ver GS_Libs.unicodeCodepoints) - y ademas
+		-- sumaba forename+surname SIN el espacio que getCharacterName() si
+		-- añade entre ambos, dando una cifra que no coincidia ni con eso.
+		-- Registrados por separado con el nombre honesto de lo que miden.
+		local forenameUnits = okName and #tostring(forename or "") or -1
+		local surnameUnits = okName and #tostring(surname or "") or -1
+		GlobalStorageSiK.Log.warn("Identity", "identityBootstrap reason=" .. tostring(reason)
+			.. " preExistingUuid=" .. preUuid
+			.. " username=" .. tostring(player.getUsername and player:getUsername() or "?")
+			.. " modDataKeyCount=" .. tostring(keyCount)
+			.. " forenameUtf16Units=" .. tostring(forenameUnits)
+			.. " surnameUtf16Units=" .. tostring(surnameUnits))
+	end
+	GlobalStorageSiK.Permissions.initializeCharacterIdentity(player, reason)
+	-- Un personaje que acaba de entrar nunca hereda la suscripcion visual
+	-- que pudiera quedar de una conexion anterior interrumpida.
+	clearTerminalWatcher(player)
+	if GlobalStorageSiK.Server.pushTerminalManifest then
+		GlobalStorageSiK.Server.pushTerminalManifest(player)
+	end
+	if GlobalStorageSiK.CraftUtils and GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted then
+		GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
+	end
+end
+
 local function onClientCommand(module, command, player, args)
 
 	if module ~= GlobalStorageSiK.MOD_ID or not player then
@@ -2353,6 +2433,61 @@ local function onClientCommand(module, command, player, args)
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 
+	elseif command == "identityHello" then
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- probar en TEST): Events.OnCreatePlayer NUNCA se disparo en el
+		-- servidor dedicado durante 3 reconexiones reales (confirmado por
+		-- ausencia total de la traza siempre-visible correspondiente en el
+		-- log) - la identidad solo se resolvia de forma perezosa al primer
+		-- runtime_lookup (abrir un terminal), nunca al conectar. El cliente
+		-- avisa explicitamente nada mas cargar su personaje (ver
+		-- GS_IdentityHello.lua, Events.OnCreatePlayer del CLIENTE, que si se
+		-- dispara de forma confirmada) y el servidor resuelve todo con el
+		-- objeto `player` AUTORITATIVO que el propio motor entrega aqui -
+		-- nunca un dato que pudiera venir en `args` desde el cliente.
+		runIdentityBootstrap(player, "identity_hello")
+		-- ACK (2026-08-26, pedido explicito de Desarrollo): confirma al
+		-- cliente que el aviso llego de verdad, para que deje de reintentar
+		-- (ver GS_IdentityHello.lua).
+		gsSendServerCommand(player, "identityHelloAck", {})
+
+	elseif command == "identityDeath" then
+		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
+		-- probar en TEST, prueba real "morir y reclamar"): el propio motor
+		-- confirmo la muerte en su log nativo ("... is replacing dead
+		-- player") pero Events.OnPlayerDeath NUNCA disparo en el lado
+		-- servidor (sin la traza siempre-visible correspondiente) - el mismo
+		-- vacio ya confirmado para OnCreatePlayer, ahora tambien para
+		-- OnPlayerDeath. handleOwnerDeath (el unico tratamiento autoritativo
+		-- de muerte) nunca llegaba a ejecutarse en el dedicado, asi que
+		-- ninguna vida se marcaba ROLE_DEAD de verdad - cada reconexion
+		-- posterior quedaba para siempre en "identityRotationUnproven" (ver
+		-- dev6/dev8), nunca en el camino seguro de vacante confirmada.
+		-- Payload vacio a proposito (pedido explicito): nunca se acepta UUID,
+		-- nombre ni SteamID que pudiera mandar el cliente - todo se resuelve
+		-- aqui con el `player` AUTORITATIVO que entrega el propio motor.
+		-- player:isDead() como guarda adicional: un cliente no deberia poder
+		-- forzar una "muerte" de su propio personaje vivo con este comando.
+		local okDead, isDead = pcall(function() return player.isDead and player:isDead() end)
+		if not okDead or not isDead then
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.warn("Permissions", "identityDeathRejected",
+					tostring(player:getUsername()) .. " - player:isDead()=" .. tostring(okDead and isDead or "error"))
+			end
+		elseif not GlobalStorageSiK.Permissions.handleOwnerDeath then
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.error("Permissions", "identityDeathRejected",
+					"handleOwnerDeath no disponible")
+			end
+		else
+			GlobalStorageSiK.Permissions.handleOwnerDeath(player)
+			if GlobalStorageSiK.Log then
+				GlobalStorageSiK.Log.warn("Permissions", "identityDeathAccepted",
+					tostring(player:getUsername()) .. " characterId="
+						.. tostring(GlobalStorageSiK.Permissions.getCharacterId(player)))
+			end
+		end
+
 	elseif command == "reclaimOwnership" then
 		-- Diseño "herencia de red" (2026-08-21): revalida en servidor la misma
 		-- condicion que ya se comprobo para mostrar el boton - nunca confia en
@@ -2376,6 +2511,10 @@ local function onClientCommand(module, command, player, args)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
 		if ok then
 			handleOpenTerminal(player, args, networkId, searchQuery)
+			-- Avisa a OTROS miembros que ya tuvieran el terminal abierto en esta
+			-- red (ver mismo fix en adminAddMember/adminSetOwner/etc. mas abajo) -
+			-- quien reclama ya se refresca a si mismo via handleOpenTerminal.
+			pushNodeChangeToNetworkWatchers(player, networkId)
 		end
 
 	elseif command == "recoverOwnRole" then
@@ -2395,6 +2534,7 @@ local function onClientCommand(module, command, player, args)
 		gsSendServerCommand(player, "actionResult", { ok = recoverOk, message = recoverMessage })
 		if recoverOk then
 			handleOpenTerminal(player, args, networkId, searchQuery)
+			pushNodeChangeToNetworkWatchers(player, networkId)
 		end
 
 	elseif command == "adminClaimOwnership" then
@@ -2418,6 +2558,7 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", { ok = adminClaimOk, message = adminClaimMessage })
 			if adminClaimOk then
 				handleOpenTerminal(player, args, networkId, searchQuery)
+				pushNodeChangeToNetworkWatchers(player, networkId)
 			end
 		end
 
@@ -2464,6 +2605,15 @@ local function onClientCommand(module, command, player, args)
 			local ok, reason = GlobalStorageSiK.Permissions.adminAddMember(networkId, args.characterId)
 			if ok then
 				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
+				-- BUG REAL cerrado (2026-08-26, pedido explicito del usuario tras
+				-- observar que la pestaña Permisos normal no se actualizaba sola
+				-- tras una accion del panel de soporte, necesitaba cerrar y
+				-- reabrir la interfaz): las acciones de staff solo transmitian
+				-- ModData (sincroniza el dato crudo) pero nunca avisaban al
+				-- terminal ya abierto de quien estuviera viendo esta red - mismo
+				-- mecanismo ya usado para cambios de nodo (pushNodeChangeToNetwork
+				-- Watchers), reutilizado aqui para permisos.
+				pushNodeChangeToNetworkWatchers(player, networkId)
 				if reason == "added" then
 					GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_add_member",
 						tostring(player:getUsername()) .. " (staff) añadio a characterId=" .. tostring(args.characterId))
@@ -2483,6 +2633,7 @@ local function onClientCommand(module, command, player, args)
 			local ok = GlobalStorageSiK.Permissions.adminSetMemberRole(networkId, args.characterId, args.role)
 			if ok then
 				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
+				pushNodeChangeToNetworkWatchers(player, networkId)
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_role",
 					tostring(player:getUsername()) .. " (staff) cambio el rol de characterId="
 						.. tostring(args.characterId) .. " a " .. tostring(args.role))
@@ -2495,6 +2646,7 @@ local function onClientCommand(module, command, player, args)
 			local ok = GlobalStorageSiK.Permissions.adminRemoveMember(networkId, args.characterId)
 			if ok then
 				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
+				pushNodeChangeToNetworkWatchers(player, networkId)
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_remove_member",
 					tostring(player:getUsername()) .. " (staff) quito a characterId=" .. tostring(args.characterId))
 			end
@@ -2506,10 +2658,21 @@ local function onClientCommand(module, command, player, args)
 			local ok, reason = GlobalStorageSiK.Permissions.adminSetOwner(networkId, args.characterId)
 			if ok then
 				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
+				pushNodeChangeToNetworkWatchers(player, networkId)
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_set_owner",
 					tostring(player:getUsername()) .. " (staff) asigno propietario a characterId=" .. tostring(args.characterId))
 			end
 			gsSendServerCommand(player, "actionResult", { ok = ok, message = reason })
+		end
+
+	elseif command == "adminClearNetworkHistory" then
+		if requireServerMod(player, command, networkId) then
+			local ok = GlobalStorageSiK.Permissions.clearNetworkHistory(networkId)
+			if ok then
+				GlobalStorageSiK.Log.warn("Permissions", "adminDashboard",
+					tostring(player:getUsername()) .. " (staff) borro el historial de " .. tostring(networkId))
+			end
+			gsSendServerCommand(player, "actionResult", { ok = ok })
 		end
 
 	elseif command == "adminReleaseOwnership" then
@@ -2517,6 +2680,7 @@ local function onClientCommand(module, command, player, args)
 			local ok = GlobalStorageSiK.Permissions.adminReleaseOwnership(networkId)
 			if ok then
 				if ModData and ModData.transmit then GlobalStorageSiK.Permissions.requestTransmit() end
+				pushNodeChangeToNetworkWatchers(player, networkId)
 				GlobalStorageSiK.Permissions.recordHistoryEvent(networkId, "admin_release_ownership",
 					tostring(player:getUsername()) .. " (staff) libero la propiedad de la red")
 			end
@@ -3122,6 +3286,13 @@ local function onClientCommand(module, command, player, args)
 
 			local fullType = type(args.fullType) == "string"
 				and string.sub(args.fullType, 1, 160) or nil
+			-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando viene
+			-- informado, esta fila representaba SOLO las cintas VHS/radio con
+			-- este contenido exacto (ver GS_ItemSnapshot.lua) - sin esto el
+			-- servidor cogeria cualquier cinta del mismo fullType generico,
+			-- ignorando cual enseña de verdad. nil para cualquier otro item.
+			local mediaTitle = type(args.mediaTitle) == "string"
+				and string.sub(args.mediaTitle, 1, 200) or nil
 			local requested = math.floor(tonumber(args.amount) or 1)
 			if requested <= 0 then requested = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
 			requested = math.min(requested, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
@@ -3130,7 +3301,7 @@ local function onClientCommand(module, command, player, args)
 			-- antes de confirmar al cliente, que decide si queda otro.
 			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
-					player, fullType, networkId, requested, dest
+					player, fullType, networkId, requested, dest, mediaTitle
 				)
 			end)
 
@@ -4304,13 +4475,18 @@ local function onClientCommand(module, command, player, args)
 
 	elseif command == "getItemNetworkCounts" then
 		local fullType = args.fullType
+		-- mediaTitle (2026-08-26, fix de agrupacion de VHS): ver
+		-- GS_Index.getNetworkCountsForItem para el motivo completo.
+		local mediaTitle = type(args.mediaTitle) == "string"
+			and string.sub(args.mediaTitle, 1, 200) or nil
 		local networks = {}
 		local hasAnyNetwork = false
 		if fullType and GlobalStorageSiK.Index and GlobalStorageSiK.Index.getNetworkCountsForItem then
-			networks, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType)
+			networks, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaTitle)
 		end
 		gsSendServerCommand(player, "itemNetworkCounts", {
 			fullType = fullType,
+			mediaTitle = mediaTitle,
 			networks = networks,
 			hasAnyNetwork = hasAnyNetwork,
 		})
@@ -4350,43 +4526,15 @@ if Events and Events.OnCreatePlayer then
 			player = getSpecificPlayer(playerIndexOrPlayer)
 		end
 		-- isAuthoritative(), no isServer() a pelo: en SP real isServer() da
-		-- false y este handler entero (manifest + regalo retroactivo de
-		-- recetas de manual) nunca corria al entrar a la partida. Este era
-		-- el motivo real de que ensureManualRecipesGranted (llamada tambien
-		-- desde handleOpenTerminal, pero eso exige abrir NUESTRA interfaz)
-		-- nunca se ejecutara para un jugador que solo abre el menu de
-		-- crafteo VANILLA sin haber abierto antes el terminal - cero lineas
-		-- de log con DebugMode porque la funcion jamas llegaba a correr.
-		if not player or not GlobalStorageSiK.isAuthoritative() then
-			return
-		end
-		-- DIAGNOSTICO DIRIGIDO (2026-08-19, feedback comunidad china: entrada
-		-- de miembro duplicada en CADA reinicio del servidor, incluso para si
-		-- mismo, y nuevos miembros sin permiso real) - traza SIEMPRE visible
-		-- (no gateada por Modo depuracion, a proposito: el reinicio en si es
-		-- el evento que hay que capturar, no se puede pedir activar debug de
-		-- antemano cada vez) del UUID que YA tenia este personaje en su
-		-- modData ANTES de que initializeCharacterIdentity toque nada -
-		-- confirma o descarta de un vistazo si el problema es que el UUID
-		-- guardado no sobrevive entre reinicios (leeria vacio aqui pese a
-		-- que el personaje ya tenia uno asignado en una sesion anterior).
-		if GlobalStorageSiK.Log and player.getModData then
-			local okPre, preData = pcall(function() return player:getModData() end)
-			local preUuid = okPre and preData
-				and tostring(preData[GlobalStorageSiK.Permissions.CHARACTER_UUID_KEY] or "") or "<sin_modData>"
-			GlobalStorageSiK.Log.warn("Identity", "onCreatePlayer preExistingUuid=" .. preUuid
-				.. " username=" .. tostring(player.getUsername and player:getUsername() or "?"))
-		end
-		GlobalStorageSiK.Permissions.initializeCharacterIdentity(player, "on_create_player")
-		-- Un personaje que acaba de entrar nunca hereda la suscripcion visual
-		-- que pudiera quedar de una conexion anterior interrumpida.
-		clearTerminalWatcher(player)
-		if GlobalStorageSiK.Server.pushTerminalManifest then
-			GlobalStorageSiK.Server.pushTerminalManifest(player)
-		end
-		if GlobalStorageSiK.CraftUtils and GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted then
-			GlobalStorageSiK.CraftUtils.ensureManualRecipesGranted(player)
-		end
+		-- false y este handler nunca corria al entrar a la partida.
+		-- Delegado en runIdentityBootstrap (2026-08-26, revision tecnica de
+		-- Desarrollo): confirmado en TEST que este hook NO se dispara en el
+		-- servidor dedicado durante una reconexion - se conserva de todos
+		-- modos por si dispara en otros contextos (SP real, host LAN), la
+		-- funcion compartida es segura de llamar mas de una vez para la
+		-- misma vida. La via fiable en dedicado es "identityHello" (ver
+		-- GS_IdentityHello.lua + el comando homonimo en onClientCommand).
+		runIdentityBootstrap(player, "on_create_player")
 	end)
 end
 

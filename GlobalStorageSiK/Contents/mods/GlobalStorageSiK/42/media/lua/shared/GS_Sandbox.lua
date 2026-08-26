@@ -560,6 +560,16 @@ function GlobalStorageSiK.Sandbox.getLootDiskProgramMagazineWeight()
 	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.LootDiskProgramMagazineWeight or 1.0
 end
 
+--- Igual que GS_RecipeTests.canCraftSolderingIron - centralizado aqui para
+--- que la UI (ventanas de "Conseguir PC"/disquetera, pantalla de
+--- instalacion) pueda avisar "vas a necesitar un soldador, solo se
+--- encuentra" sin duplicar la lectura directa de SandboxVars (pedido
+--- 2026-08-26).
+---@return boolean
+function GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled()
+	return SandboxVars.GlobalStorageSiK ~= nil and SandboxVars.GlobalStorageSiK.EnableSolderingIronCraft == true
+end
+
 ---@return number
 function GlobalStorageSiK.Sandbox.getLootSolderingIronWeight()
 	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.LootSolderingIronWeight or 1.0

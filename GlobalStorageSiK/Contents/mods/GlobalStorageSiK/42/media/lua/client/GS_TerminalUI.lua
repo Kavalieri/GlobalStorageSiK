@@ -1112,6 +1112,12 @@ function GS_TerminalUI:setRedistributeState(running, message, status)
 		self.autoSortBtn._sikUiLabel = T("IGUI_GS_Redistribute")
 		self.autoSortBtn.textColor = nil
 		local allowed = self:canUseAutoSort()
+		-- Auditoria de botones (2026-08-26): _sikUiLocked refleja SOLO el
+		-- motivo "sin permiso" (requisito no cumplido, el mismo concepto que
+		-- el resto de botones bloqueados) - "ya se esta ejecutando" es un
+		-- estado transitorio de trabajo en curso, categoria distinta, no se
+		-- pinta igual (sigue usando el atenuado plano de setEnable a secas).
+		self.autoSortBtn._sikUiLocked = not allowed
 		self.autoSortBtn:setEnable(not self._autoSortRunning and allowed)
 		if self.autoSortBtn.setTooltip then
 			self.autoSortBtn:setTooltip(allowed
@@ -1233,11 +1239,26 @@ end
 
 --- Rellena el combo de categorías principales a partir del catálogo actual.
 ---@param allItems table[]
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, mismo informe de telemetria
+-- real que los fixes de sortRows/asciiLower/itemSearchHaystack de arriba -
+-- "los 3 combos de categoria se reconstruyen en cada refresco aunque solo
+-- dependan del catalogo"): refreshItemsTab() los reconstruye SIEMPRE,
+-- incluida cada pulsacion de tecla en el buscador (via onSearch), aunque el
+-- catalogo y la seleccion de categoria/subcategoria no hayan cambiado en
+-- absoluto - clear()+addOption() por cada opcion es coste de UI real, no
+-- solo de Lua. Cada rebuildXCombo salta el trabajo si su propia firma de
+-- entrada (catalogo + claves de las que depende) es identica a la del
+-- ultimo build - misma logica ya usada en isTabUiHealthy() para otras
+-- pestañas ("solo reconstruir cuando algo relevante cambio de verdad").
 function GS_TerminalUI:rebuildMainCategoryFilterCombo(allItems)
 	local combo = self.mainCategoryFilterCombo
 	if not combo then
 		return
 	end
+	if self._mainCategoryComboSourceItems == allItems then
+		return
+	end
+	self._mainCategoryComboSourceItems = allItems
 	local prevKey = self:getMainCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectMainCategoryFilters(allItems or {})
 	self._rebuildingMainCategoryCombo = true
@@ -1267,8 +1288,13 @@ function GS_TerminalUI:rebuildSubCategoryFilterCombo(allItems)
 	if not combo then
 		return
 	end
-	local prevKey = self:getSubCategoryFilterKey()
 	local mainKey = self:getMainCategoryFilterKey()
+	if self._subCategoryComboSourceItems == allItems and self._subCategoryComboSourceMainKey == mainKey then
+		return
+	end
+	self._subCategoryComboSourceItems = allItems
+	self._subCategoryComboSourceMainKey = mainKey
+	local prevKey = self:getSubCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectSubCategoryFilters(allItems or {}, mainKey)
 	self._rebuildingSubCategoryCombo = true
 	combo:clear()
@@ -1297,9 +1323,17 @@ function GS_TerminalUI:rebuildLeafCategoryFilterCombo(allItems)
 	if not combo then
 		return
 	end
-	local prevKey = self:getLeafCategoryFilterKey()
 	local mainKey = self:getMainCategoryFilterKey()
 	local subKey = self:getSubCategoryFilterKey()
+	if self._leafCategoryComboSourceItems == allItems
+		and self._leafCategoryComboSourceMainKey == mainKey
+		and self._leafCategoryComboSourceSubKey == subKey then
+		return
+	end
+	self._leafCategoryComboSourceItems = allItems
+	self._leafCategoryComboSourceMainKey = mainKey
+	self._leafCategoryComboSourceSubKey = subKey
+	local prevKey = self:getLeafCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectLeafCategoryFilters(allItems or {}, mainKey, subKey)
 	self._rebuildingLeafCategoryCombo = true
 	combo:clear()
@@ -1322,10 +1356,21 @@ function GS_TerminalUI:rebuildLeafCategoryFilterCombo(allItems)
 end
 
 --- Refresca la pestaña Ítems aplicando filtros locales.
+-- Traza `durationMs` (2026-08-26, mismo patron ya usado en GS_ZoneScanJob.lua)
+-- añadida para poder MEDIR de verdad el efecto de los fixes de rendimiento de
+-- dev18 (sortRows/asciiLower/itemSearchHaystack/combos), no solo asumirlo -
+-- reportado originalmente por un miembro de la comunidad con telemetria real
+-- de servidor (refreshItemsTab en 1157ms sobre 1286 tipos/188 nodos, 15-16ms
+-- esperados tras memorizar). Reutiliza el canal YA gateado de UIDebug (esta
+-- funcion se dispara en CADA tecla del buscador - un Log.warn "siempre
+-- visible" aqui seria justo el tipo de ruido de consola que el proyecto
+-- evita a proposito, ver regla de diagnostico dirigido del CLAUDE.md).
 function GS_TerminalUI:refreshItemsTab()
 	if not self.itemsListPanel then
 		return
 	end
+	local startedMs = (GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled() and getTimestampMs)
+		and getTimestampMs() or nil
 	local allItems = self.terminalState and self.terminalState.items or {}
 	if GlobalStorageSiK.UIDebug then
 		GlobalStorageSiK.UIDebug.action("refreshItemsTab", "items=" .. tostring(#allItems))
@@ -1336,6 +1381,12 @@ function GS_TerminalUI:refreshItemsTab()
 	self:rebuildLeafCategoryFilterCombo(allItems)
 	local filtered = self:applyItemsFilter(allItems)
 	GlobalStorageSiK.TerminalItems.refresh(self.itemsListPanel, self, filtered)
+	if startedMs then
+		GlobalStorageSiK.UIDebug.action("refreshItemsTab_done",
+			"durationMs=" .. tostring(getTimestampMs() - startedMs)
+				.. " items=" .. tostring(#allItems)
+				.. " filtered=" .. tostring(#filtered))
+	end
 end
 
 function GS_TerminalUI:onSearch(force)

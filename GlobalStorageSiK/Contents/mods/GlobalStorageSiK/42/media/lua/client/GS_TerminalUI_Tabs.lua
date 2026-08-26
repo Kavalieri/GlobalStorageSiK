@@ -304,6 +304,22 @@ end
 
 function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
+	-- BUG REAL DE DISEÑO cerrado (2026-08-26, pedido explicito tras el fix de
+	-- fallthrough de clic en GS_TerminalTabSlot: "evitar que cualquier click
+	-- no capturado caiga en la pestaña de addon - si tiene que haber una por
+	-- defecto, que sea el almacen"): una clave invalida/vacia (nil, o una
+	-- pestaña que ya no existe - p.ej. un addon desinstalado entre sync y
+	-- clic) caia antes en el `return` silencioso de mas abajo, dejando la
+	-- pestaña activa TAL CUAL estuviera - inofensivo en la practica, pero
+	-- ninguna garantia explicita de que un futuro bug similar no pudiera
+	-- colar "addons" por esa via. Normalizado aqui, ANTES de cualquier otra
+	-- logica: una clave que no sea una de las fijas conocidas nunca activa
+	-- "addons" por defecto - cae siempre a "items".
+	if tabKey ~= "items" and tabKey ~= "network" and tabKey ~= "config" and tabKey ~= "addons"
+		and not (terminal.tabViews and terminal.tabViews[tabKey]) then
+		tabKey = "items"
+	end
+
 	-- BUG REAL reportado por el usuario (2026-08-26, captura real: "no hay
 	-- electricidad" solo se descubria al fallar una transferencia): sin
 	-- energia, el terminal dejaba navegar libremente a Almacen/Addons. Ahora
@@ -461,6 +477,34 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 		end
 
 	else
+
+		-- BUG REAL cerrado (2026-08-26, reportado con capturas: "la ventana
+		-- se pinta pequeña y hay texto que sobresale... creo que hereda
+		-- tamaños de la de bloqueo"): la ventana es un singleton compartido
+		-- entre modo bloqueo y modo completo (GS_TerminalUI_Blocked.lua/
+		-- GS_TerminalUI_Api.lua reutilizan la MISMA instancia) - el modo
+		-- bloqueo la crea mas pequeña a proposito (820-960px de ancho) que el
+		-- modo completo (900-1200px). Si la instancia se creo primero en modo
+		-- bloqueo (jugador sin terminal/red cerca) y luego pasa a modo
+		-- completo (ya con acceso real), esta funcion nunca habia
+		-- redimensionado la ventana - se quedaba con el tamaño pequeño del
+		-- bloqueo para siempre, con la interfaz completa (mas columnas,
+		-- riel de pestañas, cabeceras) intentando caber ahi y desbordando
+		-- texto - justo la norma de diseño prohibida de "texto que sobresale".
+		-- Se fuerza aqui el minimo ya usado por el redimensionado manual
+		-- (installMouseHandlers: minimumWidth/minimumHeight=900/720) antes de
+		-- activar ninguna pestaña, recentrada en pantalla igual que hace la
+		-- apertura inicial en modo completo (GS_TerminalUI_Api.lua).
+		if terminal.width < terminal.minimumWidth or terminal.height < terminal.minimumHeight then
+			local sw = getCore():getScreenWidth()
+			local sh = getCore():getScreenHeight()
+			local w = math.max(terminal.minimumWidth, math.min(1200, math.floor(sw * 0.85)))
+			local h = math.max(terminal.minimumHeight, math.min(1000, math.floor(sh * 0.90)))
+			terminal:setWidth(w)
+			terminal:setHeight(h)
+			terminal:setX(math.floor((sw - w) / 2))
+			terminal:setY(math.floor((sh - h) / 2))
+		end
 
 		local tab = terminal.activeTabKey or "items"
 

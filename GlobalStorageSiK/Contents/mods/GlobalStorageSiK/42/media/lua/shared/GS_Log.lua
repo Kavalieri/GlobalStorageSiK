@@ -135,6 +135,73 @@ local AREA_CATEGORY = {
 	Addons = "Addons",
 }
 
+--- Ficheros de depuración por categoría, uno por bloque individual del
+--- sandbox (pedido explicito 2026-08-26, mismo patron ya usado en
+--- SiKCorpseLootGuard - ver SCLG_FileLog.lua): cuando una categoria esta
+--- activa, sus lineas se escriben ADEMAS de en consola (ese camino no
+--- cambia en absoluto) en su propio fichero "GlobalStorageSiK_Debug_
+--- <Categoria>.log" en <carpeta Zomboid>/Lua/ - asi se puede revisar solo
+--- Permissions, o solo Network, sin buscarlo entre miles de lineas de otras
+--- categorias mezcladas en console.txt. Motivo real: la investigacion de
+--- identidad de personaje (UUID/owner/reconciliacion) genera trazas de la
+--- categoria Permissions intercaladas con el resto de logs del servidor -
+--- tenerla en su propio fichero facilita compartirlo/revisarlo aparte.
+--- API real getFileWriter(nombre, relativeToModData, append), misma que
+--- usa SCLG_FileLog.lua (confirmada en scripts vanilla, ej. forageSystem.lua).
+--- CAMBIO explicito (2026-08-26, pedido directo: "los ficheros que creamos y
+--- limpiamos en cada reinicio durante el debug, quizas deberian sobrevivir,
+--- con lineas de Inicio y fin al realizar cada test, para poder comparar
+--- entre ejecuciones y lanzamientos"): la version anterior VACIABA el
+--- fichero de una categoria la primera vez que escribia algo en cada
+--- arranque de proceso - util para "solo lo de ahora" pero imposible de usar
+--- para comparar una ronda de pruebas contra la anterior sin haber copiado
+--- el fichero a mano entre medias. Ahora nunca se trunca - siempre append -
+--- y la primera linea de una categoria en cada arranque de proceso es un
+--- separador "=== INICIO <categoria> <fecha/hora> proceso=<CLI/SRV/HOST/SP>
+--- ===" que delimita visualmente donde empieza cada sesion dentro del mismo
+--- historico. No hay marca de "FIN" fiable (no existe un evento de apagado
+--- limpio garantizado en un servidor dedicado que se pueda capturar desde
+--- Lua) - el limite de una sesion es, en la practica, el INICIO de la
+--- siguiente. Una categoria que nunca llega a escribir en esta sesion (esta
+--- desactivada, o no genero ninguna traza) no toca su fichero en absoluto.
+local FILE_LOG_PREFIX = "GlobalStorageSiK_Debug_"
+local categoryFileStartedThisRun = {}
+
+---@return string
+local function fileTimestamp()
+	local ok, s = pcall(function() return os.date("%Y-%m-%d %H:%M:%S") end)
+	return (ok and s) and s or "?"
+end
+
+---@param category string
+---@param line string
+local function writeCategoryFile(category, line)
+	if not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
+		return
+	end
+	local fileName = FILE_LOG_PREFIX .. category .. ".log"
+	if not categoryFileStartedThisRun[category] then
+		categoryFileStartedThisRun[category] = true
+		local okStart, startWriter = pcall(getFileWriter, fileName, true, true)
+		if okStart and startWriter then
+			pcall(function()
+				startWriter:write("=== INICIO " .. category .. " " .. fileTimestamp()
+					.. " proceso=" .. tostring(GlobalStorageSiK.DebugRelay.processTag()) .. " ===\r\n")
+			end)
+			pcall(function() startWriter:close() end)
+		end
+	end
+	local ok, writer = pcall(getFileWriter, fileName, true, true)
+	if not ok or not writer then
+		return
+	end
+	pcall(function()
+		writer:write("[" .. fileTimestamp() .. "] " .. line .. "\r\n")
+	end)
+	pcall(function() writer:close() end)
+	categoryFileStartedThisRun[category] = true
+end
+
 --- Escribe línea en consola del juego.
 ---@param level string
 ---@param area string
@@ -148,6 +215,10 @@ local function write(level, area, message, detail)
 	end
 	print(line)
 	GlobalStorageSiK.DebugRelay.emit(line)
+	local category = AREA_CATEGORY[area]
+	if category then
+		writeCategoryFile(category, line)
+	end
 end
 
 --- Error siempre visible (compatible con Error Magnifier).

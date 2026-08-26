@@ -102,6 +102,42 @@ local function literatureTitleFromItem(item)
 	return title
 end
 
+--- BUG REAL confirmado (2026-08-26, "agrupados por fullType nos perjudica
+--- con los VHS"): a diferencia de los libros de habilidad (fullType DISTINTO
+--- por habilidad/nivel, ej. Base.CarpentryBook1), TODAS las cintas VHS/radio
+--- vanilla comparten el MISMO fullType generico - lo que enseña cada cinta
+--- concreta vive en un dato de instancia (getRecordedMediaIndex(), un indice
+--- a la tabla global RecMedia), asi que nuestro Almacen (agregado por
+--- fullType) fundia todas las cintas del jugador en una sola fila sin poder
+--- ver cual tenia, retirar una en concreto, ni aplicar el check verde que si
+--- tienen libros/revistas.
+---
+--- Solucion: NO parsear RecMedia aqui (esa tabla exige pasar el indice como
+--- "short" al lado Java, marshalling que Kahlua rompe siempre a Double - ver
+--- el rodeo ya documentado en GS_ItemNetworkTooltip.getVHSTrainingLines,
+--- mismo motivo por el que el mod retirado "Show VHS skills in tooltip" tenia
+--- el mismo problema). En su lugar, exactamente igual que literatureTitle
+--- (mismo motivo: valor por-instancia, NO cacheable por fullType): vanilla ya
+--- resuelve un getDisplayName() distinto por cada entrada de RecMedia (asi es
+--- como el propio GS_ItemNetworkTooltip correlaciona indice->habilidad, vía
+--- nombre) - leerlo aqui basta como clave de agrupacion Y como nombre a
+--- mostrar, sin tocar RecMedia en absoluto ni depender de su marshalling.
+--- Publica (no solo local) a proposito: GS_Transfer.lua (filtrar que cinta
+--- fisica retirar) y GS_ItemNetworkTooltip.lua (contar en red solo cintas
+--- con este mismo contenido) reutilizan EXACTAMENTE esta misma lectura, en
+--- vez de cada uno duplicar su propia version del mismo pcall.
+---@param item InventoryItem|nil
+---@return string|nil
+function GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
+	if not item or not item.getRecordedMediaIndex then return nil end
+	local okIdx, idx = pcall(function() return item:getRecordedMediaIndex() end)
+	if not okIdx or not idx or idx < 0 then return nil end
+	local okName, name = pcall(function() return item:getDisplayName() end)
+	if not okName or not name or name == "" then return nil end
+	return name
+end
+local recordedMediaTitleFromItem = GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
+
 local function metadataForItem(item, fullType)
 	local worldSprite = readWorldSprite(item)
 	local cacheKey = fullType .. "\31" .. tostring(worldSprite or "")
@@ -154,12 +190,26 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	if not fullType or fullType == "" then
 		return false
 	end
-	local row = byType[fullType]
+	-- Clave de agrupacion: fullType a secas para el 99% de los items (sigue
+	-- siendo lo correcto - "bolsas de patatas" deben sumarse en una sola
+	-- fila), PERO fullType+mediaTitle para cintas VHS/radio, para que cada
+	-- contenido distinto sea su propia fila. row.fullType se conserva SIEMPRE
+	-- como el tipo real (retirada/instanceItem lo necesitan intacto); la
+	-- clave compuesta solo decide como se agrupan las filas, nunca que se
+	-- transfiere.
+	local mediaTitle = recordedMediaTitleFromItem(item)
+	local groupKey = mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType
+	local row = byType[groupKey]
 	if not row then
 		local metadata = metadataForItem(item, fullType)
 		row = {
 			fullType = fullType,
-			displayName = metadata.displayName,
+			-- mediaTitle (getDisplayName() real de ESTA cinta, ej. "Carpentry
+			-- for Beginners") sustituye al nombre generico por fullType ("VHS
+			-- Tape") cuando existe - es mas especifico y es exactamente lo que
+			-- ya usa vanilla para distinguir cintas, sin inventar redaccion
+			-- propia.
+			displayName = mediaTitle or metadata.displayName,
 			worldSprite = metadata.worldSprite,
 			category = metadata.category,
 			subCategory = metadata.subCategory,
@@ -168,9 +218,10 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			learnedRecipeNames = metadata.learnedRecipeNames,
 			numberOfPages = metadata.numberOfPages,
 			literatureTitle = literatureTitleFromItem(item),
+			mediaTitle = mediaTitle,
 			count = 0,
 		}
-		byType[fullType] = row
+		byType[groupKey] = row
 	end
 	-- InventoryItem:getCount() NO es el número de instancias transferibles. En
 	-- objetos como Base.Nails puede devolver el multiplicador definido por el
@@ -200,10 +251,10 @@ end
 ---@param target table<string, table>
 ---@param source table<string, table>
 function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
-	for fullType, row in pairs(source or {}) do
-		local existing = target[fullType]
+	for groupKey, row in pairs(source or {}) do
+		local existing = target[groupKey]
 		if not existing then
-			target[fullType] = {
+			target[groupKey] = {
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -214,6 +265,7 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaTitle = row.mediaTitle,
 				count = row.count or 0,
 			}
 		else

@@ -174,6 +174,13 @@ local function dispatchCurrent()
 	nextDispatchMs = math.huge
 	local sent = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
 		fullType = current.rowData.fullType,
+		-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando la fila
+		-- retirada es una cinta VHS/radio, esta fila representa SOLO las
+		-- cintas con este contenido exacto (ver GS_ItemSnapshot.lua) - hay que
+		-- decirselo al servidor para que no tome cualquier cinta del mismo
+		-- fullType generico, sino una que enseñe justo esto. nil para
+		-- cualquier otro item (comportamiento identico a siempre).
+		mediaTitle = current.rowData.mediaTitle,
 		amount = requested,
 		targetKey = current.targetKey,
 		searchQuery = current.searchQuery or "",
