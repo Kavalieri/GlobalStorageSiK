@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "Installationsdiskette im Inventar",
 	"IGUI_GS_AddonReqUninstallDisk": "Deinstallationsdiskette im Inventar (wird nicht verbraucht)",
 	"IGUI_GS_AddonReqReader": "SiK-Lesegerät in diesem Netzwerk installiert oder im Inventar",
+	"IGUI_GS_AddonReqSkill": "Elektronik Level {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Du brauchst ein höheres Elektroniklevel, um dieses Peripheriegerät zu installieren oder zu deinstallieren.",
 	"IGUI_GS_AddonReqMagazine": "Magazin gelesen",
 	"IGUI_GS_TierInstalled": "im Netzwerk installiert",
 	"IGUI_GS_TierInInventory": "in deinem Inventar",

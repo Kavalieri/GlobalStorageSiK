@@ -26,7 +26,6 @@
 require "GS_TerminalUI_Api"
 require "GS_NetClient"
 require "GS_AdminDashboard"
-require "GS_ItemNetworkTooltip"
 
 -- DIAGNOSTICO DIRIGIDO (2026-08-26, pedido explicito del usuario: "dejarlo
 -- listo para un diagnostico completo" ante el riesgo de que el cuelgue de
@@ -69,26 +68,13 @@ local function onPlayerDeath(player)
 	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		GlobalStorageSiK.NetClient.sendCommand("identityDeath", {})
 	end
-	-- BUG REAL DE CICLO cerrado (2026-08-26, diagnostico real de Desarrollo:
-	-- cuelgue de cliente reproducido "morir y crear vida nueva, desplegar
-	-- inventario"): la vida nueva dispara Events.OnCreatePlayer, momento en
-	-- el que Magic Accessories vuelve a apropiarse de ISToolTipInv.render
-	-- capturando el wrapper GS TODAVIA activo (el de la vida que acaba de
-	-- morir) como su propio fallback - eso deja un wrapper GS inactivo
-	-- atrapado dentro de la cadena de Magic, formando un ciclo que cuelga el
-	-- render de cualquier tooltip de inventario. Desmontar el wrapper GS
-	-- LO ANTES POSIBLE en esta limpieza (movido aqui en dev27, ANTES de
-	-- onClose/cierre de ventanas/limpieza de resaltados - si cualquiera de
-	-- esos pasos posteriores se bloquea o lanza una excepcion, Magic ya no
-	-- podra capturar el wrapper antiguo en la siguiente vida de todos modos)
-	-- restaura a Magic como propietario legitimo del slot; el monitor
-	-- periodico de GS_ItemNetworkTooltip.lua (suspendido hasta el proximo
-	-- Events.OnCreatePlayer, ver dev27) lo vuelve a envolver una unica vez,
-	-- ya con la cadena limpia.
-	trace("uninstall_tooltip_hook")
-	if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.uninstallHooks then
-		pcall(GlobalStorageSiK.ItemNetworkTooltip.uninstallHooks)
-	end
+	-- BUG REAL DE CICLO cerrado definitivamente en origen (2026-08-27, ver
+	-- GS_ItemNetworkTooltip.lua): el wrapper de tooltip ya no se reinstala
+	-- nunca por reclamo periodico de posicion exterior ni se desmonta al
+	-- morir - se instala UNA SOLA VEZ por sesion (o se delega por completo en
+	-- TooltipLib si esta presente) y usa una guarda de reentrada propia, asi
+	-- que ninguna vida nueva puede dejarlo atrapado en un ciclo con otro mod.
+	-- Ya no hace falta ningun paso de desmontaje aqui.
 	trace("onClose_begin")
 	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	if ui and ui.onClose then

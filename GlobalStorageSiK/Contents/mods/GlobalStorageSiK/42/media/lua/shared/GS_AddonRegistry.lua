@@ -18,6 +18,8 @@ require "GS_Config"
 
 require "GS_CraftUtils"
 
+require "GS_Sandbox"
+
 
 
 GlobalStorageSiK.AddonRegistry = GlobalStorageSiK.AddonRegistry or {}
@@ -369,6 +371,15 @@ function GlobalStorageSiK.AddonRegistry.canInstallModule(player, addonId, networ
 
 		return false, "magazine"
 
+	end
+
+	-- Requisito de habilidad, mismo umbral para instalar y desinstalar
+	-- cualquier addon (ver GlobalStorageSiK.Addons.hasRequiredSkill, GS_Addons.lua -
+	-- duplicado aqui en vez de llamar alli para no crear un ciclo de requires,
+	-- GS_Addons.lua ya requiere este fichero).
+	local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+	if requiredSkill > 0 and GlobalStorageSiK.CraftUtils.getElectricityLevel(player) < requiredSkill then
+		return false, "skill"
 	end
 
 	local def = GlobalStorageSiK.AddonRegistry.get(addonId)

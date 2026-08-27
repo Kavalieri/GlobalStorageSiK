@@ -26,6 +26,8 @@
 	"IGUI_GS_AddonReqDisk": "Installation disk in your inventory",
 	"IGUI_GS_AddonReqUninstallDisk": "Uninstall disk in your inventory (not consumed)",
 	"IGUI_GS_AddonReqReader": "SiK Reader installed on this network or in your inventory",
+	"IGUI_GS_AddonReqSkill": "Electronics level {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "You need a higher Electronics level to install or uninstall this peripheral.",
 	"IGUI_GS_AddonReqMagazine": "Magazine read",
 	"IGUI_GS_TierInstalled": "installed on the network",
 	"IGUI_GS_TierInInventory": "in your inventory",

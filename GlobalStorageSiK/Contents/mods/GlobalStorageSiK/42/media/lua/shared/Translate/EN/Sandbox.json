@@ -56,6 +56,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "How long the 'Get a PC' window takes to assemble a desktop computer from its 4 parts.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Terminal install time",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "How long installing a network disk on a computer takes (reader + disk method). Shared by the core mod and any addon that installs its own disk on a terminal.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Electronics level for addons",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Minimum Electronics skill level required to install or uninstall any terminal addon (floppy drive, 3D printer, WiFi antenna, digital whiteboard).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Debug mode",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "WARNING: Any enabled debug logging can reduce game and server performance; DETAIL logs may generate massive output. Use only for targeted diagnostics, enable only the required >> blocks, and disable during normal play and on production servers.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Relay dedicated-server logs to clients",

@@ -20,8 +20,11 @@ require "GS_Log"
 require "GS_InstallTerminalReader"
 require "GS_Config"
 require "GS_Sandbox"
+require "GS_CraftUtils"
 require "GS_DiskProgramming"
 require "TimedActions/GS_ProgramDiskAction"
+require "TimedActions/GS_AddonInstallAction"
+require "TimedActions/ISTimedActionQueue"
 require "GS_AddonRegistry"
 require "GS_Network"
 require "GS_Addons"
@@ -217,12 +220,17 @@ local function buildInstallChecklistTooltip(player, addonDef, hasTerminalNear, n
 	local magazineLabel = (addonDef.magazineType and GlobalStorageSiK.I18n.typeDisplayName
 		and GlobalStorageSiK.I18n.typeDisplayName(addonDef.magazineType)) or T("IGUI_GS_AddonStatusNeedMagazine")
 
+	local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+	local hasSkill = requiredSkill <= 0 or (player and GlobalStorageSiK.CraftUtils.getElectricityLevel(player) >= requiredSkill)
 	local lines = {
 		reqLine(T("IGUI_GS_ReqTerminalNear"), true),
 		reqLine(readerLabel, hasReader == true),
 		reqLine(moduleTierLabel(addonDef), hasAnyModuleTier(player, addonDef)),
 		reqLine(magazineLabel, knowsMag == true),
 	}
+	if requiredSkill > 0 then
+		lines[#lines + 1] = reqLine(T("IGUI_GS_AddonReqSkill", requiredSkill), hasSkill == true)
+	end
 	return table.concat(lines, " <LINE> ")
 end
 
@@ -623,7 +631,13 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 									end
 									return
 								end
-								GlobalStorageSiK.NetClient.sendCommand("installAddon", { addonId = addonId })
+								-- Pedido explicito del usuario: instalar/desinstalar un
+								-- addon ya no es instantaneo, corre una accion
+								-- cronometrada con barra de progreso y animacion de
+								-- manos trabajando (mismo requisito desde el menu
+								-- contextual del disquete y desde el modal de
+								-- gestion). ISTimedActionQueue.add mas abajo.
+								ISTimedActionQueue.add(GS_AddonInstallAction:new(p, addonId, "install", freshNid, freshAnchor, nil))
 							end)
 							-- Checklist completo SIEMPRE visible (terminal +
 							-- disquetera + modulo, cualquier tier + revista), no
@@ -684,13 +698,26 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 										end
 										return
 									end
-									GlobalStorageSiK.NetClient.sendCommand("uninstallAddon", { addonId = addonId })
+									local requiredSkillFresh = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+									if requiredSkillFresh > 0 and GlobalStorageSiK.CraftUtils.getElectricityLevel(p) < requiredSkillFresh then
+										if p and p.setHaloNote then
+											p:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+										end
+										return
+									end
+									ISTimedActionQueue.add(GS_AddonInstallAction:new(p, addonId, "uninstall", freshNid, freshAnchor, nil))
 								end)
-								attachTooltip(option, table.concat({
+								local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+								local hasSkill = requiredSkill <= 0 or (player and GlobalStorageSiK.CraftUtils.getElectricityLevel(player) >= requiredSkill)
+								local tooltipLines = {
 									reqLine(T("IGUI_GS_ReqTerminalNear"), true),
 									reqLine(readerLabel, hasReader == true),
-								}, " <LINE> "))
-								if not hasReader then
+								}
+								if requiredSkill > 0 then
+									tooltipLines[#tooltipLines + 1] = reqLine(T("IGUI_GS_AddonReqSkill", requiredSkill), hasSkill == true)
+								end
+								attachTooltip(option, table.concat(tooltipLines, " <LINE> "))
+								if not hasReader or not hasSkill then
 									markUnavailable(option)
 								end
 							end

@@ -26,6 +26,9 @@ require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
 require "GS_SiK_UI_Core"
 require "GS_TerminalUI_Scroll"
+require "GS_Sandbox"
+require "TimedActions/GS_AddonInstallAction"
+require "TimedActions/ISTimedActionQueue"
 
 GlobalStorageSiK.AddonManageUI = {}
 GlobalStorageSiK.AddonManageUI.instance = nil
@@ -208,6 +211,19 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 		-- del clic (igual que GS_ReaderAcquireUI.lua) y avisa con un halo
 		-- si falta algo, en vez de enviar un comando que sabemos que va
 		-- a fallar.
+		--
+		-- Pedido explicito del usuario (2026-08-27): instalar/desinstalar ya
+		-- no es instantaneo - se lanza una accion cronometrada con barra de
+		-- progreso y animacion de manos trabajando (GS_AddonInstallAction,
+		-- mismo patron ya probado en GS_ProgramDiskAction/
+		-- GS_InstallTerminalReaderAction). El comando real al servidor solo
+		-- se envia si la accion llega a completarse ENTERA (perform(), nunca
+		-- stop()) - cancelar a medias (moverse, Escape) no consume ni manda
+		-- nada, sin riesgo de duplicar. Mismo patron ya usado por el resto
+		-- de acciones cronometradas del mod: la ventana se cierra al lanzar
+		-- la accion (igual que GS_ReaderAcquireUI/GS_PCAcquireUI), el
+		-- feedback de exito/fallo llega despues via el toast generico de
+		-- GS_Client.lua (actionResult) cuando la accion termine de verdad.
 		if not isInstalled then
 			local recheckOk = self.player and GlobalStorageSiK.AddonRegistry.canInstallModule(self.player, def.id, self.networkId, self.anchor)
 			if not recheckOk then
@@ -216,7 +232,7 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 				end
 				return
 			end
-			GlobalStorageSiK.NetClient.sendCommand("installAddon", { addonId = def.id, searchQuery = searchQuery })
+			ISTimedActionQueue.add(GS_AddonInstallAction:new(self.player, def.id, "install", self.networkId, self.anchor, searchQuery))
 		else
 			-- Mismo criterio que instalar: revalida el disquete de
 			-- desinstalacion aqui mismo antes de enviar, en vez de
@@ -228,7 +244,7 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 				end
 				return
 			end
-			GlobalStorageSiK.NetClient.sendCommand("uninstallAddon", { addonId = def.id, searchQuery = searchQuery })
+			ISTimedActionQueue.add(GS_AddonInstallAction:new(self.player, def.id, "uninstall", self.networkId, self.anchor, searchQuery))
 		end
 		self:destroy()
 	end, nil, true, locked)
@@ -236,6 +252,7 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 		actionBtn:setTooltip(T("IGUI_GS_CraftMissing"))
 	end
 	self:addChild(actionBtn)
+	self._actionBtn = actionBtn
 	return y + BTN_H + pad
 end
 
@@ -351,7 +368,9 @@ function GS_AddonManageUI:buildLayout()
 		local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
 		local inv = self.player and self.player:getInventory()
 		local hasUninstallDisk = uninstallDiskItem and inv and (inv:getItemCountRecurse(uninstallDiskItem) or 0) >= 1
-		canUninstall = hasReader and (not uninstallDiskItem or hasUninstallDisk == true)
+		local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+		local hasSkill = requiredSkill <= 0 or (self.player and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= requiredSkill)
+		canUninstall = hasReader and (not uninstallDiskItem or hasUninstallDisk == true) and hasSkill
 
 		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqUninstallTitle"))
 		self:addChild(reqLbl)
@@ -366,6 +385,11 @@ function GS_AddonManageUI:buildLayout()
 		y = y + 6
 		if uninstallDiskItem then
 			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, uninstallDiskItem, T("IGUI_GS_AddonReqUninstallDisk"), hasUninstallDisk)
+			y = y + 6
+		end
+		if requiredSkill > 0 then
+			local skillIcon = GlobalStorageSiK.CraftUtils.getPerkTexture and GlobalStorageSiK.CraftUtils.getPerkTexture(Perks and Perks.Electricity)
+			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, skillIcon, T("IGUI_GS_AddonReqSkill", requiredSkill), hasSkill)
 			y = y + 6
 		end
 		y = y + 2
@@ -399,7 +423,9 @@ function GS_AddonManageUI:buildLayout()
 		-- podia aparecer habilitado sin ella y el jugador nunca veia ese
 		-- requisito en ningun lado de esta ventana.
 		local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
-		canInstall = hasReader and hasModule and hasDisk and hasMagazine
+		local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+		local hasSkill = requiredSkill <= 0 or (self.player and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= requiredSkill)
+		canInstall = hasReader and hasModule and hasDisk and hasMagazine and hasSkill
 
 		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqInstallTitle"))
 		self:addChild(reqLbl)
@@ -559,6 +585,16 @@ local function onRecipeLearned()
 		GlobalStorageSiK.AddonManageUI.instance:refresh()
 	end
 end
+
+-- BUG REAL cerrado (2026-08-27): el mecanismo de "ventana bloqueada hasta
+-- actionResult" (con correlacion action+addonId, hallazgo del equipo de
+-- sistemas) queda retirado - superado por la accion cronometrada
+-- (GS_AddonInstallAction, ver createAddonActionButton): la ventana se
+-- cierra en cuanto se lanza la accion, igual que el resto de acciones
+-- cronometradas del mod (GS_ReaderAcquireUI/GS_PCAcquireUI), y el feedback
+-- de exito/fallo llega via el toast generico de GS_Client.lua cuando la
+-- accion termine de verdad (perform()) - sin ventana viva que necesite
+-- correlacionar ni desbloquearse por timeout.
 
 local REFRESH_TICKS = 30
 local function onTick()

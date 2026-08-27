@@ -784,11 +784,52 @@ end
 -- con todo cacheado. Para el patron conocido de sprite de Moveable evitamos
 -- la consulta CONDENADA A FALLAR directamente: nunca se llega a preguntar,
 -- ni una sola vez, en vez de preguntar una vez y recordar la respuesta.
+-- BUG REAL cerrado (2026-08-27, ver GS_CatalogManager.lua y
+-- Documentacion/GSSiK_Taxonomia_Nativa_Analisis.md §8.4): si sm:getItem()
+-- fallaba en la PRIMERA consulta porque ScriptManager no estaba listo
+-- todavia (antes de OnGameBoot), el resultado se cacheaba como `false` PARA
+-- SIEMPRE, sin reintento en toda la sesion - un arranque lento dejaba ese
+-- fullType "sin clasificar" de forma permanente. Ahora, mientras
+-- CatalogManager no este listo, un fallo de ScriptManager no se cachea en
+-- absoluto (se reintenta en la siguiente consulta); solo se cachea un
+-- negativo real una vez que el catalogo esta confirmado disponible.
+-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas): el fix
+-- anterior evitaba cachear un negativo ANTES de que CatalogManager estuviera
+-- listo, pero los negativos guardados DESPUES seguian siendo permanentes de
+-- verdad - `forceNewEpoch()` (recarga Lua en debug) no limpiaba esta tabla
+-- ni sus entradas llevaban el epoch en que se guardaron, así que la
+-- afirmación del documento ("queda invalidada de facto al cambiar el
+-- epoch") no se cumplia para esta cache en concreto.
+--
+-- Tabla PARALELA (no un wrapper dentro del mismo valor, para no arriesgar
+-- confundir un ScriptItem real con una tabla de metadatos): solo los
+-- negativos "confirmados con catalogo listo" quedan registrados aqui con el
+-- epoch en que se guardaron. Si el epoch actual ya no coincide, el negativo
+-- se descarta y se reintenta. Los positivos (`script` real) y el patron
+-- Moveable (`false` permanente) NUNCA entran aqui - coherente con §8.2
+-- dominio 1 (ScriptItemCache): un ScriptItem real no deja de existir por
+-- cambiar de epoch, y el patron Moveable es estructural.
 local _scriptItemLookupCache = {}
+local _scriptItemNegativeEpoch = {}
 local function cachedScriptItem(fullType)
 	local cached = _scriptItemLookupCache[fullType]
 	if cached ~= nil then
-		return cached or nil
+		if cached ~= false then
+			return cached
+		end
+		local negEpoch = _scriptItemNegativeEpoch[fullType]
+		if negEpoch == nil then
+			-- Negativo permanente (patron Moveable, sin epoch registrado).
+			return nil
+		end
+		local currentEpoch = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
+		if currentEpoch == nil or negEpoch == currentEpoch then
+			return nil
+		end
+		-- El catalogo cambio de epoch desde que se confirmo este negativo -
+		-- ya no es de fiar, se retira y se reintenta abajo.
+		_scriptItemLookupCache[fullType] = nil
+		_scriptItemNegativeEpoch[fullType] = nil
 	end
 	if looksLikeMoveableSpriteFullType(fullType) then
 		_scriptItemLookupCache[fullType] = false
@@ -796,11 +837,25 @@ local function cachedScriptItem(fullType)
 	end
 	local sm = getScriptManager and getScriptManager()
 	local script = nil
+	local queried = false
 	if sm and sm.getItem then
 		local ok, value = pcall(function() return sm:getItem(fullType) end)
 		script = ok and value or nil
+		queried = ok
 	end
-	_scriptItemLookupCache[fullType] = script or false
+	local catalogReady = not GlobalStorageSiK.CatalogManager
+		or GlobalStorageSiK.CatalogManager.isReady()
+	if script then
+		_scriptItemLookupCache[fullType] = script
+	elseif queried and catalogReady then
+		-- Consulta real, ScriptManager disponible, catalogo confirmado
+		-- listo: un "no existe" aqui es un negativo de verdad - se ata al
+		-- epoch actual para poder invalidarse si el catalogo cambia.
+		_scriptItemLookupCache[fullType] = false
+		_scriptItemNegativeEpoch[fullType] = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
+	end
+	-- Si no se pudo consultar (sm no disponible) o el catalogo aun no esta
+	-- listo, no se cachea nada - la proxima llamada vuelve a intentarlo.
 	return script
 end
 
@@ -846,6 +901,34 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	local result = GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
 	typeDisplayNameCache[fullType] = result
 	return result
+end
+
+-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas: "los
+-- positivos de ScriptItem siguen siendo permanentes" - un ScriptItem real
+-- guardado en _scriptItemLookupCache nunca se invalidaba, aunque una recarga
+-- Lua/debug o un cambio de catalogo pudiera sustituir su definicion
+-- conservando el mismo fullType. El documento exige "valido durante una
+-- epoca", no para siempre, y esto se vuelve critico en cuanto las fases
+-- siguientes de la taxonomia empiecen a consultar propiedades del objeto
+-- devuelto). En vez de atar cada positivo a un epoch individual (fragil,
+-- facil de olvidar en un consumidor nuevo), se vacian POR COMPLETO las 3
+-- caches de este fichero que dependen del catalogo cada vez que
+-- CatalogManager confirma un cambio real de epoch.
+if GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.onEpochChanged then
+	GlobalStorageSiK.CatalogManager.onEpochChanged(function(newEpoch)
+		for k in pairs(_scriptItemLookupCache) do
+			_scriptItemLookupCache[k] = nil
+		end
+		for k in pairs(_scriptItemNegativeEpoch) do
+			_scriptItemNegativeEpoch[k] = nil
+		end
+		for k in pairs(typeDisplayNameCache) do
+			typeDisplayNameCache[k] = nil
+		end
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.debug("I18n", "cache de ScriptItem/nombre vaciada por cambio de catalogEpoch=" .. tostring(newEpoch))
+		end
+	end)
 end
 
 function GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)

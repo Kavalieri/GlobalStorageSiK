@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "背包中有安装磁盘",
 	"IGUI_GS_AddonReqUninstallDisk": "背包中有卸载磁盘（不会被消耗）",
 	"IGUI_GS_AddonReqReader": "该网络已安装 SiK 读卡器，或你背包中携带",
+	"IGUI_GS_AddonReqSkill": "电子技术等级 {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "你需要更高的电子技术等级才能安装或卸载该外设。",
 	"IGUI_GS_AddonReqMagazine": "已阅读杂志",
 	"IGUI_GS_TierInstalled": "已安装在网络中",
 	"IGUI_GS_TierInInventory": "在背包中",

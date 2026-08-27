@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Combien de temps la fenêtre 'Obtenir un PC' prend pour assembler un ordinateur de bureau à partir de ses 4 pièces.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Temps d'installation du terminal",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Combien de temps prend l'installation d'une disquette réseau sur un ordinateur (méthode lecteur et disquette). Partagé par le mod principal et toute extension qui installe sa propre disquette sur un terminal.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Niveau d'Électronique pour les extensions",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Niveau minimum en Électronique requis pour installer ou désinstaller n'importe quelle extension du terminal (lecteur de disquette, imprimante 3D, antenne WiFi, tableau blanc numérique).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Mode débogage",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "AVERTISSEMENT : toute journalisation de débogage active peut réduire les performances du jeu et du serveur ; les journaux DÉTAIL peuvent générer énormément de données. À utiliser uniquement pour un diagnostic ciblé, en activant seulement les blocs >> requis, puis à désactiver en jeu normal et en production.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Relayer les logs du serveur dédié aux clients",

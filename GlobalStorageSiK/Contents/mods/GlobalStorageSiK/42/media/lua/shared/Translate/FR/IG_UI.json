@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "Disquette d'installation dans votre inventaire",
 	"IGUI_GS_AddonReqUninstallDisk": "Disquette de désinstallation dans votre inventaire (non consommée)",
 	"IGUI_GS_AddonReqReader": "Lecteur SiK installé sur ce réseau ou dans votre inventaire",
+	"IGUI_GS_AddonReqSkill": "Électronique niveau {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Vous avez besoin d'un niveau d'Électronique plus élevé pour installer ou désinstaller ce périphérique.",
 	"IGUI_GS_AddonReqMagazine": "Magazine lu",
 	"IGUI_GS_TierInstalled": "installée sur le réseau",
 	"IGUI_GS_TierInInventory": "dans votre inventaire",

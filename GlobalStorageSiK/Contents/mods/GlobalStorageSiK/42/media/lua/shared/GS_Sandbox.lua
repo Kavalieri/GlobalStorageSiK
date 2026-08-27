@@ -339,6 +339,23 @@ function GlobalStorageSiK.Sandbox.getTerminalInstallTime()
 	return SandboxVars.GlobalStorageSiK.TerminalInstallTime or 90
 end
 
+--- Nivel mínimo de Electrónica exigido para instalar/desinstalar cualquier
+--- addon del terminal (disquetera, impresora 3D, antena WiFi, pizarra
+--- digital) - pedido explícito del usuario: "poco pero algo de
+--- conocimiento". Configurable por sandbox, mismo criterio que
+--- GS_ReaderAcquire.SKILL_REQUIRED (que es fijo, 3, por ser el punto de
+--- entrada al sistema) pero deliberadamente más bajo por defecto: instalar
+--- un módulo ya construido es más sencillo que montar la disquetera desde
+--- cero. Autoritativo en servidor (GlobalStorageSiK.Addons.install/
+--- uninstall lo revalida) - esto solo expone el valor configurado.
+---@return number
+function GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+	if not SandboxVars.GlobalStorageSiK then
+		return 1
+	end
+	return SandboxVars.GlobalStorageSiK.AddonInstallSkillRequired or 1
+end
+
 --- Obtiene el máximo de contenedores por zona al escanear.
 ---@return number
 function GlobalStorageSiK.Sandbox.getMaxContainersPerZone()

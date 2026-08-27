@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "Dyskietka instalacyjna w ekwipunku",
 	"IGUI_GS_AddonReqUninstallDisk": "Dyskietka deinstalacyjna w ekwipunku (nie jest zużywana)",
 	"IGUI_GS_AddonReqReader": "Czytnik SiK zainstalowany w tej sieci lub w ekwipunku",
+	"IGUI_GS_AddonReqSkill": "Elektronika na poziomie {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Potrzebujesz wyższego poziomu Elektroniki, aby zainstalować lub odinstalować to urządzenie peryferyjne.",
 	"IGUI_GS_AddonReqMagazine": "Przeczytano magazyn",
 	"IGUI_GS_TierInstalled": "zainstalowano w sieci",
 	"IGUI_GS_TierInInventory": "w ekwipunku",

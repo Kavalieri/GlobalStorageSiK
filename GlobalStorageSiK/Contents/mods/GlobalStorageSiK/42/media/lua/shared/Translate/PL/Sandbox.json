@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Ile czasu zajmuje oknu 'Zdobądź PC' zmontowanie komputera stacjonarnego z jego 4 części.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Czas instalacji terminala",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Ile czasu zajmuje instalacja dyskietki sieciowej na komputerze (metoda napęd i dyskietka). Współdzielony przez mod główny i każdy dodatek instalujący własną dyskietkę na terminalu.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Poziom Elektroniki dla dodatków",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Minimalny poziom umiejętności Elektronika wymagany do zainstalowania lub odinstalowania dowolnego dodatku terminala (napęd dyskietek, drukarka 3D, antena WiFi, cyfrowa tablica).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Tryb debugowania",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "OSTRZEŻENIE: każde aktywne logowanie debugowania może obniżyć wydajność gry i serwera; logi SZCZEGÓŁOWE mogą generować ogromną ilość danych. Używaj tylko do ukierunkowanej diagnostyki, włączaj wyłącznie potrzebne bloki >> i wyłączaj podczas normalnej gry oraz na serwerach produkcyjnych.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Przekazuj logi serwera dedykowanego klientom",

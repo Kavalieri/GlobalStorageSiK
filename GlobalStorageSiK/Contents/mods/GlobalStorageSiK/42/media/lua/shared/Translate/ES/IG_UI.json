@@ -26,6 +26,8 @@
 	"IGUI_GS_AddonReqDisk": "Disquete de instalación en tu inventario",
 	"IGUI_GS_AddonReqUninstallDisk": "Disquete de desinstalación en tu inventario (no se consume)",
 	"IGUI_GS_AddonReqReader": "Lector SiK instalado en esta red o en tu inventario",
+	"IGUI_GS_AddonReqSkill": "Electrónica nivel {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Necesitas más nivel de Electrónica para instalar o desinstalar este periférico.",
 	"IGUI_GS_AddonReqMagazine": "Revista leída",
 	"IGUI_GS_TierInstalled": "instalada en la red",
 	"IGUI_GS_TierInInventory": "en tu inventario",

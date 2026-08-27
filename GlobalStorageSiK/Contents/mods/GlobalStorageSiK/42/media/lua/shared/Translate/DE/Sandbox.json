@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Wie lange das Fenster 'PC bauen' braucht, um einen Desktop PC aus seinen 4 Teilen zusammenzubauen.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Terminal Installationszeit",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Wie lange die Installation einer Netzwerkdiskette auf einem Computer dauert (Laufwerk und Diskette Methode). Wird vom Kernmod und jeder Erweiterung geteilt, die eine eigene Diskette auf einem Terminal installiert.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Elektroniklevel für Erweiterungen",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Mindestlevel der Fertigkeit Elektronik, um eine beliebige Terminal-Erweiterung zu installieren oder zu deinstallieren (Diskettenlaufwerk, 3D-Drucker, WLAN-Antenne, digitales Whiteboard).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Debug Modus",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "WARNUNG: Jede aktivierte Debug-Protokollierung kann die Spiel- und Serverleistung beeinträchtigen; DETAIL-Protokolle können sehr große Ausgaben erzeugen. Nur für gezielte Diagnosen verwenden, ausschließlich benötigte >> Blöcke aktivieren und im normalen Spiel sowie auf Produktionsservern ausschalten.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Dedicated-Server-Logs an Clients senden",

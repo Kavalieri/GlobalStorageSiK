@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Quanto tempo impiega la finestra 'Ottieni un PC' per assemblare un computer desktop dai suoi 4 componenti.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Tempo di installazione terminale",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Quanto tempo richiede installare un disco di rete su un computer (metodo lettore + disco). Condiviso dal mod principale e da qualsiasi addon che installa il proprio disco su un terminale.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Livello di Elettronica per gli addon",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Livello minimo di Elettronica richiesto per installare o disinstallare qualsiasi addon del terminale (lettore floppy, stampante 3D, antenna WiFi, lavagna digitale).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Modalita debug",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "ATTENZIONE: qualsiasi registro di debug attivo può ridurre le prestazioni del gioco e del server; i registri DETTAGLIO possono generare enormi quantità di dati. Usalo solo per diagnosi mirate, attiva soltanto i blocchi >> necessari e disattivalo durante il gioco normale e in produzione.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Inoltra i log del server dedicato ai client",

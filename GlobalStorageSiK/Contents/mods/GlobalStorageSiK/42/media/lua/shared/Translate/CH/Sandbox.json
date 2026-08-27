@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "“组装电脑”窗口用4个零件组装台式电脑所需的时间。",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "终端安装时间",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "在电脑上安装网络磁盘所需的时间（软驱+磁盘方式）。核心模组及任何在终端上安装自己磁盘的扩展模组共用此设置。",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "扩展模组所需电子技术等级",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "安装或卸载任意终端扩展模组（软驱、3D打印机、WiFi天线、数字白板）所需的最低电子技术技能等级。",
 	"Sandbox_GlobalStorageSiK_DebugMode": "调试模式",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "警告：启用任何调试日志都可能降低游戏和服务器性能，详细日志可能产生大量输出。仅用于定向诊断，只启用所需的 >> 模块；正常游戏和生产服务器中请关闭。",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> 将专用服务器日志转发到客户端",

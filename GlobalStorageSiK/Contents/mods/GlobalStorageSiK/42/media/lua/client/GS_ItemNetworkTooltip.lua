@@ -47,62 +47,47 @@ local function getCachedTaxonomy(fullType)
 	return result or nil
 end
 local hooksInstalled = false
-local activeRenderWrapper = nil
--- "original" que capturaba el wrapper activo AL INSTALARSE - necesario para
--- poder DESMONTAR limpiamente (uninstallHooks, ver mas abajo) sin depender
--- de una variable local atrapada dentro del closure de installHooks().
-local activeOriginalRender = nil
 
--- BUG REAL DE REINSTALACION PREMATURA cerrado (2026-08-26, segundo hallazgo
--- de Desarrollo sobre el fix de dev26 - "el monitor sigue activo despues de
--- uninstallHooks(), su contador global no se pausa ni se reinicia durante la
--- transicion entre vidas"): sin esto, la secuencia real seria: GS desmonta
--- al morir -> el jugador permanece unos segundos en la pantalla de
--- muerte/creacion -> pasan los 180 ticks de HOOK_MONITOR_INTERVAL_TICKS ->
--- el monitor REINSTALA el wrapper GS ANTES de que exista el personaje nuevo
--- -> Magic Accessories dispara su OnCreatePlayer y captura ESE wrapper GS
--- recien reinstalado como fallback -> mismo ciclo que dev26 pretendia cerrar.
--- `suspendedForLifeTransition` (junto con `_hookTickCount`, declarado aqui en
--- vez de junto a monitorTooltipHook mas abajo para que uninstallHooks() y el
--- handler de OnCreatePlayer puedan compartir el mismo upvalue) congela el
--- monitor por completo durante la transicion - solo se reactiva desde el
--- propio Events.OnCreatePlayer de GS, DESPUES de que el personaje nuevo ya
--- existe, dejando que el retraso normal de instalacion (180 ticks) permita
--- que Magic Accessories (u otro mod) termine de reclamar su propio hook
--- ANTES de que GS vuelva a envolver nada - la cadena resultante es siempre
--- GS-nuevo -> Magic-nuevo -> render base, nunca una capturada a medio hacer.
-local suspendedForLifeTransition = false
-local _hookTickCount = 0
-
--- Todos los wrappers GS comparten estas guardas. Es importante que no vivan
--- dentro de installHooks(): si otro mod sustituye ISToolTipInv.render despues
--- y tenemos que envolverlo de nuevo, el wrapper GS anterior puede seguir en
--- mitad de la cadena capturada por ese mod. La instancia GS mas reciente es
--- la unica que dibuja nuestra extension; las anteriores se convierten en una
--- pasarela transparente hacia su original y no duplican bloques ni guardas.
-local renderingInstances = {}
+-- BUG REAL DE ARQUITECTURA cerrado (2026-08-27, estudio real de TooltipLib -
+-- Workshop 3694097672 - que nos nombra EXPLICITAMENTE por Workshop ID como
+-- uno de los 2 mods causantes de un ciclo real de stack overflow: "Global
+-- Storage SiK WS 3750612158... wrap ISToolTipInv.render with an 'install
+-- late to win' reclaim loop: they periodically re-take the slot"). Las 3
+-- rondas anteriores (dev26/27/28) parcheaban SINTOMAS de ese mismo patron de
+-- fondo (desmontar al morir, suspender el monitor durante la transicion de
+-- vida, corregir el log) sin cambiar el patron en si: un monitor que
+-- comprobaba cada ~60 ticks si seguiamos siendo el wrapper EXTERIOR y, si
+-- no, volvia a envolver para RECUPERAR esa posicion - una carrera activa por
+-- el puesto exterior que se repetia indefinidamente durante toda la partida,
+-- exactamente lo que TooltipLib llama "install late to win".
+--
+-- TooltipLib nunca libra esa carrera: instala su wrapper UNA SOLA VEZ por
+-- proceso y jamas vuelve a comprobar/reinstalar despues, se quede donde se
+-- quede en la cadena de otros mods. Mismo principio aplicado aqui, con nuestra
+-- propia implementacion (sin depender de TooltipLib ni copiar su codigo):
+-- `installHooks()` ahora se llama como maximo una vez de verdad (ver
+-- monitorTooltipHook mas abajo, que deja de vigilar en cuanto instala con
+-- exito) - nunca vuelve a intentar recuperar la posicion exterior si otro mod
+-- envuelve por encima despues. Esto elimina de raiz la posibilidad de que
+-- exista un "wrapper GS de la vida anterior" atrapado en la cadena de otro
+-- mod (solo se crea UN wrapper en toda la sesion), asi que ya no hace falta
+-- desmontar nada al morir - toda la maquinaria de dev26-28
+-- (uninstallHooks/suspendedForLifeTransition/onCreatePlayerResumeMonitor) se
+-- retira por completo, no por limpieza cosmetica sino porque el problema que
+-- resolvia ya no puede ocurrir bajo este diseño.
+--
+-- Guarda de reentrada POR INSTANCIA (nunca un booleano/contador compartido -
+-- confirmado en v1.2.94 que un flag compartido bloquea el tooltip de
+-- CUALQUIER OTRA instancia de ISToolTipInv activa el mismo frame, ver
+-- comentario historico mas abajo): si "original" (fijado una sola vez al
+-- instalar, nunca reevaluado) rebota de vuelta a nuestro propio wrapper para
+-- la MISMA instancia de tooltip, se corta con safeFallbackRender (dibuja
+-- contenido real via item:DoTooltip, nunca vuelve a invocar nada ajeno) en
+-- vez de seguir la cadena. Claves debiles: la instancia de tooltip puede
+-- destruirse a mitad de un ciclo real.
+local renderingInstances = setmetatable({}, { __mode = "k" })
 local failCooldownUntil = setmetatable({}, { __mode = "k" })
 local FAIL_COOLDOWN_MS = 8000
-
--- BUG REAL DE CICLO cerrado (2026-08-26, diagnostico real de Desarrollo tras
--- un cuelgue de cliente reproducido: "morir y crear una vida nueva, luego
--- desplegar el inventario"): un wrapper GS INACTIVO (el de la vida anterior,
--- capturado dentro de la cadena de Magic Accessories cuando este ultimo se
--- re-apropia de ISToolTipInv.render en su propio OnCreatePlayer) delegaba
--- SIEMPRE a su "original" sin ninguna guarda ("if wrapper ~= activeRenderWrapper
--- then return original(self,...) end") - si ese "original" resulta ser Magic
--- Accessories, y Magic a su vez cae de vuelta en ESTE mismo wrapper GS
--- inactivo (via su propio fallback_render capturado en el momento equivocado),
--- se forma un ciclo GS-viejo -> Magic -> GS-viejo -> Magic... que crece sin
--- limite - la guarda `renderingInstances` NUNCA se aplicaba en absoluto a un
--- wrapper inactivo, solo protegia al wrapper ACTIVO actual. Contador de
--- profundidad de DELEGACION compartido por TODOS los wrappers GS (activos e
--- inactivos) para la misma instancia de tooltip - si se supera el limite,
--- se corta con el render minimo propio (safeFallbackRender, nunca vuelve a
--- llamar a nada ajeno) en vez de seguir delegando indefinidamente. Claves
--- debiles: la instancia de tooltip puede destruirse a mitad de un ciclo real.
-local delegationDepth = setmetatable({}, { __mode = "k" })
-local MAX_DELEGATION_DEPTH = 6
 local FAIL_LOG_COOLDOWN_MS = 3000
 local lastFailLogAt = 0
 local lastFailSig = nil
@@ -569,85 +554,188 @@ end
 --- todavia en el momento en que este fichero se carga, un "hooksInstalled=true"
 --- prematuro desactivaria la funcion entera para siempre en esa sesion, sin
 --- reintento posible.
-function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
-	if not FEATURE_ENABLED then
+--- Construye el contenido propio (categoria/red, skills VHS, pista soldador)
+--- para UN item concreto - independiente de COMO se pinte despues (nuestro
+--- wrapper propio via drawNetworkExtension, o un proveedor de TooltipLib via
+--- ctx:addText). Antes vivia inline dentro del wrapper; extraido para no
+--- duplicar la logica entre los 2 mecanismos de render posibles (ver
+--- installHooks mas abajo).
+---@param item InventoryItem|nil
+---@return table[] blocks lista de { lines: string[], color: number[] }
+local function buildTooltipBlocks(item)
+	local blocks = {}
+	if not (item and item.getFullType) then
+		return blocks
+	end
+	local fullType = item:getFullType()
+	if not fullType then
+		return blocks
+	end
+	if item.hasModData then
+		-- Diagnostico de compatibilidad con mods que tambien parchean el
+		-- tooltip de items (Magic Accessories, etc.): confirma que este
+		-- codigo se ejecuta de verdad para items con modData de otros mods
+		-- (encantamientos, bonos aleatorios...) antes de asumir que el
+		-- problema esta en nuestro codigo.
+		local hasModData = item:hasModData()
+		GlobalStorageSiK.Log.detail("ItemNetworkTooltipDetail", "render",
+			string.format("fullType=%s hasModData=%s", tostring(fullType), tostring(hasModData)))
+	end
+
+	-- Linea(s) de categoria detectada por nuestro motor de 3 niveles (misma
+	-- fuente unica que Almacen/Nodos/GS_Router.lua) - a peticion del usuario,
+	-- para poder ver de un vistazo que categoria/sub/detalle le asignamos a
+	-- un item SIN tener que abrir el editor de nodos. UNA LINEA POR NIVEL (no
+	-- concatenado con " - "): la caja de ancho fijo truncaba igual una unica
+	-- linea larga, perdiendo la jerarquia.
+	local lines = {}
+	local tax = getCachedTaxonomy(fullType)
+	if tax and tax.groupLabel and tax.groupLabel ~= "" then
+		lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", tax.groupLabel)
+		if tax.subGroupLabel and tax.subGroupLabel ~= "" then
+			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", tax.subGroupLabel)
+		end
+		if tax.leafLabel and tax.leafLabel ~= "" then
+			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipLeaf", tax.leafLabel)
+		end
+	end
+
+	-- mediaTitle (2026-08-26, fix de agrupacion de VHS): si el item bajo el
+	-- raton es una cinta VHS/radio con contenido concreto, contar SOLO cintas
+	-- con ese mismo contenido en vez de sumar todas las del fullType generico.
+	local mediaTitle = GlobalStorageSiK.ItemSnapshot and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
+		and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
+	local networks, loaded, hasAnyNetwork = getCachedCounts(fullType, mediaTitle)
+	if networks and #networks > 0 then
+		for i = 1, #networks do
+			lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
+		end
+	elseif loaded then
+		-- Distinguir "todavia sin ninguna red creada" (mensaje generico) de
+		-- "tienes redes pero este item no esta en ninguna" - a peticion del
+		-- usuario, que reporto que el segundo mensaje confundia a jugadores
+		-- que aun no habian creado su primera red.
+		if hasAnyNetwork then
+			lines[#lines + 1] = T("IGUI_GS_NetworkCountNone")
+		else
+			lines[#lines + 1] = T("IGUI_GS_NoNetworksYet")
+		end
+	end
+	if #lines > 0 then
+		blocks[#blocks + 1] = { lines = lines, color = { 0.9, 0.85, 0.4, 1.0 } }
+	end
+
+	-- Bloque de skills VHS, SEPARADO del resto de informacion (a peticion del
+	-- usuario) - propio color para distinguirlo a simple vista.
+	local skillLines = getSkillTrainingLines(item)
+	if skillLines and #skillLines > 0 then
+		blocks[#blocks + 1] = { lines = skillLines, color = { 0.55, 0.85, 1, 1.0 } }
+	end
+
+	-- Pista narrativa del soldador (solo si el crafteo del GS_SolderingIron
+	-- sigue desactivado en el sandbox) - propio color neutro.
+	local loreLines = getSolderingIronLoreLines(fullType)
+	if loreLines and #loreLines > 0 then
+		blocks[#blocks + 1] = { lines = loreLines, color = { 0.75, 0.7, 0.6, 1.0 } }
+	end
+	return blocks
+end
+
+-- BUG REAL DE ARQUITECTURA cerrado (2026-08-27, ver comentario extenso junto
+-- a "hooksInstalled" arriba): dos vias de instalacion, evaluadas en este
+-- orden.
+--
+-- VIA 1 - integracion con TooltipLib (Workshop 3694097672) cuando esta
+-- presente: nos registramos como proveedor via TooltipLib.registerProvider,
+-- SIN tocar ISToolTipInv.render en absoluto - cero riesgo de ciclo porque no
+-- formamos parte de ninguna cadena de wrappers, es TooltipLib quien despacha
+-- nuestro callback de forma aislada (su propio framework ya gestiona el
+-- render real). Decision explicita: no depender de TooltipLib como unica
+-- solucion (es un mod opcional de terceros, la mayoria de jugadores no lo
+-- tendran) - esta via es una MEJORA cuando aplica, nunca la unica defensa.
+--
+-- VIA 2 - wrapper propio, autonomo, instalado UNA SOLA VEZ (usado cuando
+-- TooltipLib no esta presente): a diferencia del diseño anterior (dev7-dev28),
+-- este wrapper NUNCA intenta recuperar la posicion exterior si otro mod
+-- envuelve por encima despues - se instala, y a partir de ahi es
+-- responsabilidad exclusiva de la guarda de reentrada (renderingInstances,
+-- por instancia) y del contador de profundidad COMPARTIDO (ver
+-- sharedRenderDepth) evitar cualquier ciclo, sin importar donde acabemos
+-- colocados en la cadena de otros mods.
+-- Envuelta en pcall completo (no solo la llamada a registerProvider): una
+-- copia vieja o alterada de TooltipLib puede exponer el global de forma
+-- parcial (p.ej. "TooltipLib" ya existe pero "TooltipLib.hasProvider" lanza
+-- en vez de devolver nil) - cualquier excepcion aqui debe hacer que GS caiga
+-- al wrapper autonomo, nunca perder la instalacion porque el evento de
+-- arranque ya se retiro (ver installOnceTick).
+---@return boolean installed
+local function installViaTooltipLib()
+	if not (rawget(_G, "TooltipLib") and type(TooltipLib.registerProvider) == "function") then
 		return false
+	end
+	local ok, result = pcall(function()
+		if TooltipLib.checkVersion and not TooltipLib.checkVersion("1.0.0") then
+			return false
+		end
+		if TooltipLib.hasProvider and TooltipLib.hasProvider("GlobalStorageSiK") then
+			return true
+		end
+		return TooltipLib.registerProvider{
+			id = "GlobalStorageSiK",
+			target = "item",
+			description = "Global Storage SiK - red y categoria",
+			minVersion = "1.0.0",
+			callback = function(ctx)
+				local blocks = buildTooltipBlocks(ctx and ctx.item)
+				for i = 1, #blocks do
+					local block = blocks[i]
+					for j = 1, #block.lines do
+						ctx:addText(block.lines[j], block.color)
+					end
+				end
+			end,
+		} == true
+	end)
+	return ok and result == true
+end
+
+-- Contador de profundidad COMPARTIDO (no por instancia) - pedido explicito
+-- tras revisar TooltipLib: una guarda adicional independiente de
+-- renderingInstances[self], para el caso (no confirmado pero tampoco
+-- descartable) de que un ciclo involucre MAS de una instancia de tooltip
+-- alternandose. SIEMPRE se decrementa a traves de wrapper() (pcall
+-- envolvente sobre wrapperBody, ver mas abajo) - nunca puede quedar
+-- "atascado" por encima de 0 aunque wrapperBody lance un error, evitando que
+-- un fallo puntual degrade el tooltip para el resto de la sesion (incluida
+-- cualquier vida posterior del mismo personaje).
+local sharedRenderDepth = 0
+local MAX_SHARED_RENDER_DEPTH = 8
+
+function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
+	if not FEATURE_ENABLED or hooksInstalled then
+		return hooksInstalled
+	end
+	if installViaTooltipLib() then
+		hooksInstalled = true
+		GlobalStorageSiK.Log.debug("ItemNetworkTooltip", "registrado como proveedor de TooltipLib")
+		return true
 	end
 	if not ISToolTipInv or not ISToolTipInv.render then
 		return false
 	end
-	if activeRenderWrapper and ISToolTipInv.render == activeRenderWrapper then
-		hooksInstalled = true
-		return true
-	end
 
-	local recoveringOuterPosition = hooksInstalled and activeRenderWrapper ~= nil
 	local original = ISToolTipInv.render
-	-- Guarda de reentrada: reportado un crash en SP (stack overflow) al usar
-	-- el mod "Magic Accessories" a la vez - su cadena de "customRender
-	-- fallback" (MagicAccessories_Tooltip.lua) acaba re-invocando este mismo
-	-- wrapper desde DENTRO de la llamada a "original" (via despacho dinamico
-	-- self:render(), que resuelve al valor ACTUAL de ISToolTipInv.render, no
-	-- al "original" capturado por closure) - un ciclo A llama a B llama a A
-	-- que crece sin limite hasta desbordar la pila de Lua. No podemos tocar
-	-- el otro mod, asi que cortamos aqui: si ya estamos dentro de este mismo
-	-- wrapper en la pila actual, no volver a invocar nada, simplemente salir.
-	--
-	-- CRITICO: la guarda debe ser POR INSTANCIA (tabla con self como clave),
-	-- NUNCA un unico booleano compartido. El juego mantiene varias instancias
-	-- de ISToolTipInv vivas a la vez (el tooltip vanilla del inventario, más
-	-- cualquier ISToolTipInv propio como el de las filas de nuestra ventana
-	-- Almacén en GS_TerminalUI_Items.lua) y TODAS pasan por este mismo
-	-- render() parcheado. Con un booleano compartido, la instancia que
-	-- renderiza primero en un frame "gana" la bandera y bloquea el render
-	-- de CUALQUIER OTRA instancia distinta ese mismo frame - confirmado como
-	-- la causa de que solo un item (el que tenía enganchado el tooltip de
-	-- una fila de Almacén) mostrara tooltip y ningún otro item del juego,
-	-- ni siquiera vanilla, mostrara nada, en SP y en MP.
-	-- Tabla normal (sin metatabla de claves debiles): cada entrada solo vive
-	-- entre el "= true" y el "= nil" de la MISMA llamada sincrona de abajo,
-	-- nunca se acumula nada que limpiar.
-	-- BUG REAL encontrado (traza real de un jugador: "Show VHS skills in
-	-- tooltip" se re-invoca a si mismo decenas de veces antes de fallar
-	-- dentro de la cadena Magic Accessories -> nosotros): el motor vuelca la
-	-- pila COMPLETA en consola en el instante mismo de la excepcion, ANTES de
-	-- que nuestro pcall la atrape - un "macrospam" de miles de lineas por
-	-- segundo mientras el raton siga sobre ese tooltip, ya que render() corre
-	-- a 30-60 fps. Deduplicar solo NUESTRO log no arregla esto (el volcado no
-	-- es nuestro) - hay que dejar de invocar "original" en cada frame
-	-- mientras siga fallando. Cooldown por instancia de tooltip: tras un
-	-- fallo, unos segundos con el render minimo propio (safeFallbackRender,
-	-- que no vuelve a llamar a original) antes de reintentar - recupera solo
-	-- si el problema de fondo era transitorio, sin machacar la consola.
-	-- Claves DEBILES: a diferencia de renderingInstances (vive y muere dentro
-	-- de la misma llamada sincrona), esta entrada persiste minimo 3s entre
-	-- frames - sin metatabla debil, cada instancia de tooltip que falle
-	-- alguna vez quedaria referenciada aqui para siempre (fuga de memoria en
-	-- sesiones largas con muchos items distintos).
-	-- 8s en vez de 3s: la traza real muestra un STACK OVERFLOW autentico
-	-- (Coroutine.ensureCallFrameStackSize) dentro de SVSIT, no un error
-	-- ligero - mas caro de recuperar y mas motivo para no reintentar cada
-	-- pocos segundos mientras el jugador siga con el raton quieto encima.
-	local wrapper
-	local wrapperBody
-	-- Contador de profundidad de delegacion (ver comentario de
-	-- delegationDepth mas arriba) - envuelve TODO el cuerpo real del wrapper,
-	-- incluida la rama de wrapper inactivo, que es precisamente donde se
-	-- formaba el ciclo con Magic Accessories (delegaba a "original" sin
-	-- ninguna guarda). Si se supera el limite, se corta con el render minimo
-	-- propio en vez de seguir la cadena.
+	local wrapper, wrapperBody
 	wrapper = function(self, ...)
-		local depth = (delegationDepth[self] or 0) + 1
-		delegationDepth[self] = depth
-		if depth > MAX_DELEGATION_DEPTH then
-			delegationDepth[self] = depth - 1
-			if delegationDepth[self] <= 0 then delegationDepth[self] = nil end
+		if renderingInstances[self] then
+			-- Reentrada real para ESTA MISMA instancia de tooltip - dibujamos
+			-- contenido real sin volver a llamar a nada ajeno.
 			pcall(safeFallbackRender, self)
 			return
 		end
+		sharedRenderDepth = sharedRenderDepth + 1
 		local ok, result = pcall(wrapperBody, self, ...)
-		delegationDepth[self] = delegationDepth[self] and (delegationDepth[self] - 1) or nil
-		if delegationDepth[self] and delegationDepth[self] <= 0 then delegationDepth[self] = nil end
+		sharedRenderDepth = sharedRenderDepth - 1
 		if not ok then
 			pcall(safeFallbackRender, self)
 			return
@@ -655,17 +743,7 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		return result
 	end
 	wrapperBody = function(self, ...)
-		-- Si un mod de terceros capturo un wrapper GS anterior y despues GS
-		-- recupero la posicion exterior, ese wrapper viejo seguira apareciendo
-		-- dentro de la cadena. Debe limitarse a delegar: solo el wrapper activo
-		-- aplica guardas, fallback y extension visual.
-		if wrapper ~= activeRenderWrapper then
-			return original(self, ...)
-		end
-		if renderingInstances[self] then
-			-- Reentrada real (mismo self, dentro de la misma pasada) - ver
-			-- safeFallbackRender de arriba: dibujamos contenido real sin volver
-			-- a llamar a "original", en vez de dejar el tooltip en blanco.
+		if sharedRenderDepth > MAX_SHARED_RENDER_DEPTH then
 			pcall(safeFallbackRender, self)
 			return
 		end
@@ -688,12 +766,8 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 			-- MagicAccessories_Tooltip.lua:321 customRender, capturado aqui via
 			-- pcall): antes, cuando "original" fallaba (revienta el RENDER de
 			-- OTRO mod encadenado, no el nuestro), haciamos return inmediato y
-			-- NUNCA llegabamos a dibujar nuestra propia extension - el jugador
-			-- se quedaba sin tooltip de red/categoria precisamente en los items
-			-- que otro mod (Magic Accessories, con joyas encantadas) rompe por
-			-- su cuenta. Nuestro contenido no depende de que "original" tenga
-			-- exito, asi que ya no lo condicionamos a ello - solo se pierde el
-			-- dibujado vainilla+de terceros de ESE frame, nunca el nuestro.
+			-- NUNCA llegabamos a dibujar nuestra propia extension. Nuestro
+			-- contenido no depende de que "original" tenga exito.
 			failCooldownUntil[self] = now + FAIL_COOLDOWN_MS
 			if result and GlobalStorageSiK.Sandbox.debugMode() then
 				local sig = tostring(result)
@@ -706,219 +780,56 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		end
 		pcall(function()
 			if self.item and self.isVisible and self:isVisible() then
-				local fullType = self.item.getFullType and self.item:getFullType()
-				if fullType then
-					-- Diagnostico de compatibilidad con mods que tambien parchean el
-					-- tooltip de items (Magic Accessories, etc.): confirma que ESTE
-					-- wrapper se ejecuta de verdad para items con modData de otros
-					-- mods (encantamientos, bonos aleatorios...) antes de asumir que
-					-- el problema esta en nuestro codigo.
-					local hasModData = self.item.hasModData and self.item:hasModData()
-					GlobalStorageSiK.Log.detail("ItemNetworkTooltipDetail", "render",
-						string.format("fullType=%s hasModData=%s", tostring(fullType), tostring(hasModData)))
-				end
-				if fullType then
-					-- Linea(s) de categoria detectada por nuestro motor de 3 niveles
-					-- (misma fuente unica que Almacen/Nodos/GS_Router.lua) - a peticion
-					-- del usuario, para poder ver de un vistazo que categoria/sub/detalle
-					-- le asignamos a un item SIN tener que abrir el editor de nodos.
-					-- Siempre se muestra si resuelve algo, este o no el item en una red.
-					-- UNA LINEA POR NIVEL (no concatenado en una sola con " - "): la
-					-- idea de este tooltip es poder leer SIN truncar lo que en la
-					-- columna del Almacen si se trunca por falta de espacio - una
-					-- unica linea larga se truncaba igual dentro de esta caja de ancho
-					-- fijo (mismo ancho que el tooltip vanilla, ver drawNetworkExtension),
-					-- perdiendo la jerarquia. Separando por nivel, cada linea es corta
-					-- y casi nunca hace falta truncarla; solo aparecen los niveles que
-					-- el item realmente tiene.
-					local lines = {}
-					local tax = getCachedTaxonomy(fullType)
-					if tax and tax.groupLabel and tax.groupLabel ~= "" then
-						lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", tax.groupLabel)
-						if tax.subGroupLabel and tax.subGroupLabel ~= "" then
-							lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", tax.subGroupLabel)
-						end
-						if tax.leafLabel and tax.leafLabel ~= "" then
-							lines[#lines + 1] = T("IGUI_GS_CategoryTooltipLeaf", tax.leafLabel)
-						end
-					end
-
-					-- mediaTitle (2026-08-26, fix de agrupacion de VHS): si el
-					-- item bajo el raton es una cinta VHS/radio con contenido
-					-- concreto, contar SOLO cintas con ese mismo contenido en
-					-- vez de sumar todas las del fullType generico.
-					local mediaTitle = GlobalStorageSiK.ItemSnapshot and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
-						and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(self.item)
-					local networks, loaded, hasAnyNetwork = getCachedCounts(fullType, mediaTitle)
-					if networks and #networks > 0 then
-						for i = 1, #networks do
-							lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
-						end
-					elseif loaded then
-						-- Distinguir "todavia sin ninguna red creada" (mensaje generico,
-						-- no implica que falte en algo que no existe) de "tienes redes
-						-- pero este item no esta en ninguna" - a peticion del usuario,
-						-- que reporto que el segundo mensaje confundia a jugadores que
-						-- aun no habian creado su primera red.
-						if hasAnyNetwork then
-							lines[#lines + 1] = T("IGUI_GS_NetworkCountNone")
-						else
-							lines[#lines + 1] = T("IGUI_GS_NoNetworksYet")
-						end
-					end
-
-					local usedH = 0
-					if #lines > 0 then
-						usedH = drawNetworkExtension(self, lines)
-					end
-
-					-- Bloque de skills VHS, SEPARADO del resto de informacion (a
-					-- peticion del usuario) - propio color para distinguirlo a
-					-- simple vista del bloque rojo de red/categoria.
-					local skillLines = getSkillTrainingLines(self.item)
-					if skillLines and #skillLines > 0 then
-						usedH = usedH + drawNetworkExtension(self, skillLines, usedH, { 0.55, 0.85, 1 })
-					end
-
-					-- Pista narrativa del soldador (solo si el crafteo del
-					-- GS_SolderingIron sigue desactivado en el sandbox) - propio
-					-- color neutro, distinto del rojo de red y el azul de VHS.
-					local loreLines = getSolderingIronLoreLines(fullType)
-					if loreLines and #loreLines > 0 then
-						drawNetworkExtension(self, loreLines, usedH, { 0.75, 0.7, 0.6 })
-					end
+				local blocks = buildTooltipBlocks(self.item)
+				local usedH = 0
+				for i = 1, #blocks do
+					usedH = usedH + drawNetworkExtension(self, blocks[i].lines, usedH, blocks[i].color)
 				end
 			end
 		end)
 		return result
 	end
 
-	activeRenderWrapper = wrapper
-	activeOriginalRender = original
 	ISToolTipInv.render = wrapper
 	hooksInstalled = true
-	if recoveringOuterPosition then
-		GlobalStorageSiK.Log.debug("ItemNetworkTooltip",
-			"hook chain changed; GS outer wrapper restored")
-	end
+	GlobalStorageSiK.Log.debug("ItemNetworkTooltip", "ISToolTipInv.render envuelto (autonomo, instalacion unica)")
 	return true
 end
 
---- Desmonta limpiamente el wrapper GS activo, restaurando el "original" que
---- tenia capturado, y limpia todo el estado de sesion del tooltip. BUG REAL
---- DE CICLO cerrado (2026-08-26, diagnostico real de Desarrollo): morir y
---- crear una vida nueva dispara Events.OnCreatePlayer, momento en el que
---- Magic Accessories (confirmado) vuelve a apropiarse de ISToolTipInv.render
---- capturando el wrapper GS ENTONCES activo como su propio fallback. El
---- monitor de GS (mas abajo) detecta el cambio y envuelve a Magic de nuevo -
---- pero el wrapper GS anterior sigue vivo, atrapado DENTRO de la cadena de
---- Magic, delegando sin guarda (ver delegationDepth arriba) y formando un
---- ciclo GS-viejo -> Magic -> GS-viejo -> Magic... que cuelga el render.
---- Llamado desde GS_TerminalDeathCleanup.lua ANTES de que la vida nueva
---- pueda disparar su propio OnCreatePlayer (por tanto antes de que Magic
---- tenga ocasion de volver a capturar nada de GS) - restaura a Magic (o a
---- quien fuera el "original") como propietario legitimo del slot, y deja que
---- el monitor periodico vuelva a envolverlo una unica vez, ya con la cadena
---- limpia. Idempotente: seguro de llamar aunque los hooks no estuvieran
---- instalados (p.ej. ISToolTipInv no disponible en esta build).
-function GlobalStorageSiK.ItemNetworkTooltip.uninstallHooks()
-	-- BUG REAL cerrado (2026-08-26, hallazgo de Desarrollo): el `return`
-	-- temprano por "no hooksInstalled" saltaba TAMBIEN la limpieza de estado
-	-- de sesion (cache/pending/cooldowns/profundidad) - esta funcion puede
-	-- llamarse desde una muerte donde los hooks nunca llegaron a instalarse
-	-- (ISToolTipInv no disponible todavia, feature desactivada, etc.) y aun
-	-- asi conviene dejar el estado limpio para la vida siguiente. La limpieza
-	-- de abajo se ejecuta SIEMPRE, incondicionalmente.
-	-- BUG REAL cerrado (2026-08-26, hallazgo de Desarrollo): "reason" se
-	-- inicializaba a "not_installed" y solo se reasignaba en la rama de
-	-- fallo - la rama de exito (restored=true) nunca lo tocaba, asi que
-	-- podia imprimirse la combinacion contradictoria "restored=true
-	-- reason=not_installed". Cada rama asigna ahora su propio motivo.
-	local restored = false
-	local reason = "not_installed"
-	if hooksInstalled then
-		if ISToolTipInv and activeRenderWrapper and ISToolTipInv.render == activeRenderWrapper then
-			ISToolTipInv.render = activeOriginalRender
-			restored = true
-			reason = "restored_original"
-		else
-			-- Otro mod ya habia cambiado ISToolTipInv.render ANTES de esta
-			-- muerte (no somos el wrapper mas externo) - restaurar aqui
-			-- pisaria ese cambio ajeno sin necesidad. No se toca el slot,
-			-- solo se limpian las referencias propias.
-			reason = "current_slot_changed"
-		end
-	end
-	activeRenderWrapper = nil
-	activeOriginalRender = nil
-	hooksInstalled = false
-	-- Suspende el monitor por completo hasta el proximo Events.OnCreatePlayer
-	-- de GS (ver arriba) - sin esto, el monitor periodico podia reinstalar el
-	-- wrapper GS DURANTE la pantalla de muerte/creacion, antes de que el
-	-- personaje nuevo existiera, dejando a Magic Accessories capturarlo de
-	-- nuevo como fallback en su propio OnCreatePlayer (mismo ciclo de dev26).
-	suspendedForLifeTransition = true
-	_hookTickCount = 0
-	-- Estado de sesion vinculado a la vida anterior (instancias de tooltip
-	-- en curso, cooldowns de fallo, consultas de red pendientes/cacheadas) -
-	-- pedido explicito de Desarrollo: nada de esto debe sobrevivir al
-	-- desmontaje, aunque tecnicamente las claves debiles ya evitarian una
-	-- fuga de memoria a largo plazo.
-	renderingInstances = {}
-	failCooldownUntil = setmetatable({}, { __mode = "k" })
-	delegationDepth = setmetatable({}, { __mode = "k" })
-	pending = {}
-	cache = {}
-	if GlobalStorageSiK.Log then
-		GlobalStorageSiK.Log.warn("ItemNetworkTooltip",
-			"tooltipHookUninstall restored=" .. tostring(restored) .. " reason=" .. reason)
-	end
-end
-
--- Espera a que el resto de la UI/mods hayan instalado sus hooks y despues
--- vigila a bajo coste la identidad de ISToolTipInv.render. Si otro mod lo
--- sustituye mas tarde, GS vuelve a envolver la NUEVA cadena en el siguiente
--- intervalo; no obliga al usuario a resolver el orden de carga a mano.
---
--- Nuestro wrapper SIEMPRE
--- dibuja su contenido tras llamar a "original", pase lo que pase dentro -
--- eso conserva el contenido vanilla/ajeno y deja GS como envoltorio exterior.
--- Los wrappers GS anteriores que hayan quedado capturados dentro de otro mod
--- se vuelven pasarelas transparentes (ver installHooks), por lo que recuperar
--- la posicion exterior no duplica nuestra informacion.
+-- Ventana de arranque LIMITADA, nunca un monitor indefinido: el primer
+-- intento a los 180 ticks puede caer en una carga temprana real (TooltipLib
+-- todavia no ha creado su global, o ISToolTipInv aun no existe) - sin
+-- ningun reintento eso degradaba una simple carrera de arranque en perdida
+-- total del tooltip GS durante toda la sesion. Reintenta cada
+-- RETRY_INTERVAL_TICKS hasta el primer exito o hasta agotar
+-- MAX_ATTEMPT_TICKS; SIEMPRE se retira de OnTick en ese punto (exito,
+-- agotamiento, o feature desactivada) y jamas vuelve a comprobar nada
+-- despues - esto sigue siendo instalacion unica, no un reclamador periodico
+-- de posicion exterior (esta ventana solo cubre el ARRANQUE, nunca compite
+-- por el wrapper una vez instalado).
 local INSTALL_DELAY_TICKS = 180
-local HOOK_MONITOR_INTERVAL_TICKS = 60
-local function monitorTooltipHook()
-	-- BUG REAL DE REINSTALACION PREMATURA cerrado (ver comentario de
-	-- suspendedForLifeTransition arriba) - mientras el jugador este entre
-	-- vidas (muerto/creando personaje), el monitor no cuenta ticks ni
-	-- reinstala nada, pase el tiempo que pase en esa pantalla.
-	if suspendedForLifeTransition then
-		return
-	end
+local RETRY_INTERVAL_TICKS = 45
+local MAX_ATTEMPT_TICKS = 900
+local _hookTickCount = 0
+local function installOnceTick()
 	_hookTickCount = _hookTickCount + 1
 	if _hookTickCount < INSTALL_DELAY_TICKS then
 		return
 	end
-	if ((_hookTickCount - INSTALL_DELAY_TICKS) % HOOK_MONITOR_INTERVAL_TICKS) ~= 0 then
+	if ((_hookTickCount - INSTALL_DELAY_TICKS) % RETRY_INTERVAL_TICKS) ~= 0 then
 		return
 	end
-	if hooksInstalled and activeRenderWrapper and ISToolTipInv
-		and ISToolTipInv.render == activeRenderWrapper then
-		return
+	local installed = GlobalStorageSiK.ItemNetworkTooltip.installHooks()
+	if installed or _hookTickCount >= MAX_ATTEMPT_TICKS then
+		if Events and Events.OnTick and Events.OnTick.Remove then
+			Events.OnTick.Remove(installOnceTick)
+		end
+		if not installed then
+			GlobalStorageSiK.Log.warn("ItemNetworkTooltip",
+				"no se pudo instalar el enganche de tooltip tras agotar la ventana de arranque")
+		end
 	end
-	GlobalStorageSiK.ItemNetworkTooltip.installHooks()
-end
--- Reactiva el monitor DESPUES de que el personaje nuevo ya exista - deja que
--- el retraso normal de INSTALL_DELAY_TICKS permita a Magic Accessories (u
--- otro mod que tambien parchee ISToolTipInv.render en su propio
--- OnCreatePlayer) terminar de reclamar su hook ANTES de que GS vuelva a
--- envolver nada, evitando volver a capturar una cadena a medio formar.
-local function onCreatePlayerResumeMonitor()
-	suspendedForLifeTransition = false
-	_hookTickCount = 0
 end
 if FEATURE_ENABLED then
-	Events.OnTick.Add(monitorTooltipHook)
-	Events.OnCreatePlayer.Add(onCreatePlayerResumeMonitor)
+	Events.OnTick.Add(installOnceTick)
 end

@@ -1183,6 +1183,15 @@ local function requireMemberAccess(player, networkId, resultMeta)
 		queueId = resultMeta and resultMeta.queueId or nil,
 		withdrawId = resultMeta and resultMeta.withdrawId or nil,
 		transferOp = resultMeta and resultMeta.transferOp or nil,
+		-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas:
+		-- "rechazos tempranos de addons sin correlacion"): un rechazo por
+		-- falta de permisos AQUI (antes de llegar a Addons.install/uninstall)
+		-- no llevaba action/addonId, asi que GS_AddonManageUI.onActionResult
+		-- lo ignoraba correctamente (no cerraba por error) pero el modal se
+		-- quedaba bloqueado hasta el timeout de 6s en vez de desbloquearse
+		-- al instante con el rechazo real.
+		action = resultMeta and resultMeta.action or nil,
+		addonId = resultMeta and resultMeta.addonId or nil,
 	})
 	return false
 end
@@ -1207,6 +1216,8 @@ local function requireAdminAccess(player, networkId, resultMeta)
 		message = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole"),
 		jobType = resultMeta and resultMeta.jobType or nil,
 		jobState = resultMeta and resultMeta.jobState or nil,
+		action = resultMeta and resultMeta.action or nil,
+		addonId = resultMeta and resultMeta.addonId or nil,
 	})
 	return false
 end
@@ -4373,32 +4384,64 @@ local function onClientCommand(module, command, player, args)
 					target.x, target.y, target.z or 0) or resolvedNetworkId
 			end
 		end
-		if not requireAdminAccess(player, resolvedNetworkId) then
+		-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas:
+		-- "onActionResult acepta cualquier resultado" + "rechazos tempranos
+		-- de addons sin correlacion"): TODAS las salidas de este comando
+		-- (falta de permisos, sin terminal/anchor, y la respuesta final)
+		-- llevan ahora action="installAddon"+addonId, para que
+		-- GS_AddonManageUI.onActionResult pueda desbloquear su modal al
+		-- instante con cualquier rechazo, en vez de esperar el timeout de
+		-- 6s cuando el rechazo no correlacionaba.
+		local resultMeta = { action = "installAddon", addonId = args.addonId }
+		if not requireAdminAccess(player, resolvedNetworkId, resultMeta) then
 			return
 		end
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalInstallAddonsMsg") })
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalInstallAddonsMsg"), action = resultMeta.action, addonId = resultMeta.addonId })
 			return
 		end
 		local ok, message = GlobalStorageSiK.Addons.install(player, resolvedNetworkId, anchor, args.addonId)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = message, action = resultMeta.action, addonId = resultMeta.addonId })
 		if ok then
 			pushTerminalState(player, resolvedNetworkId, nil, searchQuery, nil, false, nil, anchor)
 		end
 
 	elseif command == "uninstallAddon" then
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
+		-- BUG REAL cerrado (2026-08-27, reporte real de jugador + diagnostico
+		-- del equipo de sistemas: "el disco de desinstalacion no tiene
+		-- efecto"): esto exigia SIEMPRE una sesion de terminal ya abierta
+		-- (getSessionAnchor), a diferencia de "installAddon" (ver arriba, fix
+		-- 2026-08-23) que ya cae a un reescaneo de proximidad si no hay
+		-- sesion. Un jugador que desinstala por disquete sin tener el
+		-- terminal abierto (mismo flujo que SI funciona para instalar) se
+		-- encontraba con un rechazo silencioso-en-apariencia (el toast de
+		-- fallo se ve, pero el jugador lo interpreta como "no tiene efecto").
+		-- Mismo patron de resolucion que installAddon: sesion si existe, si
+		-- no, reescaneo de proximidad de un terminal YA instalado.
 		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		local resolvedNetworkId = networkId
 		if not anchor or not anchor.x then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalRemoveAddonsMsg") })
+			local range = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
+			local target = GlobalStorageSiK.TerminalAccess.findNearestKnownComputer(player, range)
+			if target and target.alreadyInstalled then
+				anchor = { x = target.x, y = target.y, z = target.z or 0 }
+				resolvedNetworkId = GlobalStorageSiK.Network.findNetworkIdAtTerminal(
+					target.x, target.y, target.z or 0) or resolvedNetworkId
+			end
+		end
+		-- Misma correlacion completa que installAddon (ver comentario arriba).
+		local resultMeta = { action = "uninstallAddon", addonId = args.addonId }
+		if not requireAdminAccess(player, resolvedNetworkId, resultMeta) then
 			return
 		end
-		local ok, message = GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, args.addonId)
-		gsSendServerCommand(player, "actionResult", { ok = ok, message = message })
+		if not anchor or not anchor.x then
+			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_OpenTerminalRemoveAddonsMsg"), action = resultMeta.action, addonId = resultMeta.addonId })
+			return
+		end
+		local ok, message = GlobalStorageSiK.Addons.uninstall(player, resolvedNetworkId, anchor, args.addonId)
+		gsSendServerCommand(player, "actionResult", { ok = ok, message = message, action = resultMeta.action, addonId = resultMeta.addonId })
 		if ok then
-			pushTerminalState(player, networkId, nil, searchQuery, nil, false, nil, anchor)
+			pushTerminalState(player, resolvedNetworkId, nil, searchQuery, nil, false, nil, anchor)
 		end
 
 	elseif command == "installFloppyDrive" then

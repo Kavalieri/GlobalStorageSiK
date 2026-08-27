@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "Floppy di installazione nell'inventario",
 	"IGUI_GS_AddonReqUninstallDisk": "Floppy di disinstallazione nell'inventario (non consumato)",
 	"IGUI_GS_AddonReqReader": "Lettore SiK installato su questa rete o nel tuo inventario",
+	"IGUI_GS_AddonReqSkill": "Elettronica livello {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Ti serve un livello più alto di Elettronica per installare o disinstallare questa periferica.",
 	"IGUI_GS_AddonReqMagazine": "Manuale letto",
 	"IGUI_GS_TierInstalled": "installata sulla rete",
 	"IGUI_GS_TierInInventory": "nel tuo inventario",

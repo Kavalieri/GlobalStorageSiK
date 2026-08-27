@@ -56,6 +56,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Cuánto tarda la ventana 'Conseguir PC' en montar un ordenador de sobremesa a partir de sus 4 piezas.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Tiempo de instalación del terminal",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Cuánto tarda instalar un disquete de red en un ordenador (método lector + disquete). Compartido por el mod core y cualquier addon que instale su propio disquete en un terminal.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Nivel de Electrónica para addons",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Nivel mínimo de la habilidad Electrónica necesario para instalar o desinstalar cualquier addon del terminal (disquetera, impresora 3D, antena WiFi, pizarra digital).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Modo depuración (debug)",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "ADVERTENCIA: cualquier registro de depuración activo puede perjudicar el rendimiento del juego y del servidor; los registros DETALLE pueden generar una cantidad masiva de información. Úsalo solo para diagnósticos dirigidos, activa únicamente los bloques >> necesarios y desactívalo durante la partida normal y en producción.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Reenviar logs del dedicado a clientes",

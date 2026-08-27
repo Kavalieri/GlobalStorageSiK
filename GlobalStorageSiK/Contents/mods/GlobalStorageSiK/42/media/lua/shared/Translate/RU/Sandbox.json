@@ -52,6 +52,8 @@
 	"Sandbox_GlobalStorageSiK_PCAcquireCraftTime_tooltip": "Сколько времени занимает окно 'Получить ПК' для сборки настольного компьютера из 4 деталей.",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime": "Время установки терминала",
 	"Sandbox_GlobalStorageSiK_TerminalInstallTime_tooltip": "Сколько времени занимает установка сетевого диска на компьютер (метод дисковод + диск). Общее для основного мода и любого аддона, устанавливающего свой диск на терминал.",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired": "Уровень Электроники для аддонов",
+	"Sandbox_GlobalStorageSiK_AddonInstallSkillRequired_tooltip": "Минимальный уровень навыка Электроника, необходимый для установки или удаления любого аддона терминала (дисковод, 3D-принтер, WiFi-антенна, цифровая доска).",
 	"Sandbox_GlobalStorageSiK_DebugMode": "Режим отладки",
 	"Sandbox_GlobalStorageSiK_DebugMode_tooltip": "ПРЕДУПРЕЖДЕНИЕ: любое включённое журналирование отладки может снизить производительность игры и сервера; журналы DETAIL могут создавать огромный объём данных. Используйте только для целевой диагностики, включайте лишь необходимые блоки >> и отключайте во время обычной игры и на рабочих серверах.",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "   >> Передавать логи выделенного сервера клиентам",

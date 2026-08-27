@@ -11,6 +11,8 @@ require "GS_Permissions"
 require "GS_I18n"
 require "GS_Log"
 require "GS_InventorySync"
+require "GS_CraftUtils"
+require "GS_Sandbox"
 -- Registra el addon "Reader" (ver GS_ReaderAddon.lua) - require aqui, no
 -- desde GS_AddonRegistry.lua, porque necesita que AddonRegistry.register ya
 -- exista (este fichero carga siempre despues, nunca antes).
@@ -70,14 +72,31 @@ end
 --- respaldo el ultimo installedAddons recibido por ese canal
 --- (GlobalStorageSiK.Client.cachedTerminalState, ver GS_Client.lua) cuando
 --- el registry local no tiene nada para esta red.
+---
+--- BUG REAL cerrado (2026-08-27, reporte real de jugador: "el addon solo se
+--- puede instalar por disquete, no desde el menu; y al reabrir el menu la
+--- opcion desaparece" - diagnostico conjunto con el equipo de sistemas):
+--- este respaldo solo comparaba `networkId`, nunca el terminal concreto -
+--- una red con MAS DE UN terminal podia devolver aqui el ultimo
+--- installedAddons cacheado de OTRO terminal de la misma red (distinto
+--- anchor), mostrando addons instalados/faltantes que no correspondian al
+--- terminal que el jugador tenia realmente abierto. Ahora se exige tambien
+--- que el anchor coincida - si no coincide, se trata como "sin respaldo
+--- valido para ESTE terminal" en vez de devolver el de otro.
 ---@param networkId string
+---@param anchor table|nil terminal concreto para el que se pide el respaldo
 ---@return table|nil
-local function cachedInstalledAddons(networkId)
+local function cachedInstalledAddons(networkId, anchor)
 	if GlobalStorageSiK.isAuthoritative() then
 		return nil
 	end
 	local cached = GlobalStorageSiK.Client and GlobalStorageSiK.Client.cachedTerminalState
 	if not cached or cached.networkId ~= networkId or not cached.installedAddons then
+		return nil
+	end
+	local wantedKey = GlobalStorageSiK.Addons.anchorKey(anchor)
+	local cachedKey = GlobalStorageSiK.Addons.anchorKey(cached.terminalAnchor)
+	if wantedKey and cachedKey and wantedKey ~= cachedKey then
 		return nil
 	end
 	return cached.installedAddons
@@ -98,11 +117,29 @@ function GlobalStorageSiK.Addons.isInstalled(networkId, anchor, addonId)
 	if net and net.addonInstalls and net.addonInstalls[key] and net.addonInstalls[key][addonId] ~= nil then
 		return true
 	end
-	local fallback = cachedInstalledAddons(networkId)
+	local fallback = cachedInstalledAddons(networkId, anchor)
 	if fallback then
 		return fallback[addonId] ~= nil
 	end
 	return false
+end
+
+--- Nivel de Electrónica del jugador frente al mínimo exigido por sandbox
+--- para instalar/desinstalar CUALQUIER addon del terminal - pedido explícito
+--- del usuario junto a la acción cronometrada de instalar/desinstalar:
+--- "poco pero algo de conocimiento". Mismo requisito para los 4 periféricos
+--- actuales (disquetera, impresora 3D, antena WiFi, pizarra digital); no
+--- depende del addon concreto, a diferencia del manual/magazine (que sí es
+--- por addon) - instalar hardware en el terminal exige el mismo conocimiento
+--- eléctrico base sea cual sea el módulo.
+---@param player IsoPlayer|nil
+---@return boolean
+function GlobalStorageSiK.Addons.hasRequiredSkill(player)
+	local required = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+	if required <= 0 then
+		return true
+	end
+	return GlobalStorageSiK.CraftUtils.getElectricityLevel(player) >= required
 end
 
 --- Genérico: mod addon activo + periférico instalado en el terminal ancla.
@@ -201,7 +238,7 @@ function GlobalStorageSiK.Addons.serializeForTerminal(networkId, anchor)
 	-- apertura, no solo cuando hacia falta el respaldo. Nunca usar next() en
 	-- este codebase; comprobar "vacio" con un flag propio como hasAny.
 	if not hasAny then
-		local fallback = cachedInstalledAddons(networkId)
+		local fallback = cachedInstalledAddons(networkId, anchor)
 		if fallback then
 			return fallback
 		end
@@ -263,6 +300,9 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 		-- este mensaje en español). GS_I18n.text() ya se usa asi en servidor
 		-- para otros mensajes (ver GS_Server.lua, IGUI_GS_PCAcquireFailBook).
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonStatusNeedMagazine")
+	end
+	if not GlobalStorageSiK.Addons.hasRequiredSkill(player) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonStatusNeedSkill")
 	end
 	-- BUG REAL cerrado (2026-08-22, reportado en Steam Workshop y confirmado
 	-- en auditoria: "un admin debe poder instalar addons, configurar
@@ -362,6 +402,9 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	-- propietario, no solo propietario.
 	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRemoveAddonsMsg")
+	end
+	if not GlobalStorageSiK.Addons.hasRequiredSkill(player) then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonStatusNeedSkill")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)
 	if not key then

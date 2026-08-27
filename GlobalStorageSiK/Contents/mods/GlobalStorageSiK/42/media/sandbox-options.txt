@@ -164,6 +164,16 @@ option GlobalStorageSiK.TerminalInstallTime
 	translation = GlobalStorageSiK_TerminalInstallTime,
 }
 
+option GlobalStorageSiK.AddonInstallSkillRequired
+{
+	type = integer,
+	default = 1,
+	min = 0,
+	max = 10,
+	page = GlobalStorageSiK,
+	translation = GlobalStorageSiK_AddonInstallSkillRequired,
+}
+
 option GlobalStorageSiK.DebugMode
 {
 	type = boolean,

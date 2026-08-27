@@ -24,6 +24,8 @@
 	"IGUI_GS_AddonReqDisk": "Установочная дискета в инвентаре",
 	"IGUI_GS_AddonReqUninstallDisk": "Дискета деинсталляции в инвентаре (не расходуется)",
 	"IGUI_GS_AddonReqReader": "Считыватель SiK установлен в этой сети или лежит в инвентаре",
+	"IGUI_GS_AddonReqSkill": "Электроника уровня {1}",
+	"IGUI_GS_AddonStatusNeedSkill": "Нужен более высокий уровень Электроники, чтобы установить или снять этот периферийный модуль.",
 	"IGUI_GS_AddonReqMagazine": "Журнал прочитан",
 	"IGUI_GS_TierInstalled": "установлено в сети",
 	"IGUI_GS_TierInInventory": "в вашем инвентаре",
