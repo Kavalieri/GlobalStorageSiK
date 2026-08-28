@@ -21,6 +21,8 @@ El relé del dedicado agrupa y limita las líneas antes de enviarlas. No vuelve 
 
 Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el halo sobre el personaje: ese espacio se reserva para progreso y resultados funcionales, cancelaciones y fallos que el jugador debe ver sin abrir el log. Los errores funcionales se muestran en rojo y durante más tiempo; comandos internos como `pingTerminalAccess`, payloads y comprobaciones periódicas permanecen en `console.txt` aunque el modo debug esté activo.
 
+Al iniciar una partida, cada proceso escribe siempre una única identidad de runtime: `[CLI] [GlobalStorageSiK:SYSTEM:RuntimeIdentity] client | version=X.Y.Z-devN` en cliente y `[SRV] ... server | version=X.Y.Z-devN` en dedicado (`[SP]`/`[HOST]` según corresponda). No requiere opciones sandbox y permite confirmar el árbol efectivo antes de interpretar una prueba. La instalación DEV genera además `%USERPROFILE%\Zomboid\.sik-dev-client-identity.json` con versión, conteos y `sik-tree-sha256-v1` de cada override físico.
+
 ## Core
 
 `GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, Router y el árbol **SiK UI** (ver más abajo). Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.

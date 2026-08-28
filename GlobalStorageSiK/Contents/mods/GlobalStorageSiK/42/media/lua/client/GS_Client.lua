@@ -674,7 +674,13 @@ GlobalStorageSiK.Client.terminalOpenSeq = 0
 GlobalStorageSiK.Client.terminalManifest = nil
 GlobalStorageSiK.Client.activeNetworkId = nil
 
+local function logClientRuntimeIdentity()
+	local version = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION or "?"
+	GlobalStorageSiK.Log.runtimeIdentity("client", version)
+end
+
 Events.OnServerCommand.Add(onServerCommand)
+Events.OnGameStart.Add(logClientRuntimeIdentity)
 
 --- Expuesto para GS_Server.lua: en SP real, sendServerCommand()/
 --- Events.OnServerCommand NO entregan nada (confirmado con traza completa -

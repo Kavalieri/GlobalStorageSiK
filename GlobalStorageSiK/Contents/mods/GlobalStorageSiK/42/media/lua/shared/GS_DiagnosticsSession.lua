@@ -1,6 +1,6 @@
 --[[
 	GlobalStorageSiK - aislamiento temporal de evidencias QA por sesion/run
-	Core 1.4.3-dev28.1
+	Core 1.4.3-dev28.2
 
 	Todo nombre devuelto es relativo a <Zomboid>/Lua/. El modulo no transmite
 	contenido ni conoce UI; solo reserva rutas, evita sobrescrituras y mantiene
@@ -63,11 +63,13 @@ local function writeManifest()
 	if not ok or not writer then return false end
 	local suites = sortedKeys(s.suites)
 	local files = sortedKeys(s.files)
+	local modVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
+	if modVersion == nil or tostring(modVersion) == "" then modVersion = "?" end
 	local okWrite = pcall(function()
 		writer:write("{\r\n")
 		writer:write('  "schemaVersion": "1.0",\r\n')
 		writer:write('  "modId": "GlobalStorageSiK",\r\n')
-		writer:write('  "modVersion": "' .. jsonEscape(GlobalStorageSiK.MOD_VERSION) .. '",\r\n')
+		writer:write('  "modVersion": "' .. jsonEscape(modVersion) .. '",\r\n')
 		writer:write('  "sessionId": "' .. jsonEscape(s.sessionId) .. '",\r\n')
 		writer:write('  "startedAtUtc": "' .. jsonEscape(s.startedAtUtc) .. '",\r\n')
 		writer:write('  "suites": [')

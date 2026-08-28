@@ -215,6 +215,16 @@ local function write(level, area, message, detail)
 	end
 end
 
+--- Identidad mínima de la build efectiva, siempre visible una vez al arrancar.
+--- No es una traza de diagnóstico opcional: permite demostrar qué árbol cargó
+--- cada proceso antes de atribuir a código actual un resultado de QA antiguo.
+---@param role string
+---@param version string|nil
+function GlobalStorageSiK.Log.runtimeIdentity(role, version)
+	write("SYSTEM", "RuntimeIdentity", tostring(role or "runtime"),
+		"version=" .. tostring(version or "?"))
+end
+
 --- Error siempre visible (compatible con Error Magnifier).
 ---@param area string
 ---@param message string

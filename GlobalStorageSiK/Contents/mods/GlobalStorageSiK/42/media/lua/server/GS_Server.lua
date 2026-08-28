@@ -4713,11 +4713,10 @@ Events.OnInitGlobalModData.Add(function(isNewGame)
 	-- isAuthoritative(), no isServer() a pelo: en SP real isServer() da false
 	-- y la reconciliacion de redes nunca corria al iniciar partida.
 	if GlobalStorageSiK.isAuthoritative() then
-		GlobalStorageSiK.Log.info("Server", "init", GlobalStorageSiK.Config.MOD_VERSION or "?")
+		GlobalStorageSiK.Log.runtimeIdentity("server", GlobalStorageSiK.Config.MOD_VERSION)
 		if GlobalStorageSiK.TerminalRegistry and GlobalStorageSiK.TerminalRegistry.reconcileAllNetworks then
 			GlobalStorageSiK.TerminalRegistry.reconcileAllNetworks()
 		end
 		installCraftDiagnostics()
 	end
 end)
-
