@@ -11,6 +11,7 @@
 
 require "GS_I18n"
 require "GS_ItemTaxonomy"
+require "GS_NativeProduct"
 require "GS_Subcategories"
 require "GS_NodeFilters"
 
@@ -36,6 +37,8 @@ local JEWELRY_SLOT_KEYS = { ring = true, necklace = true, wrist = true, earring 
 ---@return string
 function GlobalStorageSiK.RulesUI.categoryLabel(key)
 	if not key or key == "" then return "?" end
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
+	if nativePath then return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if key:sub(1, #EXT) == EXT then
@@ -81,7 +84,7 @@ end
 function GlobalStorageSiK.RulesUI.describeCondition(condition)
 	if not condition then return "?" end
 	if condition.type == "category" then
-		return GlobalStorageSiK.RulesUI.categoryLabel(condition.value)
+		return GlobalStorageSiK.RulesUI.categoryLabel(condition.nativePath or condition.value)
 	end
 	return GlobalStorageSiK.NodeFilters.describe(condition)
 end
@@ -204,6 +207,8 @@ end
 ---@return boolean
 local function isBroadCategoryRule(key)
 	if not key or key == "" then return false end
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
+	if nativePath then return nativePath.l3 == nil end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	return key:sub(1, #EXT) == EXT or key:sub(1, #SUB) == SUB
@@ -245,6 +250,8 @@ end
 ---@return string|nil
 local function categoryRuleGroupKey(key)
 	if not key or key == "" then return nil end
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
+	if nativePath then return nativePath.l1 end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if key:sub(1, #EXT) == EXT then
@@ -273,14 +280,21 @@ end
 local function conditionsOverlap(a, b)
 	if not a or not b or a.type ~= b.type then return false end
 	if a.type == "category" then
-		local av, bv = string.lower(tostring(a.value or "")), string.lower(tostring(b.value or ""))
+		local aValue, bValue = a.nativePath or a.value, b.nativePath or b.value
+		local av, bv = string.lower(tostring(aValue or "")), string.lower(tostring(bValue or ""))
 		if av == bv then return true end
+		local aPath = GlobalStorageSiK.NativeProduct.decodePath(aValue)
+		local bPath = GlobalStorageSiK.NativeProduct.decodePath(bValue)
+		if aPath and bPath then
+			return GlobalStorageSiK.NativeProduct.pathMatches(aPath, bPath)
+				or GlobalStorageSiK.NativeProduct.pathMatches(bPath, aPath)
+		end
 		-- Jerarquia: un NOT/OR/AND de Nivel 1 o 2 (ej. "Comida" o "Comida >
 		-- Perecedero") cubre cualquier hoja mas especifica del MISMO grupo -
 		-- solo cuenta si al menos una de las dos reglas es "amplia" (Nivel
 		-- 1/2), nunca entre dos hojas exactas hermanas sin relacion.
-		if isBroadCategoryRule(a.value) or isBroadCategoryRule(b.value) then
-			local ga, gb = categoryRuleGroupKey(a.value), categoryRuleGroupKey(b.value)
+		if isBroadCategoryRule(aValue) or isBroadCategoryRule(bValue) then
+			local ga, gb = categoryRuleGroupKey(aValue), categoryRuleGroupKey(bValue)
 			if ga and gb and string.lower(ga) == string.lower(gb) then
 				return true
 			end

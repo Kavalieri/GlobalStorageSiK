@@ -1385,6 +1385,30 @@ local function suggestCategoryFromSnapshot(rows)
 	return best and (EXT .. best) or nil
 end
 
+--- Ruta nativa dominante del snapshot, calculada autoritativamente y con
+--- desempate lexical estable. Conserva suggestedCategory legacy en el mismo
+--- payload durante 1.4.3; el cliente DEV30 prefiere esta ruta nueva.
+---@param rows table[]
+---@return string|nil
+local function suggestNativePathFromSnapshot(rows)
+	local counts = {}
+	for i = 1, #(rows or {}) do
+		local row = rows[i]
+		local encoded = GlobalStorageSiK.NativeProduct.encodePath(
+			GlobalStorageSiK.NativeProduct.getPath(row.fullType))
+		if encoded then
+			counts[encoded] = (counts[encoded] or 0) + (row.count or 1)
+		end
+	end
+	local best, bestCount = nil, 0
+	for encoded, total in pairs(counts) do
+		if total > bestCount or (total == bestCount and (not best or encoded < best)) then
+			best, bestCount = encoded, total
+		end
+	end
+	return best
+end
+
 --- Obtiene filas de inventario de un nodo (vivo o snapshot).
 ---@param node table
 ---@param networkId string
@@ -2294,6 +2318,19 @@ local function sanitizeRuleCondition(condition)
 	if type(condition) ~= "table" then return nil end
 	if condition.type == "category" then
 		local value = tostring(condition.value or ""):sub(1, 160)
+		local nativePath = condition.nativePath or (value:sub(1, 7) == "native:" and value or nil)
+		if nativePath then
+			local decoded = GlobalStorageSiK.NativeProduct.decodePath(nativePath)
+			local encoded = GlobalStorageSiK.NativeProduct.encodePath(decoded)
+			if not encoded then return nil end
+			local legacyValue = condition.legacyValue and tostring(condition.legacyValue):sub(1, 160) or nil
+			return {
+				type = "category",
+				value = value ~= "" and value or encoded,
+				nativePath = encoded,
+				legacyValue = legacyValue,
+			}
+		end
 		if value == "" then return nil end
 		return { type = "category", value = value }
 	end
@@ -2841,6 +2878,7 @@ local function onClientCommand(module, command, player, args)
 			rows = rows,
 			source = source,
 			suggestedCategory = suggestCategoryFromSnapshot(rows),
+			suggestedNativePath = suggestNativePathFromSnapshot(rows),
 			capacity = GlobalStorageSiK.NetworkCapacity.computeNode(liveContainer, player),
 		})
 

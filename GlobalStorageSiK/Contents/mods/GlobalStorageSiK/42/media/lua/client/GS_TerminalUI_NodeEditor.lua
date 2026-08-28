@@ -12,6 +12,7 @@ require "ISUI/ISLabel"
 require "ISUI/ISTextEntryBox"
 require "ISUI/ISComboBox"
 require "GS_I18n"
+require "GS_NativeProduct"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Window"
@@ -606,8 +607,10 @@ function GS_NodeEditorUI:ensureForm()
 	-- consumida aqui.
 	local _sugCache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
 	local _sugPayload = self.node and _sugCache[self.node.id]
-	local sugKey = _sugPayload and _sugPayload.suggestedCategory and _sugPayload.suggestedCategory ~= ""
-		and _sugPayload.suggestedCategory or nil
+	local sugKey = _sugPayload and _sugPayload.suggestedNativePath and _sugPayload.suggestedNativePath ~= ""
+		and _sugPayload.suggestedNativePath
+		or (_sugPayload and _sugPayload.suggestedCategory and _sugPayload.suggestedCategory ~= ""
+			and _sugPayload.suggestedCategory or nil)
 	-- El contenido del nodo (y con el, la sugerencia) llega ASYNC del
 	-- servidor y puede no haber llegado todavia cuando se construye el
 	-- formulario por primera vez al abrir el editor - `refreshContents()` se
@@ -620,7 +623,7 @@ function GS_NodeEditorUI:ensureForm()
 		local alreadyPresent = false
 		for _, rule in ipairs(self.node.rules or {}) do
 			if rule.condition and rule.condition.type == "category"
-				and string.lower(rule.condition.value or "") == string.lower(sugKey) then
+				and string.lower(rule.condition.nativePath or rule.condition.value or "") == string.lower(sugKey) then
 				alreadyPresent = true
 				break
 			end
@@ -638,7 +641,8 @@ function GS_NodeEditorUI:ensureForm()
 			-- - antes el único botón (solo OR) se lo saltaba (bug real
 			-- cerrado en la auditoria pre-release del mismo día).
 			local pal = GlobalStorageSiK.SiK_UI.PALETTE
-			local neutral = pal.textMuted
+			local neutral = GlobalStorageSiK.NativeProduct.decodePath(sugKey)
+				and GlobalStorageSiK.NativeProduct.getColor(sugKey) or pal.textMuted
 			local cardPad = 8
 			local cardX = pad
 			local cardW = innerW - pad
@@ -657,7 +661,9 @@ function GS_NodeEditorUI:ensureForm()
 
 			local function applySuggested(op)
 				if not self.node then return end
-				local newRule = { op = op, condition = { type = "category", value = sugKey } }
+				local condition = { type = "category", value = sugKey }
+				if GlobalStorageSiK.NativeProduct.decodePath(sugKey) then condition.nativePath = sugKey end
+				local newRule = { op = op, condition = condition }
 				local function applyRule()
 					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addRule = newRule })
 					self.node.rules = self.node.rules or {}
@@ -1058,8 +1064,9 @@ local function contentsFingerprint(node)
 	local rowCount = #rows
 	local firstType = rowCount > 0 and (rows[1].fullType or "") or ""
 	return string.format(
-		"%s|%s|%s|%d|%s",
+		"%s|%s|%s|%s|%d|%s",
 		tostring(payload.source or ""),
+		tostring(payload.suggestedNativePath or ""),
 		tostring(payload.suggestedCategory or ""),
 		tostring(rowCount),
 		tostring(node.itemTypeCount or 0),

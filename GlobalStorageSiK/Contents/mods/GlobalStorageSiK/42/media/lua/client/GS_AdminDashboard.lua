@@ -593,6 +593,19 @@ function GS_AdminDashboardUI:rebuildAfterResize()
 	end
 end
 
+--- Recalcula en un unico punto los limites de las dos suites de Taxonomia.
+--- Es idempotente y se ejecuta siempre despues de que ambas secciones hayan
+--- sido pobladas, tanto en apertura como en cada reconstruccion por resize.
+function GS_AdminDashboardUI:layoutTaxonomyTab()
+	if not self._taxonomyTabY then return end
+	local bottomY = self.height - PAD
+	local midY = self._taxonomyTabY + math.floor((bottomY - self._taxonomyTabY) / 2)
+	self._auditBottomLimit = midY - 4
+	self._corpusBottomLimit = bottomY
+	GlobalStorageSiK.AdminDashboardAudit.refreshSummary(self)
+	GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(self)
+end
+
 function GS_AdminDashboardUI:initialise()
 	ISPanel.initialise(self)
 	self.backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.98 }
@@ -808,6 +821,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	-- secuencial. Guardada aparte porque `y` sigue avanzando mas abajo con
 	-- el contenido propio de Soporte de redes.
 	local taxonomyTabY = y
+	self._taxonomyTabY = taxonomyTabY
 
 	self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
 	self.networkCombo:initialise()
@@ -876,6 +890,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local taxonomyMidY = taxonomyTabY + math.floor((taxonomyBottomY - taxonomyTabY) / 2)
 	GlobalStorageSiK.AdminDashboardAudit.build(self, pad, taxonomyTabY, textW, taxonomyMidY - 4)
 	GlobalStorageSiK.AdminDashboardCorpus.build(self, pad, taxonomyMidY + 4, textW, taxonomyBottomY)
+	self:layoutTaxonomyTab()
 
 	-- Herramientas internas aportadas por los addons. El Dashboard solo pinta
 	-- el registro neutral; cada addon conserva la responsabilidad de abrir su

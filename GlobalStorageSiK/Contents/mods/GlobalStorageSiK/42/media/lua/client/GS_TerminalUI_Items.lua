@@ -11,6 +11,7 @@ require "ISUI/ISContextMenu"
 require "GS_CatalogManager"
 require "GS_I18n"
 require "GS_ItemTaxonomy"
+require "GS_NativeProduct"
 require "GS_Libs"
 require "GS_BulkFilters"
 require "GS_DepositSources"
@@ -653,6 +654,7 @@ local function sortRowCacheKey(row)
 	return tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
+		.. "\1" .. tostring(row.nativePath or "")
 end
 local function sortKeyValue(row, sortKey, terminal)
 	if sortKey == "count" then
@@ -668,7 +670,9 @@ local function sortKeyValue(row, sortKey, terminal)
 	end
 	local value
 	if sortKey == "category" then
-		if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
+		if row.nativePath then
+			value = string.lower(GlobalStorageSiK.NativeProduct.getView(row.nativePath).fullLabel)
+		elseif GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
 			value = string.lower(GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row).fullLabel)
 		else
 			value = string.lower(tostring(row.category or ""))
@@ -689,8 +693,13 @@ end
 ---@return table[]
 local function sortRows(rows, sortKey, ascending, terminal)
 	local sorted = {}
+	local values = {}
 	for i = 1, #rows do
 		sorted[i] = rows[i]
+		-- DEV30: fuerza cualquier traduccion/resolucion en una pasada lineal.
+		-- El comparador de table.sort queda reducido a lecturas de tabla: cero
+		-- clasificador, i18n o ScriptManager durante sus O(n log n) llamadas.
+		values[rows[i]] = sortKeyValue(rows[i], sortKey, terminal)
 	end
 	-- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, reportado por un miembro de
 	-- la comunidad con telemetria real de servidor dedicado: red de 1286
@@ -698,16 +707,13 @@ local function sortRows(rows, sortKey, ascending, terminal)
 	-- "displayName", la clave POR DEFECTO, resolvia I18n.itemDisplayName() DOS
 	-- VECES POR COMPARACION, ~26000 llamadas para 1286 filas). Cerrado en 2
 	-- pasos: primero (dev18) un cache local de UNA pasada por sortRows;
-	-- despues (dev20/dev21, propuesta de mejora futura de Desarrollo tras
-	-- validar dev20) sortKeyValue() paso a memorizar sus propios resultados de
-	-- forma PERSISTENTE por fila (sortKeyValueCache, arriba) - ya no hace
-	-- falta ninguna tabla intermedia aqui, el propio comparador puede llamar a
-	-- sortKeyValue() directamente en cada comparacion: la primera vez que se
-	-- ve una fila hace el trabajo real, cualquier ordenacion posterior (o
-	-- reordenar mientras se escribe en el buscador) son lecturas O(1).
+	-- despues (dev20/dev21), sortKeyValue() paso a memorizar sus resultados de
+	-- forma persistente por fila. DEV30 conserva esa cache y recupera ademas
+	-- la tabla intermedia por ordenacion: incluso el primer sort queda libre
+	-- de traducciones o resoluciones dentro del comparador.
 	table.sort(sorted, function(a, b)
-		local av = sortKeyValue(a, sortKey, terminal)
-		local bv = sortKeyValue(b, sortKey, terminal)
+		local av = values[a]
+		local bv = values[b]
 		if av == bv then
 			return (a.fullType or "") < (b.fullType or "")
 		end
@@ -727,14 +733,66 @@ function GlobalStorageSiK.TerminalItems.rowTaxonomy(row)
 		return { mainKey = "", subKey = "", mainLabel = "", subLabel = "", fullLabel = "",
 			groupKey = "", subGroupKey = nil, groupLabel = "", subGroupLabel = nil, leafLabel = nil }
 	end
+	local path = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
+	if path then
+		local view = GlobalStorageSiK.NativeProduct.getView(path)
+		return {
+			mainKey = view.key, subKey = view.key, mainLabel = view.l1Label,
+			subLabel = view.l2Label, fullLabel = view.fullLabel,
+			groupKey = path.l1, subGroupKey = path.l2, categoryLeafKey = path.l3,
+			groupLabel = view.l1Label, subGroupLabel = view.l2Label, leafLabel = view.l3Label,
+			nativePath = path,
+		}
+	end
 	return GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
+end
+
+-- El mismo snapshot de filas alimenta L1/L2/L3 durante un refresh. Mantener
+-- un unico indice inverso por referencia evita volver a recorrer el stock
+-- para cada opcion de cada nivel.
+local nativeIndexRows = nil
+local nativeIndex = nil
+local nativeIndexEpoch = nil
+local function indexForRows(rows)
+	local epoch = GlobalStorageSiK.CatalogManager.getEpoch()
+	if rows ~= nativeIndexRows or epoch ~= nativeIndexEpoch then
+		nativeIndexRows = rows
+		nativeIndexEpoch = epoch
+		nativeIndex = GlobalStorageSiK.NativeProduct.buildIndex(rows)
+	end
+	return nativeIndex
+end
+
+local function nativeOptionsPresent(rows, parent)
+	local options = GlobalStorageSiK.NativeProduct.listOptions(parent)
+	local result = {}
+	local index = indexForRows(rows)
+	for o = 1, #options do
+		local count = #GlobalStorageSiK.NativeProduct.rowsForPath(index, options[o].key)
+		if count > 0 then
+			result[#result + 1] = { key = options[o].key, label = options[o].label, typeCount = count }
+		end
+	end
+	return result
+end
+
+local function filterByNativePath(rows, key)
+	if not key or key == "" then return rows end
+	if not GlobalStorageSiK.NativeProduct.decodePath(key) then return nil end
+	local filtered = {}
+	for i = 1, #rows do
+		if GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePath) then
+			filtered[#filtered + 1] = rows[i]
+		end
+	end
+	return filtered
 end
 
 --- Recopila categorías principales únicas del catálogo.
 ---@param rows table[]
 ---@return table[] { key: string, label: string, typeCount: number }
 function GlobalStorageSiK.TerminalItems.collectMainCategoryFilters(rows)
-	return GlobalStorageSiK.ItemTaxonomy.collectMainFilters(rows or {})
+	return nativeOptionsPresent(rows or {}, nil)
 end
 
 --- Recopila subcategorías únicas (opcionalmente restringidas a una categoría principal).
@@ -742,7 +800,8 @@ end
 ---@param mainKey string|nil
 ---@return table[] { key: string, label: string, typeCount: number }
 function GlobalStorageSiK.TerminalItems.collectSubCategoryFilters(rows, mainKey)
-	return GlobalStorageSiK.ItemTaxonomy.collectSubFilters(rows or {}, mainKey)
+	if not mainKey or mainKey == "" then return {} end
+	return nativeOptionsPresent(rows or {}, mainKey)
 end
 
 --- Filtra filas por categoría principal (vacío = todas).
@@ -753,6 +812,8 @@ function GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, mainKey)
 	if not mainKey or mainKey == "" then
 		return rows
 	end
+	local native = filterByNativePath(rows, mainKey)
+	if native then return native end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	if mainKey:sub(1, #EXT) == EXT then
 		-- Clave de familia canonica (groupKey, fuente unica - ver
@@ -788,7 +849,8 @@ end
 ---@param subKey string|nil
 ---@return table[] { key: string, label: string, typeCount: number }
 function GlobalStorageSiK.TerminalItems.collectLeafCategoryFilters(rows, mainKey, subKey)
-	return GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(rows or {}, mainKey, subKey)
+	if not subKey or subKey == "" then return {} end
+	return nativeOptionsPresent(rows or {}, subKey)
 end
 
 --- Filtra filas por Nivel 2 (subcategoría, ej. "Perecedero" - vacío = todas).
@@ -802,6 +864,8 @@ function GlobalStorageSiK.TerminalItems.filterBySubCategory(rows, subKey)
 	if not subKey or subKey == "" then
 		return rows
 	end
+	local native = filterByNativePath(rows, subKey)
+	if native then return native end
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if subKey:sub(1, #SUB) ~= SUB then
 		return rows
@@ -834,6 +898,8 @@ function GlobalStorageSiK.TerminalItems.filterByLeafCategory(rows, leafKey)
 	if not leafKey or leafKey == "" then
 		return rows
 	end
+	local native = filterByNativePath(rows, leafKey)
+	if native then return native end
 	local key = string.lower(leafKey)
 
 	-- Clave compuesta "categoria::hueco" (joyeria O cualquier subcategoria
@@ -1143,7 +1209,10 @@ local function createItemRow(scroll, listPanel, terminal)
 			local nameCol, catCol, zoneCol, countCol = columns[1], columns[2], columns[3], columns[4]
 			local textX = nameCol.x + 6 + ICON_SIZE + 8
 			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
-			local cat = GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
+			local nativeView = data.nativePath and GlobalStorageSiK.NativeProduct.getView(data.nativePath) or nil
+			local cat = nativeView and nativeView.fullLabel
+				or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
+			local catColor = data.nativePath and GlobalStorageSiK.NativeProduct.getColor(data.nativePath) or pal.textMuted
 			local zoneLabel = self._gsZoneLabel or "—"
 			local count = tostring(data.count or 0)
 			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
@@ -1158,7 +1227,7 @@ local function createItemRow(scroll, listPanel, terminal)
 			local catMaxW = catCol.finish - catX - catCol.pad
 			local zoneMaxW = zoneCol.finish - zoneX - zoneCol.pad
 			self:drawText(truncateText(name, nameMaxW, UIFont.Small), textX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-			self:drawText(truncateText(cat, catMaxW, UIFont.Small), catX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+			self:drawText(truncateText(cat, catMaxW, UIFont.Small), catX, yMid, catColor[1], catColor[2], catColor[3], 1, UIFont.Small)
 			self:drawText(truncateText(zoneLabel, zoneMaxW, UIFont.Small), zoneX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 			self:drawTextRight(count, countCol.finish - countCol.pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		end

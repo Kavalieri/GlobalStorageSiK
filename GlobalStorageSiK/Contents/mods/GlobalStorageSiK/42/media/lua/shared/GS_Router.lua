@@ -8,6 +8,7 @@
 
 require "GS_Sandbox"
 require "GS_ItemTaxonomy"
+require "GS_NativeProduct"
 require "GS_Subcategories"
 require "GS_Log"
 require "GS_NodeFilters"
@@ -205,7 +206,16 @@ end
 local function categoryRuleTier(rule, item, category, subCategory, subKeys, rowContext)
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if rule == "*" then
+	local nativeRule = GlobalStorageSiK.NativeProduct.decodePath(rule)
+	if nativeRule then
+		local okType, fullType = pcall(function() return item:getFullType() end)
+		if not okType or not fullType then return nil end
+		local itemPath = GlobalStorageSiK.NativeProduct.getPath(fullType)
+		if not GlobalStorageSiK.NativeProduct.pathMatches(nativeRule, itemPath) then return nil end
+		if nativeRule.l3 then return 1 end
+		if nativeRule.l2 then return 2 end
+		return 3
+	elseif rule == "*" then
 		return 4
 	elseif GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule) then
 		for j = 1, #subKeys do
@@ -366,6 +376,25 @@ function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 	local function conditionTier(condition)
 		if not condition then return nil end
 		if condition.type == "category" then
+			-- nativePath es autoritativa cuando existe. `value` se conserva como
+			-- alias recuperable para mundos/reglas anteriores y solo se consulta
+			-- mientras la migración aditiva todavía no añadió nativePath.
+			local nativePath = condition.nativePath
+			if nativePath then
+				local nativeTier = categoryRuleTier(nativePath, item, category, subCategory, subKeys, rowContext)
+				local legacyValue = condition.legacyValue
+					or (condition.value ~= nativePath and condition.value or nil)
+				if legacyValue then
+					local legacyTier = categoryRuleTier(legacyValue, item, category, subCategory, subKeys, rowContext)
+					-- Contraste seguro: un delta conserva el comportamiento legacy y
+					-- queda contado para la decisión de Kava; solo la equivalencia
+					-- demostrada activa la ruta nativa de esa regla migrada.
+					if not GlobalStorageSiK.NativeProduct.recordRoutingContrast(legacyTier, nativeTier) then
+						return legacyTier
+					end
+				end
+				return nativeTier
+			end
 			return categoryRuleTier(condition.value, item, category, subCategory, subKeys, rowContext)
 		end
 		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then

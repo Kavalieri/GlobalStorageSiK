@@ -11,6 +11,7 @@ require "ISUI/ISTextEntryBox"
 require "ISUI/ISComboBox"
 require "GS_I18n"
 require "GS_ItemTaxonomy"
+require "GS_NativeProduct"
 require "GS_Subcategories"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
@@ -133,6 +134,10 @@ end
 ---@param key string
 ---@return string
 local function categoryLabel(key)
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
+	if nativePath then
+		return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel
+	end
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	if key:sub(1, #EXT) == EXT then
@@ -218,7 +223,7 @@ function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, sel
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_CategoryAny"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectMainFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows())
+	local filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
 		combo:addOption(filters[i].label)
@@ -246,7 +251,7 @@ function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, se
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectSubFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows(), mainKey)
+	local filters = GlobalStorageSiK.NativeProduct.listOptions(mainKey)
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
 		combo:addOption(filters[i].label)
@@ -275,7 +280,12 @@ function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, s
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows(), mainKey, subKey)
+	-- La cascada es estricta: L3 solo existe tras elegir L2. Usar L1 como
+	-- parent repetia las opciones L2 dentro del tercer combo.
+	local filters = {}
+	if subKey and subKey ~= "" then
+		filters = GlobalStorageSiK.NativeProduct.listOptions(subKey)
+	end
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
 		combo:addOption(filters[i].label)

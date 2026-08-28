@@ -11,6 +11,7 @@ require "GS_Zones"
 require "GS_ItemSnapshot"
 require "GS_ZoneRefresh"
 require "GS_ItemTaxonomy"
+require "GS_NativeProduct"
 require "GS_Permissions"
 
 GlobalStorageSiK.Index = {}
@@ -150,7 +151,16 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 		end
 	end
 
-	return GlobalStorageSiK.ItemSnapshot.toRows(byType)
+	local rows = GlobalStorageSiK.ItemSnapshot.toRows(byType)
+	-- La clasificación se resuelve en el proceso autoritativo al construir el
+	-- snapshot serializable, nunca desde refresh/search/sort del cliente. El
+	-- propio NativeProduct conserva una referencia por fullType/epoch, por lo
+	-- que snapshots posteriores no vuelven a invocar al clasificador.
+	for i = 1, #rows do
+		local path = GlobalStorageSiK.NativeProduct.getPath(rows[i].fullType)
+		rows[i].nativePath = GlobalStorageSiK.NativeProduct.encodePath(path)
+	end
+	return rows
 end
 
 --- Refresca el itemSnapshot de UN nodo concreto ya resuelto por la propia

@@ -462,7 +462,7 @@ function GS_FilterEditorUI:onAddClicked()
 		-- guarda SIEMPRE la clave del nivel MAS ESPECIFICO elegido.
 		local key = (leafKey ~= "" and leafKey) or (subKey ~= "" and subKey) or (mainKey ~= "" and mainKey) or nil
 		if not key then return end
-		filter = { type = "category", value = key }
+		filter = { type = "category", value = key, nativePath = key }
 
 	elseif self.filterType == "name" then
 		local val = self.nameEntry and self.nameEntry:getText() or ""

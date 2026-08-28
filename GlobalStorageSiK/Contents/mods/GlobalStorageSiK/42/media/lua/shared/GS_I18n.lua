@@ -1231,6 +1231,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	local cacheKey = tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
+		.. "\1" .. tostring(row.nativePath or "")
 	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
@@ -1253,6 +1254,14 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 
 	local locName = GlobalStorageSiK.I18n.itemDisplayName(fullType, row.displayName, row.worldSprite)
 	addPart(locName)
+	if row.nativePath and GlobalStorageSiK.NativeProduct then
+		local nativeView = GlobalStorageSiK.NativeProduct.getView(row.nativePath)
+		addPart(nativeView.fullLabel)
+		addPart(nativeView.l1Label)
+		addPart(nativeView.l2Label)
+		addPart(nativeView.l3Label)
+		addPart(row.nativePath)
+	end
 	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
 		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
 		addPart(tax.fullLabel)

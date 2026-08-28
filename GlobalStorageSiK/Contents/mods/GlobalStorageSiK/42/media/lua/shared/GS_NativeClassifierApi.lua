@@ -40,6 +40,27 @@ GlobalStorageSiK.NativeClassifier = GlobalStorageSiK.NativeClassifier or {}
 --- construccion, sin bookkeeping por entrada.
 local classificationCache = GlobalStorageSiK.CatalogManager.createEpochCache()
 
+-- Contadores de producto DEV30. Son deliberadamente escalares y se reinician
+-- con catalogEpoch: permiten demostrar que una apertura/filtro/sort posterior
+-- reutiliza el resultado canónico sin guardar referencias de diagnóstico.
+local metrics = {
+	requests = 0,
+	effectiveClassifications = 0,
+	cacheHits = 0,
+	pendingRequests = 0,
+	invalidRequests = 0,
+}
+
+local function resetMetrics()
+	metrics.requests = 0
+	metrics.effectiveClassifications = 0
+	metrics.cacheHits = 0
+	metrics.pendingRequests = 0
+	metrics.invalidRequests = 0
+end
+
+GlobalStorageSiK.CatalogManager.onEpochChanged(resetMetrics)
+
 --- Lista ordenada de clasificadores por bloque, registrados por cada ronda
 --- de implementacion (Combate, Herramientas, Materiales...). Cada
 --- clasificador es function(fullType, scriptItem) -> primaryPath, facets,
@@ -246,19 +267,37 @@ local PENDING_RESULT = {
 ---@param fullType string|nil
 ---@return table|nil NativeClassificationResult, nil si fullType invalido, PENDING_RESULT si el catalogo aun no esta listo/sellado
 function GlobalStorageSiK.NativeClassifier.classify(fullType)
+	metrics.requests = metrics.requests + 1
 	if not fullType or fullType == "" then
+		metrics.invalidRequests = metrics.invalidRequests + 1
 		return nil
 	end
 	if not sealed or not GlobalStorageSiK.CatalogManager.isReady() then
+		metrics.pendingRequests = metrics.pendingRequests + 1
 		return PENDING_RESULT
 	end
 	local cached = classificationCache[fullType]
 	if cached ~= nil then
+		metrics.cacheHits = metrics.cacheHits + 1
 		return cached
 	end
 	local result = computeClassification(fullType)
+	metrics.effectiveClassifications = metrics.effectiveClassifications + 1
 	classificationCache[fullType] = result
 	return result
+end
+
+--- Copia plana de telemetría; ningún consumidor puede mutar los contadores.
+---@return table
+function GlobalStorageSiK.NativeClassifier.getMetrics()
+	return {
+		catalogEpoch = GlobalStorageSiK.CatalogManager.getEpoch(),
+		requests = metrics.requests,
+		effectiveClassifications = metrics.effectiveClassifications,
+		cacheHits = metrics.cacheHits,
+		pendingRequests = metrics.pendingRequests,
+		invalidRequests = metrics.invalidRequests,
+	}
 end
 
 --- SOLO DIAGNOSTICO (GS_NativeAudit.lua) - a diferencia de classify(), que
