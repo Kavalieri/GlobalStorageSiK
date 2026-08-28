@@ -14,6 +14,7 @@ require "GS_CatalogManager"
 require "GS_NativeClassifier"
 require "GS_NativeTaxonomyRegistry"
 require "GS_ItemTaxonomy"
+require "GS_CompatMods"
 
 GlobalStorageSiK.NativeProduct = GlobalStorageSiK.NativeProduct or {}
 
@@ -189,6 +190,57 @@ function GlobalStorageSiK.NativeProduct.getView(path)
 	}
 	viewCache[key] = view
 	return view
+end
+
+--- La compatibilidad de categorías existente sigue gobernando la proyección
+--- visible de tipos ajenos a GS mientras el mod externo esté activo. La ruta
+--- canónica nunca cambia y los tipos propios conservan siempre su identidad.
+---@return boolean
+function GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive()
+	local compat = GlobalStorageSiK.CompatMods
+	return compat and (compat.hasExtendedCategories()
+		or compat.hasOrganizedCategoriesCore()
+		or compat.hasBetterSorting()) or false
+end
+
+---@param row table|nil
+---@return table projection {mode,key,fullLabel,color,nativePath,taxonomy}
+function GlobalStorageSiK.NativeProduct.getRowProjection(row)
+	row = row or {}
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
+	if nativePath and nativePath.l1 == "globalstoragesik" then
+		local view = GlobalStorageSiK.NativeProduct.getView(nativePath)
+		return { mode = "native", key = view.key, fullLabel = view.fullLabel,
+			color = GlobalStorageSiK.NativeProduct.getColor(nativePath), nativePath = nativePath }
+	end
+	if GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
+		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
+		if tax and tax.mainCanon and tax.mainCanon ~= "" then
+			return { mode = "legacy", key = tax.mainCanon, fullLabel = tax.fullLabel,
+				taxonomy = tax, nativePath = nativePath }
+		end
+	end
+	if nativePath then
+		local view = GlobalStorageSiK.NativeProduct.getView(nativePath)
+		return { mode = "native", key = view.key, fullLabel = view.fullLabel,
+			color = GlobalStorageSiK.NativeProduct.getColor(nativePath), nativePath = nativePath }
+	end
+	local tax = GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
+	return { mode = "legacy", key = tax.mainCanon, fullLabel = tax.fullLabel,
+		taxonomy = tax, nativePath = nil }
+end
+
+---@param row table|nil
+---@return boolean
+function GlobalStorageSiK.NativeProduct.usesLegacyProjection(row)
+	return GlobalStorageSiK.NativeProduct.getRowProjection(row).mode == "legacy"
+end
+
+---@param fullType string|nil
+---@return boolean
+function GlobalStorageSiK.NativeProduct.isOwnFullType(fullType)
+	local path = GlobalStorageSiK.NativeProduct.getPath(fullType)
+	return path and path.l1 == "globalstoragesik" or false
 end
 
 local function addIndex(index, key, row)

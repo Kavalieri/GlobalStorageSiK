@@ -205,6 +205,30 @@ function GlobalStorageSiK.TerminalConfig.fillCategoryCombo(combo, categories, se
 	combo.selected = #combo.categoryKeys
 end
 
+local legacyCatalogRows = nil
+local function getLegacyCatalogRows()
+	if not GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then return nil end
+	if legacyCatalogRows then return legacyCatalogRows end
+	legacyCatalogRows = {}
+	local allRows = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
+	local own = GlobalStorageSiK.NativeClassifier.getOwnItemsExactTable
+		and GlobalStorageSiK.NativeClassifier.getOwnItemsExactTable() or {}
+	for i = 1, #allRows do
+		if not own[allRows[i].fullType] then legacyCatalogRows[#legacyCatalogRows + 1] = allRows[i] end
+	end
+	return legacyCatalogRows
+end
+
+local function appendUniqueCategoryOptions(target, seen, options)
+	for i = 1, #options do
+		local sig = string.lower(tostring(options[i].key or ""))
+		if sig ~= "" and not seen[sig] then
+			seen[sig] = true
+			target[#target + 1] = options[i]
+		end
+	end
+end
+
 --- Rellena combo de categoria PRINCIPAL a partir del CATALOGO COMPLETO del
 --- juego (todo tipo de item existente), no solo lo que la red tiene ahora
 --- mismo - a diferencia del filtro de la pestaña Almacen (que si se
@@ -223,7 +247,22 @@ function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, sel
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_CategoryAny"))
-	local filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
+	local filters = {}
+	local legacyRows = getLegacyCatalogRows()
+	if legacyRows then
+		local seen = {}
+		appendUniqueCategoryOptions(filters, seen,
+			GlobalStorageSiK.ItemTaxonomy.collectMainFilters(legacyRows))
+		local nativeRoots = GlobalStorageSiK.NativeProduct.listOptions(nil)
+		for i = 1, #nativeRoots do
+			if nativeRoots[i].path and nativeRoots[i].path.l1 == "globalstoragesik" then
+				appendUniqueCategoryOptions(filters, seen, { nativeRoots[i] })
+			end
+		end
+		table.sort(filters, function(a, b) return string.lower(a.label) < string.lower(b.label) end)
+	else
+		filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
+	end
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
 		combo:addOption(filters[i].label)
@@ -251,7 +290,10 @@ function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, se
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
-	local filters = GlobalStorageSiK.NativeProduct.listOptions(mainKey)
+	local legacyRows = getLegacyCatalogRows()
+	local filters = GlobalStorageSiK.NativeProduct.decodePath(mainKey)
+		and GlobalStorageSiK.NativeProduct.listOptions(mainKey)
+		or (legacyRows and GlobalStorageSiK.ItemTaxonomy.collectSubFilters(legacyRows, mainKey) or {})
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
 		combo:addOption(filters[i].label)
@@ -284,7 +326,10 @@ function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, s
 	-- parent repetia las opciones L2 dentro del tercer combo.
 	local filters = {}
 	if subKey and subKey ~= "" then
-		filters = GlobalStorageSiK.NativeProduct.listOptions(subKey)
+		local legacyRows = getLegacyCatalogRows()
+		filters = GlobalStorageSiK.NativeProduct.decodePath(subKey)
+			and GlobalStorageSiK.NativeProduct.listOptions(subKey)
+			or (legacyRows and GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(legacyRows, mainKey, subKey) or {})
 	end
 	for i = 1, #filters do
 		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key

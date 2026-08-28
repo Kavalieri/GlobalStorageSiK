@@ -1409,6 +1409,31 @@ local function suggestNativePathFromSnapshot(rows)
 	return best
 end
 
+--- Elige una única sugerencia respetando la misma proyección que verá el
+--- usuario: categoría externa/legacy para tipos ajenos cuando el mod está
+--- activo; ruta nativa como fallback y siempre para objetos propios GS.
+---@param rows table[]
+---@return string|nil
+local function suggestProjectedCategoryFromSnapshot(rows)
+	local counts = {}
+	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
+	for i = 1, #(rows or {}) do
+		local row = rows[i]
+		local projection = GlobalStorageSiK.NativeProduct.getRowProjection(row)
+		local key = projection.mode == "native" and projection.key
+			or (projection.taxonomy and projection.taxonomy.groupKey
+				and (EXT .. projection.taxonomy.groupKey) or nil)
+		if key then counts[key] = (counts[key] or 0) + (row.count or 1) end
+	end
+	local best, bestCount = nil, 0
+	for key, total in pairs(counts) do
+		if total > bestCount or (total == bestCount and (not best or key < best)) then
+			best, bestCount = key, total
+		end
+	end
+	return best
+end
+
 --- Obtiene filas de inventario de un nodo (vivo o snapshot).
 ---@param node table
 ---@param networkId string
@@ -2879,6 +2904,7 @@ local function onClientCommand(module, command, player, args)
 			source = source,
 			suggestedCategory = suggestCategoryFromSnapshot(rows),
 			suggestedNativePath = suggestNativePathFromSnapshot(rows),
+			suggestedProjectedCategory = suggestProjectedCategoryFromSnapshot(rows),
 			capacity = GlobalStorageSiK.NetworkCapacity.computeNode(liveContainer, player),
 		})
 

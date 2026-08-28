@@ -5,6 +5,7 @@ package.loaded["GS_CatalogManager"] = true
 package.loaded["GS_NativeClassifier"] = true
 package.loaded["GS_NativeTaxonomyRegistry"] = true
 package.loaded["GS_ItemTaxonomy"] = true
+package.loaded["GS_CompatMods"] = true
 
 local classifierCalls = 0
 GlobalStorageSiK = {
@@ -31,6 +32,9 @@ GlobalStorageSiK = {
 			if fullType == "Base.Apple" then
 				return { primaryPath = { l1 = "food_drink", l2 = "produce", l3 = "fruit" } }
 			end
+			if fullType == "GlobalStorageSiK.Tablet" then
+				return { primaryPath = { l1 = "globalstoragesik", l2 = "tablet" } }
+			end
 			return { primaryPath = { l1 = "materials", l2 = "wood" } }
 		end,
 		getMetrics = function()
@@ -43,6 +47,11 @@ GlobalStorageSiK = {
 		resolve = function(_, row)
 			return { mainCanon = row.category, subCanon = row.subCategory, groupKey = row.category }
 		end,
+	},
+	CompatMods = {
+		hasExtendedCategories = function() return false end,
+		hasOrganizedCategoriesCore = function() return false end,
+		hasBetterSorting = function() return false end,
 	},
 	I18n = { text = function(key) return key end },
 }
@@ -92,5 +101,25 @@ assertEqual(condition.legacyValue, "Food", "recoverable legacy copy")
 assertEqual(condition.nativePath, "native:food_drink/produce/fruit", "native path added")
 assertEqual(Product.recordRoutingContrast(2, 2), true, "equivalent routing contrast")
 assertEqual(Product.recordRoutingContrast(nil, 1), false, "routing delta detected")
+
+local externalRow = { fullType = "Base.Apple", category = "ExternalFood",
+	nativePath = "native:food_drink/produce/fruit" }
+GlobalStorageSiK.ItemTaxonomy.resolve = function()
+	return { mainCanon = "ExternalFood", groupKey = "ExternalFood", fullLabel = "External > Food" }
+end
+GlobalStorageSiK.CompatMods.hasExtendedCategories = function() return true end
+assertEqual(Product.getRowProjection(externalRow).mode, "legacy", "external category projection wins")
+assertEqual(Product.getRowProjection(externalRow).fullLabel, "External > Food", "external label preserved")
+local ownRow = { fullType = "GlobalStorageSiK.Tablet", category = "ExternalTool",
+	nativePath = "native:globalstoragesik/tablet" }
+GlobalStorageSiK.NativeTaxonomyRegistry.hasL2 = function(l1, l2)
+	return (l1 == "food_drink" and l2 == "produce") or (l1 == "materials" and l2 == "wood")
+		or (l1 == "globalstoragesik" and l2 == "tablet")
+end
+GlobalStorageSiK.NativeTaxonomyRegistry.hasL1 = function(l1)
+	return l1 == "food_drink" or l1 == "materials" or l1 == "globalstoragesik"
+end
+assertEqual(Product.getRowProjection(ownRow).mode, "native", "GS identity remains native")
+assertEqual(Product.isOwnFullType("GlobalStorageSiK.Tablet"), true, "GS routing identity remains native")
 
 print("native_product_regression: OK")

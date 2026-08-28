@@ -207,6 +207,16 @@ local function categoryRuleTier(rule, item, category, subCategory, subKeys, rowC
 	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
 	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
 	local nativeRule = GlobalStorageSiK.NativeProduct.decodePath(rule)
+	local isGsAlias = GlobalStorageSiK.Subcategories
+		and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule)
+	-- Con un organizador externo activo, sus DisplayCategory gobiernan tipos
+	-- ajenos, pero nunca deben suplantar la identidad/routing de objetos GS.
+	-- Los aliases gs_* anteriores siguen siendo legibles durante esta release.
+	if not nativeRule and rule ~= "*" and not isGsAlias
+		and GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
+		local okType, fullType = pcall(function() return item:getFullType() end)
+		if okType and GlobalStorageSiK.NativeProduct.isOwnFullType(fullType) then return nil end
+	end
 	if nativeRule then
 		local okType, fullType = pcall(function() return item:getFullType() end)
 		if not okType or not fullType then return nil end
@@ -217,7 +227,7 @@ local function categoryRuleTier(rule, item, category, subCategory, subKeys, rowC
 		return 3
 	elseif rule == "*" then
 		return 4
-	elseif GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule) then
+	elseif isGsAlias then
 		for j = 1, #subKeys do
 			if subKeys[j] == rule then
 				return 1

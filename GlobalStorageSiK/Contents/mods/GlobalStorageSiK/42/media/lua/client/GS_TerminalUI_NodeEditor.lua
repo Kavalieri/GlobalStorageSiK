@@ -607,8 +607,10 @@ function GS_NodeEditorUI:ensureForm()
 	-- consumida aqui.
 	local _sugCache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
 	local _sugPayload = self.node and _sugCache[self.node.id]
-	local sugKey = _sugPayload and _sugPayload.suggestedNativePath and _sugPayload.suggestedNativePath ~= ""
-		and _sugPayload.suggestedNativePath
+	local sugKey = _sugPayload and _sugPayload.suggestedProjectedCategory
+		and _sugPayload.suggestedProjectedCategory ~= "" and _sugPayload.suggestedProjectedCategory
+		or (_sugPayload and _sugPayload.suggestedNativePath and _sugPayload.suggestedNativePath ~= ""
+		and _sugPayload.suggestedNativePath)
 		or (_sugPayload and _sugPayload.suggestedCategory and _sugPayload.suggestedCategory ~= ""
 			and _sugPayload.suggestedCategory or nil)
 	-- El contenido del nodo (y con el, la sugerencia) llega ASYNC del
