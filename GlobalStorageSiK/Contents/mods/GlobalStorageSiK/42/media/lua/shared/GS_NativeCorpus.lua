@@ -242,6 +242,19 @@ local function fmt(n)
 	return tostring(n or 0)
 end
 
+--- Normaliza el sentinel `false` usado por el ground truth para expresar que
+--- L3 debe estar ausente. Evita el falso ternario `cond and nil or value`,
+--- que en Lua recupera `value` porque nil es falsy.
+---@param case table entrada de GS_NativeTaxonomyGroundTruth.cases
+---@return string|nil expectedL3
+local function getExpectedL3(case)
+	local expectedL3 = case.expectedL3
+	if case.expectAbstain or expectedL3 == false then
+		return nil
+	end
+	return expectedL3
+end
+
 --- Compara un unico caso ya confirmado presente (`si` no nil) contra el
 --- resultado real de NativeClassifier.classify() - NUNCA decide presencia
 --- (eso ya lo resolvio el llamador), solo evalua la expectativa.
@@ -263,8 +276,7 @@ local function evaluateCase(case, result)
 			kind = "classification"
 		end
 	else
-		local expectedL3 = case.expectedL3
-		if expectedL3 == false then expectedL3 = nil end
+		local expectedL3 = getExpectedL3(case)
 		if path.l1 ~= case.expectedL1 then
 			reasons[#reasons + 1] = "L1 esperado=" .. tostring(case.expectedL1) .. " obtenido=" .. tostring(path.l1)
 			kind = "classification"
@@ -722,7 +734,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 				end
 			end
 			if case.expectedL3 ~= nil or case.expectAbstain then
-				local expectedL3 = case.expectAbstain and nil or (case.expectedL3 == false and nil or case.expectedL3)
+				local expectedL3 = getExpectedL3(case)
 				report.l3Total = report.l3Total + 1
 				blockStats.l3Total = blockStats.l3Total + 1
 				if path.l3 == expectedL3 then
