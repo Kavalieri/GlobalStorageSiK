@@ -189,7 +189,8 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomySummaryLine",
 		tostring(report.totalTypes), tostring(report.pending), tostring(report.unclassified),
-		tostring(report.invalidPath), tostring(report.classifierErrors), tostring(report.timeMs)),
+		tostring(report.excludedInternal or 0), tostring(report.invalidPath),
+		tostring(report.classifierErrors), tostring(report.timeMs)),
 		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
 
 	-- dev23 (rechazo de sistemas: "el fingerprint completo es demasiado
@@ -216,6 +217,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	local files = {
 		{ labelKey = "IGUI_GS_TaxonomyFileReport", name = report.fileName },
 		{ labelKey = "IGUI_GS_TaxonomyFileUnclassified", name = report.unclassifiedFileName },
+		{ labelKey = "IGUI_GS_TaxonomyFileExcludedInternal", name = report.excludedInternalFileName },
 	}
 	for i = 1, #files do
 		if files[i].name then

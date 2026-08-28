@@ -48,6 +48,21 @@ local INTERNAL_OR_DEBUG_TOKENS = {
 }
 local MAX_SAMPLES_INTERNAL_OR_DEBUG = 40
 
+-- dev29: unica exclusion interna con frontera estructural confirmada en TEST.
+-- Los 94 proxies observados (ZedDmg, stubble, intestinos y huesos de mods)
+-- comparten BodyLocation=base:zeddmg. No se usan palabras del nombre: un
+-- objeto jugable que contenga "bone"/"debug" no queda oculto por accidente.
+local INTERNAL_EXCLUSION_BODY_LOCATION = "base:zeddmg"
+
+---@param si table|nil
+---@return string|nil reason
+local function internalExclusionReason(si)
+	if GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si) == INTERNAL_EXCLUSION_BODY_LOCATION then
+		return "body_location_zeddmg"
+	end
+	return nil
+end
+
 -- Probes controlados pedidos por sistemas (dev13, informe sobre dev12):
 -- "hace falta un probe especifico que registre para estos objetos getters,
 -- tags y propiedades" - SOLO diagnostico, nunca decide nada en
@@ -119,11 +134,14 @@ function GlobalStorageSiK.NativeAudit.run()
 		activeModCount = GlobalStorageSiK.CatalogManager.getActiveModCount(),
 		gameBuildVersion = GlobalStorageSiK.CatalogManager.getGameBuildVersion(),
 		totalTypes = 0,
+		classified = 0,
 		classifiedByL1 = {},        -- l1 -> contador (== coverageByL1)
 		coverageBySource = {},      -- evidence.primary.source -> contador
 		coverageByConfidence = {},  -- confidence numerica -> contador
 		pending = 0,
 		unclassified = 0,           -- other/unclassified_modded
+		excludedInternal = 0,       -- unclassified con señal interna estructural aprobada
+		excludedInternalByReason = {},
 		invalidPath = 0,            -- l1/l2/l3 no registrados en GS_NativeTaxonomyRegistry
 		classifierErrors = 0,       -- pcall del bloque fallo (ver GS_NativeClassifier.computeClassification)
 		precedenceCollisions = {},  -- { fullType, winner={l1,l2,l3}, others={{blockIndex,path},...} }
@@ -152,6 +170,7 @@ function GlobalStorageSiK.NativeAudit.run()
 		-- (GlobalStorageSiK_NativeAudit_Unclassified.tsv), nunca se envia por
 		-- red ni se muestra en la UI (ver GS_Server.lua).
 		unclassifiedInventory = {},
+		excludedInternalInventory = {},
 		tokenFrequency = {},
 		moduleFrequency = {},
 		likelyInternalOrDebugCount = 0,
@@ -300,8 +319,6 @@ function GlobalStorageSiK.NativeAudit.run()
 			else
 				local path = result.primaryPath or {}
 				local l1, l2, l3 = path.l1, path.l2, path.l3
-				report.classifiedByL1[l1 or "?"] = (report.classifiedByL1[l1 or "?"] or 0) + 1
-
 				-- coverageBySource / coverageByConfidence / samplesBySourceAndPath
 				-- (pedido explicito del equipo de sistemas tras revisar dev4:
 				-- "el informe no permite validar la precision" - sin esto, un
@@ -359,10 +376,21 @@ function GlobalStorageSiK.NativeAudit.run()
 				end
 
 				if l1 == "other" and l2 == "unclassified_modded" then
-					report.unclassified = report.unclassified + 1
-					addSample(report.samples.unclassified, fullType)
+					local exclusionReason = internalExclusionReason(si)
+					if exclusionReason then
+						report.excludedInternal = report.excludedInternal + 1
+						report.excludedInternalByReason[exclusionReason] =
+							(report.excludedInternalByReason[exclusionReason] or 0) + 1
+						report.excludedInternalInventory[#report.excludedInternalInventory + 1] = {
+							fullType = fullType,
+							reason = exclusionReason,
+							bodyLocation = GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si),
+						}
+					else
+						report.unclassified = report.unclassified + 1
+						addSample(report.samples.unclassified, fullType)
 
-					-- Pedido explicito del equipo de sistemas (dev13, tras
+						-- Pedido explicito del equipo de sistemas (dev13, tras
 					-- revisar dev11): "una muestra de 20 entre 2540 no basta
 					-- para decidir el siguiente bloque cuantitativamente" -
 					-- inventario COMPLETO de lo sin clasificar, solo a
@@ -383,7 +411,7 @@ function GlobalStorageSiK.NativeAudit.run()
 						wcStr = GlobalStorageSiK.NativeClassifierUtils.safeCall(function() return tostring(wc) end) or ""
 					end
 					local ammoTypeRaw = si.getAmmoType and GlobalStorageSiK.NativeClassifierUtils.safeCall(function() return si:getAmmoType() end)
-					report.unclassifiedInventory[#report.unclassifiedInventory + 1] = {
+						report.unclassifiedInventory[#report.unclassifiedInventory + 1] = {
 						fullType = fullType,
 						module = module,
 						typeName = typeName,
@@ -391,7 +419,11 @@ function GlobalStorageSiK.NativeAudit.run()
 						weaponCategories = wcStr,
 						ammoType = ammoTypeRaw and tostring(ammoTypeRaw) or "",
 						tokens = table.concat(nameTokens2, " "),
-					}
+						}
+					end
+				else
+					report.classified = report.classified + 1
+					report.classifiedByL1[l1 or "?"] = (report.classifiedByL1[l1 or "?"] or 0) + 1
 				end
 				-- Valida la ruta contra el registro real - detecta un
 				-- clasificador de bloque que devuelva una clave inventada,
@@ -419,6 +451,10 @@ function GlobalStorageSiK.NativeAudit.run()
 			end
 		end
 	end
+	report.reconciledTotal = report.classified + report.unclassified + report.excludedInternal
+		+ report.pending + report.classifierErrors
+	report.reconciliationDelta = report.totalTypes - report.reconciledTotal
+	table.sort(report.excludedInternalInventory, function(a, b) return a.fullType < b.fullType end)
 	-- Diff de mapeos exactos del grupo 14 (pedido explicito): compara la
 	-- tabla EXACT de GS_NativeClassifierOwnItems.lua contra el catalogo REAL
 	-- ya recorrido, y contra los modulos/discos que AddonRegistry dice que
@@ -463,8 +499,9 @@ function GlobalStorageSiK.NativeAudit.run()
 	if GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.info("NativeAudit",
 			string.format(
-				"auditoria: total=%d pending=%d unclassified=%d invalidPath=%d classifierErrors=%d tiempo=%dms",
-				report.totalTypes, report.pending, report.unclassified, report.invalidPath, report.classifierErrors, report.timeMs))
+				"auditoria: total=%d classified=%d pending=%d unclassified=%d excludedInternal=%d invalidPath=%d classifierErrors=%d delta=%d tiempo=%dms",
+				report.totalTypes, report.classified, report.pending, report.unclassified, report.excludedInternal,
+				report.invalidPath, report.classifierErrors, report.reconciliationDelta, report.timeMs))
 	end
 	return report
 end
@@ -507,9 +544,21 @@ function GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 			return
 		end
 		writer:write("epoch=" .. fmt(report.catalogEpoch) .. " fingerprint=" .. tostring(report.catalogFingerprint) .. "\r\n")
-		writer:write("totalTypes=" .. fmt(report.totalTypes) .. " pending=" .. fmt(report.pending)
-			.. " unclassified=" .. fmt(report.unclassified) .. " invalidPath=" .. fmt(report.invalidPath)
-			.. " classifierErrors=" .. fmt(report.classifierErrors) .. " tiempoMs=" .. fmt(report.timeMs) .. "\r\n")
+		writer:write("totalTypes=" .. fmt(report.totalTypes) .. " classified=" .. fmt(report.classified)
+			.. " pending=" .. fmt(report.pending) .. " unclassified=" .. fmt(report.unclassified)
+			.. " excludedInternal=" .. fmt(report.excludedInternal) .. " invalidPath=" .. fmt(report.invalidPath)
+			.. " classifierErrors=" .. fmt(report.classifierErrors) .. " reconciledTotal=" .. fmt(report.reconciledTotal)
+			.. " reconciliationDelta=" .. fmt(report.reconciliationDelta) .. " tiempoMs=" .. fmt(report.timeMs) .. "\r\n")
+		writer:write("--- Excluidos internos por regla estructural ---\r\n")
+		local exclusionReasons = {}
+		for reason in pairs(report.excludedInternalByReason or {}) do
+			exclusionReasons[#exclusionReasons + 1] = reason
+		end
+		table.sort(exclusionReasons)
+		for i = 1, #exclusionReasons do
+			local reason = exclusionReasons[i]
+			writer:write("  " .. tostring(reason) .. " = " .. fmt(report.excludedInternalByReason[reason]) .. "\r\n")
+		end
 		writer:write("--- Cobertura por grupo L1 ---\r\n")
 		for l1, count in pairs(report.classifiedByL1 or {}) do
 			writer:write("  " .. tostring(l1) .. " = " .. fmt(count) .. "\r\n")
@@ -673,6 +722,37 @@ function GlobalStorageSiK.NativeAudit.writeUnclassifiedTsv(report)
 	end)
 	-- El writer SIEMPRE se cierra, escriba lo que escriba lo de arriba -
 	-- una fila que fallara antes ni siquiera cerraba el fichero.
+	pcall(function() writer:close() end)
+	if not okWrite then
+		return false, "row_" .. tostring(rowsWritten + 1) .. "_failed: " .. tostring(errMsg)
+	end
+	return true, nil
+end
+
+--- Lista completa server-side de tipos internos excluidos del contador
+--- unclassified. Nunca se envia por red; el cliente recibe solo el contador y
+--- la ruta relativa del fichero.
+---@param report table
+---@return boolean ok
+---@return string|nil errorMessage
+function GlobalStorageSiK.NativeAudit.writeExcludedInternalTsv(report)
+	if not getFileWriter then return false, "getFileWriter_unavailable" end
+	local inventory = report.excludedInternalInventory or {}
+	local fileName = report and report.diagnosticExcludedInternalFile
+	if not fileName then return false, "missing_file_name" end
+	local ok, writer = pcall(getFileWriter, fileName, true, false)
+	if not ok or not writer then return false, "getFileWriter_failed" end
+	local rowsWritten = 0
+	local okWrite, errMsg = pcall(function()
+		writer:write("fullType\treason\tbodyLocation\r\n")
+		for i = 1, #inventory do
+			local row = inventory[i]
+			writer:write(table.concat({
+				tsvCell(row.fullType), tsvCell(row.reason), tsvCell(row.bodyLocation),
+			}, "\t") .. "\r\n")
+			rowsWritten = rowsWritten + 1
+		end
+	end)
 	pcall(function() writer:close() end)
 	if not okWrite then
 		return false, "row_" .. tostring(rowsWritten + 1) .. "_failed: " .. tostring(errMsg)

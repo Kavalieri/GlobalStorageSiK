@@ -68,7 +68,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- dev27: incrementada a "5" - anade los 3 bloques completos de la ronda
 -- (Combate, Ropa/Proteccion, Contenedores), 76+141+108 casos nuevos (ver
 -- secciones 1ter/1quater/1quinquies mas abajo).
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "5"
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "6"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -78,6 +78,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- del nombre real del item. Todos presence=required: son objetos de
 	-- NUESTROS PROPIOS mods, siempre cargados en el dedicado de pruebas.
 	{ caseId = "own_gs_floppydisk_blank", fullType = "GlobalStorageSiK.GS_FloppyDisk_Blank", block = "globalstoragesik", presence = "required",
+		criticalAnchor = true,
 		expectedL1 = "globalstoragesik", expectedL2 = "floppy_disk", expectedL3 = "blank",
 		minConfidence = 90, expectedSource = "exact_fulltype_own_item",
 		note = "Disquete sin programar, Core - mapeo exacto original." },
@@ -281,6 +282,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- queda como faceta `weaponCapability`, nunca como ruta primaria.
 
 	{ caseId = "tool_ballpeenhammer", fullType = "Base.BallPeenHammer", block = "tools", presence = "required",
+		criticalAnchor = true,
 		expectedL1 = "tools", expectedL2 = "general", expectedL3 = "striking",
 		minConfidence = 95, expectedSource = "script_tag_tool", expectFacets = { weaponCapability = true },
 		collisionWith = "combat",
@@ -725,6 +727,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- el script estatico; ver nota de riesgo en CURRENT.md).
 	{
 		caseId = "combat_handaxe", fullType = "Base.HandAxe", block = "combat", presence = "required",
+		criticalAnchor = true,
 		expectedL1 = "combat", expectedL2 = "melee", expectedL3 = "axe",
 		minConfidence = 100, expectedSource = "script_weapon_category",
 		expectFacets = { melee = true },
@@ -1286,6 +1289,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- GS_NativeClassifierClothing.lua.
 	{
 		caseId = "clothing_bandeau_burlap", fullType = "Base.Bandeau_Burlap", block = "clothing_protection", presence = "required",
+		criticalAnchor = true,
 		expectedL1 = "clothing_protection", expectedL2 = "clothing", expectedL3 = "torso",
 		minConfidence = 100, expectedSource = "script_body_location",
 		note = "BodyLocation oficial confirmado en clothing.txt (media/scripts/generated/items), region real torso.",
@@ -2143,6 +2147,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	},
 	{
 		caseId = "clothing_abstain_zeddmg_back", fullType = "Base.ZedDmg_BACK_Slash", block = "other", presence = "required",
+		criticalAnchor = true,
 		expectAbstain = true,
 		note = "Proxy visual interno (INTERNAL_PROXY_TOKENS) - Ropa NO debe reclamarlo, sin bloque de destino todavia, honesto unclassified_modded (dev7, re-verificado en dev27).",
 	},
@@ -2163,6 +2168,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	},
 	{
 		caseId = "containers_liquid_bottlecrafted", fullType = "Base.BottleCrafted", block = "containers", presence = "required",
+		criticalAnchor = true,
 		expectedL1 = "containers", expectedL2 = "liquid", expectedL3 = false,
 		minConfidence = 100, expectedSource = "script_fluid_container_component",
 		expectFacets = { containerForm = "liquid" },
@@ -2908,4 +2914,69 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		expectFacets = { containerForm = "bag_or_box" },
 		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation ni tag AMMO_CASE/firearmloot que sugiera identidad de Combate.",
 	},
+
+	-- Corpus v6 / dev29. Expectativas curadas desde politica de producto y
+	-- senales estructurales verificadas en TEST; nunca copiadas para generar
+	-- casos automaticamente desde la salida del clasificador.
+	{ caseId="v6_materials_sheetmetal", fullType="Base.SheetMetal", block="materials", presence="required", expectedL1="materials", expectedL2="metal", expectedL3=false, minConfidence=30, expectedSource="name_metal", expectationSource="product_policy:material_metal_name", criticalAnchor=true },
+	{ caseId="v6_materials_log", fullType="Base.Log", block="materials", presence="required", expectedL1="materials", expectedL2="wood", expectedL3=false, minConfidence=30, expectedSource="name_wood", expectationSource="product_policy:material_wood_name" },
+	{ caseId="v6_materials_textile", fullType="Base.FabricRoll_Cotton", block="materials", presence="required", expectedL1="materials", expectedL2="textile", expectedL3=false, minConfidence=30, expectedSource="name_textile", expectationSource="product_policy:material_textile_name" },
+	{ caseId="v6_materials_hide", fullType="Base.CowHide", block="materials", presence="required", expectedL1="materials", expectedL2="leather_hide", expectedL3=false, minConfidence=30, expectedSource="name_leather", expectationSource="product_policy:material_hide_name" },
+	{ caseId="v6_materials_mineral", fullType="Base.ClayBrick", block="materials", presence="required", expectedL1="materials", expectedL2="mineral", expectedL3=false, minConfidence=30, expectedSource="name_mineral", expectationSource="product_policy:material_mineral_name" },
+	{ caseId="v6_materials_organic", fullType="Base.SmallAnimalBone", block="materials", presence="required", expectedL1="materials", expectedL2="organic", expectedL3=false, minConfidence=30, expectedSource="name_organic", expectationSource="product_policy:material_organic_name" },
+	{ caseId="v6_materials_exact", fullType="Base.ScrapMetal", block="materials", presence="required", expectedL1="materials", expectedL2="metal", expectedL3=false, minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="product_policy:material_exact_anchor", criticalAnchor=true },
+
+	{ caseId="v6_food_beverage_collision", fullType="Base.JuiceBox", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="beverage", expectedL3=false, minConfidence=30, expectedSource="name_food_beverage", expectationSource="product_policy:contents_over_container", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_food_ingredient", fullType="Base.CakeBatter", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="ingredient", expectedL3=false, minConfidence=30, expectedSource="name_food_ingredient", expectationSource="product_policy:food_ingredient_name" },
+	{ caseId="v6_food_pantry", fullType="Base.RiceBowlClay", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="pantry", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type", criticalAnchor=true },
+	{ caseId="v6_food_produce", fullType="Base.CannedTomatoOpen", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="produce", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
+	{ caseId="v6_food_prepared", fullType="Base.CannedMushroomSoup", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="prepared_meal", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
+	{ caseId="v6_food_other", fullType="Base.CannedPineapple", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="other_food", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
+	{ caseId="v6_food_dairy", fullType="Base.CannedMilk_Box", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="dairy_egg", expectedL3=false, minConfidence=30, expectedSource="name_food_dairy_egg", expectationSource="product_policy:food_dairy_name" },
+
+	{ caseId="v6_knowledge_magazine_collision", fullType="Base.Magazine_Science_New", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="general_magazine", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_literature_type", collisionWith="knowledge_fallback", criticalAnchor=true },
+	{ caseId="v6_knowledge_literature", fullType="Base.PhotoBook", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="literature", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_literature_type" },
+	{ caseId="v6_knowledge_recorded", fullType="Base.VHS_Home", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="recorded_media", expectedL3=false, minConfidence=30, expectedSource="name_knowledge_recorded_media", expectationSource="product_policy:recorded_media_name", criticalAnchor=true },
+	{ caseId="v6_knowledge_book", fullType="Base.BookPotterySet", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="literature", expectedL3=false, minConfidence=30, expectedSource="name_knowledge_literature", expectationSource="product_policy:book_name" },
+	{ caseId="v6_knowledge_recipe", fullType="Base.BookCookingSet", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="recipe_magazine", expectedL3=false, minConfidence=30, expectedSource="name_knowledge_recipe_magazine", expectationSource="product_policy:recipe_knowledge_name" },
+
+	{ caseId="v6_medicine_bandage", fullType="Base.AlcoholBandage", block="medicine", presence="required", expectedL1="medicine", expectedL2="treatment", expectedL3="wound_dressing", minConfidence=30, expectedSource="name_medicine_treatment", expectationSource="product_policy:medical_treatment_name", criticalAnchor=true },
+	{ caseId="v6_medicine_splint", fullType="Base.Splint", block="medicine", presence="required", expectedL1="medicine", expectedL2="treatment", expectedL3="splint", minConfidence=30, expectedSource="name_medicine_treatment", expectationSource="product_policy:medical_treatment_name" },
+	{ caseId="v6_medicine_surgery_collision", fullType="Base.SutureNeedleBox", block="medicine", presence="required", expectedL1="medicine", expectedL2="instrument", expectedL3="surgical", minConfidence=30, expectedSource="name_medicine_surgery", expectationSource="product_policy:surgical_instrument_name", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_medicine_painkiller", fullType="Base.PillsBeta", block="medicine", presence="required", expectedL1="medicine", expectedL2="medication", expectedL3="painkiller", minConfidence=30, expectedSource="name_medicine_medication", expectationSource="product_policy:medication_name" },
+	{ caseId="v6_medicine_antibiotic", fullType="Base.AntibioticsBox", block="medicine", presence="required", expectedL1="medicine", expectedL2="medication", expectedL3="antibiotic", minConfidence=30, expectedSource="name_medicine_medication", expectationSource="product_policy:medication_name" },
+	{ caseId="v6_medicine_vitamin", fullType="Base.PillsVitamins", block="medicine", presence="required", expectedL1="medicine", expectedL2="medication", expectedL3="vitamin", minConfidence=30, expectedSource="name_medicine_medication", expectationSource="product_policy:medication_name" },
+	{ caseId="v6_medicine_sedative", fullType="Base.PillsSleepingTablets", block="medicine", presence="required", expectedL1="medicine", expectedL2="medication", expectedL3="sedative", minConfidence=30, expectedSource="name_medicine_medication", expectationSource="product_policy:medication_name" },
+	{ caseId="v6_medicine_supply", fullType="Base.GasmaskFilter", block="medicine", presence="required", expectedL1="medicine", expectedL2="supply", expectedL3="protective", minConfidence=30, expectedSource="name_medicine_supply", expectationSource="product_policy:medical_supply_name" },
+	{ caseId="v6_medicine_modded", fullType="AuthenticZClothing.Authentic_Pills", block="medicine", presence="required", expectedL1="medicine", expectedL2="medication", expectedL3="sedative", minConfidence=30, expectedSource="name_medicine_medication", expectationSource="product_policy:medication_name", moddedOrigin="AuthenticZClothing" },
+
+	{ caseId="v6_home_cookware", fullType="Base.Spatula", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="kitchen", expectedL3="cookware", minConfidence=30, expectedSource="name_home_kitchen", expectationSource="product_policy:home_kitchen_name", criticalAnchor=true },
+	{ caseId="v6_home_appliance", fullType="Base.Kettle", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="kitchen", expectedL3="appliance", minConfidence=30, expectedSource="name_home_kitchen", expectationSource="product_policy:home_kitchen_name" },
+	{ caseId="v6_home_cleaning_chemical", fullType="Base.Bleach", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="cleaning", expectedL3="chemical", minConfidence=30, expectedSource="name_home_cleaning", expectationSource="product_policy:home_cleaning_name" },
+	{ caseId="v6_home_cleaning_tool", fullType="Base.Mop", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="cleaning", expectedL3="tool", minConfidence=30, expectedSource="name_home_cleaning", expectationSource="product_policy:home_cleaning_name" },
+	{ caseId="v6_home_renovation", fullType="Base.Paintbrush", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="renovation", expectedL3="paint", minConfidence=30, expectedSource="name_home_renovation", expectationSource="product_policy:home_renovation_name" },
+	{ caseId="v6_home_collection_collision", fullType="Base.TrophyBronze", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="collection", expectedL3="collectible", minConfidence=30, expectedSource="name_home_collection", expectationSource="product_policy:collection_over_container", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_home_media", fullType="Base.Mov_PaintingRiverside", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="collection", expectedL3="media", minConfidence=30, expectedSource="name_home_collection", expectationSource="product_policy:home_collection_name" },
+	{ caseId="v6_home_music", fullType="Base.Harmonica", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="leisure", expectedL3="music", minConfidence=30, expectedSource="name_home_leisure", expectationSource="product_policy:home_leisure_name" },
+	{ caseId="v6_home_game", fullType="Base.ChessWhite", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="leisure", expectedL3="game", minConfidence=30, expectedSource="name_home_leisure", expectationSource="product_policy:home_leisure_name" },
+	{ caseId="v6_home_modded", fullType="AuthenticZClothing.Authentic_Paintbrush", block="home_leisure_collection", presence="required", expectedL1="home_leisure_collection", expectedL2="renovation", expectedL3="paint", minConfidence=30, expectedSource="name_home_renovation", expectationSource="product_policy:home_renovation_name", moddedOrigin="AuthenticZClothing" },
+
+	{ caseId="v6_electronics_power", fullType="Base.Battery", block="electronics_power", presence="required", expectedL1="electronics_power", expectedL2="power", expectedL3=false, minConfidence=30, expectedSource="name_electronics_power", expectationSource="product_policy:electronics_power_name", criticalAnchor=true },
+	{ caseId="v6_electronics_communication", fullType="Base.WalkieTalkie3", block="electronics_power", presence="required", expectedL1="electronics_power", expectedL2="communication", expectedL3=false, minConfidence=30, expectedSource="name_electronics_communication", expectationSource="product_policy:electronics_communication_name" },
+	{ caseId="v6_electronics_lighting", fullType="Base.Lantern_Hurricane", block="electronics_power", presence="required", expectedL1="electronics_power", expectedL2="lighting", expectedL3=false, minConfidence=30, expectedSource="name_electronics_lighting", expectationSource="product_policy:electronics_lighting_name" },
+	{ caseId="v6_electronics_modded_power", fullType="PSR.SuperBattery", block="electronics_power", presence="required", expectedL1="electronics_power", expectedL2="power", expectedL3=false, minConfidence=30, expectedSource="name_electronics_power", expectationSource="product_policy:electronics_power_name", moddedOrigin="PSR", criticalAnchor=true },
+	{ caseId="v6_electronics_modded_light", fullType="AuthenticZClothing.Authentic_MilitaryFlashlightGreen", block="electronics_power", presence="required", expectedL1="electronics_power", expectedL2="lighting", expectedL3=false, minConfidence=30, expectedSource="name_electronics_lighting", expectationSource="product_policy:electronics_lighting_name", moddedOrigin="AuthenticZClothing" },
+
+	{ caseId="v6_vehicles_part", fullType="Base.ModernSuspension1", block="vehicles", presence="required", expectedL1="vehicles", expectedL2="part", expectedL3=false, minConfidence=30, expectedSource="name_vehicles_part", expectationSource="product_policy:vehicle_part_name", criticalAnchor=true },
+	{ caseId="v6_vehicles_consumable", fullType="Base.PetrolCan", block="vehicles", presence="required", expectedL1="vehicles", expectedL2="consumable", expectedL3=false, minConfidence=30, expectedSource="name_vehicles_consumable", expectationSource="product_policy:vehicle_consumable_name" },
+	{ caseId="v6_vehicles_collision", fullType="Base.utilityBoxBumperRear2", block="vehicles", presence="required", expectedL1="vehicles", expectedL2="part", expectedL3=false, minConfidence=30, expectedSource="name_vehicles_part", expectationSource="product_policy:vehicle_part_over_container", collisionWith="containers", criticalAnchor=true },
+
+	{ caseId="v6_survival_farming_collision", fullType="Base.WheatBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=30, expectedSource="name_survival_farming", expectationSource="product_policy:seed_content_over_container", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_survival_fishing", fullType="Base.JigLure", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="fishing", expectedL3=false, minConfidence=30, expectedSource="name_survival_fishing", expectationSource="product_policy:fishing_name" },
+	{ caseId="v6_survival_trapping_collision", fullType="Base.TrapCrate", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_over_container", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_survival_camping_collision", fullType="Base.SleepingBag_HighQuality_Brown", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="camping", expectedL3=false, minConfidence=30, expectedSource="name_survival_camping", expectationSource="product_policy:camping_over_container", collisionWith="containers" },
+	{ caseId="v6_survival_security", fullType="Base.Padlock", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="security", expectedL3=false, minConfidence=30, expectedSource="name_survival_security", expectationSource="product_policy:security_name" },
+	{ caseId="v6_survival_strong_seed", fullType="Base.Corn", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=95, expectedSource="script_tag_isseed", expectationSource="product_policy:script_seed_tag", criticalAnchor=true },
+	{ caseId="v6_survival_modded", fullType="AuthenticZClothing.FlameTrapRemote", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_name", moddedOrigin="AuthenticZClothing" },
+	{ caseId="v6_survival_farming_weak", fullType="Base.LemonGrassBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=30, expectedSource="name_survival_farming", expectationSource="product_policy:seed_name" },
 }

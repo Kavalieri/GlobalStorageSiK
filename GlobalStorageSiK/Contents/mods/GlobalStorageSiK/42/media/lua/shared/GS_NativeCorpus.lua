@@ -57,6 +57,7 @@ local BLOCK_ACCEPTANCE_CONFIG = {
 	globalstoragesik = {
 		minCorpusCases = 44,
 		requireOwnItemsCrossCheck = true,
+		scanMetrics = true,
 	},
 	-- dev26.1 (correccion de fallo bloqueante: dev26 declaraba
 	-- collisionsReviewed=10 como si fuera la lista COMPLETA de colisiones,
@@ -75,6 +76,7 @@ local BLOCK_ACCEPTANCE_CONFIG = {
 		requireFullCollisionCoverage = true,
 		minModdedReviewed = 10,
 		fullInventory = true,
+		scanMetrics = true,
 	},
 	-- dev27: mismo mecanismo generalizado, 3 bloques nuevos (Combate, Ropa/
 	-- Proteccion, Contenedores). minModdedReviewed solo se exige donde hay
@@ -89,17 +91,33 @@ local BLOCK_ACCEPTANCE_CONFIG = {
 		requireFullCollisionCoverage = true,
 		minModdedReviewed = 10,
 		fullInventory = true,
+		scanMetrics = true,
 	},
 	clothing_protection = {
 		minCorpusCases = 100,
 		requireFullCollisionCoverage = true,
 		fullInventory = true,
+		scanMetrics = true,
 	},
 	containers = {
 		minCorpusCases = 100,
 		requireFullCollisionCoverage = true,
 		fullInventory = true,
+		scanMetrics = true,
 	},
+	-- dev29: puerta representativa para todos los L1 activos. Los minimos
+	-- describen el corpus curado que acompana esta ronda; `scanMetrics`
+	-- calcula en runtime los universos reales de colisiones y procedencia
+	-- modded conocida sin volcar inventarios masivos al informe.
+	materials = { minCorpusCases = 13, scanMetrics = true },
+	food_drink = { minCorpusCases = 11, scanMetrics = true },
+	knowledge_media = { minCorpusCases = 6, scanMetrics = true },
+	medicine = { minCorpusCases = 9, scanMetrics = true },
+	home_leisure_collection = { minCorpusCases = 11, scanMetrics = true },
+	electronics_power = { minCorpusCases = 7, scanMetrics = true },
+	vehicles = { minCorpusCases = 3, scanMetrics = true },
+	survival_outdoors = { minCorpusCases = 9, scanMetrics = true },
+	other = { minCorpusCases = 6, scanMetrics = true },
 }
 
 -- dev26 (pedido explicito de sistemas §1: "incorporar al informe del
@@ -408,6 +426,10 @@ local function computeBlockAcceptance(blockName, stats, config, crossCheck)
 	if stats.facetAttributeChecks > 0 and stats.facetAttributeCorrect < stats.facetAttributeChecks then
 		failReasons[#failReasons + 1] = "facet/attribute incorrecto en " .. tostring(stats.facetAttributeChecks - stats.facetAttributeCorrect) .. " comprobacion(es)"
 	end
+	if stats.criticalAnchorsExercised > 0 and stats.criticalAnchorsPassed < stats.criticalAnchorsExercised then
+		failReasons[#failReasons + 1] = "anclas criticas incorrectas="
+			.. tostring(stats.criticalAnchorsExercised - stats.criticalAnchorsPassed)
+	end
 	if crossCheck then
 		local exactWithoutCase, caseWithoutExact = crossCheck[1], crossCheck[2]
 		if #exactWithoutCase > 0 then
@@ -421,6 +443,9 @@ local function computeBlockAcceptance(blockName, stats, config, crossCheck)
 	local corpusExpected = stats.applicable + stats.absent + stats.skipped
 	if config.minCorpusCases and corpusExpected < config.minCorpusCases then
 		reviewReasons[#reviewReasons + 1] = "corpus con " .. tostring(corpusExpected) .. " casos, por debajo del minimo acordado (" .. tostring(config.minCorpusCases) .. ")"
+	end
+	if (stats.criticalAnchorsDeclared or 0) == 0 then
+		reviewReasons[#reviewReasons + 1] = "sin ancla critica declarada"
 	end
 	-- dev26.1: denominador REAL (universo calculado por
 	-- computeCollisionUniverse sobre el inventario completo), nunca un
@@ -519,8 +544,11 @@ end
 ---@param inventory table[]
 ---@return table { withAnyAlternate=, withMultipleAlternates=, towardBlock={blockName->count} }
 local function computeCollisionUniverse(inventory)
-	local stats = { withAnyAlternate = 0, withMultipleAlternates = 0, towardBlock = {} }
+	local stats = { withAnyAlternate = 0, withMultipleAlternates = 0, towardBlock = {}, moddedKnown = 0 }
 	for i = 1, #inventory do
+		if inventory[i].origin ~= "base_module_unknown" then
+			stats.moddedKnown = stats.moddedKnown + 1
+		end
 		local alternates = inventory[i].alternates
 		if #alternates > 0 then
 			stats.withAnyAlternate = stats.withAnyAlternate + 1
@@ -548,10 +576,14 @@ end
 local function scanCatalogForBlocks(blockConfigs, moddedOriginLookup)
 	local claimedByBlock = {}
 	local inventoryByBlock = {}
+	local metricInventoryByBlock = {}
 	for blockName, config in pairs(blockConfigs) do
 		claimedByBlock[blockName] = 0
 		if config.fullInventory then
 			inventoryByBlock[blockName] = {}
+		end
+		if config.fullInventory or config.scanMetrics then
+			metricInventoryByBlock[blockName] = {}
 		end
 	end
 
@@ -573,7 +605,7 @@ local function scanCatalogForBlocks(blockConfigs, moddedOriginLookup)
 			local l1 = path and path.l1
 			if l1 and claimedByBlock[l1] ~= nil then
 				claimedByBlock[l1] = claimedByBlock[l1] + 1
-				local inventory = inventoryByBlock[l1]
+				local inventory = metricInventoryByBlock[l1]
 				if inventory then
 					local matchedTags = {}
 					for t = 1, #KNOWN_TOOL_TAG_NAMES do
@@ -617,9 +649,12 @@ local function scanCatalogForBlocks(blockConfigs, moddedOriginLookup)
 	end
 
 	local collisionUniverseByBlock = {}
-	for blockName, inventory in pairs(inventoryByBlock) do
+	for blockName, inventory in pairs(metricInventoryByBlock) do
 		table.sort(inventory, function(a, b) return a.fullType < b.fullType end)
 		collisionUniverseByBlock[blockName] = computeCollisionUniverse(inventory)
+		if inventoryByBlock[blockName] then
+			inventoryByBlock[blockName] = inventory
+		end
 	end
 
 	return claimedByBlock, inventoryByBlock, collisionUniverseByBlock
@@ -659,6 +694,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 		divergences = {},   -- detalle SOLO para el fichero server-side, nunca enviado por red
 		-- dev27: matriz cruzada de colisiones (§5) - "winnerBlock|alternativeBlock" -> stats.
 		collisionPairStats = {},
+		caseDeclarations = {},
 		timeMs = 0,
 	}
 
@@ -684,6 +720,9 @@ function GlobalStorageSiK.NativeCorpus.run()
 				l3Correct = 0, l3Total = 0,
 				facetAttributeChecks = 0, facetAttributeCorrect = 0,
 				criticalFailures = 0,
+				criticalAnchorsDeclared = 0, criticalAnchorsExercised = 0, criticalAnchorsPassed = 0,
+				l3Declared = 0, l3Exercised = 0,
+				collisionsDeclared = 0, moddedDeclared = 0,
 				-- dev26: cobertura de casos marcados collisionWith/moddedOrigin
 				-- en el ground-truth - solo se cuentan si el caso ademas paso
 				-- (un caso en colision marcado pero que falla no "revisa" nada
@@ -692,6 +731,24 @@ function GlobalStorageSiK.NativeCorpus.run()
 			}
 			report.byBlock[block] = blockStats
 		end
+		if case.criticalAnchor then blockStats.criticalAnchorsDeclared = blockStats.criticalAnchorsDeclared + 1 end
+		if case.expectedL3 ~= nil or case.expectAbstain then blockStats.l3Declared = blockStats.l3Declared + 1 end
+		if case.collisionWith then blockStats.collisionsDeclared = blockStats.collisionsDeclared + 1 end
+		if case.moddedOrigin then blockStats.moddedDeclared = blockStats.moddedDeclared + 1 end
+		local evaluatedFields = { "L1" }
+		if case.expectedL2 ~= nil or case.expectAbstain then evaluatedFields[#evaluatedFields + 1] = "L2" end
+		if case.expectedL3 ~= nil or case.expectAbstain then evaluatedFields[#evaluatedFields + 1] = "L3" end
+		if case.expectFacets then evaluatedFields[#evaluatedFields + 1] = "facets" end
+		if case.expectAttributes then evaluatedFields[#evaluatedFields + 1] = "attributes" end
+		evaluatedFields[#evaluatedFields + 1] = "evidence"
+		report.caseDeclarations[#report.caseDeclarations + 1] = {
+			caseId = case.caseId,
+			fullType = case.fullType,
+			block = block,
+			presence = case.presence,
+			expectationSource = case.expectationSource or "legacy_v5:curated_case",
+			evaluatedFields = evaluatedFields,
+		}
 
 		local si = GlobalStorageSiK.I18n.getScriptItem and GlobalStorageSiK.I18n.getScriptItem(case.fullType)
 		if not si then
@@ -713,6 +770,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 		else
 			report.applicableCases = report.applicableCases + 1
 			blockStats.applicable = blockStats.applicable + 1
+			if case.criticalAnchor then blockStats.criticalAnchorsExercised = blockStats.criticalAnchorsExercised + 1 end
 
 			local result = GlobalStorageSiK.NativeClassifier.classify(case.fullType)
 			local path = (result and result.primaryPath) or {}
@@ -734,6 +792,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 				end
 			end
 			if case.expectedL3 ~= nil or case.expectAbstain then
+				blockStats.l3Exercised = blockStats.l3Exercised + 1
 				local expectedL3 = getExpectedL3(case)
 				report.l3Total = report.l3Total + 1
 				blockStats.l3Total = blockStats.l3Total + 1
@@ -790,6 +849,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 				blockStats.passed = blockStats.passed + 1
 				if case.collisionWith then blockStats.collisionsReviewed = blockStats.collisionsReviewed + 1 end
 				if case.moddedOrigin then blockStats.moddedReviewed = blockStats.moddedReviewed + 1 end
+				if case.criticalAnchor then blockStats.criticalAnchorsPassed = blockStats.criticalAnchorsPassed + 1 end
 			else
 				report.failedCases = report.failedCases + 1
 				blockStats.failed = blockStats.failed + 1
@@ -846,6 +906,9 @@ function GlobalStorageSiK.NativeCorpus.run()
 				local universe = collisionUniverseByBlock[blockName]
 				stats.collisionUniverseTotal = universe and universe.withAnyAlternate or 0
 			end
+			local metricUniverse = collisionUniverseByBlock[blockName]
+			stats.collisionUniverseTotal = metricUniverse and metricUniverse.withAnyAlternate or 0
+			stats.moddedUniverseTotal = metricUniverse and metricUniverse.moddedKnown or 0
 			local crossCheck = nil
 			if config.requireOwnItemsCrossCheck then
 				local exactWithoutCase, caseWithoutExact = computeOwnItemsCrossCheck(cases)
@@ -922,6 +985,16 @@ function GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 				.. " ausentes=" .. fmt(stats.absent) .. " omitidos=" .. fmt(stats.skipped)
 				.. " aprobados=" .. fmt(stats.passed) .. " fallidos=" .. fmt(stats.failed) .. "\r\n")
 		end
+		writer:write("--- Declaracion de expectativas del corpus (origen y campos evaluados) ---\r\n")
+		for i = 1, #(report.caseDeclarations or {}) do
+			local declaration = report.caseDeclarations[i]
+			writer:write("  caseId=" .. tostring(declaration.caseId)
+				.. " fullType=" .. tostring(declaration.fullType)
+				.. " block=" .. tostring(declaration.block)
+				.. " presence=" .. tostring(declaration.presence)
+				.. " expectationSource=" .. tostring(declaration.expectationSource)
+				.. " evaluatedFields=[" .. table.concat(declaration.evaluatedFields, ",") .. "]\r\n")
+		end
 		-- dev25 (pedido explicito de sistemas, §2 - campos exactos): resumen
 		-- de aceptacion PASS/REVIEW/FAIL con denominadores reales, solo para
 		-- los bloques con umbral formal esta ronda (globalstoragesik).
@@ -935,10 +1008,17 @@ function GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 				.. " requiredMissing=" .. fmt(stats.absent) .. "\r\n")
 			writer:write("  l1Correct=" .. fmt(stats.l1Correct) .. "/" .. fmt(stats.l1Total)
 				.. " l2Correct=" .. fmt(stats.l2Correct) .. "/" .. fmt(stats.l2Total)
-				.. " l3Expected=" .. fmt(stats.l3Total) .. " l3Correct=" .. fmt(stats.l3Correct) .. "\r\n")
+				.. " l3Declared=" .. fmt(stats.l3Declared) .. " l3Exercised=" .. fmt(stats.l3Exercised)
+				.. " l3Correct=" .. fmt(stats.l3Correct) .. "/" .. fmt(stats.l3Total) .. "\r\n")
 			writer:write("  facetAttributeChecks=" .. fmt(stats.facetAttributeChecks)
 				.. " facetAttributeCorrect=" .. fmt(stats.facetAttributeCorrect) .. "\r\n")
-			writer:write("  collisionsReviewed=" .. fmt(stats.collisionsReviewed)
+			writer:write("  criticalAnchors=" .. fmt(stats.criticalAnchorsPassed) .. "/" .. fmt(stats.criticalAnchorsExercised)
+				.. " declared=" .. fmt(stats.criticalAnchorsDeclared) .. "\r\n")
+			writer:write("  collisionsExisting=" .. fmt(stats.collisionUniverseTotal)
+				.. " collisionsDeclared=" .. fmt(stats.collisionsDeclared)
+				.. " collisionsReviewed=" .. fmt(stats.collisionsReviewed) .. "\r\n")
+			writer:write("  moddedExistingKnown=" .. fmt(stats.moddedUniverseTotal)
+				.. " moddedDeclared=" .. fmt(stats.moddedDeclared)
 				.. " moddedReviewed=" .. fmt(stats.moddedReviewed)
 				.. " criticalFailures=" .. fmt(stats.criticalFailures) .. "\r\n")
 			writer:write("  status=" .. tostring(acceptance.status) .. "\r\n")

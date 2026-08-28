@@ -34,12 +34,13 @@ Las ejecuciones diagnósticas se aíslan bajo `Lua/SiKDiagnostics/GlobalStorageS
 ```text
 taxonomy/audit-<runId>.log
 taxonomy/unclassified-<runId>.log
+taxonomy/excluded-internal-<runId>.log
 taxonomy/corpus-<runId>.log
 permissions/permissions-<runId>.log
 session.json
 ```
 
-`session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId` y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` únicamente si necesitas el eco acotado en el cliente.
+`session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` únicamente si necesitas el eco acotado en el cliente.
 
 ### Árbol "SiK UI" (dev36)
 

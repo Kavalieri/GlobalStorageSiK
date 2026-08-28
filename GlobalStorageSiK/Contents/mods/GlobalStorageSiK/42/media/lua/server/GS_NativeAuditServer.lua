@@ -68,16 +68,23 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	-- GENERADO/NO GENERADO con la causa real en vez de anunciar el
 	-- fichero a ciegas.
 	local diagnosticRun = GlobalStorageSiK.DiagnosticsSession.beginRun(
-		"taxonomy", { "audit", "unclassified" })
+		"taxonomy", { "audit", "unclassified", "excluded-internal" })
 	report.diagnosticSessionId = diagnosticRun.sessionId
 	report.diagnosticRunId = diagnosticRun.runId
 	report.diagnosticReportFile = diagnosticRun.paths.audit
 	report.diagnosticUnclassifiedFile = diagnosticRun.paths.unclassified
+	report.diagnosticExcludedInternalFile = diagnosticRun.paths["excluded-internal"]
 	local tsvOk, tsvErr = GlobalStorageSiK.NativeAudit.writeUnclassifiedTsv(report)
 	report.unclassifiedTsvOk = tsvOk
 	report.unclassifiedTsvError = tsvErr
 	if not tsvOk and GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.warn("NativeAudit", "writeUnclassifiedTsv fallo: " .. tostring(tsvErr))
+	end
+	local excludedOk, excludedErr = GlobalStorageSiK.NativeAudit.writeExcludedInternalTsv(report)
+	report.excludedInternalTsvOk = excludedOk
+	report.excludedInternalTsvError = excludedErr
+	if not excludedOk and GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.warn("NativeAudit", "writeExcludedInternalTsv fallo: " .. tostring(excludedErr))
 	end
 	GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 
@@ -114,6 +121,7 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 		totalTypes = report.totalTypes,
 		pending = report.pending,
 		unclassified = report.unclassified,
+		excludedInternal = report.excludedInternal,
 		invalidPath = report.invalidPath,
 		classifierErrors = report.classifierErrors,
 		timeMs = report.timeMs,
@@ -126,5 +134,6 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 		tierVariantTotal = tierVariantTotal,
 		fileName = diagnosticRun.paths.audit,
 		unclassifiedFileName = diagnosticRun.paths.unclassified,
+		excludedInternalFileName = diagnosticRun.paths["excluded-internal"],
 	})
 end
