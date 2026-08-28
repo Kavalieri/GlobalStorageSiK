@@ -260,6 +260,11 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "terminalState" then
 		local itemCount = args and args.items and #args.items or 0
+		for i = 1, math.min(itemCount, 3) do
+			local row = args.items[i]
+			GlobalStorageSiK.NativeProduct.tracePathSample("clientReceive", row.fullType, row.nativePath)
+		end
+		GlobalStorageSiK.NativeProduct.traceCompatibility("client")
 		local explicitOpen = args and args.openUi == true
 		local inventorySync = args and args.inventorySync == true
 		local openSeq = args and args.openSeq

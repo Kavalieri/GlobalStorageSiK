@@ -159,6 +159,7 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	for i = 1, #rows do
 		local path = GlobalStorageSiK.NativeProduct.getPath(rows[i].fullType)
 		rows[i].nativePath = GlobalStorageSiK.NativeProduct.encodePath(path)
+		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
 	end
 	return rows
 end

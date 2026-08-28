@@ -70,7 +70,7 @@ Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` prim
 | `DebugCatCraft` | `>> Recetas y crafteo` / `>> Recipes & crafting` | Resumen de recetas y préstamos compartidos. |
 | `DebugDetailCraft` | `>>> DETALLE: recetas y préstamos de red` / `>>> DETAIL: recipes and network loans` | Probes y decisiones individuales; alto volumen. |
 | `DebugCatInventory` | `>> Inventario y transferencias` / `>> Inventory & transfers` | Depósitos, retiradas, snapshots y trabajos masivos resumidos. |
-| `DebugDetailInventory` | `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL: taxonomy and items` | Clasificación por objeto/tipo, consolidación por microlote y render por-frame del tooltip; volumen masivo. |
+| `DebugDetailInventory` | `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL: taxonomy and items` | Clasificación por objeto/tipo, consolidación por microlote, render por-frame del tooltip y muestras acotadas `nativePath` (`getPath`, `buildRows`, `preSend`, `clientReceive`) con los tres booleanos de compatibilidad externa por proceso; volumen masivo. |
 | `DebugCatTooltip` | `>> Tooltip de red` / `>> Network tooltip` | Instalación/recuperación del hook, fallos y fallback del tooltip de cantidades. No registra cada frame. |
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
 | `DebugDetailRouter` | `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` | Tier y capacidad de cada candidato; alto volumen. |

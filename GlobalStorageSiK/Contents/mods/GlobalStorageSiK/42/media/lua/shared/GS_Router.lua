@@ -9,6 +9,7 @@
 require "GS_Sandbox"
 require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_RuleSanitizer"
 require "GS_Subcategories"
 require "GS_Log"
 require "GS_NodeFilters"
@@ -419,9 +420,12 @@ function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 
 	for i = 1, #rules do
 		local rule = rules[i]
+		local junk = GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition)
 		local op = rule.op
-		local tier = conditionTier(rule.condition)
-		if op == "NOT" then
+		local tier = not junk and conditionTier(rule.condition) or nil
+		if junk then
+			-- Condición legacy inequívocamente basura: queda fuera del routing.
+		elseif op == "NOT" then
 			if tier then
 				return nil
 			end

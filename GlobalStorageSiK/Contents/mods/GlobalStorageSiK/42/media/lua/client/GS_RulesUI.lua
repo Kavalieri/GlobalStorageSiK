@@ -12,6 +12,7 @@
 require "GS_I18n"
 require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_RuleSanitizer"
 require "GS_Subcategories"
 require "GS_NodeFilters"
 
@@ -96,9 +97,11 @@ function GlobalStorageSiK.RulesUI.cloneRules(source)
 	local result = {}
 	for i = 1, #(source or {}) do
 		local rule = source[i]
-		local condition = {}
-		for k, v in pairs(rule.condition or {}) do condition[k] = v end
-		result[i] = { op = rule.op, condition = condition }
+		if not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+			local condition = {}
+			for k, v in pairs(rule.condition or {}) do condition[k] = v end
+			result[#result + 1] = { op = rule.op, condition = condition }
+		end
 	end
 	return result
 end
@@ -116,14 +119,7 @@ end
 ---@param cat string|nil
 ---@return boolean
 local function isJunkLegacyCategory(cat)
-	if not cat or cat == "" then return false end
-	if cat:match("^%s*[A-Za-z]%s*$") then return true end
-	local sepPos = cat:find("::", 1, true)
-	if sepPos then
-		local slotPart = cat:sub(sepPos + 2)
-		if slotPart:match("^%s*[A-Za-z]%s*$") then return true end
-	end
-	return false
+	return GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({ type = "category", value = cat })
 end
 
 --- Migra categorias/filtros legacy (pre-dev26) a la lista unificada de
@@ -154,10 +150,12 @@ function GlobalStorageSiK.RulesUI.buildSummary(rules)
 	local orParts, andParts, notParts = {}, {}, {}
 	for i = 1, #(rules or {}) do
 		local rule = rules[i]
-		local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
-		if rule.op == "AND" then andParts[#andParts + 1] = label
-		elseif rule.op == "NOT" then notParts[#notParts + 1] = label
-		else orParts[#orParts + 1] = label end
+		if not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
+			if rule.op == "AND" then andParts[#andParts + 1] = label
+			elseif rule.op == "NOT" then notParts[#notParts + 1] = label
+			else orParts[#orParts + 1] = label end
+		end
 	end
 	if #orParts == 0 and #andParts == 0 and #notParts == 0 then
 		return T("IGUI_GS_NodeRulesSummaryUnrestricted")

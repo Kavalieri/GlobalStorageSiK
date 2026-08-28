@@ -29,6 +29,7 @@ require "GS_ZoneRefresh"
 require "GS_Network"
 
 require "GS_Index"
+require "GS_RuleSanitizer"
 
 require "GS_NetworkCapacity"
 
@@ -286,6 +287,13 @@ local lastNetworkIdByPlayer = {}
 ---@param command string
 ---@param payload table|nil
 local function gsSendServerCommand(player, command, payload)
+	if command == "terminalState" and payload and payload.items then
+		for i = 1, math.min(#payload.items, 3) do
+			local row = payload.items[i]
+			GlobalStorageSiK.NativeProduct.tracePathSample("preSend", row.fullType, row.nativePath)
+		end
+		GlobalStorageSiK.NativeProduct.traceCompatibility("server")
+	end
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logServerSend then
 		GlobalStorageSiK.NetTrace.logServerSend(player, command, payload)
 	end
@@ -453,6 +461,21 @@ end
 ---@return table
 local function buildTerminalState(networkId, scanSummary, searchQuery, craftProbe, player)
 
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local migration = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry)
+	if migration.changed then
+		GlobalStorageSiK.Log.info("Server", "legacyRuleSanitizer owners=" .. tostring(migration.owners)
+			.. " changedOwners=" .. tostring(migration.changedOwners)
+			.. " before=" .. tostring(migration.before) .. " after=" .. tostring(migration.after)
+			.. " quarantined=" .. tostring(migration.quarantined)
+			.. " unknownPreserved=" .. tostring(migration.unknownPreserved))
+		if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
+			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		end
+		if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+			GlobalStorageSiK.RegistryStore.notifyChanged()
+		end
+	end
 	local freshSnapshotScope = scanSummary and scanSummary._freshSnapshotScope or nil
 	local rows = GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	-- Los campos con prefijo "_" coordinan servidor/indice y no forman parte
@@ -461,17 +484,6 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	local scanPayload = {}
 	for key, value in pairs(scanSummary or {}) do
 		if string.sub(tostring(key), 1, 1) ~= "_" then scanPayload[key] = value end
-	end
-
-	if GlobalStorageSiK.Sandbox.debugMode() then
-		for i = 1, #rows do
-			local row = rows[i]
-			if row.category == "food" or row.category == "Food" then
-				GlobalStorageSiK.Log.debug("Server", "buildTerminalState | PRE-SEND fullType=" .. tostring(row.fullType)
-					.. " gsSubKeysStr=" .. tostring(row.gsSubKeysStr) .. " (type=" .. type(row.gsSubKeysStr) .. ")"
-					.. " gsSubKeys=" .. tostring(row.gsSubKeys) .. " nodeId=" .. tostring(row.nodeId))
-			end
-		end
 	end
 
 	-- El filtrado por búsqueda se aplica en el cliente (idioma del jugador).
@@ -2356,7 +2368,9 @@ local function sanitizeRuleCondition(condition)
 				legacyValue = legacyValue,
 			}
 		end
-		if value == "" then return nil end
+		if value == "" or GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({
+			type = "category", value = value,
+		}) then return nil end
 		return { type = "category", value = value }
 	end
 	return sanitizeNodeFilter(condition)

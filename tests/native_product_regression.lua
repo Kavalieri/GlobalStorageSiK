@@ -6,6 +6,7 @@ package.loaded["GS_NativeClassifier"] = true
 package.loaded["GS_NativeTaxonomyRegistry"] = true
 package.loaded["GS_ItemTaxonomy"] = true
 package.loaded["GS_CompatMods"] = true
+package.loaded["GS_RuleSanitizer"] = true
 
 local classifierCalls = 0
 GlobalStorageSiK = {
@@ -65,6 +66,11 @@ end
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_NativeProduct.lua")
 local Product = GlobalStorageSiK.NativeProduct
+dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_RuleSanitizer.lua")
+local compatStatus = Product.getCompatibilityStatus()
+assertEqual(compatStatus.extendedCategories, false, "Extended Categories runtime detection")
+assertEqual(compatStatus.organizedCategories, false, "Organized Categories runtime detection")
+assertEqual(compatStatus.betterSorting, false, "Better Sorting runtime detection")
 
 local applePath = Product.getPath("Base.Apple")
 assertEqual(Product.encodePath(applePath), "native:food_drink/produce/fruit", "canonical apple path")
@@ -82,6 +88,14 @@ local index = Product.buildIndex(rows)
 assertEqual(#Product.rowsForPath(index, "native:food_drink"), 1, "L1 inverse index")
 assertEqual(#Product.rowsForPath(index, "native:food_drink/produce"), 1, "L2 inverse index")
 assertEqual(classifierCalls, 1, "index consumes precomputed paths")
+
+local copiedRows = Product.copyRows({ {
+	fullType = "Base.Apple", nativePath = "native:food_drink/produce/fruit",
+	locations = { { nodeId = "node-a", count = 2 } }, futureProductField = "preserved",
+} })
+assertEqual(copiedRows[1].nativePath, "native:food_drink/produce/fruit", "UI snapshot preserves native path")
+assertEqual(copiedRows[1].locations[1].nodeId, "node-a", "UI snapshot preserves locations")
+assertEqual(copiedRows[1].futureProductField, "preserved", "UI snapshot preserves future contract fields")
 
 local owners = { { id = "node-a", rules = {
 	{ op = "OR", condition = { type = "category", value = "Food" } },
@@ -101,6 +115,22 @@ assertEqual(condition.legacyValue, "Food", "recoverable legacy copy")
 assertEqual(condition.nativePath, "native:food_drink/produce/fruit", "native path added")
 assertEqual(Product.recordRoutingContrast(2, 2), true, "equivalent routing contrast")
 assertEqual(Product.recordRoutingContrast(nil, 1), false, "routing delta detected")
+
+local persisted = { nodes = { a = { id = "a", rules = {
+	{ op = "OR", condition = { type = "category", value = "F" } },
+	{ op = "OR", condition = { type = "category", value = "UnknownButValid" } },
+} } }, zones = { z = { id = "z", rules = {
+	{ op = "NOT", condition = { type = "category", value = "Food::W" } },
+} } } }
+local firstSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted)
+assertEqual(firstSanitize.quarantined, 2, "node and zone junk rules quarantined")
+assertEqual(firstSanitize.unknownPreserved, 1, "unknown non-junk rule preserved")
+assertEqual(#persisted.nodes.a.rules, 1, "junk removed from active node rules")
+assertEqual(#persisted.nodes.a.legacyJunkRules, 1, "node junk remains recoverable")
+assertEqual(#persisted.zones.z.legacyJunkRules, 1, "zone junk remains recoverable")
+local secondSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted)
+assertEqual(secondSanitize.changed, false, "second persisted-rule migration is idempotent")
+assertEqual(#persisted.nodes.a.legacyJunkRules, 1, "quarantine not duplicated")
 
 local externalRow = { fullType = "Base.Apple", category = "ExternalFood",
 	nativePath = "native:food_drink/produce/fruit" }

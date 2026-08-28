@@ -36,6 +36,8 @@ local metrics = {
 	routingContrastDeltas = 0,
 }
 
+local pathTraceSamples = {}
+
 -- Acentos exclusivos de interfaces GS. La ruta completa hereda el color de
 -- L1; no se exportan hooks ni se modifica el inventario vanilla en DEV30.
 local L1_COLORS = {
@@ -65,6 +67,51 @@ local function resetMetrics()
 	metrics.routingContrastComparisons = 0
 	metrics.routingContrastEquivalent = 0
 	metrics.routingContrastDeltas = 0
+	pathTraceSamples = {}
+end
+
+--- Muestra extremo-a-extremo acotada y solo bajo el sublog DETALLE de
+--- Inventario. Máximo tres filas por etapa y época; no reclasifica.
+---@param stage string
+---@param fullType string|nil
+---@param nativePath string|nil
+function GlobalStorageSiK.NativeProduct.tracePathSample(stage, fullType, nativePath)
+	local count = pathTraceSamples[stage] or 0
+	if count >= 3 or not GlobalStorageSiK.Log or not GlobalStorageSiK.Log.detail
+		or not GlobalStorageSiK.Sandbox or not GlobalStorageSiK.Sandbox.debugDetailEnabled
+		or not GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory") then return end
+	pathTraceSamples[stage] = count + 1
+	local area = stage == "clientReceive" and "Client" or "Server"
+	GlobalStorageSiK.Log.detail(area, "nativePath stage=" .. tostring(stage)
+		.. " fullType=" .. tostring(fullType) .. " value=" .. tostring(nativePath)
+		.. " decodable=" .. tostring(GlobalStorageSiK.NativeProduct.decodePath(nativePath) ~= nil))
+end
+
+---@return table
+function GlobalStorageSiK.NativeProduct.getCompatibilityStatus()
+	local compat = GlobalStorageSiK.CompatMods
+	return {
+		extendedCategories = compat and compat.hasExtendedCategories() == true or false,
+		organizedCategories = compat and compat.hasOrganizedCategoriesCore() == true or false,
+		betterSorting = compat and compat.hasBetterSorting() == true or false,
+	}
+end
+
+---@param stage string server|client
+function GlobalStorageSiK.NativeProduct.traceCompatibility(stage)
+	local key = "compat:" .. tostring(stage)
+	if pathTraceSamples[key] then return end
+	if not GlobalStorageSiK.Sandbox or not GlobalStorageSiK.Sandbox.debugDetailEnabled
+		or not GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory") then return end
+	pathTraceSamples[key] = 1
+	local status = GlobalStorageSiK.NativeProduct.getCompatibilityStatus()
+	local area = stage == "client" and "Client" or "Server"
+	if GlobalStorageSiK.Log and GlobalStorageSiK.Log.detail then
+		GlobalStorageSiK.Log.detail(area, "nativeProductCompat stage=" .. tostring(stage)
+			.. " extendedCategories=" .. tostring(status.extendedCategories)
+			.. " organizedCategories=" .. tostring(status.organizedCategories)
+			.. " betterSorting=" .. tostring(status.betterSorting))
+	end
 end
 
 local function resetCatalogState()
@@ -134,7 +181,31 @@ function GlobalStorageSiK.NativeProduct.getPath(fullType)
 	if not result or result.pending then return nil end
 	local path = GlobalStorageSiK.NativeProduct.normalizePath(result.primaryPath)
 	pathCache[fullType] = path or false
+	GlobalStorageSiK.NativeProduct.tracePathSample("getPath", fullType,
+		GlobalStorageSiK.NativeProduct.encodePath(path))
 	return path
+end
+
+--- Copia defensiva del contrato de una fila sin una lista blanca frágil. La
+--- UI puede conservar su snapshot sin perder `nativePath`, `locations` ni
+--- futuros campos serializables añadidos por el servidor.
+---@param row table|nil
+---@return table|nil
+function GlobalStorageSiK.NativeProduct.copyRow(row)
+	if type(row) ~= "table" then return nil end
+	local copy = {}
+	for key, value in pairs(row) do copy[key] = value end
+	return copy
+end
+
+---@param rows table|nil
+---@return table
+function GlobalStorageSiK.NativeProduct.copyRows(rows)
+	local copy = {}
+	for i = 1, #(rows or {}) do
+		copy[i] = GlobalStorageSiK.NativeProduct.copyRow(rows[i])
+	end
+	return copy
 end
 
 ---@param rulePath string|table|nil

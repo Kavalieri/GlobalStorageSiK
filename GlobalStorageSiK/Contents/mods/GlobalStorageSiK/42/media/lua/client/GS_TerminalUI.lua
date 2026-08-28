@@ -819,55 +819,12 @@ function GS_TerminalUI:refreshFromState(state)
 			end
 		end
 		if state.items then
-			local copy = {}
-			for i = 1, #state.items do
-				local row = state.items[i]
-				if row then
-					copy[i] = {
-						fullType = row.fullType,
-						displayName = row.displayName,
-						worldSprite = row.worldSprite,
-						category = row.category,
-						subCategory = row.subCategory,
-						count = row.count,
-						nodeId = row.nodeId,
-						gsSubKeysStr = row.gsSubKeysStr,
-						gsSubKeys = row.gsSubKeys,
-						-- BUG REAL reportado por el usuario (2026-08-26, captura real:
-						-- falta "Localizar objeto" del menu contextual y la columna
-						-- "Zona" siempre vacia): esta lista de campos NO incluia
-						-- `locations` (los nodos reales donde vive este fullType, ver
-						-- GS_Index.lua) - sin el, `data.locations` siempre llegaba nil
-						-- al cliente y las dos funciones que dependen de el
-						-- (openItemContextMenu, resolveZoneLabel via terminalState.
-						-- nodes) se quedaban sin datos con los que trabajar.
-						locations = row.locations,
-					}
-				end
-			end
-			merged.items = copy
+			merged.items = GlobalStorageSiK.NativeProduct.copyRows(state.items)
 		end
 		state = merged
 	end
 	if state and state.items then
-		local copy = {}
-		for i = 1, #state.items do
-			local row = state.items[i]
-			if row then
-				copy[i] = {
-					fullType = row.fullType,
-					displayName = row.displayName,
-					worldSprite = row.worldSprite,
-					category = row.category,
-					subCategory = row.subCategory,
-					count = row.count,
-					nodeId = row.nodeId,
-					gsSubKeysStr = row.gsSubKeysStr,
-					gsSubKeys = row.gsSubKeys,
-				}
-			end
-		end
-		state.items = copy
+		state.items = GlobalStorageSiK.NativeProduct.copyRows(state.items)
 	end
 	self.terminalState = state or prev
 	-- BUG REAL reportado por el usuario (2026-08-26): sin energia, el
