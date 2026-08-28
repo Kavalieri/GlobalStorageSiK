@@ -115,10 +115,13 @@ end
 ---@param subKeys table
 ---@param rowContext table
 ---@return number|nil
-local function categoryRuleTier(rule, item)
+local function categoryRuleTier(rule, item, categorySource)
 	if type(rule) ~= "string" then return nil end
 	if rule == "*" then return 4 end
-	local stored = GlobalStorageSiK.CategoryResolution.classifyStoredRule({ type = "category", value = rule })
+	rule = GlobalStorageSiK.CategoryResolution.legacyAliasNativePath(rule) or rule
+	local stored = GlobalStorageSiK.CategoryResolution.classifyStoredRule({
+		type = "category", value = rule, categorySource = categorySource,
+	})
 	if stored == "DEPRECATED_EXTERNAL" or stored == "TECHNICAL_RESIDUE" or stored == "LEGACY_GS_ALIAS" then return nil end
 	local fullType = item and item.getFullType and item:getFullType() or nil
 	if not fullType then return nil end
@@ -183,7 +186,7 @@ function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 			-- mientras la migración aditiva todavía no añadió nativePath.
 			local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition)
 			if status == "DEPRECATED_EXTERNAL" or status == "TECHNICAL_RESIDUE" then return nil end
-			return categoryRuleTier(condition.nativePath or condition.value, item)
+			return categoryRuleTier(condition.nativePath or condition.value, item, condition.categorySource)
 		end
 		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then
 			return 1

@@ -159,8 +159,12 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	for i = 1, #rows do
 		local resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
 		rows[i].nativePath = resolution.nativePath
+		rows[i].nativeStatus = resolution.nativeStatus
 		rows[i].vanillaKey = resolution.vanillaKey
+		rows[i].effective = resolution.effective
 		rows[i].categoryEffective = resolution.effective
+		rows[i].routingIdentity = resolution.routingIdentity
+		rows[i].categorySource = resolution.categorySource
 		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
 	end
 	return rows

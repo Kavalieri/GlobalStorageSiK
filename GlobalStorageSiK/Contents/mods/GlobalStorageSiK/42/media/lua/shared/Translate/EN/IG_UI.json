@@ -994,6 +994,8 @@
 	"IGUI_GS_NodeInheritedFromZone": "Inherited from your zone '{1}':",
 	"IGUI_GS_NodeInheritedEditZoneBtn": "Edit zone →",
 	"IGUI_GS_RuleContradictionConfirm": "You already have a {1} rule '{2}' that conflicts with the new {3} rule '{4}'. Save anyway?",
+	"IGUI_GS_RuleDeprecatedExternal": "Inactive incompatible rule: {1}",
+	"IGUI_GS_RuleTechnicalResidue": "Technical residue: {1}",
 	"IGUI_GS_NodeExcludeConfirm": "Exclude '{1}' from the network? It will stop receiving or providing items until you include it again.",
 	"IGUI_GS_NodeExcludeTooltip": "Exclude this container from the network (your client only). Excluded = invisible for deposit and withdrawal from the terminal.",
 	"IGUI_GS_ZoneBtnExclude": "Exclude zone",

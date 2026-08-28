@@ -33,8 +33,8 @@ function GlobalStorageSiK.RulesUI.categoryLabel(key)
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
 	if nativePath then return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel end
 	local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule({ value = key })
-	if status == "DEPRECATED_EXTERNAL" then return "Incompatible e inactiva: " .. key end
-	if status == "TECHNICAL_RESIDUE" then return "Residuo técnico: " .. key end
+	if status == "DEPRECATED_EXTERNAL" then return GlobalStorageSiK.I18n.text("IGUI_GS_RuleDeprecatedExternal", key) end
+	if status == "TECHNICAL_RESIDUE" then return GlobalStorageSiK.I18n.text("IGUI_GS_RuleTechnicalResidue", key) end
 	if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then
 		return GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = key })
 	end

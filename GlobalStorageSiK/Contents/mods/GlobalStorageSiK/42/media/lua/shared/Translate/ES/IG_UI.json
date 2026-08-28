@@ -994,6 +994,8 @@
 	"IGUI_GS_NodeInheritedFromZone": "Heredado de tu zona '{1}':",
 	"IGUI_GS_NodeInheritedEditZoneBtn": "Editar zona →",
 	"IGUI_GS_RuleContradictionConfirm": "Ya tienes una regla {1} '{2}' que entra en conflicto con la nueva regla {3} '{4}'. ¿Guardar de todos modos?",
+	"IGUI_GS_RuleDeprecatedExternal": "Incompatible e inactiva: {1}",
+	"IGUI_GS_RuleTechnicalResidue": "Residuo técnico: {1}",
 	"IGUI_GS_NodeExcludeConfirm": "¿Excluir '{1}' de la red? Dejará de recibir o aportar ítems hasta que vuelvas a incluirlo.",
 	"IGUI_GS_NodeExcludeTooltip": "Excluir este contenedor de la red (solo tu cliente). Excluido = invisible para depósito y extracción desde el terminal.",
 	"IGUI_GS_ZoneBtnExclude": "Excluir zona",

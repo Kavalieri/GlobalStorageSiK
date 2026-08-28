@@ -2386,12 +2386,14 @@ local function sanitizeRuleCondition(condition)
 				value = value ~= "" and value or encoded,
 				nativePath = encoded,
 				legacyValue = legacyValue,
+				categorySource = "NATIVE",
 			}
 		end
 		if value == "" or GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({
 			type = "category", value = value,
 		}) then return nil end
-		return { type = "category", value = value }
+		if not GlobalStorageSiK.CategoryResolution.isSafeSourceCategory(value) then return nil end
+		return { type = "category", value = value, categorySource = "SOURCE_CATEGORY" }
 	end
 	return sanitizeNodeFilter(condition)
 end

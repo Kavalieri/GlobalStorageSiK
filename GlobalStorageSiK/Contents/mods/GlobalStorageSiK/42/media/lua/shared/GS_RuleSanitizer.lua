@@ -133,6 +133,14 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 			else
 				copy.legacySource = rawRule.legacySource
 				if copy.condition.type == "category" then
+					local aliasPath = GlobalStorageSiK.CategoryResolution.legacyAliasNativePath(copy.condition.value)
+					if aliasPath and not copy.condition.nativePath then
+						copy.condition.nativePath = aliasPath
+						copy.condition.legacyValue = copy.condition.legacyValue or copy.condition.value
+						copy.condition.categorySource = "NATIVE"
+						report.changed = true
+						report.rulesChanged = true
+					end
 					local status = GlobalStorageSiK.RuleSanitizer.classifyCategoryCondition(copy.condition)
 					if copy.condition.categoryStatus ~= status then
 						copy.condition.categoryStatus = status
