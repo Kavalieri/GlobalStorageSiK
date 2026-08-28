@@ -5,6 +5,8 @@
 	Descripción: Evita excepciones Java en getText y claves crudas en UI.
 ]]
 
+require "GS_CatalogManager"
+
 GlobalStorageSiK.I18n = GlobalStorageSiK.I18n or {}
 
 --- Vocales/consonantes acentuadas latinas mas comunes (ES/FR/DE/PT/IT) ->
@@ -793,43 +795,24 @@ end
 -- CatalogManager no este listo, un fallo de ScriptManager no se cachea en
 -- absoluto (se reintenta en la siguiente consulta); solo se cachea un
 -- negativo real una vez que el catalogo esta confirmado disponible.
--- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas): el fix
--- anterior evitaba cachear un negativo ANTES de que CatalogManager estuviera
--- listo, pero los negativos guardados DESPUES seguian siendo permanentes de
--- verdad - `forceNewEpoch()` (recarga Lua en debug) no limpiaba esta tabla
--- ni sus entradas llevaban el epoch en que se guardaron, así que la
--- afirmación del documento ("queda invalidada de facto al cambiar el
--- epoch") no se cumplia para esta cache en concreto.
---
--- Tabla PARALELA (no un wrapper dentro del mismo valor, para no arriesgar
--- confundir un ScriptItem real con una tabla de metadatos): solo los
--- negativos "confirmados con catalogo listo" quedan registrados aqui con el
--- epoch en que se guardaron. Si el epoch actual ya no coincide, el negativo
--- se descarta y se reintenta. Los positivos (`script` real) y el patron
--- Moveable (`false` permanente) NUNCA entran aqui - coherente con §8.2
--- dominio 1 (ScriptItemCache): un ScriptItem real no deja de existir por
--- cambiar de epoch, y el patron Moveable es estructural.
-local _scriptItemLookupCache = {}
-local _scriptItemNegativeEpoch = {}
+-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas: "los
+-- positivos de ScriptItem siguen siendo permanentes"). Ciclo de vida
+-- CERRADO DE VERDAD (2026-08-27, pedido explicito del usuario: "cerrar
+-- primero el ciclo de cache positiva por catalogEpoch antes de construir
+-- la taxonomia encima"): en vez de un seguimiento de epoch por entrada
+-- (fragil, ver historial de este comentario en versiones previas), esta
+-- tabla se crea con GlobalStorageSiK.CatalogManager.createEpochCache() -
+-- se vacia por COMPLETO cada vez que el catalogo cambia de epoch de
+-- verdad, sin excepcion y sin bookkeeping adicional. Positivos, negativos
+-- confirmados y el patron Moveable comparten la misma tabla; recomputar un
+-- patron Moveable tras un vaciado es barato (nunca llega a tocar
+-- ScriptManager), asi que no hace falta tratarlo aparte.
+local _scriptItemLookupCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 local function cachedScriptItem(fullType)
 	local cached = _scriptItemLookupCache[fullType]
 	if cached ~= nil then
-		if cached ~= false then
-			return cached
-		end
-		local negEpoch = _scriptItemNegativeEpoch[fullType]
-		if negEpoch == nil then
-			-- Negativo permanente (patron Moveable, sin epoch registrado).
-			return nil
-		end
-		local currentEpoch = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
-		if currentEpoch == nil or negEpoch == currentEpoch then
-			return nil
-		end
-		-- El catalogo cambio de epoch desde que se confirmo este negativo -
-		-- ya no es de fiar, se retira y se reintenta abajo.
-		_scriptItemLookupCache[fullType] = nil
-		_scriptItemNegativeEpoch[fullType] = nil
+		return cached or nil
 	end
 	if looksLikeMoveableSpriteFullType(fullType) then
 		_scriptItemLookupCache[fullType] = false
@@ -849,10 +832,9 @@ local function cachedScriptItem(fullType)
 		_scriptItemLookupCache[fullType] = script
 	elseif queried and catalogReady then
 		-- Consulta real, ScriptManager disponible, catalogo confirmado
-		-- listo: un "no existe" aqui es un negativo de verdad - se ata al
-		-- epoch actual para poder invalidarse si el catalogo cambia.
+		-- listo: un "no existe" aqui es un negativo de verdad - la propia
+		-- cache lo descarta sola si el catalogo cambia de epoch.
 		_scriptItemLookupCache[fullType] = false
-		_scriptItemNegativeEpoch[fullType] = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
 	end
 	-- Si no se pudo consultar (sm no disponible) o el catalogo aun no esta
 	-- listo, no se cachea nada - la proxima llamada vuelve a intentarlo.
@@ -889,7 +871,11 @@ end
 --- temprano si aplica) - segura de memorizar sin cache separada por sprite.
 ---@param fullType string|nil
 ---@return string
-local typeDisplayNameCache = {}
+-- Misma epoch-cache reutilizable que _scriptItemLookupCache (ver
+-- GS_CatalogManager.createEpochCache) - un nombre resuelto depende del
+-- ScriptItem subyacente, asi que debe invalidarse en el mismo momento.
+local typeDisplayNameCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if not fullType or fullType == "" then
 		return "?"
@@ -901,34 +887,6 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	local result = GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
 	typeDisplayNameCache[fullType] = result
 	return result
-end
-
--- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas: "los
--- positivos de ScriptItem siguen siendo permanentes" - un ScriptItem real
--- guardado en _scriptItemLookupCache nunca se invalidaba, aunque una recarga
--- Lua/debug o un cambio de catalogo pudiera sustituir su definicion
--- conservando el mismo fullType. El documento exige "valido durante una
--- epoca", no para siempre, y esto se vuelve critico en cuanto las fases
--- siguientes de la taxonomia empiecen a consultar propiedades del objeto
--- devuelto). En vez de atar cada positivo a un epoch individual (fragil,
--- facil de olvidar en un consumidor nuevo), se vacian POR COMPLETO las 3
--- caches de este fichero que dependen del catalogo cada vez que
--- CatalogManager confirma un cambio real de epoch.
-if GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.onEpochChanged then
-	GlobalStorageSiK.CatalogManager.onEpochChanged(function(newEpoch)
-		for k in pairs(_scriptItemLookupCache) do
-			_scriptItemLookupCache[k] = nil
-		end
-		for k in pairs(_scriptItemNegativeEpoch) do
-			_scriptItemNegativeEpoch[k] = nil
-		end
-		for k in pairs(typeDisplayNameCache) do
-			typeDisplayNameCache[k] = nil
-		end
-		if GlobalStorageSiK.Log then
-			GlobalStorageSiK.Log.debug("I18n", "cache de ScriptItem/nombre vaciada por cambio de catalogEpoch=" .. tostring(newEpoch))
-		end
-	end)
 end
 
 function GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
@@ -1178,6 +1136,18 @@ function GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 	return nil
 end
 
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: "I18n.itemDisplayName no cachea su resultado final -
+-- typeDisplayName() SI esta memorizada, pero el wrapper completo (deteccion
+-- de moveable + isLowQualityDisplayName sobre stable/fallback) se re-ejecuta
+-- en cada llamada de busqueda/ordenacion/render"). Clave por
+-- fullType+worldSprite+fallback (los 3 parametros reales de la funcion,
+-- estables mientras la fila no cambie de tipo) - epoch-cache igual que
+-- typeDisplayNameCache, un nombre resuelto depende del mismo ScriptItem
+-- subyacente y debe invalidarse en el mismo momento (cambio de catalogo).
+local itemDisplayNameCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+
 --- Nombre legible de un ítem según idioma del cliente (estable por fullType).
 ---@param fullType string|nil
 ---@param fallback string|nil
@@ -1187,21 +1157,31 @@ function GlobalStorageSiK.I18n.itemDisplayName(fullType, fallback, worldSprite)
 	if not fullType then
 		return fallback or "?"
 	end
+	local cacheKey = fullType .. "\1" .. tostring(worldSprite or "") .. "\1" .. tostring(fallback or "")
+	local cached = itemDisplayNameCache[cacheKey]
+	if cached ~= nil then
+		return cached
+	end
+	local result
 	local moveable = GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
-	if moveable then return moveable end
-	local stable = GlobalStorageSiK.I18n.typeDisplayName(fullType)
-	if stable and stable ~= "" and stable ~= fullType
-		and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
-		return stable
+	if moveable then
+		result = moveable
+	else
+		local stable = GlobalStorageSiK.I18n.typeDisplayName(fullType)
+		if stable and stable ~= "" and stable ~= fullType
+			and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
+			result = stable
+		elseif fallback and fallback ~= "" and fallback ~= fullType
+			and not GlobalStorageSiK.I18n.isLowQualityDisplayName(fallback) then
+			result = fallback
+		elseif stable and stable ~= "" and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
+			result = stable
+		else
+			result = fullType or "?"
+		end
 	end
-	if fallback and fallback ~= "" and fallback ~= fullType
-		and not GlobalStorageSiK.I18n.isLowQualityDisplayName(fallback) then
-		return fallback
-	end
-	if stable and stable ~= "" and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
-		return stable
-	end
-	return fullType or "?"
+	itemDisplayNameCache[cacheKey] = result
+	return result
 end
 
 --- Categoría legible estilo inventario vanilla (p. ej. Arma - Hacha).
@@ -1228,17 +1208,30 @@ end
 -- esta memorizado"): filterItemRows() llama a esto para CADA fila en CADA
 -- pulsacion de tecla del buscador, recalculando itemDisplayName/
 -- ItemTaxonomy.resolve/categoria/asciiLower entero desde cero aunque la fila
--- no haya cambiado desde la ultima tecla. Cache por REFERENCIA de fila
--- (clave debil, __mode="k") - las filas del catalogo son objetos estables
--- mientras la pestaña no se reconstruye (refreshItemsTab crea filas NUEVAS,
--- asi que la cache vieja simplemente deja de usarse y el recolector de
--- basura libera las entradas sin que haga falta invalidarla a mano).
-local itemSearchHaystackCache = setmetatable({}, { __mode = "k" })
+-- no haya cambiado desde la ultima tecla.
+--
+-- BUG REAL DE RENDIMIENTO #2 cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: "el snapshot del servidor entrega tablas de fila
+-- nuevas aproximadamente cada dos segundos - aunque el contenido logico sea
+-- identico, la identidad de tabla cambia y la cache pierde efectividad").
+-- La cache original usaba la propia tabla `row` como clave debil, asumiendo
+-- que era estable entre refrescos - Simucad confirmo que NO lo es. Cambiada
+-- a clave por COMPUESTO de los campos intrinsecos al tipo de los que
+-- realmente depende esta funcion (fullType/worldSprite/displayName/
+-- category/subCategory) - mismo patron ya usado por
+-- ItemTaxonomy.resolve()/itemTaxonomyResolveCache (ver GS_ItemTaxonomy.lua)
+-- para el mismo problema. `count`/zona/nodo NUNCA entran en la clave -son
+-- estado dinamico de red, no identidad del tipo.
+local itemSearchHaystackCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	if not row then
 		return ""
 	end
-	local cached = itemSearchHaystackCache[row]
+	local cacheKey = tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
+		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
+		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
+	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
 	end
@@ -1279,7 +1272,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	end
 
 	local haystack = GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
-	itemSearchHaystackCache[row] = haystack
+	itemSearchHaystackCache[cacheKey] = haystack
 	return haystack
 end
 

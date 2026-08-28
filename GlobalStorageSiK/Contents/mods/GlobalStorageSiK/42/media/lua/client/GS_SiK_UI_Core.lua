@@ -1206,6 +1206,19 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 	local SEARCH_MIN_CHARS = 3
 	local DEBOUNCE_MS = 180
 	local pendingTick = nil
+	-- BUG REAL DE RENDIMIENTO cerrado (2026-08-27, informe de telemetria de
+	-- Simucad tras dev19: "los primeros caracteres pueden provocar refrescos
+	-- completos aunque el filtro todavia devuelve todas las filas" - con el
+	-- umbral por debajo del minimo, CADA pulsacion llamaba a runSearch(false)
+	-- de forma incondicional, aunque el resultado efectivo (catalogo
+	-- completo, sin filtro) fuera identico pulsacion tras pulsacion). Se
+	-- recuerda si la ULTIMA busqueda aplicada fue un filtro activo
+	-- (charCount >= umbral efectivo) - por debajo del umbral solo se
+	-- refresca UNA VEZ, la transicion real de "habia filtro" a "ya no hay
+	-- filtro" (restaura el catalogo completo); mientras se siga por debajo
+	-- del umbral (o ya se estaba, p. ej. escribiendo el 1er/2º caracter) no
+	-- se dispara ningun refresco nuevo.
+	local lastEffectiveActive = false
 
 	local function cancelPending()
 		if pendingTick and Events and Events.OnTick and Events.OnTick.Remove then
@@ -1226,6 +1239,10 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 
 	searchEntry.onPressEnter = function()
 		cancelPending()
+		local text = searchEntry:getText() or ""
+		local charCount, wide = unicodeCharLengthAndWidth(text)
+		local minChars = wide and 2 or SEARCH_MIN_CHARS
+		lastEffectiveActive = text ~= "" and charCount >= minChars - 1
 		runSearch(true)
 	end
 
@@ -1260,9 +1277,18 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 		-- consistente - se compensa aqui restando 1 al umbral efectivo en
 		-- vez de dejar el gate a ciegas del texto que reporte el motor.
 		if text == "" or charCount < minChars - 1 then
-			runSearch(false)
+			if lastEffectiveActive then
+				-- Transicion real: habia un filtro activo y acaba de caer por
+				-- debajo del umbral (o se borro del todo) - una sola
+				-- aplicacion para restaurar el catalogo completo.
+				lastEffectiveActive = false
+				runSearch(false)
+			end
+			-- Ya estabamos por debajo del umbral (1º/2º caracter, o ya vacio):
+			-- el resultado efectivo no cambia, no hay nada que refrescar.
 			return
 		end
+		lastEffectiveActive = true
 		local deadline = (getTimestampMs and getTimestampMs() or 0) + DEBOUNCE_MS
 		pendingTick = function()
 			if getTimestampMs and getTimestampMs() < deadline then
@@ -1386,6 +1412,48 @@ function GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxWidth, font)
 		table.insert(lines, "")
 	end
 	return lines
+end
+
+-- dev24 (promovida desde GS_AdminDashboard_Audit.lua, dev23, para
+-- reutilizarla tambien en GS_AdminDashboard_Corpus.lua sin duplicar la
+-- funcion completa - "el resto de interfaces ya usa wrapTextLines()", esto
+-- cierra el patron que faltaba: crear/reutilizar las ISLabel de un bloque
+-- envuelto, no solo calcular las lineas de texto).
+--- Renderiza `text` envuelto a `width` dentro de `host` (una ventana o un
+--- scroll con :addChild), reutilizando un pool de ISLabel indexado por
+--- posicion en vez de crear/destruir en cada llamada - las labels sobrantes
+--- de un texto mas largo anterior se OCULTAN, nunca quedan visibles con
+--- datos viejos.
+---@param host table ventana o scroll donde viven las labels
+---@param pool table[] array persistente reutilizado entre llamadas
+---@param text string
+---@param x number
+---@param y number
+---@param width number
+---@param addFn fun(host:table, widget:table) añade el widget nuevo a host - llamado SOLO para labels recien creadas, nunca para reutilizadas (aqui es donde el llamador registra tracking si hace falta)
+---@return number nextY
+function GlobalStorageSiK.SiK_UI.renderWrappedLinePool(host, pool, text, x, y, width, addFn)
+	local fontH = getTextManager():getFontHeight(UIFont.Small)
+	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text or "", width, UIFont.Small)
+	for i = 1, #lines do
+		local lbl = pool[i]
+		if not lbl then
+			lbl = ISLabel:new(x, y, fontH, "", 0.72, 0.75, 0.8, 1, UIFont.Small, true)
+			lbl:initialise()
+			addFn(host, lbl)
+			pool[i] = lbl
+		else
+			lbl:setX(x)
+			lbl:setY(y)
+			lbl:setVisible(true)
+		end
+		lbl:setName(lines[i])
+		y = y + fontH + 2
+	end
+	for i = #lines + 1, #pool do
+		if pool[i] then pool[i]:setVisible(false) end
+	end
+	return y
 end
 
 --- Altura en px de un bloque de texto envuelto.

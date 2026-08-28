@@ -34,6 +34,8 @@ require "GS_SiK_UI_Table"
 require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Extensions"
+require "GS_AdminDashboard_Audit"
+require "GS_AdminDashboard_Corpus"
 
 GlobalStorageSiK.AdminDashboard = GlobalStorageSiK.AdminDashboard or {}
 GlobalStorageSiK.AdminDashboard.instance = nil
@@ -713,10 +715,45 @@ end
 --- proyecto para texto de longitud variable), lista de miembros con scroll,
 --- y la barra de acciones de red. Se llama UNA vez; lo que cambia con los
 --- datos vive dentro de cada refresh*.
+--- Registra un widget ya añadido a `self` como propio de la pestaña
+--- "Soporte de redes" - dev22 (dashboard reorganizado en pestañas, pedido
+--- explicito de sistemas): permite mostrar/ocultar por pestaña sin
+--- reconstruir nada, self:selectStaffTab() solo alterna setVisible().
+---@param widget ISUIElement
+local function trackNetworkTabWidget(self, widget)
+	self._networkTabWidgets[#self._networkTabWidgets + 1] = widget
+end
+
+--- Cambia la pestaña activa del panel de staff (Soporte de redes / Taxonomia)
+--- mostrando/ocultando los paneles ya construidos - NUNCA reconstruye la
+--- pestaña que deja de verse (pedido explicito de sistemas: "la pestaña no
+--- visible no debe reconstruirse en cada refresh de la visible").
+---@param tabKey string "network"|"taxonomy"
+function GS_AdminDashboardUI:selectStaffTab(tabKey)
+	self._activeStaffTab = tabKey
+	local showNetwork = tabKey ~= "taxonomy"
+	for i = 1, #(self._networkTabWidgets or {}) do
+		local w = self._networkTabWidgets[i]
+		if w and w.setVisible then w:setVisible(showNetwork) end
+	end
+	for i = 1, #(self._taxonomyTabWidgets or {}) do
+		local w = self._taxonomyTabWidgets[i]
+		if w and w.setVisible then w:setVisible(not showNetwork) end
+	end
+	if self.staffTabNetworkBtn then
+		self.staffTabNetworkBtn._sikUiActive = showNetwork
+	end
+	if self.staffTabTaxonomyBtn then
+		self.staffTabTaxonomyBtn._sikUiActive = not showNetwork
+	end
+end
+
 function GS_AdminDashboardUI:buildStaticFrame()
 	local pad = PAD
 	local textW = self.width - pad * 2
 	local y = pad
+	self._networkTabWidgets = {}
+	self._taxonomyTabWidgets = {}
 
 	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_AdminDashboardTitle"),
 		0.95, 0.75, 0.6, 1, UIFont.Medium, true)
@@ -724,11 +761,34 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	self:addChild(title)
 	y = self.headerHeight + 4
 
+	-- dev22: pestañas del panel de staff (Soporte de redes / Taxonomia) -
+	-- controlador pequeño y explicito, 2 botones que alternan visibilidad de
+	-- los widgets ya construidos (ver selectStaffTab arriba), nunca
+	-- reconstruyen ni destruyen nada.
+	local tabW = math.floor((textW - 8) / 2)
+	self.staffTabNetworkBtn = GlobalStorageSiK.SiK_UI.createButton(
+		pad, y, tabW, BTN_H, T("IGUI_GS_AdminTabNetwork"), self, function()
+			self:selectStaffTab("network")
+		end)
+	self:addChild(self.staffTabNetworkBtn)
+	self.staffTabTaxonomyBtn = GlobalStorageSiK.SiK_UI.createButton(
+		pad + tabW + 8, y, tabW, BTN_H, T("IGUI_GS_AdminTabTaxonomy"), self, function()
+			self:selectStaffTab("taxonomy")
+		end)
+	self:addChild(self.staffTabTaxonomyBtn)
+	y = y + BTN_H + LINE_GAP + 4
+	-- Ambas pestañas arrancan en la MISMA Y (justo debajo de la barra de
+	-- pestañas) - son una superposicion mostrar/ocultar, no un flujo
+	-- secuencial. Guardada aparte porque `y` sigue avanzando mas abajo con
+	-- el contenido propio de Soporte de redes.
+	local taxonomyTabY = y
+
 	self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
 	self.networkCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.networkCombo)
 	self.networkCombo.onChange = function() self:onComboChanged() end
 	self:addChild(self.networkCombo)
+	trackNetworkTabWidget(self, self.networkCombo)
 	y = y + ENTRY_H + LINE_GAP + 2
 
 	self.infoLbls = {}
@@ -736,6 +796,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, "", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
 		lbl:initialise()
 		self:addChild(lbl)
+		trackNetworkTabWidget(self, lbl)
 		self.infoLbls[i] = lbl
 		y = y + FONT_HGT_SMALL + 2
 	end
@@ -748,12 +809,14 @@ function GS_AdminDashboardUI:buildStaticFrame()
 			if self._selectedNetworkId then self:requestMembers(self._selectedNetworkId) end
 		end)
 	self:addChild(self.reloadBtn)
+	trackNetworkTabWidget(self, self.reloadBtn)
 
 	self.historyBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + reloadW + 8, y, reloadW, BTN_H, T("IGUI_GS_AdminHistoryButton"), self, function()
 			self:requestHistory()
 		end)
 	self:addChild(self.historyBtn)
+	trackNetworkTabWidget(self, self.historyBtn)
 	y = y + BTN_H + LINE_GAP
 
 	-- Diagnostico DEV puntual (2026-08-22, ver comentario en GS_Server.lua,
@@ -769,7 +832,24 @@ function GS_AdminDashboardUI:buildStaticFrame()
 			end
 		end)
 	self:addChild(self.diagBtn)
+	trackNetworkTabWidget(self, self.diagBtn)
 	y = y + BTN_H + LINE_GAP + 6
+
+	-- dev22 (pedido explicito de sistemas: "Auditar catalogo, trasladado
+	-- desde Soporte de redes... su unico hogar sera Taxonomia, no duplicar
+	-- el boton en ambas pestañas"): construccion completa de la pestaña
+	-- Taxonomia extraida a GS_AdminDashboard_Audit.lua (mismo motivo que la
+	-- extraccion de runNativeAudit a GS_NativeAuditServer.lua en dev14 - no
+	-- seguir haciendo crecer este fichero/buildStaticFrame).
+	-- dev24: la pestaña Taxonomia ahora reparte su alto disponible entre 2
+	-- suites INDEPENDIENTES (Auditar catalogo / Validar corpus, pedido
+	-- explicito de sistemas: "cada suite conserva estado, requestId, ultima
+	-- ejecucion y resumen propios") - mitad superior para auditoria, mitad
+	-- inferior para el corpus, cada una con su propio scroll.
+	local taxonomyBottomY = self.height - pad
+	local taxonomyMidY = taxonomyTabY + math.floor((taxonomyBottomY - taxonomyTabY) / 2)
+	GlobalStorageSiK.AdminDashboardAudit.build(self, pad, taxonomyTabY, textW, taxonomyMidY - 4)
+	GlobalStorageSiK.AdminDashboardCorpus.build(self, pad, taxonomyMidY + 4, textW, taxonomyBottomY)
 
 	-- Herramientas internas aportadas por los addons. El Dashboard solo pinta
 	-- el registro neutral; cada addon conserva la responsabilidad de abrir su
@@ -778,6 +858,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	if #staffActions > 0 then
 		local toolsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AdminInternalTests"))
 		self:addChild(toolsTitle)
+		trackNetworkTabWidget(self, toolsTitle)
 		y = y + FONT_HGT_SMALL + LINE_GAP
 
 		local actionGap = 8
@@ -792,6 +873,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 				buttonX, y + row * (BTN_H + LINE_GAP), buttonW, BTN_H, T(action.labelKey), self,
 				staffActionCallback(action, self))
 			self:addChild(actionBtn)
+			trackNetworkTabWidget(self, actionBtn)
 		end
 		local actionRows = math.ceil(#staffActions / 2)
 		y = y + actionRows * (BTN_H + LINE_GAP) + 6
@@ -801,6 +883,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		0.7, 0.72, 0.76, 1, UIFont.Small, true)
 	self.membersTitle:initialise()
 	self:addChild(self.membersTitle)
+	trackNetworkTabWidget(self, self.membersTitle)
 	y = y + FONT_HGT_SMALL + LINE_GAP
 
 	-- Añadir miembro (pedido explicito 2026-08-22): desplegable de jugadores
@@ -810,11 +893,13 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	self.addMemberCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.addMemberCombo)
 	self:addChild(self.addMemberCombo)
+	trackNetworkTabWidget(self, self.addMemberCombo)
 	self.addMemberBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + textW - addBtnW, y, addBtnW, ENTRY_H, T("IGUI_GS_AdminAddMember"), self, function()
 			self:onAddMember()
 		end)
 	self:addChild(self.addMemberBtn)
+	trackNetworkTabWidget(self, self.addMemberBtn)
 	y = y + ENTRY_H + LINE_GAP + 6
 
 	-- Texto de longitud variable SIEMPRE con wrap real (regla del proyecto) -
@@ -825,6 +910,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
 	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
 	self.memberScroll = GlobalStorageSiK.TerminalScroll.create(self, pad, y, textW, memberH)
+	trackNetworkTabWidget(self, self.memberScroll)
 	local actionsY = y + memberH + ROW_GAP
 
 	self.releaseBtn = GlobalStorageSiK.SiK_UI.createButton(
@@ -832,6 +918,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 			self:onReleaseOwnership()
 		end, nil, true)
 	self:addChild(self.releaseBtn)
+	trackNetworkTabWidget(self, self.releaseBtn)
 
 	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
 		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), self, function()
@@ -839,12 +926,14 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		end, nil, true)
 	GlobalStorageSiK.SiK_UI.applyDangerButton(self.deleteBtn)
 	self:addChild(self.deleteBtn)
+	trackNetworkTabWidget(self, self.deleteBtn)
 
 	local hintY = actionsY + BTN_H + ROW_GAP
 	for _, line in ipairs(hintLines) do
 		local hintLbl = ISLabel:new(pad, hintY, FONT_HGT_SMALL, line, 0.55, 0.57, 0.6, 1, UIFont.Small, true)
 		hintLbl:initialise()
 		self:addChild(hintLbl)
+		trackNetworkTabWidget(self, hintLbl)
 		hintY = hintY + FONT_HGT_SMALL + 2
 	end
 
@@ -857,6 +946,11 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	end
 
 	GlobalStorageSiK.SiK_UI.centerModal(self)
+	-- dev22: recuerda la pestaña activa SOLO durante la sesion de la ventana
+	-- (pedido explicito de sistemas, no hace falta persistirla) - por
+	-- defecto "network" en la apertura inicial, conservada tras un resize
+	-- (rebuildAfterResize llama a buildStaticFrame de nuevo).
+	self:selectStaffTab(self._activeStaffTab or "network")
 end
 
 ---@param networks table[]
@@ -1089,9 +1183,34 @@ function GlobalStorageSiK.AdminDashboard.onNetworkHistory(networkId, events)
 	end
 end
 
+---@param report table
+function GlobalStorageSiK.AdminDashboard.onNativeAuditSummary(report)
+	local ui = GlobalStorageSiK.AdminDashboard.instance
+	if ui then
+		GlobalStorageSiK.AdminDashboardAudit.onSummary(ui, report)
+	end
+end
+
+---@param report table
+function GlobalStorageSiK.AdminDashboard.onNativeCorpusSummary(report)
+	local ui = GlobalStorageSiK.AdminDashboard.instance
+	if ui then
+		GlobalStorageSiK.AdminDashboardCorpus.onSummary(ui, report)
+	end
+end
+
 ---@param args table|nil
 function GlobalStorageSiK.AdminDashboard.onActionResult(args)
 	local ui = GlobalStorageSiK.AdminDashboard.instance
+	-- dev22: cualquier actionResult (exito o fallo) libera el estado
+	-- "ejecutando" del boton de auditoria, independientemente de si hay una
+	-- red seleccionada - la guarda de abajo es solo para el refresco de
+	-- redes/miembros, no debe bloquear esto. dev24: mismo trato para la
+	-- suite de corpus, aislada de la de auditoria (action/requestId propios).
+	if ui then
+		GlobalStorageSiK.AdminDashboardAudit.onActionResult(ui, args)
+		GlobalStorageSiK.AdminDashboardCorpus.onActionResult(ui, args)
+	end
 	if not ui or not ui._selectedNetworkId then return end
 	-- Refresco simple tras cualquier accion: repedir ambas listas en vez de
 	-- intentar diferenciar que comando disparo el actionResult - el coste es

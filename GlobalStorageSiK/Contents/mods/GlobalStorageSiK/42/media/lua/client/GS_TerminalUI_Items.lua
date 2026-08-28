@@ -8,6 +8,7 @@
 require "ISUI/ISPanel"
 require "ISUI/ISLabel"
 require "ISUI/ISContextMenu"
+require "GS_CatalogManager"
 require "GS_I18n"
 require "GS_ItemTaxonomy"
 require "GS_Libs"
@@ -635,7 +636,24 @@ end
 -- propia cache con invalidacion por referencia de nodos, ver
 -- resolveZoneLabel) y "count" es ya trivial (lectura directa de campo, cachearla
 -- no aportaria nada).
-local sortKeyValueCache = setmetatable({}, { __mode = "k" })
+-- BUG REAL DE RENDIMIENTO #2 cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: mismo hallazgo que itemSearchHaystackCache en
+-- GS_I18n.lua - "el snapshot del servidor entrega tablas de fila nuevas
+-- aproximadamente cada dos segundos", la clave por REFERENCIA de `row`
+-- (`__mode="k"`) pierde efectividad entre snapshots aunque el tipo/nombre/
+-- categoria de la fila no haya cambiado. Cambiada a clave por COMPUESTO de
+-- los campos intrinsecos de los que depende (fullType/worldSprite/
+-- displayName/category/subCategory/gsSubKeysStr) + sortKey - mismo patron
+-- ya usado por itemSearchHaystackCache/itemTaxonomyResolveCache. `count` y
+-- `zone` siguen fuera de esta cache (ya lo estaban: count es lectura
+-- directa, zone tiene su propia invalidacion por referencia de nodos).
+local sortKeyValueCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+local function sortRowCacheKey(row)
+	return tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
+		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
+		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
+end
 local function sortKeyValue(row, sortKey, terminal)
 	if sortKey == "count" then
 		return row.count or 0
@@ -643,9 +661,10 @@ local function sortKeyValue(row, sortKey, terminal)
 	if sortKey == "zone" then
 		return string.lower(resolveZoneLabel(terminal, row))
 	end
-	local rowCache = sortKeyValueCache[row]
-	if rowCache and rowCache[sortKey] ~= nil then
-		return rowCache[sortKey]
+	local cacheKey = sortRowCacheKey(row) .. "\1" .. sortKey
+	local cached = sortKeyValueCache[cacheKey]
+	if cached ~= nil then
+		return cached
 	end
 	local value
 	if sortKey == "category" then
@@ -658,11 +677,7 @@ local function sortKeyValue(row, sortKey, terminal)
 		local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
 		value = string.lower(tostring(name or row.fullType or ""))
 	end
-	if not rowCache then
-		rowCache = {}
-		sortKeyValueCache[row] = rowCache
-	end
-	rowCache[sortKey] = value
+	sortKeyValueCache[cacheKey] = value
 	return value
 end
 

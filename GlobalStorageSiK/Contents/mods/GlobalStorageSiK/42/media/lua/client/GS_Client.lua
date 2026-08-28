@@ -633,6 +633,34 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNetworkHistory then
 			GlobalStorageSiK.AdminDashboard.onNetworkHistory(args and args.networkId, args and args.events or {})
 		end
+	elseif command == "nativeAuditSummary" then
+		-- Resultado del boton "Auditar catalogo" (ver GS_NativeAudit.lua) -
+		-- solo el resumen llega aqui, el informe completo con muestras se
+		-- queda en el fichero de diagnostico del servidor.
+		if args then
+			local msg = GlobalStorageSiK.I18n.text("IGUI_GS_NativeAuditSummary",
+				tostring(args.timeMs), tostring(args.totalTypes), tostring(args.pending),
+				tostring(args.unclassified), tostring(args.invalidPath), tostring(args.fileName))
+			GlobalStorageSiK.Log.info("NativeAudit", msg)
+			local player = GlobalStorageSiK.NetClient.getPlayer()
+			if player and player.setHaloNote then
+				player:setHaloNote(msg, 220, 220, 220, 600)
+			end
+			-- dev22: ademas del halo/log de siempre, alimenta el resumen
+			-- persistente de la pestaña Taxonomia del panel de staff (antes
+			-- este informe no se guardaba en ningun sitio del cliente).
+			if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeAuditSummary then
+				GlobalStorageSiK.AdminDashboard.onNativeAuditSummary(args)
+			end
+		end
+	elseif command == "nativeCorpusSummary" then
+		-- dev24: resultado del boton "Validar corpus" - suite DIFERENCIADA
+		-- de nativeAuditSummary, misma idea de solo mandar el resumen
+		-- agregado (la lista de divergencias se queda en
+		-- GlobalStorageSiK_NativeCorpus.log).
+		if args and GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeCorpusSummary then
+			GlobalStorageSiK.AdminDashboard.onNativeCorpusSummary(args)
+		end
 	end
 end
 

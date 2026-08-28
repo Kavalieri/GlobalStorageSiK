@@ -79,6 +79,9 @@ require "GS_FuelConsumption"
 
 require "GS_Log"
 
+require "GS_NativeAuditServer"
+require "GS_NativeCorpusServer"
+
 require "GS_Debug"
 
 require "GS_NetTrace"
@@ -1045,6 +1048,9 @@ local function scanContainerForBrokenItems(container, path, out)
 end
 
 local playerCraftProbe = {}
+
+-- dev14: la guarda de concurrencia del boton "Auditar catalogo" vive ahora
+-- en GS_NativeAuditServer.lua, junto al resto de esa herramienta.
 
 local ACCESS_MESSAGES = {
 	no_terminal = GlobalStorageSiK.I18n.remote("IGUI_GS_BlockedTitle"),
@@ -2587,6 +2593,27 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "adminNetworkMembers",
 				{ networkId = networkId, members = GlobalStorageSiK.Permissions.adminGetNetworkMembers(networkId) })
 		end
+
+	elseif command == "runNativeAudit" then
+		-- Boton "Auditar catalogo" del panel de soporte/staff. dev14: la
+		-- logica completa (guarda de concurrencia, ejecucion, escritura de
+		-- ficheros, resumen al cliente) vive en GS_NativeAuditServer.lua -
+		-- extraccion puramente estructural (pedido de sistemas: "no
+		-- conviene añadir mas locales al gran dispatcher"), mismo
+		-- protocolo/permisos/respuesta de siempre. requireServerMod y
+		-- gsSendServerCommand se pasan tal cual, sin cambiar su visibilidad.
+		-- dev23: `args` tambien se pasa ahora - el cliente manda un
+		-- `requestId` propio (correlacion sin protocolo nuevo, ver
+		-- GS_NativeAuditServer.lua) que el handler simplemente reenvia tal
+		-- cual en su respuesta, exito o fallo.
+		GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMod, gsSendServerCommand)
+
+	elseif command == "runNativeCorpus" then
+		-- Boton "Validar corpus" del panel de staff, pestaña Taxonomia
+		-- (dev24, suite DIFERENCIADA de "Auditar catalogo" - guarda de
+		-- concurrencia y estado propios, ver GS_NativeCorpusServer.lua).
+		-- Mismo patron de extraccion estructural que runNativeAudit.
+		GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerMod, gsSendServerCommand)
 
 	elseif command == "gsDiagFindBrokenItems" then
 		-- Diagnostico DEV puntual, ver comentario de scanContainerForBrokenItems.

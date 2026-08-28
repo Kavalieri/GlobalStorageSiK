@@ -1237,6 +1237,19 @@ function GS_TerminalUI:getLeafCategoryFilterKey()
 	return self._leafCategoryFilterKey or ""
 end
 
+--- Firma de una lista de filtros de combo (solo las claves, orden estable) -
+--- dos snapshots con el mismo conjunto de tipos/categorias visibles producen
+--- la MISMA firma aunque `allItems` sea una tabla nueva por referencia.
+---@param filters table[] lista de {key=..., label=...}
+---@return string
+local function filterListSignature(filters)
+	local keys = {}
+	for i = 1, #filters do
+		keys[i] = filters[i].key or ""
+	end
+	return table.concat(keys, "\1")
+end
+
 --- Rellena el combo de categorías principales a partir del catálogo actual.
 ---@param allItems table[]
 -- BUG REAL DE RENDIMIENTO cerrado (2026-08-26, mismo informe de telemetria
@@ -1250,6 +1263,19 @@ end
 -- entrada (catalogo + claves de las que depende) es identica a la del
 -- ultimo build - misma logica ya usada en isTabUiHealthy() para otras
 -- pestañas ("solo reconstruir cuando algo relevante cambio de verdad").
+--
+-- BUG REAL DE RENDIMIENTO #2 cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: "el snapshot del servidor entrega tablas de fila
+-- nuevas cada ~2s - la identidad de tabla cambia aunque el catalogo logico
+-- sea identico, y la comparacion `== allItems` falla siempre entre
+-- snapshots"): la comparacion de REFERENCIA sigue como guardia rapida (0
+-- coste mientras `allItems` no cambie, es decir entre pulsaciones de tecla
+-- dentro del mismo snapshot), pero cuando la referencia SI cambia ya no se
+-- reconstruye la UI a ciegas - se recalculan los filtros (barato, sin tocar
+-- el combo) y solo se llama a clear()/addOption() si la FIRMA semantica
+-- (conjunto real de claves de categoria) difiere de la ultima construida.
+-- Los contadores de objetos no entran en la firma - un snapshot que solo
+-- cambia cantidades nunca dispara una reconstruccion de combo.
 function GS_TerminalUI:rebuildMainCategoryFilterCombo(allItems)
 	local combo = self.mainCategoryFilterCombo
 	if not combo then
@@ -1259,8 +1285,13 @@ function GS_TerminalUI:rebuildMainCategoryFilterCombo(allItems)
 		return
 	end
 	self._mainCategoryComboSourceItems = allItems
-	local prevKey = self:getMainCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectMainCategoryFilters(allItems or {})
+	local signature = filterListSignature(filters)
+	if self._mainCategoryComboSignature == signature then
+		return
+	end
+	self._mainCategoryComboSignature = signature
+	local prevKey = self:getMainCategoryFilterKey()
 	self._rebuildingMainCategoryCombo = true
 	combo:clear()
 	combo.filterKeys = { "" }
@@ -1294,8 +1325,13 @@ function GS_TerminalUI:rebuildSubCategoryFilterCombo(allItems)
 	end
 	self._subCategoryComboSourceItems = allItems
 	self._subCategoryComboSourceMainKey = mainKey
-	local prevKey = self:getSubCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectSubCategoryFilters(allItems or {}, mainKey)
+	local signature = mainKey .. "\2" .. filterListSignature(filters)
+	if self._subCategoryComboSignature == signature then
+		return
+	end
+	self._subCategoryComboSignature = signature
+	local prevKey = self:getSubCategoryFilterKey()
 	self._rebuildingSubCategoryCombo = true
 	combo:clear()
 	combo.filterKeys = { "" }
@@ -1333,8 +1369,13 @@ function GS_TerminalUI:rebuildLeafCategoryFilterCombo(allItems)
 	self._leafCategoryComboSourceItems = allItems
 	self._leafCategoryComboSourceMainKey = mainKey
 	self._leafCategoryComboSourceSubKey = subKey
-	local prevKey = self:getLeafCategoryFilterKey()
 	local filters = GlobalStorageSiK.TerminalItems.collectLeafCategoryFilters(allItems or {}, mainKey, subKey)
+	local signature = mainKey .. "\2" .. subKey .. "\2" .. filterListSignature(filters)
+	if self._leafCategoryComboSignature == signature then
+		return
+	end
+	self._leafCategoryComboSignature = signature
+	local prevKey = self:getLeafCategoryFilterKey()
 	self._rebuildingLeafCategoryCombo = true
 	combo:clear()
 	combo.filterKeys = { "" }

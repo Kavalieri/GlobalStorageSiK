@@ -508,17 +508,49 @@ local JEWELRY_SLOT_LABEL_KEY = {
 	nose     = "IGUI_GS_JewelrySlot_Nose",
 }
 
+-- BUG REAL cerrado (2026-08-27, hallazgo de sistemas sobre dev11): la
+-- version anterior buscaba "ear"/"ring"/etc. como SUBCADENA libre
+-- (:find(needle, 1, true)) - "Underwear" y "ForeArm" (BodyLocation reales
+-- de ropa interior y brazales) contienen la subcadena "ear" ("und-EAR-wear",
+-- "for-EAR-m") y se colaban como "pendiente" (earring). No es exclusivo de
+-- este helper nuevo: cualquier consumidor que ya reutilizara esta funcion
+-- (incluida la taxonomia anterior via GS_ItemTaxonomy.lua) heredaba el
+-- mismo fallo. Corregido a comparacion por TOKEN COMPLETO tras partir el
+-- valor en palabras alfabeticas (mismo criterio que
+-- GS_NativeClassifierUtils.tokenize, pero sin acoplar este fichero legacy
+-- de uso muy extendido a un modulo de la taxonomia nativa) - "underwear"/
+-- "forearm" quedan como un unico token que no coincide con ningun hueco de
+-- joyeria real, mientras que variantes con guion bajo de mods de terceros
+-- (incluido Magic Accessories, ya compatible) como "ear_top"/"left_ring"
+-- siguen reconociendose via sus tokens "ear"/"ring".
+local EARRING_TOKENS = { ear = true, ears = true, earring = true }
+local NECKLACE_TOKENS = { necklace = true }
+local NOSE_TOKENS = { nose = true }
+local WRIST_TOKENS = { wrist = true }
+local RING_FINGER_TOKENS = { finger = true, thumb = true, ringfinger = true }
+
+---@param locLower string
+---@return string[]
+local function splitAlphaTokens(locLower)
+	local tokens = {}
+	for word in locLower:gmatch("%a+") do
+		tokens[#tokens + 1] = word
+	end
+	return tokens
+end
+
 --- Hueco de joyeria "amigable" a partir de un BodyLocation ya resuelto en
 --- minusculas (p.ej. "rightringfinger", "necklace_long", "right_ring_finger").
 --- Version pura, sin depender de tener un script item vivo a mano - reutilizable
 --- tanto si se resolvio via scriptItem:getBodyLocation() como via el fallback
 --- de red (row.subCategory), el mismo dato que ya usa la columna "Categoria".
 ---
---- Busca por SUBCADENA, no por coincidencia exacta: distintos mods de items
---- (el nuestro, uno de joyeria de terceros...) pueden escribir el BodyLocation
---- con o sin guion bajo, en distinto orden de palabras, etc. - una tabla de
---- claves exactas se rompia con la primera variante no prevista. "ear" se
---- comprueba antes que "ring" porque "earring" contiene "ring" como subcadena.
+--- Comparacion por TOKEN COMPLETO (nunca subcadena, ver bug real arriba) -
+--- distintos mods de items (el nuestro, Magic Accessories, otro de joyeria
+--- de terceros...) pueden escribir el BodyLocation con guion bajo en
+--- distinto orden de palabras; una tabla de claves exactas sin partir en
+--- tokens se rompia con la primera variante no prevista, y buscar por
+--- subcadena libre producia falsos positivos reales (Underwear/ForeArm).
 ---@param locLower string
 ---@return string|nil
 function GlobalStorageSiK.Subcategories.jewelrySlotBucket(locLower)
@@ -526,12 +558,14 @@ function GlobalStorageSiK.Subcategories.jewelrySlotBucket(locLower)
 	if JEWELRY_SLOT_BUCKET[locLower] then
 		return JEWELRY_SLOT_BUCKET[locLower]
 	end
-	if locLower:find("neck", 1, true) then return "necklace" end
-	if locLower:find("ear", 1, true) then return "earring" end
-	if locLower:find("nose", 1, true) then return "nose" end
-	if locLower:find("wrist", 1, true) then return "wrist" end
-	if locLower:find("finger", 1, true) or locLower:find("thumb", 1, true) or locLower:find("ring", 1, true) then
-		return "ring"
+	local tokens = splitAlphaTokens(locLower)
+	for i = 1, #tokens do
+		local token = tokens[i]
+		if NECKLACE_TOKENS[token] then return "necklace" end
+		if EARRING_TOKENS[token] then return "earring" end
+		if NOSE_TOKENS[token] then return "nose" end
+		if WRIST_TOKENS[token] then return "wrist" end
+		if RING_FINGER_TOKENS[token] then return "ring" end
 	end
 	return nil
 end
