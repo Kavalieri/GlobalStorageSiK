@@ -11,8 +11,7 @@
 	Tecla por defecto: F9. Ninguna de las teclas F1-F6, F10, F11 vanilla la usa
 	(ver keyBinding.lua), y F7/F8/F9/F12 no aparecen usadas en ningun sitio del
 	juego base - la mas segura frente a los mods que ya hemos revisado esta
-	sesion (Extended Categories, Customizable Containers, Magic Accessories:
-	ninguno registra atajos propios). No hay garantia absoluta frente a
+	sesion (ninguno registra atajos propios). No hay garantia absoluta frente a
 	CUALQUIER mod de terceros, pero es una eleccion razonable y facil de
 	cambiar por el jugador si choca con algo.
 ]]

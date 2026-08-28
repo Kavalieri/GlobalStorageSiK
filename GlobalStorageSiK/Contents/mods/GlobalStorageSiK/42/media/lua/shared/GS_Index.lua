@@ -10,8 +10,8 @@ require "GS_Router"
 require "GS_Zones"
 require "GS_ItemSnapshot"
 require "GS_ZoneRefresh"
-require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_CategoryResolution"
 require "GS_Permissions"
 
 GlobalStorageSiK.Index = {}
@@ -157,8 +157,10 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	-- propio NativeProduct conserva una referencia por fullType/epoch, por lo
 	-- que snapshots posteriores no vuelven a invocar al clasificador.
 	for i = 1, #rows do
-		local path = GlobalStorageSiK.NativeProduct.getPath(rows[i].fullType)
-		rows[i].nativePath = GlobalStorageSiK.NativeProduct.encodePath(path)
+		local resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
+		rows[i].nativePath = resolution.nativePath
+		rows[i].vanillaKey = resolution.vanillaKey
+		rows[i].categoryEffective = resolution.effective
 		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
 	end
 	return rows
@@ -313,8 +315,7 @@ function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaT
 	if not player or not fullType or not GlobalStorageSiK.Network then
 		return {}, false
 	end
-	local familyKey = (not mediaTitle) and GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey
-		and GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey(fullType) or fullType
+	local familyKey = fullType
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local out = {}
@@ -335,7 +336,7 @@ function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaT
 								if row.fullType == fullType and row.mediaTitle == mediaTitle then
 									total = total + (row.count or 0)
 								end
-							elseif GlobalStorageSiK.ItemTaxonomy.getVariantFamilyKey(row.fullType) == familyKey then
+							elseif row.fullType == familyKey then
 								total = total + (row.count or 0)
 							end
 						end

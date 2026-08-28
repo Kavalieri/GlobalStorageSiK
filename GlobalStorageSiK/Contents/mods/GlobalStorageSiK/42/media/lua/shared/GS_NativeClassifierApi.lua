@@ -325,8 +325,8 @@ function GlobalStorageSiK.NativeClassifier.diagnosticClassifyAllBlocks(fullType)
 	return out
 end
 
---- OnGameBoot es el mismo evento que ya usa GS_CategoryRewrite.lua (recorrer
---- getAllItems() con seguridad confirmada) y que GS_CatalogManager usa para
+--- OnGameBoot permite recorrer getAllItems() con seguridad y que GS_CatalogManager
+--- marque el catálogo como listo; para entonces
 --- marcar ready - para entonces, todos los ficheros de bloque (que se
 --- registran a si mismos al cargar, fuera de cualquier evento) ya han
 --- tenido ocasion de llamar a registerBlock(). Sellar aqui, no antes.

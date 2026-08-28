@@ -10,6 +10,8 @@
 	preserva intacto.
 ]]
 
+require "GS_CategoryResolution"
+
 GlobalStorageSiK.RuleSanitizer = GlobalStorageSiK.RuleSanitizer or {}
 
 local function cloneRule(rule)
@@ -52,6 +54,12 @@ function GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(condition)
 	return asciiDimension(activeValue) ~= nil
 end
 
+---@param condition table|nil
+---@return string
+function GlobalStorageSiK.RuleSanitizer.classifyCategoryCondition(condition)
+	return GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition)
+end
+
 local function ruleSignature(rule)
 	local condition = (rule and rule.condition) or {}
 	return table.concat({
@@ -75,6 +83,7 @@ local function appendSample(report, context, rule, ruleIndex)
 		value = condition.value,
 		nativePath = condition.nativePath,
 		legacyValue = condition.legacyValue,
+		categoryStatus = condition.categoryStatus,
 		canonical = "legacy-junk:category-dimension:"
 			.. tostring(asciiDimension(condition.nativePath ~= nil and condition.nativePath or condition.value) or "?"),
 	}
@@ -92,7 +101,7 @@ end
 function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 	local report = { before = 0, after = 0, rulesBefore = 0, rulesAfter = 0,
 		categoriesBefore = 0, categoriesAfter = 0, quarantined = 0,
-		unknownPreserved = 0, changed = false, rulesChanged = false,
+		unknownPreserved = 0, deprecatedExternal = 0, changed = false, rulesChanged = false,
 		categoriesChanged = false, samples = {} }
 	if type(owner) ~= "table" then return report end
 	local sourceRules = type(owner.rules) == "table" and owner.rules or {}
@@ -123,6 +132,15 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 				report.rulesChanged = true
 			else
 				copy.legacySource = rawRule.legacySource
+				if copy.condition.type == "category" then
+					local status = GlobalStorageSiK.RuleSanitizer.classifyCategoryCondition(copy.condition)
+					if copy.condition.categoryStatus ~= status then
+						copy.condition.categoryStatus = status
+						report.changed = true
+						report.rulesChanged = true
+					end
+					if status == "DEPRECATED_EXTERNAL" then report.deprecatedExternal = report.deprecatedExternal + 1 end
+				end
 				active[#active + 1] = copy
 				if copy.condition.type == "category"
 					and not copy.condition.nativePath

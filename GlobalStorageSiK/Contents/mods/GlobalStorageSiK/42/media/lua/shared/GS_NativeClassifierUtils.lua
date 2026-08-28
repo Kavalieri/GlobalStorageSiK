@@ -12,6 +12,38 @@
 
 GlobalStorageSiK.NativeClassifierUtils = GlobalStorageSiK.NativeClassifierUtils or {}
 
+local JEWELRY_LOCATION_BUCKET = {
+	necklace = "necklace", necklace_long = "necklace", ears = "earring", nose = "nose",
+	rightwrist = "wrist", leftwrist = "wrist",
+	right_ringfinger = "ring", left_ringfinger = "ring",
+	right_middlefinger = "ring", left_middlefinger = "ring",
+	right_indexfinger = "ring", left_indexfinger = "ring",
+	right_pinkyfinger = "ring", left_pinkyfinger = "ring",
+	right_thumb = "ring", left_thumb = "ring",
+}
+
+local function jewelryLocationTokens(value)
+	local tokens = {}
+	for token in tostring(value or ""):lower():gmatch("%a+") do tokens[token] = true end
+	return tokens
+end
+
+---@param scriptItem table|nil
+---@return string|nil
+function GlobalStorageSiK.NativeClassifierUtils.jewelrySlotKey(scriptItem)
+	local location = GlobalStorageSiK.NativeClassifierUtils.bodyLocation(scriptItem)
+	if location == "" then return nil end
+	location = location:lower():gsub("^[^:]+:", "")
+	if JEWELRY_LOCATION_BUCKET[location] then return JEWELRY_LOCATION_BUCKET[location] end
+	local tokens = jewelryLocationTokens(location)
+	if tokens.necklace then return "necklace" end
+	if tokens.ear or tokens.ears or tokens.earring then return "earring" end
+	if tokens.nose then return "nose" end
+	if tokens.wrist then return "wrist" end
+	if tokens.finger or tokens.thumb or tokens.ringfinger then return "ring" end
+	return nil
+end
+
 ---@param fn function
 ---@return any|nil
 local function safeCall(fn)

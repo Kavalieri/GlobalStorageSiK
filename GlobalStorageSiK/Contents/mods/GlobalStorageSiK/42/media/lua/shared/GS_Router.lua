@@ -7,110 +7,27 @@
 ]]
 
 require "GS_Sandbox"
-require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_CategoryResolution"
 require "GS_RuleSanitizer"
-require "GS_Subcategories"
 require "GS_Log"
 require "GS_NodeFilters"
 require "GS_InventorySync"
 
 GlobalStorageSiK.Router = {}
 
--- Cache de ItemTaxonomy.resolve() por fullType (dev22, eficiencia): sin esto,
--- matchSpecificity recalculaba resolve() para el MISMO item hasta 2 veces por
--- nodo (contexto vacio + contexto de fila) en pickDepositTarget, que ya
--- itera todos los nodos vivos (tipicamente 10-20) para el mismo item - decenas
--- de llamadas identicas por deposito. El resultado de resolve() depende solo
--- del fullType (via ScriptItem, mismo para toda instancia de ese tipo) y de
--- category/subCategory, que a su vez tambien salen del fullType (mismo
--- ScriptItem) - no del item vivo concreto, asi que cachear por fullType es
--- seguro y valido durante toda la vida del proceso (servidor o SP real),
--- nunca queda obsoleto salvo que cambie el catalogo de items (solo con un
--- cambio de mods, que ya requiere reiniciar el proceso).
-local _taxResolveCache = {}
-local function resolveCached(fullType, ctxKind, ctx)
-	if not fullType then
-		return nil
-	end
-	local key = fullType .. "|" .. ctxKind
-	local cached = _taxResolveCache[key]
-	if cached ~= nil then
-		if cached == false then
-			return nil
-		end
-		return cached
-	end
-	local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, ctx)
-	if not ok or not tax then
-		_taxResolveCache[key] = false
-		return nil
-	end
-	_taxResolveCache[key] = tax
-	return tax
-end
-
-local CATEGORY_ALIASES = {
-	Medical = "FirstAid",
-	FirstAid = "Medical",
-	Tools = "Tool",
-	Tool = "Tools",
-	Materials = "Material",
-	Material = "Materials",
-
-	-- Migracion (v1.2.76): estas subcategorias gs_* pasaron de ser una
-	-- etiqueta interna nuestra a una DisplayCategory real (ver
-	-- GS_CategoryRewrite.lua). Un contenedor configurado ANTES de esa version
-	-- con la clave vieja debe seguir aceptando los mismos items ahora que
-	-- reportan la clave nueva - de ahi el alias en ambos sentidos.
-	gs_accessory_jewelry = "AccessoryJewelry", AccessoryJewelry = "gs_accessory_jewelry",
-	gs_accessory_other = "AccessoryOther", AccessoryOther = "gs_accessory_other",
-	gs_food_cold = "FoodPerishable", FoodPerishable = "gs_food_cold",
-	gs_food_dry = "FoodNonPerishable", FoodNonPerishable = "gs_food_dry",
-	gs_food_seed = "GardeningSeed", GardeningSeed = "gs_food_seed",
-	gs_tool_farm = "GardeningTool", GardeningTool = "gs_tool_farm",
-	gs_med_aid = "FirstAidAid", FirstAidAid = "gs_med_aid",
-	gs_med_surgery = "FirstAidSurgery", FirstAidSurgery = "gs_med_surgery",
-	gs_weapon_firearm = "Firearm", Firearm = "gs_weapon_firearm",
-	gs_weapon_melee = "WeaponMelee", WeaponMelee = "gs_weapon_melee",
-	gs_mat_metal = "MaterialMetalworking", MaterialMetalworking = "gs_mat_metal",
-	gs_mat_leather = "MaterialLeather", MaterialLeather = "gs_mat_leather",
-	gs_mat_wood = "MaterialWood", MaterialWood = "gs_mat_wood",
-}
-
 --- Obtiene la categoría principal vanilla (DisplayCategory) de un ítem.
 ---@param item InventoryItem
 ---@return string
 function GlobalStorageSiK.Router.getItemCategory(item)
-	if not item then
-		return "Misc"
-	end
-	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.keysFromItem then
-		local mainKey, _ = GlobalStorageSiK.ItemTaxonomy.keysFromItem(item)
-		if mainKey and mainKey ~= "" then
-			return mainKey
-		end
-	end
-	if item.getDisplayCategory then
-		local cat = item:getDisplayCategory()
-		if cat and cat ~= "" then
-			return cat
-		end
-	end
-	return "Misc"
+	if not item or not item.getFullType then return "Misc" end
+	return GlobalStorageSiK.CategoryResolution.resolve(item:getFullType(), nil, item).vanillaKey
 end
 
 --- Obtiene la subcategoría vanilla de un ítem (perk, BodyLocation, etc.).
 ---@param item InventoryItem
 ---@return string|nil
 function GlobalStorageSiK.Router.getItemSubCategory(item)
-	if not item or not GlobalStorageSiK.ItemTaxonomy or not GlobalStorageSiK.ItemTaxonomy.keysFromItem then
-		return nil
-	end
-	local _, subKey = GlobalStorageSiK.ItemTaxonomy.keysFromItem(item)
-	if subKey and subKey ~= "" then
-		return subKey
-	end
 	return nil
 end
 
@@ -123,12 +40,6 @@ local function categoryMatches(rule, category)
 		return false
 	end
 	if string.lower(rule) == string.lower(category) then
-		return true
-	end
-	if CATEGORY_ALIASES[rule] and string.lower(CATEGORY_ALIASES[rule]) == string.lower(category) then
-		return true
-	end
-	if CATEGORY_ALIASES[category] and string.lower(CATEGORY_ALIASES[category]) == string.lower(rule) then
 		return true
 	end
 	return false
@@ -204,139 +115,22 @@ end
 ---@param subKeys table
 ---@param rowContext table
 ---@return number|nil
-local function categoryRuleTier(rule, item, category, subCategory, subKeys, rowContext)
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
+local function categoryRuleTier(rule, item)
+	if type(rule) ~= "string" then return nil end
+	if rule == "*" then return 4 end
+	local stored = GlobalStorageSiK.CategoryResolution.classifyStoredRule({ type = "category", value = rule })
+	if stored == "DEPRECATED_EXTERNAL" or stored == "TECHNICAL_RESIDUE" or stored == "LEGACY_GS_ALIAS" then return nil end
+	local fullType = item and item.getFullType and item:getFullType() or nil
+	if not fullType then return nil end
+	local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
 	local nativeRule = GlobalStorageSiK.NativeProduct.decodePath(rule)
-	local isGsAlias = GlobalStorageSiK.Subcategories
-		and GlobalStorageSiK.Subcategories.isSubcategoryKey(rule)
-	-- Con un organizador externo activo, sus DisplayCategory gobiernan tipos
-	-- ajenos, pero nunca deben suplantar la identidad/routing de objetos GS.
-	-- Los aliases gs_* anteriores siguen siendo legibles durante esta release.
-	if not nativeRule and rule ~= "*" and not isGsAlias
-		and GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
-		local okType, fullType = pcall(function() return item:getFullType() end)
-		if okType and GlobalStorageSiK.NativeProduct.isOwnFullType(fullType) then return nil end
-	end
 	if nativeRule then
-		local okType, fullType = pcall(function() return item:getFullType() end)
-		if not okType or not fullType then return nil end
-		local itemPath = GlobalStorageSiK.NativeProduct.getPath(fullType)
-		if not GlobalStorageSiK.NativeProduct.pathMatches(nativeRule, itemPath) then return nil end
+		if resolved.effective ~= "native" or not GlobalStorageSiK.NativeProduct.pathMatches(nativeRule, resolved.nativePath) then return nil end
 		if nativeRule.l3 then return 1 end
 		if nativeRule.l2 then return 2 end
 		return 3
-	elseif rule == "*" then
-		return 4
-	elseif isGsAlias then
-		for j = 1, #subKeys do
-			if subKeys[j] == rule then
-				return 1
-			end
-		end
-		return nil
-	elseif rule:sub(1, #SUB) == SUB then
-		-- Regla de NIVEL 2 (subcategoria elegida sin bajar a Nivel 3, ej.
-		-- "Food > FoodPerishable"): acepta cualquier item cuyas claves
-		-- canonicas groupKey Y subGroupKey coincidan. Las etiquetas traducidas
-		-- se aceptan solo como fallback legacy hasta migrar el nodo desde la UI.
-		local rest = rule:sub(#SUB + 1)
-		local sepPos = rest:find("::", 1, true)
-		if not sepPos then return nil end
-		local wantGroup = string.lower(rest:sub(1, sepPos - 1))
-		local wantSubGroup = string.lower(rest:sub(sepPos + 2))
-		local ftOk, fullType = pcall(function() return item:getFullType() end)
-		if not ftOk then return nil end
-		-- dev22: probar resolve() con DOS contextos distintos (vacio y
-		-- con category/subCategory del item vivo), ambos cacheados por
-		-- fullType (ver resolveCached arriba) - antes se llamaba
-		-- resolve() sin cache, hasta 2 veces por nodo evaluado (10-20
-		-- nodos por deposito) para el MISMO item, puro trabajo repetido.
-		local taxEmpty = resolveCached(fullType, "empty", {})
-		local taxRow = resolveCached(fullType, "row", rowContext)
-		local function matches(tax)
-			if not tax then return false end
-			local groupMatches = tax.groupKey and string.lower(tax.groupKey) == wantGroup
-				or (tax.groupLabel and string.lower(tax.groupLabel) == wantGroup)
-			local subMatches = tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup
-				or (tax.subGroupLabel and string.lower(tax.subGroupLabel) == wantSubGroup)
-			return groupMatches and subMatches
-		end
-		if matches(taxEmpty) or matches(taxRow) then
-			return 2
-		end
-		return nil
-	elseif rule:sub(1, #EXT) == EXT then
-		-- Regla de NIVEL 1 (familia completa, ej. "Comida" sola): acepta
-		-- cualquier item cuyo groupKey canonico coincida, tenga o no Nivel 2/3.
-		local group = string.lower(rule:sub(#EXT + 1))
-		local ftOk, fullType = pcall(function() return item:getFullType() end)
-		if not ftOk then return nil end
-		local tax = resolveCached(fullType, "empty", {})
-		if tax and ((tax.groupKey and string.lower(tax.groupKey) == group)
-			or (tax.groupLabel and string.lower(tax.groupLabel) == group)) then
-			return 3
-		end
-		return nil
-	elseif rule:find("::", 1, true) then
-		-- Regla "categoria::hueco" (joyeria, ropa por prenda, o cualquier
-		-- subcategoria vanilla con hueco - ver GS_ItemTaxonomy.lua:
-		-- collectLeafFilters). Tan especifica como una subcategoria GS (tier 1).
-		-- Se acepta el hueco tanto si es de joyeria (jewelrySlotKey,
-		-- agrupado) como si es la subcategoria vanilla cruda (subCategory,
-		-- ej. la prenda exacta de Ropa) - mismo formato de clave, dos
-		-- fuentes posibles segun la categoria del item.
-		local sepPos = rule:find("::", 1, true)
-		local mainPart = string.lower(rule:sub(1, sepPos - 1))
-		local slotPart = string.lower(rule:sub(sepPos + 2))
-		if string.lower(category) ~= mainPart then return nil end
-		if subCategory and string.lower(subCategory) == slotPart then
-			return 1
-		end
-		local ftOk, fullType = pcall(function() return item:getFullType() end)
-		if ftOk then
-			local tax = resolveCached(fullType, "row", rowContext)
-			if tax and tax.jewelrySlotKey == slotPart then
-				return 1
-			end
-		end
-		return nil
-	else
-		-- Regla de NIVEL 3 sin combo (hoja EC compuesta, ej. "Comida >
-		-- Perecedero > Carne" = clave cruda "FoodPerishableMeat" completa,
-		-- ver GS_ItemTaxonomy.collectLeafFilters "elseif tax.hyphenLeafLabel
-		-- then key = tax.mainCanon"). category (arriba, via
-		-- Router.getItemCategory del ITEM VIVO) deberia coincidir en crudo
-		-- con rule sin mas, pero por la misma cautela que Nivel 2 (dev22):
-		-- si el match directo falla, reintentar contra tax.mainCanon
-		-- resuelto via resolve() con rowContext antes de rendirse.
-		if categoryMatches(rule, category) then
-			return 1
-		end
-		local ftOk, fullType = pcall(function() return item:getFullType() end)
-		if ftOk then
-			local tax = resolveCached(fullType, "row", rowContext)
-			if tax and tax.mainCanon and categoryMatches(rule, tax.mainCanon) then
-				return 1
-			end
-		end
-		return nil
 	end
-end
-
---- Calcula category/subCategory/subKeys/rowContext de un item una sola vez
---- (compartido entre matchSpecificity legacy y evaluateContainerRules).
----@param item InventoryItem
----@return string, string|nil, table, table
-local function resolveItemRowContext(item)
-	local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
-		and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
-	local category = GlobalStorageSiK.Router.getItemCategory(item)
-	-- Subcategoria vanilla real del item (BodyLocation/perk - ej. la prenda
-	-- exacta de Ropa, o el hueco de joyeria en crudo).
-	local subCategory = GlobalStorageSiK.Router.getItemSubCategory(item)
-	local rowContext = { category = category, subCategory = subCategory }
-	return category, subCategory, subKeys, rowContext
+	return categoryMatches(rule, resolved.vanillaKey) and 1 or nil
 end
 
 function GlobalStorageSiK.Router.matchSpecificity(entry, item)
@@ -356,10 +150,9 @@ function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	end
 	local rules = entry.categories
 	if not rules or #rules == 0 then return 4 end
-	local category, subCategory, subKeys, rowContext = resolveItemRowContext(item)
 	local bestTier = nil
 	for i = 1, #rules do
-		local tier = categoryRuleTier(rules[i], item, category, subCategory, subKeys, rowContext)
+		local tier = categoryRuleTier(rules[i], item)
 		if tier then
 			bestTier = bestTier and math.min(bestTier, tier) or tier
 		end
@@ -382,31 +175,15 @@ end
 function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 	local rules = entry and entry.rules
 	if not rules or #rules == 0 then return 4 end
-	local category, subCategory, subKeys, rowContext = resolveItemRowContext(item)
-
 	local function conditionTier(condition)
 		if not condition then return nil end
 		if condition.type == "category" then
 			-- nativePath es autoritativa cuando existe. `value` se conserva como
 			-- alias recuperable para mundos/reglas anteriores y solo se consulta
 			-- mientras la migración aditiva todavía no añadió nativePath.
-			local nativePath = condition.nativePath
-			if nativePath then
-				local nativeTier = categoryRuleTier(nativePath, item, category, subCategory, subKeys, rowContext)
-				local legacyValue = condition.legacyValue
-					or (condition.value ~= nativePath and condition.value or nil)
-				if legacyValue then
-					local legacyTier = categoryRuleTier(legacyValue, item, category, subCategory, subKeys, rowContext)
-					-- Contraste seguro: un delta conserva el comportamiento legacy y
-					-- queda contado para la decisión de Kava; solo la equivalencia
-					-- demostrada activa la ruta nativa de esa regla migrada.
-					if not GlobalStorageSiK.NativeProduct.recordRoutingContrast(legacyTier, nativeTier) then
-						return legacyTier
-					end
-				end
-				return nativeTier
-			end
-			return categoryRuleTier(condition.value, item, category, subCategory, subKeys, rowContext)
+			local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition)
+			if status == "DEPRECATED_EXTERNAL" or status == "TECHNICAL_RESIDUE" then return nil end
+			return categoryRuleTier(condition.nativePath or condition.value, item)
 		end
 		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then
 			return 1
@@ -557,7 +334,8 @@ function GlobalStorageSiK.Router.buildAffinityIndex(liveNodes)
 				local existing = items:get(j)
 				local fullType = existing and existing.getFullType and existing:getFullType() or nil
 				if fullType then exact[fullType] = (exact[fullType] or 0) + 1 end
-				local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(existing)
+				local affinityKey = existing and existing.getFullType
+					and GlobalStorageSiK.CategoryResolution.resolve(existing:getFullType(), nil, existing).routingIdentity or nil
 				if affinityKey then taxonomy[affinityKey] = (taxonomy[affinityKey] or 0) + 1 end
 			end
 		end
@@ -572,7 +350,8 @@ end
 function GlobalStorageSiK.Router.updateAffinityIndex(index, nodeIndex, item, delta)
 	if not index or not nodeIndex or not item then return end
 	local fullType = item.getFullType and item:getFullType() or nil
-	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	local affinityKey = item and item.getFullType
+		and GlobalStorageSiK.CategoryResolution.resolve(item:getFullType(), nil, item).routingIdentity or nil
 	local exact = index.exactByNode[nodeIndex] or {}
 	local taxonomy = index.taxonomyByNode[nodeIndex] or {}
 	index.exactByNode[nodeIndex] = exact
@@ -591,7 +370,8 @@ function GlobalStorageSiK.Router.unrestrictedAffinityTier(item, nodeIndex, affin
 	local exactCount = fullType and (exact[fullType] or 0) or 0
 	if excludeCurrent then exactCount = math.max(0, exactCount - 1) end
 	if exactCount > 0 then return 4 end
-	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	local affinityKey = item and item.getFullType
+		and GlobalStorageSiK.CategoryResolution.resolve(item:getFullType(), nil, item).routingIdentity or nil
 	local taxonomy = affinityIndex and affinityIndex.taxonomyByNode
 		and affinityIndex.taxonomyByNode[nodeIndex] or {}
 	local taxonomyCount = affinityKey and (taxonomy[affinityKey] or 0) or 0
@@ -684,12 +464,10 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 	local detailOn = GlobalStorageSiK.Sandbox.debugDetailEnabled("Router")
 	local ft = item.getFullType and item:getFullType() or "?"
 	if debugOn then
-		local subKeys = GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.keysForItem
-			and GlobalStorageSiK.Subcategories.keysForItem(item) or {}
+		local resolution = GlobalStorageSiK.CategoryResolution.resolve(ft, nil, item)
 		GlobalStorageSiK.Log.debug("Router", "pickDepositTarget | fullType=" .. tostring(ft)
-			.. " category=" .. tostring(GlobalStorageSiK.Router.getItemCategory(item))
-			.. " subKeys=" .. (#subKeys > 0 and table.concat(subKeys, ",") or "(ninguna)")
-			.. " affinityKey=" .. tostring(GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item))
+			.. " effective=" .. tostring(resolution.routingIdentity)
+			.. " nativeStatus=" .. tostring(resolution.nativeStatus)
 			.. " autoSort=" .. tostring(autoSort) .. " liveNodes=" .. tostring(#liveNodes))
 	end
 
@@ -817,7 +595,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 			end
 			if hasSpace then
 				local reason = cand.affinityTier == 4 and "afinidad mismo item"
-					or (cand.affinityTier == 5 and "afinidad taxonomica" or "contenedor sin restriccion")
+					or (cand.affinityTier == 5 and "afinidad de categoría" or "contenedor sin restriccion")
 				if debugOn then
 					GlobalStorageSiK.Log.debug("Router", string.format("RESULT tier=%s nodeId=%s (%s)",
 						tostring(cand.affinityTier), tostring((live.entry or {}).id), reason))

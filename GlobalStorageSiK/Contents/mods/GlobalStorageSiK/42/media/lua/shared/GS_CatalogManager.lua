@@ -24,8 +24,7 @@
 	  invalida presentacion (traducciones/etiquetas), nunca clasificacion.
 
 	Se ejecuta en TODOS los procesos (cliente, servidor dedicado, SP) porque
-	cada uno carga su propio ScriptManager de forma independiente - mismo
-	criterio ya usado en GS_CategoryRewrite.lua.
+	cada uno carga su propio ScriptManager de forma independiente.
 ]]
 
 GlobalStorageSiK.CatalogManager = GlobalStorageSiK.CatalogManager or {}
@@ -105,10 +104,8 @@ local function gameBuildFingerprint()
 	return "unknown"
 end
 
---- Calcula catalogFingerprint/externalModsFingerprint a partir del estado
---- real del proceso. Llamado una sola vez en OnGameBoot (mismo evento en el
---- que GS_CategoryRewrite.lua ya recorre getAllItems() con seguridad
---- confirmada) - nunca antes, nunca de forma perezosa desde una consulta.
+--- Calcula los fingerprints del catálogo a partir del estado real del proceso.
+--- Se llama una sola vez en OnGameBoot, nunca de forma perezosa desde una consulta.
 local function computeFingerprints()
 	local modsFingerprint, modCount = activeModsFingerprint()
 	state.externalModsFingerprint = modsFingerprint

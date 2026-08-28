@@ -33,7 +33,6 @@
 
 require "GS_NativeClassifierApi"
 require "GS_NativeClassifierUtils"
-require "GS_Subcategories"
 
 local U = GlobalStorageSiK.NativeClassifierUtils
 
@@ -171,14 +170,13 @@ local function classifyClothing(fullType, si)
 	if U.hasAnyToken(nameTokens, INTERNAL_PROXY_TOKENS) then return nil end
 
 	-- dev11 (pedido explícito del usuario: "las joyas ya lo teníamos
-	-- compatibilizado para el mod Magic, para organizarlos por hueco
-	-- equipable también"): reutiliza GS_Subcategories.jewelrySlotKey() (ya
-	-- en producción, ya compatible con anillos/joyas de Magic y de
-	-- terceros) en vez de duplicar la lista de huecos de joyería aquí -
+	-- organizados por hueco equipable también"): reutiliza
+	-- NativeClassifierUtils.jewelrySlotKey() en vez de duplicar la lista de
+	-- huecos de joyería aquí -
 	-- collar/anillo/muñeca/pendiente/nariz son L2 "accessory", nunca
 	-- "clothing" genérico, aunque compartan el mismo hueco de equipación
 	-- oficial.
-	local jewelrySlot = GlobalStorageSiK.Subcategories.jewelrySlotKey(si)
+	local jewelrySlot = U.jewelrySlotKey(si)
 	if jewelrySlot then
 		return
 			{ l1 = "clothing_protection", l2 = "accessory", l3 = jewelrySlot },

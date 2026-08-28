@@ -14,6 +14,7 @@ require "GS_Power"
 require "GS_Zones"
 require "GS_ZonePriority"
 require "GS_I18n"
+require "GS_CategoryResolution"
 
 GlobalStorageSiK.Redistribute = {}
 
@@ -237,7 +238,9 @@ local function updateTypeCount(session, nodeIndex, fullType, delta)
 end
 
 local function updateAffinityCount(session, nodeIndex, item, delta)
-	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	local fullType = item and item.getFullType and item:getFullType() or nil
+	local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
+	local affinityKey = resolved and resolved.routingIdentity
 	if not affinityKey then return end
 	local counts = session.affinityCountsByNode[nodeIndex]
 	if not counts then

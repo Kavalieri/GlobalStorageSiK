@@ -926,37 +926,8 @@ function GlobalStorageSiK.TerminalNodes.refresh(nodesPanel, terminal, nodes, cat
 	local panel = nodesPanel.nodesListPanel
 	nodes = nodes or {}
 	categories = categories or {}
-	-- Migracion best-effort de las reglas v1 que persistian etiquetas del
-	-- idioma del cliente. Se ejecuta al recibir la lista de Nodos, no obliga a
-	-- abrir cada editor. El servidor conserva su validacion normal de permisos.
-	panel._canonicalMigrationSent = panel._canonicalMigrationSent or {}
-	local catalog = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
-	local configLocked = terminal and terminal.canEditNetworkConfig
-		and not terminal:canEditNetworkConfig(false)
-	if not configLocked then
-		for i = 1, #nodes do
-			local node = nodes[i]
-			local migrated = {}
-			local changed = false
-			local seen = {}
-			for _, rule in ipairs(node.categories or {}) do
-				local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(rule, catalog)
-				if canonical ~= rule then changed = true end
-				local sig = string.lower(canonical)
-				if not seen[sig] then
-					seen[sig] = true
-					migrated[#migrated + 1] = canonical
-				end
-			end
-			if changed then
-				node.categories = migrated
-				if node.id and not panel._canonicalMigrationSent[node.id] then
-					panel._canonicalMigrationSent[node.id] = true
-					GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = migrated })
-				end
-			end
-		end
-	end
+	-- Las reglas heredadas llegan sin normalización cliente: el saneado
+	-- autoritativo conserva sus valores y clasifica las incompatibles.
 	local zones = terminal and terminal.terminalState and terminal.terminalState.zones or {}
 	panel._lastNodes = nodes
 	panel._displayRows = buildGroupedDisplayRows(nodes, zones, panel._collapsedZones, panel.sortColumn, panel.sortDir)

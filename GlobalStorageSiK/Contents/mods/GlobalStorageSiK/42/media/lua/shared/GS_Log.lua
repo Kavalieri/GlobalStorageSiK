@@ -98,10 +98,6 @@ local AREA_CATEGORY = {
 	-- Renombrada en dev36 para agrupar bajo el mismo arbol SiK UI en vez de
 	-- quedar suelta.
 	SiKUISearch = "SiKUISearch",
-	-- Categoria propia (pedido explicito 2026-08-21, fase dev Better Sorting):
-	-- traza de normalizacion de categorias por item, alto volumen (Log.detail),
-	-- debe poder apagarse sin tocar el resto de diagnosticos activos.
-	CompatCategories = "CompatCategories",
 	-- Categoria propia (pedido explicito 2026-08-21, prueba de bonus de
 	-- capacidad por rasgo tipo Organizado): confirma si/cuanto bonus personal
 	-- se detecto por contenedor durante la prueba, sin depender del

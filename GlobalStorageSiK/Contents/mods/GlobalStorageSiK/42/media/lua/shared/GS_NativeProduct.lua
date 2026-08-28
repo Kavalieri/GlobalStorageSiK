@@ -7,14 +7,12 @@
 	- clasificación canónica por fullType/epoch;
 	- proyección/etiquetas de presentación separadas;
 	- índices inversos reutilizables;
-	- compatibilidad y migración explícitas, nunca destructivas al cargar.
+	- índices y presentación reutilizables sin depender de proveedores externos.
 ]]
 
 require "GS_CatalogManager"
 require "GS_NativeClassifier"
 require "GS_NativeTaxonomyRegistry"
-require "GS_ItemTaxonomy"
-require "GS_CompatMods"
 
 GlobalStorageSiK.NativeProduct = GlobalStorageSiK.NativeProduct or {}
 
@@ -30,10 +28,6 @@ local metrics = {
 	indexBuilds = 0,
 	indexRows = 0,
 	presentationBuilds = 0,
-	migrationAudits = 0,
-	routingContrastComparisons = 0,
-	routingContrastEquivalent = 0,
-	routingContrastDeltas = 0,
 }
 
 local pathTraceSamples = {}
@@ -63,10 +57,6 @@ local function resetMetrics()
 	metrics.indexBuilds = 0
 	metrics.indexRows = 0
 	metrics.presentationBuilds = 0
-	metrics.migrationAudits = 0
-	metrics.routingContrastComparisons = 0
-	metrics.routingContrastEquivalent = 0
-	metrics.routingContrastDeltas = 0
 	pathTraceSamples = {}
 end
 
@@ -85,33 +75,6 @@ function GlobalStorageSiK.NativeProduct.tracePathSample(stage, fullType, nativeP
 	GlobalStorageSiK.Log.detail(area, "nativePath stage=" .. tostring(stage)
 		.. " fullType=" .. tostring(fullType) .. " value=" .. tostring(nativePath)
 		.. " decodable=" .. tostring(GlobalStorageSiK.NativeProduct.decodePath(nativePath) ~= nil))
-end
-
----@return table
-function GlobalStorageSiK.NativeProduct.getCompatibilityStatus()
-	local compat = GlobalStorageSiK.CompatMods
-	return {
-		extendedCategories = compat and compat.hasExtendedCategories() == true or false,
-		organizedCategories = compat and compat.hasOrganizedCategoriesCore() == true or false,
-		betterSorting = compat and compat.hasBetterSorting() == true or false,
-	}
-end
-
----@param stage string server|client
-function GlobalStorageSiK.NativeProduct.traceCompatibility(stage)
-	local key = "compat:" .. tostring(stage)
-	if pathTraceSamples[key] then return end
-	if not GlobalStorageSiK.Sandbox or not GlobalStorageSiK.Sandbox.debugDetailEnabled
-		or not GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory") then return end
-	pathTraceSamples[key] = 1
-	local status = GlobalStorageSiK.NativeProduct.getCompatibilityStatus()
-	local area = stage == "client" and "Client" or "Server"
-	if GlobalStorageSiK.Log and GlobalStorageSiK.Log.detail then
-		GlobalStorageSiK.Log.detail(area, "nativeProductCompat stage=" .. tostring(stage)
-			.. " extendedCategories=" .. tostring(status.extendedCategories)
-			.. " organizedCategories=" .. tostring(status.organizedCategories)
-			.. " betterSorting=" .. tostring(status.betterSorting))
-	end
 end
 
 local function resetCatalogState()
@@ -178,7 +141,8 @@ function GlobalStorageSiK.NativeProduct.getPath(fullType)
 		return cached ~= false and cached or nil
 	end
 	local result = GlobalStorageSiK.NativeClassifier.classify(fullType)
-	if not result or result.pending then return nil end
+	if not result or result.pending or result.classifierError
+		or not result.primaryPath or result.primaryPath.l1 == "other" then return nil end
 	local path = GlobalStorageSiK.NativeProduct.normalizePath(result.primaryPath)
 	pathCache[fullType] = path or false
 	GlobalStorageSiK.NativeProduct.tracePathSample("getPath", fullType,
@@ -263,48 +227,20 @@ function GlobalStorageSiK.NativeProduct.getView(path)
 	return view
 end
 
---- La compatibilidad de categorías existente sigue gobernando la proyección
---- visible de tipos ajenos a GS mientras el mod externo esté activo. La ruta
---- canónica nunca cambia y los tipos propios conservan siempre su identidad.
----@return boolean
-function GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive()
-	local compat = GlobalStorageSiK.CompatMods
-	return compat and (compat.hasExtendedCategories()
-		or compat.hasOrganizedCategoriesCore()
-		or compat.hasBetterSorting()) or false
-end
-
 ---@param row table|nil
----@return table projection {mode,key,fullLabel,color,nativePath,taxonomy}
+---@return table projection {mode,key,fullLabel,color,nativePath,vanillaKey}
 function GlobalStorageSiK.NativeProduct.getRowProjection(row)
-	row = row or {}
-	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
-	if nativePath and nativePath.l1 == "globalstoragesik" then
-		local view = GlobalStorageSiK.NativeProduct.getView(nativePath)
-		return { mode = "native", key = view.key, fullLabel = view.fullLabel,
-			color = GlobalStorageSiK.NativeProduct.getColor(nativePath), nativePath = nativePath }
+	local resolved = GlobalStorageSiK.CategoryResolution
+		and GlobalStorageSiK.CategoryResolution.resolve(row and row.fullType, row, nil) or nil
+	if resolved and resolved.effective == "native" then
+		return { mode = "native", key = resolved.nativePath,
+			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
+			color = GlobalStorageSiK.CategoryResolution.color(resolved), nativePath = resolved.nativePath }
 	end
-	if GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
-		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
-		if tax and tax.mainCanon and tax.mainCanon ~= "" then
-			return { mode = "legacy", key = tax.mainCanon, fullLabel = tax.fullLabel,
-				taxonomy = tax, nativePath = nativePath }
-		end
-	end
-	if nativePath then
-		local view = GlobalStorageSiK.NativeProduct.getView(nativePath)
-		return { mode = "native", key = view.key, fullLabel = view.fullLabel,
-			color = GlobalStorageSiK.NativeProduct.getColor(nativePath), nativePath = nativePath }
-	end
-	local tax = GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
-	return { mode = "legacy", key = tax.mainCanon, fullLabel = tax.fullLabel,
-		taxonomy = tax, nativePath = nil }
-end
-
----@param row table|nil
----@return boolean
-function GlobalStorageSiK.NativeProduct.usesLegacyProjection(row)
-	return GlobalStorageSiK.NativeProduct.getRowProjection(row).mode == "legacy"
+	local vanillaKey = resolved and resolved.vanillaKey or "Misc"
+	return { mode = "vanilla", key = vanillaKey,
+		fullLabel = resolved and GlobalStorageSiK.CategoryResolution.label(resolved) or vanillaKey,
+		vanillaKey = vanillaKey, nativePath = nil }
 end
 
 ---@param fullType string|nil
@@ -403,107 +339,6 @@ function GlobalStorageSiK.NativeProduct.listOptions(parent)
 	return options
 end
 
-local function legacyAliasesForRow(row)
-	local aliases = {}
-	local seen = {}
-	local function add(value)
-		if value and value ~= "" then
-			local sig = string.lower(tostring(value))
-			if not seen[sig] then seen[sig] = true; aliases[#aliases + 1] = tostring(value) end
-		end
-	end
-	add(row.category)
-	add(row.subCategory)
-	for key in tostring(row.gsSubKeysStr or ""):gmatch("[^|]+") do add(key) end
-	local tax = GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
-	add(tax.mainCanon)
-	add(tax.subCanon)
-	add(GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX .. tostring(tax.groupKey or ""))
-	if tax.groupKey and tax.subGroupKey then
-		add(GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX .. tax.groupKey .. "::" .. tax.subGroupKey)
-	end
-	return aliases
-end
-
---- Preflight explícito: no muta owners ni recorre el catálogo por iniciativa
---- propia. Solo las aliases que convergen en una única ruta son transformables.
----@param owners table[] {id=string,rules=table[]}
----@param catalogRows table[]
----@return table plan
-function GlobalStorageSiK.NativeProduct.auditMigration(owners, catalogRows)
-	metrics.migrationAudits = metrics.migrationAudits + 1
-	local aliasPaths = {}
-	for i = 1, #(catalogRows or {}) do
-		local row = catalogRows[i]
-		local path = GlobalStorageSiK.NativeProduct.getPath(row.fullType)
-		local encoded = GlobalStorageSiK.NativeProduct.encodePath(path)
-		if encoded then
-			local aliases = legacyAliasesForRow(row)
-			for a = 1, #aliases do
-				local sig = string.lower(aliases[a])
-				aliasPaths[sig] = aliasPaths[sig] or {}
-				aliasPaths[sig][encoded] = true
-			end
-		end
-	end
-	local plan = { transformable = {}, ambiguous = {}, orphan = {}, alreadyNative = 0, totalCategoryRules = 0 }
-	for i = 1, #(owners or {}) do
-		local owner = owners[i]
-		for r = 1, #(owner.rules or {}) do
-			local rule = owner.rules[r]
-			local condition = rule and rule.condition
-			if condition and condition.type == "category" then
-				plan.totalCategoryRules = plan.totalCategoryRules + 1
-				if GlobalStorageSiK.NativeProduct.decodePath(condition.nativePath or condition.value) then
-					plan.alreadyNative = plan.alreadyNative + 1
-				else
-					local candidates = aliasPaths[string.lower(tostring(condition.value or ""))] or {}
-					local count, only = 0, nil
-					for encoded in pairs(candidates) do count = count + 1; only = encoded end
-					local entry = { owner = owner, ownerId = owner.id, ruleIndex = r, rule = rule, nativePath = only }
-					if count == 1 then plan.transformable[#plan.transformable + 1] = entry
-					elseif count > 1 then plan.ambiguous[#plan.ambiguous + 1] = entry
-					else plan.orphan[#plan.orphan + 1] = entry end
-				end
-			end
-		end
-	end
-	return plan
-end
-
---- Migración aditiva/idempotente sobre un plan ya auditado. Conserva value
---- original y jamás aplica entradas ambiguas/huérfanas.
----@param plan table
----@return number changed
-function GlobalStorageSiK.NativeProduct.applyAuditedMigration(plan)
-	local changed = 0
-	for i = 1, #((plan and plan.transformable) or {}) do
-		local entry = plan.transformable[i]
-		local condition = entry.rule and entry.rule.condition
-		if condition and not condition.nativePath and GlobalStorageSiK.NativeProduct.decodePath(entry.nativePath) then
-			condition.legacyValue = condition.value
-			condition.nativePath = entry.nativePath
-			changed = changed + 1
-		end
-	end
-	return changed
-end
-
---- Registra contraste escalar sin conservar item, regla ni referencias Java.
----@param legacyTier number|nil
----@param nativeTier number|nil
----@return boolean equivalent
-function GlobalStorageSiK.NativeProduct.recordRoutingContrast(legacyTier, nativeTier)
-	metrics.routingContrastComparisons = metrics.routingContrastComparisons + 1
-	local equivalent = legacyTier == nativeTier
-	if equivalent then
-		metrics.routingContrastEquivalent = metrics.routingContrastEquivalent + 1
-	else
-		metrics.routingContrastDeltas = metrics.routingContrastDeltas + 1
-	end
-	return equivalent
-end
-
 ---@return table
 function GlobalStorageSiK.NativeProduct.getMetrics()
 	local classifier = GlobalStorageSiK.NativeClassifier.getMetrics and GlobalStorageSiK.NativeClassifier.getMetrics() or {}
@@ -511,16 +346,11 @@ function GlobalStorageSiK.NativeProduct.getMetrics()
 		catalogEpoch = GlobalStorageSiK.CatalogManager.getEpoch(),
 		languageEpoch = GlobalStorageSiK.CatalogManager.getLanguageEpoch(),
 		catalogFingerprint = GlobalStorageSiK.CatalogManager.getCatalogFingerprint(),
-		externalModsFingerprint = GlobalStorageSiK.CatalogManager.getExternalModsFingerprint(),
 		pathRequests = metrics.pathRequests,
 		pathCacheHits = metrics.pathCacheHits,
 		indexBuilds = metrics.indexBuilds,
 		indexRows = metrics.indexRows,
 		presentationBuilds = metrics.presentationBuilds,
-		migrationAudits = metrics.migrationAudits,
-		routingContrastComparisons = metrics.routingContrastComparisons,
-		routingContrastEquivalent = metrics.routingContrastEquivalent,
-		routingContrastDeltas = metrics.routingContrastDeltas,
 		classifierRequests = classifier.requests or 0,
 		effectiveClassifications = classifier.effectiveClassifications or 0,
 		classifierCacheHits = classifier.cacheHits or 0,

@@ -10,8 +10,8 @@ require "ISUI/ISLabel"
 require "ISUI/ISContextMenu"
 require "GS_CatalogManager"
 require "GS_I18n"
-require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_CategoryResolution"
 require "GS_Libs"
 require "GS_BulkFilters"
 require "GS_DepositSources"
@@ -670,7 +670,8 @@ local function sortKeyValue(row, sortKey, terminal)
 	end
 	local value
 	if sortKey == "category" then
-		value = string.lower(GlobalStorageSiK.NativeProduct.getRowProjection(row).fullLabel or "")
+		value = string.lower(GlobalStorageSiK.CategoryResolution.label(
+			GlobalStorageSiK.CategoryResolution.resolve(row.fullType, row, nil)) or "")
 	else
 		local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName, row.worldSprite)
 		value = string.lower(tostring(name or row.fullType or ""))
@@ -727,8 +728,8 @@ function GlobalStorageSiK.TerminalItems.rowTaxonomy(row)
 		return { mainKey = "", subKey = "", mainLabel = "", subLabel = "", fullLabel = "",
 			groupKey = "", subGroupKey = nil, groupLabel = "", subGroupLabel = nil, leafLabel = nil }
 	end
-	local projection = GlobalStorageSiK.NativeProduct.getRowProjection(row)
-	local path = projection.mode == "native" and projection.nativePath or nil
+	local resolution = GlobalStorageSiK.CategoryResolution.resolve(row.fullType, row, nil)
+	local path = resolution.effective == "native" and resolution.nativePath or nil
 	if path then
 		local view = GlobalStorageSiK.NativeProduct.getView(path)
 		return {
@@ -739,7 +740,10 @@ function GlobalStorageSiK.TerminalItems.rowTaxonomy(row)
 			nativePath = path,
 		}
 	end
-	return projection.taxonomy or GlobalStorageSiK.ItemTaxonomy.resolve(row.fullType, row)
+	return { mainKey = resolution.vanillaKey, subKey = nil,
+		mainLabel = GlobalStorageSiK.CategoryResolution.label(resolution),
+		fullLabel = GlobalStorageSiK.CategoryResolution.label(resolution),
+		groupKey = resolution.vanillaKey, groupLabel = GlobalStorageSiK.CategoryResolution.label(resolution) }
 end
 
 -- El mismo snapshot de filas alimenta L1/L2/L3 durante un refresh. Mantener
@@ -771,27 +775,6 @@ local function nativeOptionsPresent(rows, parent)
 	return result
 end
 
-local projectionSourceRows = nil
-local projectionNativeRows = nil
-local projectionLegacyRows = nil
-local projectionRowsEpoch = nil
-local function projectionRows(rows, wantLegacy)
-	rows = rows or {}
-	local epoch = GlobalStorageSiK.CatalogManager.getEpoch()
-	if rows ~= projectionSourceRows or epoch ~= projectionRowsEpoch then
-		projectionSourceRows = rows
-		projectionRowsEpoch = epoch
-		projectionNativeRows = {}
-		projectionLegacyRows = {}
-		for i = 1, #rows do
-			local target = GlobalStorageSiK.NativeProduct.usesLegacyProjection(rows[i])
-				and projectionLegacyRows or projectionNativeRows
-			target[#target + 1] = rows[i]
-		end
-	end
-	return wantLegacy and projectionLegacyRows or projectionNativeRows
-end
-
 local function appendUniqueOptions(target, seen, options)
 	for i = 1, #options do
 		local sig = string.lower(tostring(options[i].key or ""))
@@ -807,8 +790,7 @@ local function filterByNativePath(rows, key)
 	if not GlobalStorageSiK.NativeProduct.decodePath(key) then return nil end
 	local filtered = {}
 	for i = 1, #rows do
-		if not GlobalStorageSiK.NativeProduct.usesLegacyProjection(rows[i])
-			and GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePath) then
+		if GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePath) then
 			filtered[#filtered + 1] = rows[i]
 		end
 	end
@@ -821,9 +803,7 @@ end
 function GlobalStorageSiK.TerminalItems.collectMainCategoryFilters(rows)
 	rows = rows or {}
 	local result, seen = {}, {}
-	appendUniqueOptions(result, seen, nativeOptionsPresent(projectionRows(rows, false), nil))
-	appendUniqueOptions(result, seen,
-		GlobalStorageSiK.ItemTaxonomy.collectMainFilters(projectionRows(rows, true)))
+	appendUniqueOptions(result, seen, nativeOptionsPresent(rows, nil))
 	table.sort(result, function(a, b) return string.lower(a.label) < string.lower(b.label) end)
 	return result
 end
@@ -834,12 +814,8 @@ end
 ---@return table[] { key: string, label: string, typeCount: number }
 function GlobalStorageSiK.TerminalItems.collectSubCategoryFilters(rows, mainKey)
 	if not mainKey or mainKey == "" then return {} end
-	if GlobalStorageSiK.NativeProduct.decodePath(mainKey) then
-		return nativeOptionsPresent(projectionRows(rows or {}, false), mainKey)
-	end
-	local legacyRows = GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive()
-		and projectionRows(rows or {}, true) or (rows or {})
-	return GlobalStorageSiK.ItemTaxonomy.collectSubFilters(legacyRows, mainKey)
+	return GlobalStorageSiK.NativeProduct.decodePath(mainKey)
+		and nativeOptionsPresent(rows or {}, mainKey) or {}
 end
 
 --- Filtra filas por categoría principal (vacío = todas).
@@ -852,35 +828,7 @@ function GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, mainKey)
 	end
 	local native = filterByNativePath(rows, mainKey)
 	if native then return native end
-	if GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
-		rows = projectionRows(rows, true)
-	end
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	if mainKey:sub(1, #EXT) == EXT then
-		-- Clave de familia canonica (groupKey, fuente unica - ver
-		-- GS_ItemTaxonomy.lua resolve()/collectMainFilters): se compara por clave, NO
-		-- solo por extGroupLabel, para incluir tambien los items "genericos"
-		-- de la misma familia que no tienen division cualificada (antes se
-		-- quedaban fuera del filtro sin que se notara, ya que rara vez se
-		-- posee a la vez un item de cada variante).
-		local group = string.lower(mainKey:sub(#EXT + 1))
-		local filtered = {}
-		for i = 1, #rows do
-			local tax = GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i])
-			if tax.groupKey and tax.groupKey ~= "" and string.lower(tax.groupKey) == group then
-				filtered[#filtered + 1] = rows[i]
-			end
-		end
-		return filtered
-	end
-	local key = string.lower(mainKey)
-	local filtered = {}
-	for i = 1, #rows do
-		if GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i]).mainKey == key then
-			filtered[#filtered + 1] = rows[i]
-		end
-	end
-	return filtered
+	return rows
 end
 
 --- Recopila sub-subcategorías (Nivel 3) únicas, restringidas a Nivel 1 (y
@@ -891,12 +839,8 @@ end
 ---@return table[] { key: string, label: string, typeCount: number }
 function GlobalStorageSiK.TerminalItems.collectLeafCategoryFilters(rows, mainKey, subKey)
 	if not subKey or subKey == "" then return {} end
-	if GlobalStorageSiK.NativeProduct.decodePath(subKey) then
-		return nativeOptionsPresent(projectionRows(rows or {}, false), subKey)
-	end
-	local legacyRows = GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive()
-		and projectionRows(rows or {}, true) or (rows or {})
-	return GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(legacyRows, mainKey, subKey)
+	return GlobalStorageSiK.NativeProduct.decodePath(subKey)
+		and nativeOptionsPresent(rows or {}, subKey) or {}
 end
 
 --- Filtra filas por Nivel 2 (subcategoría, ej. "Perecedero" - vacío = todas).
@@ -911,30 +855,7 @@ function GlobalStorageSiK.TerminalItems.filterBySubCategory(rows, subKey)
 		return rows
 	end
 	local native = filterByNativePath(rows, subKey)
-	if native then return native end
-	if GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
-		rows = projectionRows(rows, true)
-	end
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if subKey:sub(1, #SUB) ~= SUB then
-		return rows
-	end
-	local rest = subKey:sub(#SUB + 1)
-	local sepPos = rest:find("::", 1, true)
-	if not sepPos then
-		return rows
-	end
-	local wantGroup = string.lower(rest:sub(1, sepPos - 1))
-	local wantSubGroup = string.lower(rest:sub(sepPos + 2))
-	local filtered = {}
-	for i = 1, #rows do
-		local tax = GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i])
-		if tax.groupKey and string.lower(tax.groupKey) == wantGroup
-			and tax.subGroupKey and string.lower(tax.subGroupKey) == wantSubGroup then
-			filtered[#filtered + 1] = rows[i]
-		end
-	end
-	return filtered
+	return native or rows
 end
 
 --- Filtra filas por Nivel 3 (hoja final: tipo de comida, hueco de
@@ -948,38 +869,7 @@ function GlobalStorageSiK.TerminalItems.filterByLeafCategory(rows, leafKey)
 		return rows
 	end
 	local native = filterByNativePath(rows, leafKey)
-	if native then return native end
-	if GlobalStorageSiK.NativeProduct.isLegacyCategoryProjectionActive() then
-		rows = projectionRows(rows, true)
-	end
-	local key = string.lower(leafKey)
-
-	-- Clave compuesta "categoria::hueco" (joyeria O cualquier subcategoria
-	-- vanilla cruda, ej. la prenda exacta de Ropa) - ver
-	-- GS_ItemTaxonomy.lua:collectLeafFilters.
-	local sepPos = key:find("::", 1, true)
-	if sepPos then
-		local mainPart = key:sub(1, sepPos - 1)
-		local slotPart = key:sub(sepPos + 2)
-		local filtered = {}
-		for i = 1, #rows do
-			local tax = GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i])
-			if tax.mainKey == mainPart and (tax.jewelrySlotKey == slotPart or tax.subKey == slotPart) then
-				filtered[#filtered + 1] = rows[i]
-			end
-		end
-		return filtered
-	end
-
-	-- Hoja "plana": el tercer segmento con guion ya deja mainCanon completo
-	-- y unico (ej. "foodperishablecheese"), coincidencia exacta contra mainKey.
-	local filtered = {}
-	for i = 1, #rows do
-		if GlobalStorageSiK.TerminalItems.rowTaxonomy(rows[i]).mainKey == key then
-			filtered[#filtered + 1] = rows[i]
-		end
-	end
-	return filtered
+	return native or rows
 end
 
 ---@param panel ISPanel

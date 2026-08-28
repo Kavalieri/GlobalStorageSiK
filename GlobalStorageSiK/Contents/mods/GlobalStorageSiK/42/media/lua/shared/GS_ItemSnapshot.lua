@@ -7,7 +7,6 @@
 
 require "GS_Router"
 require "GS_I18n"
-require "GS_Subcategories"
 
 GlobalStorageSiK.ItemSnapshot = {}
 
@@ -143,7 +142,7 @@ local function metadataForItem(item, fullType)
 	local cacheKey = fullType .. "\31" .. tostring(worldSprite or "")
 	local cached = metadataByFullType[cacheKey]
 	if cached then return cached end
-	local gsKeysList = GlobalStorageSiK.Subcategories.keysForItem(item) or {}
+	local gsKeysList = {}
 	local displayName = GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 	if not displayName or GlobalStorageSiK.I18n.isLowQualityDisplayName(displayName) then
 		displayName = GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)

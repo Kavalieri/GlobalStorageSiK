@@ -264,7 +264,6 @@ local function onServerCommand(module, command, args)
 			local row = args.items[i]
 			GlobalStorageSiK.NativeProduct.tracePathSample("clientReceive", row.fullType, row.nativePath)
 		end
-		GlobalStorageSiK.NativeProduct.traceCompatibility("client")
 		local explicitOpen = args and args.openUi == true
 		local inventorySync = args and args.inventorySync == true
 		local openSeq = args and args.openSeq

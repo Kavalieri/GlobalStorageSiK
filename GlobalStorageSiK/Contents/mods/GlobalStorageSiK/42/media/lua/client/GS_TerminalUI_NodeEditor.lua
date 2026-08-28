@@ -609,28 +609,13 @@ function GS_NodeEditorUI:ensureForm()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rulesSummaryHost)
 	y = y + self.rulesSummaryHost:getHeight() + 8
 
-	-- ── Categoria sugerida (basada en el contenido actual) ─────────────────
-	-- BUG REAL confirmado (2026-08-25, captura del usuario: la tarjeta nueva
-	-- con OR/AND nunca aparecio en NINGUN contenedor, ni siquiera cuando el
-	-- bloque viejo de abajo si mostraba una sugerencia) - esta tarjeta
-	-- llamaba a `GlobalStorageSiK.ItemTaxonomy.suggestCategoryForNode`, una
-	-- funcion que JAMAS se llego a implementar (no existe en GS_ItemTaxonomy.
-	-- lua ni en ningun otro fichero) - `sugKey` era siempre nil y la tarjeta
-	-- nunca se construia, codigo muerto desde el dia que se escribio. La
-	-- sugerencia real la calcula el SERVIDOR (`suggestCategoryFromSnapshot`,
-	-- GS_Server.lua) y llega al cliente en `nodeContentsCache[node.id].
-	-- suggestedCategory` - exactamente lo que ya leia el bloque viejo (ahora
-	-- eliminado) de GS_TerminalUI_Config.lua. Misma fuente de datos, ahora
-	-- consumida aqui.
+	-- ── Ruta nativa sugerida (basada en el contenido actual) ────────────────
+	-- El servidor solo propone una ruta nativa útil. La ausencia de sugerencia
+	-- no se sustituye por una categoría técnica, externa o inferida.
 	local _sugCache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
 	local _sugPayload = self.node and _sugCache[self.node.id]
 	local suggestedNativePath = _sugPayload and _sugPayload.suggestedNativePath
-	local sugKey = _sugPayload and _sugPayload.suggestedProjectedCategory
-		and _sugPayload.suggestedProjectedCategory ~= "" and _sugPayload.suggestedProjectedCategory
-		or (_sugPayload and _sugPayload.suggestedNativePath and _sugPayload.suggestedNativePath ~= ""
-		and _sugPayload.suggestedNativePath)
-		or (_sugPayload and _sugPayload.suggestedCategory and _sugPayload.suggestedCategory ~= ""
-			and _sugPayload.suggestedCategory or nil)
+	local sugKey = suggestedNativePath and suggestedNativePath ~= "" and suggestedNativePath or nil
 	-- El contenido del nodo (y con el, la sugerencia) llega ASYNC del
 	-- servidor y puede no haber llegado todavia cuando se construye el
 	-- formulario por primera vez al abrir el editor - `refreshContents()` se
@@ -1104,12 +1089,10 @@ local function contentsFingerprint(node)
 	local rowCount = #rows
 	local firstType = rowCount > 0 and (rows[1].fullType or "") or ""
 	return string.format(
-		"%s|%s|%s|%s|%s|%d|%s",
+		"%s|%s|%d|%s|%s",
 		tostring(payload.source or ""),
 		tostring(payload.suggestedNativePath or ""),
-		tostring(payload.suggestedProjectedCategory or ""),
-		tostring(payload.suggestedCategory or ""),
-		tostring(rowCount),
+		rowCount,
 		tostring(node.itemTypeCount or 0),
 		firstType
 	)
@@ -1268,25 +1251,10 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 	self.categories = categories or {}
 	-- Inicializar estado de edición al abrir un nodo nuevo
 	if not sameNode then
-		local migrated = false
-		local seen = {}
-		local catalog = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
-		local canonicalCategories = {}
-		for _, cat in ipairs(node.categories or {}) do
-			local canonical = GlobalStorageSiK.ItemTaxonomy.canonicalizeFilterRule(cat, catalog)
-			if canonical ~= cat then migrated = true end
-			local sig = string.lower(canonical)
-			if not seen[sig] then
-				seen[sig] = true
-				canonicalCategories[#canonicalCategories + 1] = canonical
-			end
-		end
-		-- Migracion unica de reglas antiguas que guardaban textos traducidos.
-		-- Solo afecta a los prefijos virtuales de Nivel 1/2; las hojas exactas
-		-- y categoria::hueco de joyeria/ropa pasan intactas.
-		if migrated then
-			node.categories = canonicalCategories
-		end
+		-- Las claves historicas se conservan literalmente: el servidor las
+		-- clasifica y deja inactivas si pertenecen a un proveedor retirado.
+		-- No se traducen ni se convierten al abrir el editor.
+		local legacyCategories = node.categories or {}
 
 		-- Migracion al motor unificado de reglas (dev26, ver
 		-- Documentacion/GS_FilterRedesign_Plan.md): un contenedor que
@@ -1296,11 +1264,9 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 		-- mismo patron ya establecido arriba para canonicalizar categorias.
 		-- Un contenedor SIN ninguna regla configurada nunca migra (sigue
 		-- vacio, protege el caso base de afinidad, ver §4.3 del plan).
-		if (not node.rules or #node.rules == 0) and (#canonicalCategories > 0 or #(node.filters or {}) > 0) then
-			node.rules = migrateLegacyToRules(canonicalCategories, node.filters)
+		if (not node.rules or #node.rules == 0) and (#legacyCategories > 0 or #(node.filters or {}) > 0) then
+			node.rules = migrateLegacyToRules(legacyCategories, node.filters)
 			GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { rules = node.rules })
-		elseif migrated then
-			GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { categories = canonicalCategories })
 		end
 
 		self._editName     = node.displayName or node.name or ""

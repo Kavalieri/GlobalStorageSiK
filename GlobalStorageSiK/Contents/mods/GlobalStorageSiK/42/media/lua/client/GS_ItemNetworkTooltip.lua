@@ -12,7 +12,7 @@ require "GS_Index"
 require "GS_ItemSnapshot"
 require "GS_Sandbox"
 require "GS_Log"
-require "GS_ItemTaxonomy"
+require "GS_CategoryResolution"
 
 GlobalStorageSiK.ItemNetworkTooltip = {}
 
@@ -33,17 +33,15 @@ local CACHE_TTL_MS = 4000
 -- anteriores de fix no lo detectaban con un grep de "getItem sin cache").
 -- Aqui SIEMPRE se llama con row={} (nunca datos de fila reales), asi que
 -- cachear unicamente por fullType es correcto para este call site concreto;
--- no se toca la firma general de ItemTaxonomy.resolve() usada en otros
--- ficheros con datos de fila reales.
-local _taxResolveCache = {}
-local function getCachedTaxonomy(fullType)
-	local cached = _taxResolveCache[fullType]
+local _categoryResolveCache = {}
+local function getCachedCategory(fullType)
+	local cached = _categoryResolveCache[fullType]
 	if cached ~= nil then
 		return cached or nil
 	end
-	local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, fullType, {})
-	local result = (ok and tax) or false
-	_taxResolveCache[fullType] = result
+	local ok, resolved = pcall(GlobalStorageSiK.CategoryResolution.resolve, fullType, nil)
+	local result = (ok and resolved) or false
+	_categoryResolveCache[fullType] = result
 	return result or nil
 end
 local hooksInstalled = false
@@ -589,14 +587,16 @@ local function buildTooltipBlocks(item)
 	-- concatenado con " - "): la caja de ancho fijo truncaba igual una unica
 	-- linea larga, perdiendo la jerarquia.
 	local lines = {}
-	local tax = getCachedTaxonomy(fullType)
-	if tax and tax.groupLabel and tax.groupLabel ~= "" then
-		lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", tax.groupLabel)
-		if tax.subGroupLabel and tax.subGroupLabel ~= "" then
-			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", tax.subGroupLabel)
-		end
-		if tax.leafLabel and tax.leafLabel ~= "" then
-			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipLeaf", tax.leafLabel)
+	local resolved = getCachedCategory(fullType)
+	if resolved then
+		if resolved.effective == "native" then
+			local path = GlobalStorageSiK.NativeProduct.decodePath(resolved.nativePath)
+			local view = path and GlobalStorageSiK.NativeProduct.getView(path) or nil
+			if view and view.l1Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", view.l1Label) end
+			if view and view.l2Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", view.l2Label) end
+			if view and view.l3Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipLeaf", view.l3Label) end
+		else
+			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", GlobalStorageSiK.CategoryResolution.label(resolved))
 		end
 	end
 

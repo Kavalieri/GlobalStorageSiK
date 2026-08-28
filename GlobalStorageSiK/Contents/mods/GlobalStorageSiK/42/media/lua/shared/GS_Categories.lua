@@ -7,14 +7,13 @@
 require "GS_Network"
 require "GS_Zones"
 require "GS_Index"
-require "GS_ItemTaxonomy"
+require "GS_CategoryResolution"
 require "GS_I18n"
 
 GlobalStorageSiK.Categories = {}
 
--- Bootstrap reducido para redes nuevas. La detección real de categorías se
--- delega a GS_ItemTaxonomy. Food debe estar aquí: solo los perecederos se
--- reescriben a FoodPerishable; la comida estable conserva Food general.
+-- Bootstrap reducido para redes nuevas. El resolvedor único conserva una
+-- ruta nativa útil y, si se abstiene, la categoría vanilla.
 GlobalStorageSiK.Categories.DEFAULTS = {
 	"Ammo",
 	"Clothing",
@@ -92,9 +91,9 @@ function GlobalStorageSiK.Categories.collectFromNetworkItems(networkId)
 		-- la fuente real y persistente del spam, nunca antes cacheada. Usar
 		-- GlobalStorageSiK.I18n.getScriptItem() (mismo cache de sesion que
 		-- usa el resto del fichero de i18n).
-		local scriptItem = GlobalStorageSiK.I18n.getScriptItem(row.fullType)
-		local cat = GlobalStorageSiK.ItemTaxonomy.readMainKey(nil, scriptItem, row.category)
-		if cat and cat ~= "" and GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(cat)
+		local resolved = GlobalStorageSiK.CategoryResolution.resolve(row.fullType, row)
+		local cat = resolved.vanillaKey
+		if cat and cat ~= "" and GlobalStorageSiK.CategoryResolution.isVanillaKey(cat)
 			and not seen[string.lower(cat)] then
 			seen[string.lower(cat)] = true
 			table.insert(found, cat)
@@ -114,9 +113,9 @@ function GlobalStorageSiK.Categories.collectFromNodeRules(networkId)
 		local zone = registry.zones and registry.zones[node.zoneId]
 		if zone and zone.networkId == networkId and node.categories then
 			for j = 1, #node.categories do
-				local cat = GlobalStorageSiK.ItemTaxonomy.normalizeDisplayCategoryKey(node.categories[j])
+				local cat = node.categories[j]
 				if cat and cat ~= "" and cat ~= "*"
-					and GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(cat)
+					and GlobalStorageSiK.CategoryResolution.isVanillaKey(cat)
 					and not seen[string.lower(cat)] then
 					seen[string.lower(cat)] = true
 					table.insert(found, cat)
@@ -135,11 +134,11 @@ function GlobalStorageSiK.Categories.buildCatalog(networkId)
 	local catalog = {}
 
 	local function add(cat)
-		cat = GlobalStorageSiK.ItemTaxonomy.normalizeDisplayCategoryKey(cat)
+		cat = type(cat) == "string" and cat or nil
 		if not cat or cat == "" or cat == "*" then
 			return
 		end
-		if not GlobalStorageSiK.ItemTaxonomy.isDisplayCategoryKey(cat) then
+		if not GlobalStorageSiK.CategoryResolution.isVanillaKey(cat) then
 			return
 		end
 		local key = string.lower(cat)
@@ -164,8 +163,8 @@ function GlobalStorageSiK.Categories.buildCatalog(networkId)
 	end
 
 	table.sort(catalog, function(a, b)
-		local la = GlobalStorageSiK.ItemTaxonomy.translateMainKey(a)
-		local lb = GlobalStorageSiK.ItemTaxonomy.translateMainKey(b)
+		local la = GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = a })
+		local lb = GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = b })
 		return string.lower(la) < string.lower(lb)
 	end)
 	return catalog

@@ -1190,12 +1190,9 @@ end
 ---@param subFallback string|nil
 ---@return string
 function GlobalStorageSiK.I18n.itemCategoryDisplay(fullType, fallback, subFallback, gsSubKeysStr)
-	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
-		return GlobalStorageSiK.ItemTaxonomy.resolve(fullType, {
-			category = fallback,
-			subCategory = subFallback,
-			gsSubKeysStr = gsSubKeysStr,
-		}).fullLabel
+	if GlobalStorageSiK.CategoryResolution then
+		return GlobalStorageSiK.CategoryResolution.label(
+			GlobalStorageSiK.CategoryResolution.resolve(fullType, { vanillaKey = fallback, category = fallback }, nil))
 	end
 	return fallback or "—"
 end
@@ -1219,7 +1216,7 @@ end
 -- a clave por COMPUESTO de los campos intrinsecos al tipo de los que
 -- realmente depende esta funcion (fullType/worldSprite/displayName/
 -- category/subCategory) - mismo patron ya usado por
--- ItemTaxonomy.resolve()/itemTaxonomyResolveCache (ver GS_ItemTaxonomy.lua)
+-- CategoryResolution.resolve()/su caché de sesión
 -- para el mismo problema. `count`/zona/nodo NUNCA entran en la clave -son
 -- estado dinamico de red, no identidad del tipo.
 local itemSearchHaystackCache = GlobalStorageSiK.CatalogManager
@@ -1254,19 +1251,19 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 
 	local locName = GlobalStorageSiK.I18n.itemDisplayName(fullType, row.displayName, row.worldSprite)
 	addPart(locName)
-	if row.nativePath and GlobalStorageSiK.NativeProduct then
-		local nativeView = GlobalStorageSiK.NativeProduct.getView(row.nativePath)
+	local resolved = GlobalStorageSiK.CategoryResolution
+		and GlobalStorageSiK.CategoryResolution.resolve(fullType, row, nil) or nil
+	if resolved and resolved.effective == "native" and GlobalStorageSiK.NativeProduct then
+		local nativeView = GlobalStorageSiK.NativeProduct.getView(resolved.nativePath)
 		addPart(nativeView.fullLabel)
 		addPart(nativeView.l1Label)
 		addPart(nativeView.l2Label)
 		addPart(nativeView.l3Label)
-		addPart(row.nativePath)
+		addPart(resolved.nativePath)
 	end
-	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
-		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
-		addPart(tax.fullLabel)
-		addPart(tax.mainLabel)
-		addPart(tax.subLabel)
+	if resolved then
+		addPart(GlobalStorageSiK.CategoryResolution.label(resolved))
+		addPart(resolved.vanillaKey)
 	else
 		local locCat = GlobalStorageSiK.I18n.itemCategoryDisplay(fullType, row.category, row.subCategory)
 		addPart(locCat)

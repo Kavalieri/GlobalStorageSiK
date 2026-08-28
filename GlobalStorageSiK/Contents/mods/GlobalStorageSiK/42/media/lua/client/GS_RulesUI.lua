@@ -10,10 +10,9 @@
 ]]
 
 require "GS_I18n"
-require "GS_ItemTaxonomy"
 require "GS_NativeProduct"
+require "GS_CategoryResolution"
 require "GS_RuleSanitizer"
-require "GS_Subcategories"
 require "GS_NodeFilters"
 
 GlobalStorageSiK.RulesUI = {}
@@ -24,57 +23,22 @@ GlobalStorageSiK.RulesUI.OPS = { "OR", "AND", "NOT" }
 GlobalStorageSiK.RulesUI.OP_TITLE_KEY = { OR = "IGUI_GS_NodeRulesOrTitle", AND = "IGUI_GS_NodeRulesAndTitle", NOT = "IGUI_GS_NodeRulesNotTitle" }
 GlobalStorageSiK.RulesUI.OP_ADD_KEY   = { OR = "IGUI_GS_NodeRulesAddOr",   AND = "IGUI_GS_NodeRulesAddAnd",   NOT = "IGUI_GS_NodeRulesAddNot" }
 
--- Los 5 huecos de joyeria reales (ver GS_Subcategories.lua:JEWELRY_SLOT_BUCKET) -
--- mismo enum ya establecido en varios ficheros del mod.
-local JEWELRY_SLOT_KEYS = { ring = true, necklace = true, wrist = true, earring = true, nose = true }
-
---- Etiqueta legible de una clave de categoria/subcategoria/hoja de
---- cualquier nivel (1, 2 o 3) - entiende los 2 prefijos de familia
---- (EXT_GROUP_PREFIX, SUBGROUP_PREFIX) y las claves combinadas "::" (hueco
---- de joyeria o de cualquier subcategoria vanilla, ej. Ropa por prenda).
---- Extraida de GS_TerminalUI_NodeEditor.lua (dev26 ronda 2) para que el
---- editor de zona use exactamente la misma logica de etiquetado.
+--- Etiqueta legible de una clave de categoria. Las rutas nativas se resuelven
+--- mediante el contrato comun; las claves historicas externas se conservan
+--- como texto visible para poder sustituirlas, pero no se interpretan.
 ---@param key string
 ---@return string
 function GlobalStorageSiK.RulesUI.categoryLabel(key)
 	if not key or key == "" then return "?" end
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
 	if nativePath then return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel end
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if key:sub(1, #EXT) == EXT then
-		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
+	local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule({ value = key })
+	if status == "DEPRECATED_EXTERNAL" then return "Incompatible e inactiva: " .. key end
+	if status == "TECHNICAL_RESIDUE" then return "Residuo técnico: " .. key end
+	if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then
+		return GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = key })
 	end
-	if key:sub(1, #SUB) == SUB then
-		local rest = key:sub(#SUB + 1)
-		local sepPos = rest:find("::", 1, true)
-		if sepPos then
-			local groupKey = rest:sub(1, sepPos - 1)
-			local subKey = rest:sub(sepPos + 2)
-			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " - "
-				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(subKey, groupKey)
-		end
-		return rest
-	end
-	local sepPos = key:find("::", 1, true)
-	if sepPos then
-		local mainPart = key:sub(1, sepPos - 1)
-		local slotPart = key:sub(sepPos + 2)
-		local mainLabel = GlobalStorageSiK.ItemTaxonomy.translateMainKey(mainPart)
-		local slotLower = string.lower(slotPart)
-		local slotLabel
-		if JEWELRY_SLOT_KEYS[slotLower] and GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.jewelrySlotLabel then
-			slotLabel = GlobalStorageSiK.Subcategories.jewelrySlotLabel(slotLower)
-		else
-			slotLabel = GlobalStorageSiK.ItemTaxonomy.translateSubKey(slotPart, mainPart, nil) or slotPart
-		end
-		return mainLabel .. " - " .. slotLabel
-	end
-	local GSSub = GlobalStorageSiK.Subcategories
-	if GSSub and GSSub.isSubcategoryKey and GSSub.isSubcategoryKey(key) then
-		return GSSub.label(key)
-	end
-	return GlobalStorageSiK.ItemTaxonomy.translateMainKey(key)
+	return key
 end
 
 --- Etiqueta legible de UNA condicion de regla: tipo "category" usa
@@ -125,8 +89,8 @@ end
 
 --- Categoria legacy "basura": un codigo tecnico de una sola letra (B/F/W...)
 --- filtrado por metadata vanilla, suelto o como sub-nivel de un "main::sub"
---- (ej. "Arma::W") - GS_ItemTaxonomy.readMainKey ya descarta este mismo
---- patron al leer datos EN VIVO (ver isSingleAsciiDimension, mismo fichero),
+--- (ej. "Arma::W") - el resolvedor común descarta este mismo patrón al leer
+--- datos en vivo,
 --- pero una categoria legacy ya guardada en node.categories de una sesion
 --- ANTERIOR a esa proteccion podia arrastrar uno de estos codigos sueltos.
 --- Sin este mismo filtro aqui, la migracion los convertia en una regla real
@@ -336,63 +300,17 @@ end
 local function isBroadCategoryRule(key)
 	if not key or key == "" then return false end
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
-	if nativePath then return nativePath.l3 == nil end
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	return key:sub(1, #EXT) == EXT or key:sub(1, #SUB) == SUB
+	return nativePath and nativePath.l3 == nil
 end
 
---- Indice inverso (clave de regla de categoria en minusculas -> groupKey
---- canonico), construido UNA vez por sesion recorriendo el catalogo completo
---- (mismo patron que ItemTaxonomy.canonicalizeFilterRule) - permite resolver
---- el grupo de una hoja de Nivel 3 (ej. "FoodPerishableMeat" -> "Food") SIN
---- necesitar un item vivo, solo el catalogo de items del juego.
-local _categoryGroupKeyIndex = nil
-local function buildCategoryGroupKeyIndex()
-	if _categoryGroupKeyIndex then return _categoryGroupKeyIndex end
-	_categoryGroupKeyIndex = {}
-	local rows = GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows()
-	for i = 1, #rows do
-		local ok, tax = pcall(GlobalStorageSiK.ItemTaxonomy.resolve, rows[i].fullType, rows[i])
-		if ok and tax and tax.groupKey and tax.groupKey ~= "" and tax.mainCanon then
-			-- Mismas 4 formas de clave de hoja que ItemTaxonomy.collectLeafFilters.
-			local key
-			if tax.jewelrySlotKey then
-				key = tax.mainCanon .. "::" .. tax.jewelrySlotKey
-			elseif tax.hyphenLeafLabel then
-				key = tax.mainCanon
-			elseif tax.subCanon and tax.subCanon ~= "" then
-				key = tax.mainCanon .. "::" .. tax.subCanon
-			else
-				key = tax.mainCanon
-			end
-			_categoryGroupKeyIndex[string.lower(key)] = tax.groupKey
-		end
-	end
-	return _categoryGroupKeyIndex
-end
-
---- Resuelve el groupKey canonico (Nivel 1) de CUALQUIER clave de regla de
---- categoria, sea de Nivel 1, 2 o 3 - sin necesitar un item vivo.
+--- Resuelve el nivel superior de una ruta nativa de regla.
 ---@param key string
 ---@return string|nil
 local function categoryRuleGroupKey(key)
 	if not key or key == "" then return nil end
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
 	if nativePath then return nativePath.l1 end
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if key:sub(1, #EXT) == EXT then
-		return key:sub(#EXT + 1)
-	end
-	if key:sub(1, #SUB) == SUB then
-		local rest = key:sub(#SUB + 1)
-		local sepPos = rest:find("::", 1, true)
-		if sepPos then return rest:sub(1, sepPos - 1) end
-		return rest
-	end
-	local index = buildCategoryGroupKeyIndex()
-	return index[string.lower(key)]
+	return nil
 end
 
 --- true si dos condiciones del MISMO tipo se solapan (misma categoria/tag/
