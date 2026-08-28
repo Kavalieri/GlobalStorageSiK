@@ -88,6 +88,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menu de contexto de itens",
 	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Instalação/desinstalação de addons",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requer modo de depuração. Resume a seleção de destino para depósitos e Auto Sort. Decisões por nó ficam no bloco >>> DETALHE separado.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Migração de regras legacy",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Requer modo de depuração. Registra a migração recuperável no servidor de dimensões de categoria obsoletas de uma letra, com amostras limitadas da origem e uma segunda passagem idempotente.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transferência remota de itens",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permite inserir e retirar itens da rede pela interface do terminal sem andar fisicamente até o contêiner. Desligue para uma experiência mais realista.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Ordenação automática ao depositar",

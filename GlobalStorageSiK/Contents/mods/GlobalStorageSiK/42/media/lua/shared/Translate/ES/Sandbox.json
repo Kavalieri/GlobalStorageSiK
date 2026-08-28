@@ -84,6 +84,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatTooltip_tooltip": "Requiere Modo depuración activado. El parche del tooltip \"cuánto tengo en mi red\" sobre los tooltips vanilla de ítems (fallos de render, uso del camino de reserva).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requiere Modo depuración. Resume la selección de destino para depósitos y Auto Sort. Las decisiones por nodo permanecen en el bloque >>> DETALLE independiente.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Migración de reglas legacy",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Requiere Modo depuración. Registra la migración recuperable server-side de dimensiones de categoría obsoletas de una letra, con muestras acotadas de origen y segunda pasada idempotente.",
 	"Sandbox_GlobalStorageSiK_DebugCatCompatCategories": "   >> Compatibilidad de categorías (Better Sorting)",
 	"Sandbox_GlobalStorageSiK_DebugCatCompatCategories_tooltip": "Requiere Modo depuración activado. Registra cuándo un código plano de Better Sorting se normaliza de vuelta a la categoría vanilla (Food/Weapon/Accessory/Material/FirstAid/Gardening) antes de que nuestro propio motor de subcategorías lo evalúe. El detalle por ítem vive en el sublog >>> DETALLE aparte.",
 	"Sandbox_GlobalStorageSiK_DebugDetailCompatCategories": "      >>> DETALLE: normalización por ítem",

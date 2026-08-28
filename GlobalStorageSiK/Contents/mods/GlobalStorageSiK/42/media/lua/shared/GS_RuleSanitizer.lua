@@ -1,11 +1,13 @@
 --[[
 	GlobalStorageSiK - saneado recuperable de reglas legacy persistidas
-	Core 1.4.3-dev30.1
+	Core 1.4.3-dev30.2
 
 	Las versiones antiguas pudieron persistir dimensiones tecnicas de una sola
 	letra (B/F/W...) como si fueran categorias. Son inequívocamente basura, pero
-	no se destruyen: se retiran de `rules` y se conservan, sin duplicados, en
-	`legacyJunkRules`. El resto de condiciones desconocidas se preserva intacto.
+	no se destruyen: se retiran de `rules` y de la coleccion legacy `categories`
+	y se conservan, sin duplicados, en `legacyJunkRules`. `legacySource` permite
+	reconstruir el origen exacto. El resto de condiciones desconocidas se
+	preserva intacto.
 ]]
 
 GlobalStorageSiK.RuleSanitizer = GlobalStorageSiK.RuleSanitizer or {}
@@ -13,11 +15,21 @@ GlobalStorageSiK.RuleSanitizer = GlobalStorageSiK.RuleSanitizer or {}
 local function cloneRule(rule)
 	local condition = {}
 	for key, value in pairs((rule and rule.condition) or {}) do condition[key] = value end
-	return { op = rule and rule.op or "OR", condition = condition }
+	return {
+		op = rule and rule.op or "OR",
+		condition = condition,
+		legacySource = rule and rule.legacySource or nil,
+	}
 end
 
-local function isSingleAsciiDimension(value)
-	return type(value) == "string" and value:match("^%s*[A-Za-z]%s*$") ~= nil
+local function asciiDimension(value)
+	if type(value) ~= "string" then return nil end
+	local dimension = value:match("^%s*([A-Za-z])%s*$")
+	if dimension then return string.upper(dimension) end
+	local sep = value:find("::", 1, true)
+	if not sep then return nil end
+	dimension = value:sub(sep + 2):match("^%s*([A-Za-z])%s*$")
+	return dimension and string.upper(dimension) or nil
 end
 
 ---@param condition table|nil
@@ -32,12 +44,7 @@ function GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(condition)
 		return false
 	end
 	local value = condition.value
-	if isSingleAsciiDimension(value) then return true end
-	if type(value) == "string" then
-		local sep = value:find("::", 1, true)
-		if sep and isSingleAsciiDimension(value:sub(sep + 2)) then return true end
-	end
-	return false
+	return asciiDimension(value) ~= nil
 end
 
 local function ruleSignature(rule)
@@ -45,47 +52,102 @@ local function ruleSignature(rule)
 	return table.concat({
 		tostring(rule and rule.op or "OR"), tostring(condition.type),
 		tostring(condition.value), tostring(condition.nativePath),
-		tostring(condition.legacyValue),
+		tostring(condition.legacyValue), tostring(rule and rule.legacySource),
 	}, "\31")
+end
+
+local function appendSample(report, context, rule)
+	if #report.samples >= 3 then return end
+	local condition = rule.condition or {}
+	report.samples[#report.samples + 1] = {
+		ownerKind = context and context.ownerKind or "unknown",
+		ownerId = context and context.ownerId or "?",
+		networkId = context and context.networkId or "?",
+		source = rule.legacySource or "rules",
+		op = rule.op or "OR",
+		type = condition.type,
+		value = condition.value,
+		canonical = "legacy-junk:category-dimension:" .. tostring(asciiDimension(condition.value) or "?"),
+	}
+end
+
+local function quarantineRule(quarantine, seen, rule)
+	local signature = ruleSignature(rule)
+	if seen[signature] then return end
+	seen[signature] = true
+	quarantine[#quarantine + 1] = rule
 end
 
 ---@param owner table nodo o zona persistida
 ---@return table report
-function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner)
-	local report = { before = 0, after = 0, quarantined = 0, unknownPreserved = 0, changed = false }
-	if type(owner) ~= "table" or type(owner.rules) ~= "table" then return report end
+function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
+	local report = { before = 0, after = 0, rulesBefore = 0, rulesAfter = 0,
+		categoriesBefore = 0, categoriesAfter = 0, quarantined = 0,
+		unknownPreserved = 0, changed = false, rulesChanged = false,
+		categoriesChanged = false, samples = {} }
+	if type(owner) ~= "table" then return report end
+	local sourceRules = type(owner.rules) == "table" and owner.rules or {}
+	local sourceCategories = type(owner.categories) == "table" and owner.categories or {}
 	local active, quarantine, seen = {}, {}, {}
 	for i = 1, #(owner.legacyJunkRules or {}) do
 		local copy = cloneRule(owner.legacyJunkRules[i])
-		local signature = ruleSignature(copy)
-		if not seen[signature] then
-			seen[signature] = true
-			quarantine[#quarantine + 1] = copy
+		quarantineRule(quarantine, seen, copy)
+	end
+	for i = 1, #sourceRules do
+		local rawRule = sourceRules[i]
+		if type(rawRule) ~= "table" or type(rawRule.condition) ~= "table" then
+			report.rulesBefore = report.rulesBefore + 1
+			report.before = report.before + 1
+			report.unknownPreserved = report.unknownPreserved + 1
+			active[#active + 1] = rawRule
+		else
+			local copy = cloneRule(rawRule)
+			copy.legacySource = copy.legacySource or "rules"
+			report.rulesBefore = report.rulesBefore + 1
+			report.before = report.before + 1
+			if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(copy.condition) then
+				quarantineRule(quarantine, seen, copy)
+				appendSample(report, context, copy)
+				report.quarantined = report.quarantined + 1
+				report.changed = true
+				report.rulesChanged = true
+			else
+				copy.legacySource = rawRule.legacySource
+				active[#active + 1] = copy
+				if copy.condition.type == "category"
+					and not copy.condition.nativePath
+					and type(copy.condition.value) == "string" then
+					report.unknownPreserved = report.unknownPreserved + 1
+				end
+			end
 		end
 	end
-	for i = 1, #owner.rules do
-		local copy = cloneRule(owner.rules[i])
+	report.rulesAfter = #active
+	local activeCategories = {}
+	for i = 1, #sourceCategories do
+		local value = sourceCategories[i]
+		report.categoriesBefore = report.categoriesBefore + 1
 		report.before = report.before + 1
-		if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(copy.condition) then
-			local signature = ruleSignature(copy)
-			if not seen[signature] then
-				seen[signature] = true
-				quarantine[#quarantine + 1] = copy
-			end
+		local synthetic = {
+			op = "OR",
+			condition = { type = "category", value = value },
+			legacySource = "categories",
+		}
+		if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(synthetic.condition) then
+			quarantineRule(quarantine, seen, synthetic)
+			appendSample(report, context, synthetic)
 			report.quarantined = report.quarantined + 1
 			report.changed = true
+			report.categoriesChanged = true
 		else
-			active[#active + 1] = copy
-			if copy.condition.type == "category"
-				and not copy.condition.nativePath
-				and type(copy.condition.value) == "string" then
-				report.unknownPreserved = report.unknownPreserved + 1
-			end
+			activeCategories[#activeCategories + 1] = value
 		end
 	end
-	report.after = #active
+	report.categoriesAfter = #activeCategories
+	report.after = report.rulesAfter + report.categoriesAfter
 	if report.changed then
-		owner.rules = active
+		if report.rulesChanged then owner.rules = active end
+		if report.categoriesChanged then owner.categories = activeCategories end
 		owner.legacyJunkRules = quarantine
 	end
 	return report
@@ -93,22 +155,40 @@ end
 
 ---@param registry table|nil
 ---@return table report
-function GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry)
+function GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry, networkId)
 	local total = { owners = 0, changedOwners = 0, before = 0, after = 0,
-		quarantined = 0, unknownPreserved = 0, changed = false }
-	local function visit(owners)
-		for _, owner in pairs(owners or {}) do
+		rulesBefore = 0, rulesAfter = 0, categoriesBefore = 0, categoriesAfter = 0,
+		quarantined = 0, unknownPreserved = 0, changed = false, samples = {} }
+	local function visit(owners, ownerKind)
+		for ownerId, owner in pairs(owners or {}) do
+			local ownerNetworkId = owner.networkId
+			if ownerKind == "node" then
+				local zone = registry and registry.zones and registry.zones[owner.zoneId]
+				ownerNetworkId = zone and zone.networkId or ownerNetworkId
+			end
+			if networkId == nil or ownerNetworkId == networkId then
 			total.owners = total.owners + 1
-			local report = GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner)
+			local report = GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, {
+				ownerKind = ownerKind, ownerId = owner.id or ownerId,
+				networkId = ownerNetworkId,
+			})
 			total.before = total.before + report.before
 			total.after = total.after + report.after
+			total.rulesBefore = total.rulesBefore + report.rulesBefore
+			total.rulesAfter = total.rulesAfter + report.rulesAfter
+			total.categoriesBefore = total.categoriesBefore + report.categoriesBefore
+			total.categoriesAfter = total.categoriesAfter + report.categoriesAfter
 			total.quarantined = total.quarantined + report.quarantined
 			total.unknownPreserved = total.unknownPreserved + report.unknownPreserved
+			for i = 1, #report.samples do
+				if #total.samples < 3 then total.samples[#total.samples + 1] = report.samples[i] end
+			end
 			if report.changed then total.changedOwners = total.changedOwners + 1 end
+			end
 		end
 	end
-	visit(registry and registry.nodes)
-	visit(registry and registry.zones)
+	visit(registry and registry.nodes, "node")
+	visit(registry and registry.zones, "zone")
 	total.changed = total.changedOwners > 0
 	return total
 end

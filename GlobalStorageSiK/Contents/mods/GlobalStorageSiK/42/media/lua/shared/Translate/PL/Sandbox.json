@@ -88,6 +88,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menu kontekstowe przedmiotów",
 	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Instalacja/deinstalacja dodatków",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Wymaga trybu debug. Podsumowuje wybór celu dla depozytu i Auto Sort. Decyzje dla każdego węzła pozostają w osobnym bloku >>> SZCZEGÓŁY.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Migracja reguł legacy",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Wymaga trybu debugowania. Rejestruje odwracalną migrację po stronie serwera przestarzałych jednoliterowych wymiarów kategorii, z ograniczonymi próbkami źródła i idempotentnym drugim przebiegiem.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Zdalny transfer przedmiotów",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Pozwala wkładać i wyjmować przedmioty z sieci przez interfejs terminala bez fizycznego dochodzenia do pojemnika. Wyłącz dla bardziej realistycznego doświadczenia.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Automatyczne sortowanie przy depozycie",

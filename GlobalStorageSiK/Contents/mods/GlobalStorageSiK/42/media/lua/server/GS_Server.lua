@@ -450,6 +450,58 @@ end
 
 
 
+local LEGACY_RULE_SANITIZER_VERSION = 2
+
+local function migrationLogValue(value)
+	return tostring(value or "?"):gsub("[%c]", "?"):sub(1, 160)
+end
+
+local function logLegacyRuleSanitizerPass(networkId, pass, report)
+	GlobalStorageSiK.Log.info("RuleMigration", "legacyRuleSanitizer"
+		.. " network=" .. migrationLogValue(networkId)
+		.. " pass=" .. tostring(pass)
+		.. " owners=" .. tostring(report.owners)
+		.. " changedOwners=" .. tostring(report.changedOwners)
+		.. " rules=" .. tostring(report.rulesBefore) .. "->" .. tostring(report.rulesAfter)
+		.. " categories=" .. tostring(report.categoriesBefore) .. "->" .. tostring(report.categoriesAfter)
+		.. " quarantined=" .. tostring(report.quarantined)
+		.. " unknownPreserved=" .. tostring(report.unknownPreserved))
+	for i = 1, #(report.samples or {}) do
+		local sample = report.samples[i]
+		GlobalStorageSiK.Log.info("RuleMigration", "legacyRuleSanitizerSample"
+			.. " network=" .. migrationLogValue(sample.networkId)
+			.. " pass=" .. tostring(pass)
+			.. " ownerKind=" .. migrationLogValue(sample.ownerKind)
+			.. " ownerId=" .. migrationLogValue(sample.ownerId)
+			.. " source=" .. migrationLogValue(sample.source)
+			.. " op=" .. migrationLogValue(sample.op)
+			.. " type=" .. migrationLogValue(sample.type)
+			.. " value=" .. migrationLogValue(sample.value)
+			.. " canonical=" .. migrationLogValue(sample.canonical))
+	end
+end
+
+local function sanitizePersistedRules(registry, networkId)
+	if type(registry.legacyRuleSanitizerByNetwork) ~= "table" then
+		registry.legacyRuleSanitizerByNetwork = {}
+	end
+	if tonumber(registry.legacyRuleSanitizerByNetwork[networkId]) == LEGACY_RULE_SANITIZER_VERSION then
+		return
+	end
+	local first = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry, networkId)
+	logLegacyRuleSanitizerPass(networkId, 1, first)
+	local second = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry, networkId)
+	logLegacyRuleSanitizerPass(networkId, 2, second)
+	registry.legacyRuleSanitizerByNetwork[networkId] = LEGACY_RULE_SANITIZER_VERSION
+	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	end
+	if first.changed and GlobalStorageSiK.RegistryStore
+		and GlobalStorageSiK.RegistryStore.notifyChanged then
+		GlobalStorageSiK.RegistryStore.notifyChanged()
+	end
+end
+
 --- Construye estado completo del terminal.
 
 ---@param networkId string
@@ -462,20 +514,7 @@ end
 local function buildTerminalState(networkId, scanSummary, searchQuery, craftProbe, player)
 
 	local registry = GlobalStorageSiK.Zones.getRegistry()
-	local migration = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry)
-	if migration.changed then
-		GlobalStorageSiK.Log.info("Server", "legacyRuleSanitizer owners=" .. tostring(migration.owners)
-			.. " changedOwners=" .. tostring(migration.changedOwners)
-			.. " before=" .. tostring(migration.before) .. " after=" .. tostring(migration.after)
-			.. " quarantined=" .. tostring(migration.quarantined)
-			.. " unknownPreserved=" .. tostring(migration.unknownPreserved))
-		if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		end
-		if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
-			GlobalStorageSiK.RegistryStore.notifyChanged()
-		end
-	end
+	sanitizePersistedRules(registry, networkId)
 	local freshSnapshotScope = scanSummary and scanSummary._freshSnapshotScope or nil
 	local rows = GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	-- Los campos con prefijo "_" coordinan servidor/indice y no forman parte
@@ -2332,7 +2371,9 @@ local function sanitizeNodeCategories(categories)
 	if type(categories) ~= "table" then return result end
 	for i = 1, math.min(#categories, 20) do
 		local category = tostring(categories[i] or ""):sub(1, 160)
-		if category ~= "" then
+		if category ~= "" and not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({
+			type = "category", value = category,
+		}) then
 			local signature = string.lower(category)
 			if not seen[signature] then
 				seen[signature] = true

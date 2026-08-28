@@ -63,6 +63,10 @@ local AREA_CATEGORY = {
 	RedistributeJob = "Inventory",
 	ItemTaxonomy = "Inventory",
 	Subcategories = "Inventory",
+	-- Migración recuperable y acotada de protocolos legacy persistidos. Tiene
+	-- categoría propia para obtener evidencia de primera/segunda pasada sin
+	-- activar el resto del inventario ni el subsistema de permisos.
+	RuleMigration = "RuleMigration",
 	Router = "Router",
 	-- dev36: categoria "UI" (antes cubria NodeNaming + TerminalUI a la vez,
 	-- sin poder separarlos) retirada y sustituida por un arbol propio "SiK UI"

@@ -270,6 +270,14 @@ option GlobalStorageSiK.DebugCatRouter
 	translation = GlobalStorageSiK_DebugCatRouter,
 }
 
+option GlobalStorageSiK.DebugCatRuleMigration
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatRuleMigration,
+}
+
 option GlobalStorageSiK.DebugCatNodeNaming
 {
 	type = boolean,

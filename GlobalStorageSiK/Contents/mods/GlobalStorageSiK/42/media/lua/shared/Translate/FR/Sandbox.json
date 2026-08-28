@@ -88,6 +88,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Menu contextuel des objets",
 	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Installation/désinstallation d'addons",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Nécessite le mode débogage. Résume la sélection de destination pour les dépôts et Auto Sort. Les décisions par nœud restent dans le bloc >>> DÉTAIL séparé.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Migration des règles legacy",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Nécessite le mode débogage. Enregistre la migration récupérable côté serveur des dimensions de catégorie obsolètes d'une lettre, avec des exemples d'origine limités et un second passage idempotent.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Transfert d'objets à distance",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Permet d'insérer et de retirer des objets du réseau via l'interface du terminal sans marcher physiquement jusqu'au conteneur. Désactivez pour une expérience plus réaliste.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Tri automatique au dépôt",

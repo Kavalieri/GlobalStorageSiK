@@ -74,6 +74,7 @@ Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` prim
 | `DebugCatTooltip` | `>> Tooltip de red` / `>> Network tooltip` | Instalación/recuperación del hook, fallos y fallback del tooltip de cantidades. No registra cada frame. |
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
 | `DebugDetailRouter` | `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` | Tier y capacidad de cada candidato; alto volumen. |
+| `DebugCatRuleMigration` | `>> Migración de reglas legacy` / `>> Legacy rule migration` | Dos resúmenes server-side, primera y segunda pasada, y hasta tres muestras del origen persistido exacto retirado de `rules` o `categories`. |
 | `DebugCatSiKUI` | `>> SiK UI: clics y widgets` / `>> SiK UI: clicks & widgets` | Clics, apertura/reutilización/refresco de ventana, árbol de widgets y solapes. Traza general del framework — ver árbol "SiK UI" arriba. |
 | `DebugCatSiKUITable` | `>> SiK UI: geometría de tabla` / `>> SiK UI: table geometry` | Anchos de columna resueltos por `SiK_UI.Table`; solo al cambiar el ancho disponible. |
 | `DebugCatSiKUIScroll` | `>> SiK UI: scroll y lista virtual` / `>> SiK UI: scroll & virtual list` | Pool de filas y cambios de dataset del motor de scroll/lista virtual. |
@@ -169,6 +170,12 @@ Las colas cliente usan `queueId` (depósito) o `withdrawId` (retirada). Una resp
 - `[CLI] [GlobalStorageSiK:DEBUG:RedistributeJob] completed breakdown | tiers=1:12,4:3,5:2 topTypes=Base.Nails:8,...`: resumen acotado al terminar Auto Sort. `tiers` indica el nivel de destino (1=filtro/hoja exacta, 2=subcategoría, 3=categoría, 4=afinidad por `fullType`, 5=afinidad por ruta taxonómica canónica, 6=contenedor libre) y `topTypes` muestra como máximo ocho tipos; no emite una línea por objeto.
 
 Al terminar cualquiera de estos casos, el correspondiente `Events.OnTick` se retira. Para diagnosticarlos activa `Modo depuración (debug)` / `Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`; añade `>> Router` / `>> Router` y `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` solo si se investiga la selección de destino.
+
+### Prueba DEV: migración recuperable de reglas legacy
+
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `>> Migración de reglas legacy` / `>> Legacy rule migration`. Mantén apagadas las categorías no relacionadas y todos los sublogs `>>> DETALLE / >>> DETAIL`. En dedicado, añade opcionalmente `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`; conserva siempre el `console.txt` del servidor.
+
+Al abrir por primera vez una red heredada, el servidor emite `legacyRuleSanitizer ... pass=1` con conteos separados `rules=A->B` y `categories=C->D`, seguido de `pass=2` con `changedOwners=0` y `quarantined=0`. Hasta tres líneas `legacyRuleSanitizerSample` identifican `network`, `ownerKind`, `ownerId`, `source`, `op`, `type`, `value` y la representación `canonical`; nunca incluyen payloads completos. Las entradas retiradas permanecen recuperables en `legacyJunkRules` con `legacySource=rules|categories`.
 
 ### Prueba DEV: leer literatura y devolverla a la red
 

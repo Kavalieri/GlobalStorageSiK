@@ -116,21 +116,33 @@ assertEqual(condition.nativePath, "native:food_drink/produce/fruit", "native pat
 assertEqual(Product.recordRoutingContrast(2, 2), true, "equivalent routing contrast")
 assertEqual(Product.recordRoutingContrast(nil, 1), false, "routing delta detected")
 
-local persisted = { nodes = { a = { id = "a", rules = {
-	{ op = "OR", condition = { type = "category", value = "F" } },
-	{ op = "OR", condition = { type = "category", value = "UnknownButValid" } },
-} } }, zones = { z = { id = "z", rules = {
-	{ op = "NOT", condition = { type = "category", value = "Food::W" } },
-} } } }
-local firstSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted)
-assertEqual(firstSanitize.quarantined, 2, "node and zone junk rules quarantined")
+local persisted = { nodes = {
+	a = { id = "a", zoneId = "z", categories = { "Food::F", "ValidLegacy" }, rules = {
+		{ op = "OR", condition = { type = "category", value = "F" } },
+		{ op = "OR", condition = { type = "category", value = "UnknownButValid" } },
+	} },
+	b = { id = "b", zoneId = "other", categories = { "Weapon::W" } },
+}, zones = {
+	z = { id = "z", networkId = "net-a", rules = {
+		{ op = "NOT", condition = { type = "category", value = "Food::W" } },
+	} },
+	other = { id = "other", networkId = "net-b", rules = {} },
+} }
+local firstSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted, "net-a")
+assertEqual(firstSanitize.quarantined, 3, "node categories plus node/zone junk rules quarantined")
 assertEqual(firstSanitize.unknownPreserved, 1, "unknown non-junk rule preserved")
 assertEqual(#persisted.nodes.a.rules, 1, "junk removed from active node rules")
-assertEqual(#persisted.nodes.a.legacyJunkRules, 1, "node junk remains recoverable")
+assertEqual(#persisted.nodes.a.categories, 1, "junk removed from active legacy categories")
+assertEqual(persisted.nodes.a.categories[1], "ValidLegacy", "valid legacy category preserved")
+assertEqual(#persisted.nodes.a.legacyJunkRules, 2, "node junk from both sources remains recoverable")
+assertEqual(persisted.nodes.a.legacyJunkRules[2].legacySource, "categories", "legacy category source recorded")
 assertEqual(#persisted.zones.z.legacyJunkRules, 1, "zone junk remains recoverable")
-local secondSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted)
+assertEqual(persisted.nodes.b.categories[1], "Weapon::W", "other network remains untouched")
+assertEqual(firstSanitize.samples[1].networkId, "net-a", "sample records owning network")
+local secondSanitize = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(persisted, "net-a")
 assertEqual(secondSanitize.changed, false, "second persisted-rule migration is idempotent")
-assertEqual(#persisted.nodes.a.legacyJunkRules, 1, "quarantine not duplicated")
+assertEqual(secondSanitize.quarantined, 0, "second migration quarantines nothing")
+assertEqual(#persisted.nodes.a.legacyJunkRules, 2, "quarantine not duplicated")
 
 local externalRow = { fullType = "Base.Apple", category = "ExternalFood",
 	nativePath = "native:food_drink/produce/fruit" }

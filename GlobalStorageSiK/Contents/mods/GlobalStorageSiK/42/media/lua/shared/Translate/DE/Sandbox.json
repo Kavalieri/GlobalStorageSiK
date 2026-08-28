@@ -88,6 +88,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> Objekt-Kontextmenü",
 	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> Addon-Installation/-Deinstallation",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Benötigt Debug-Modus. Fasst die Zielauswahl für Einlagerung und Auto Sort zusammen. Entscheidungen je Knoten bleiben im separaten >>> DETAIL-Block.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Migration von Legacy-Regeln",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Benötigt Debug-Modus. Protokolliert die wiederherstellbare serverseitige Migration veralteter einbuchstabiger Kategoriedimensionen mit begrenzten Herkunftsbeispielen und idempotentem zweiten Durchlauf.",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "Fernübertragung von Gegenständen",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "Erlaubt das Einlagern und Entnehmen von Gegenständen im Netzwerk über die Terminaloberfläche, ohne physisch zum Behälter zu gehen. Für ein realistischeres Erlebnis AUS schalten.",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "Automatische Sortierung beim Einlagern",

@@ -88,6 +88,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatItemActions": "   >> 物品右键菜单",
 	"Sandbox_GlobalStorageSiK_DebugCatAddons": "   >> 附加组件安装/卸载",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "需要调试模式。汇总存入与 Auto Sort 的目标选择。逐节点判断仅在独立的 >>> 详细模块中输出。",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> 旧版规则迁移",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "需要开启调试模式。记录服务器端可恢复的单字母旧分类维度迁移、有限的来源样本以及幂等的第二次执行。",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled": "远程物品转移",
 	"Sandbox_GlobalStorageSiK_RemoteTransferEnabled_tooltip": "允许通过终端界面存取网络中的物品，而无需实际走到容器旁。关闭以获得更真实的体验。",
 	"Sandbox_GlobalStorageSiK_AutoSortEnabled": "存入时自动分类",

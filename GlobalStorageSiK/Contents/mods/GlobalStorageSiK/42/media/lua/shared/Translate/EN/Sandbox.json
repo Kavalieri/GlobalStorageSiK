@@ -84,6 +84,8 @@
 	"Sandbox_GlobalStorageSiK_DebugCatTooltip_tooltip": "Requires Debug mode ON. The \"how much do I have in my network\" tooltip patch on vanilla item tooltips (render failures, fallback path used).",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter": "   >> Router",
 	"Sandbox_GlobalStorageSiK_DebugCatRouter_tooltip": "Requires Debug mode. Summarizes destination selection for deposits and Auto Sort. Per-node decisions remain in the separate >>> DETAIL block.",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration": "   >> Legacy rule migration",
+	"Sandbox_GlobalStorageSiK_DebugCatRuleMigration_tooltip": "Requires Debug mode. Records the recoverable server-side migration of obsolete one-letter category dimensions, including bounded source samples and the idempotent second pass.",
 	"Sandbox_GlobalStorageSiK_DebugCatCompatCategories": "   >> Category compatibility (Better Sorting)",
 	"Sandbox_GlobalStorageSiK_DebugCatCompatCategories_tooltip": "Requires Debug mode ON. Logs when Better Sorting's flat category code is normalized back to the vanilla category (Food/Weapon/Accessory/Material/FirstAid/Gardening) before our own subcategory engine evaluates it. Per-item detail lives in the separate >>> DETAIL sublog.",
 	"Sandbox_GlobalStorageSiK_DebugDetailCompatCategories": "      >>> DETAIL: per-item normalization",
