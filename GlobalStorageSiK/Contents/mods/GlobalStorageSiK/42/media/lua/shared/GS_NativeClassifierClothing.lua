@@ -151,8 +151,8 @@ local function classifyClothing(fullType, si)
 	-- nunca doble identidad con Combate para el mismo objeto. Las cajas de
 	-- municion SIN BodyLocation (Bag_AmmoBox_*) no pasan por aqui (bodyLoc
 	-- vacio) y siguen siendo Combate via el tag AMMO_CASE, sin cambios.
-	local bodyLocForAmmo = U.bodyLocationLower(si)
-	if bodyLocForAmmo ~= "" and ItemTag and U.hasTag(si, ItemTag.AMMO_CASE) then
+	local bodyLocForAmmo = U.bodyLocationLower(si):gsub("^[^:]+:", "")
+	if bodyLocForAmmo == "ammostrap" and U.itemTypeLower(si) == "base:container" then
 		return
 			{ l1 = "clothing_protection", l2 = "equipment", l3 = "ammo_strap" },
 			{ ammo = true, containerCapacity = true },
@@ -160,7 +160,14 @@ local function classifyClothing(fullType, si)
 			U.evidence("script_body_location_ammo_strap", 100)
 	end
 
-	if U.bodyLocationLower(si) == "" then return nil end
+	local bodyLocLower = U.bodyLocationLower(si)
+	if bodyLocLower == "" then return nil end
+	local normalizedBodyLoc = bodyLocLower:gsub("^[^:]+:", "")
+	local displayCategory = U.displayCategoryLower(si):gsub("^[^:]+:", "")
+	-- dev28.1: los proxies ZedDmg no siempre incluyen el token en el nombre
+	-- que devuelve typeName(). BodyLocation/DisplayCategory son las señales
+	-- estructurales reales y deben excluirlos antes del fallback de ropa.
+	if normalizedBodyLoc == "zeddmg" or displayCategory == "zeddmg" then return nil end
 	if U.hasAnyToken(nameTokens, INTERNAL_PROXY_TOKENS) then return nil end
 
 	-- dev11 (pedido explícito del usuario: "las joyas ya lo teníamos

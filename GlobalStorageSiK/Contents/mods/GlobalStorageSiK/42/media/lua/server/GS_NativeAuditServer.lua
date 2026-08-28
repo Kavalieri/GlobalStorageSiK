@@ -15,6 +15,7 @@
 ]]
 
 require "GS_NativeAudit"
+require "GS_DiagnosticsSession"
 
 GlobalStorageSiK.NativeAuditServer = GlobalStorageSiK.NativeAuditServer or {}
 
@@ -66,6 +67,12 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	-- ANTES del log principal, para que este pueda informar
 	-- GENERADO/NO GENERADO con la causa real en vez de anunciar el
 	-- fichero a ciegas.
+	local diagnosticRun = GlobalStorageSiK.DiagnosticsSession.beginRun(
+		"taxonomy", { "audit", "unclassified" })
+	report.diagnosticSessionId = diagnosticRun.sessionId
+	report.diagnosticRunId = diagnosticRun.runId
+	report.diagnosticReportFile = diagnosticRun.paths.audit
+	report.diagnosticUnclassifiedFile = diagnosticRun.paths.unclassified
 	local tsvOk, tsvErr = GlobalStorageSiK.NativeAudit.writeUnclassifiedTsv(report)
 	report.unclassifiedTsvOk = tsvOk
 	report.unclassifiedTsvError = tsvErr
@@ -101,6 +108,8 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	-- Taxonomia ya no lo usa para pintar.
 	sendCommandFn(player, "nativeAuditSummary", {
 		requestId = requestId,
+		sessionId = diagnosticRun.sessionId,
+		runId = diagnosticRun.runId,
 		finishedAtMs = (getTimestampMs and getTimestampMs()) or 0,
 		totalTypes = report.totalTypes,
 		pending = report.pending,
@@ -115,7 +124,7 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 		gameBuildVersion = report.gameBuildVersion,
 		tierVariantMatched = tierVariantMatched,
 		tierVariantTotal = tierVariantTotal,
-		fileName = "GlobalStorageSiK_NativeAudit.log",
-		unclassifiedFileName = "GlobalStorageSiK_NativeAudit_Unclassified.log",
+		fileName = diagnosticRun.paths.audit,
+		unclassifiedFileName = diagnosticRun.paths.unclassified,
 	})
 end

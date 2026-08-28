@@ -889,7 +889,8 @@ function GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 	if not getFileWriter then
 		return false
 	end
-	local ok, writer = pcall(getFileWriter, REPORT_FILE_NAME, true, false)
+	local fileName = (report and report.diagnosticReportFile) or REPORT_FILE_NAME
+	local ok, writer = pcall(getFileWriter, fileName, true, false)
 	if not ok or not writer then
 		return false
 	end

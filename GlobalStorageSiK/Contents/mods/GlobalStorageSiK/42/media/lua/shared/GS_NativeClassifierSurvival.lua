@@ -95,6 +95,7 @@ local function classifySurvival(fullType, si)
 	if not si then return nil end
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end
+	local itemType = U.itemTypeLower(si)
 
 	if U.hasAnyToken(tokens, POWER_TOKENS) and not U.hasAnyToken(tokens, POWER_EXCLUDE_TOKENS) then
 		return { l1 = "electronics_power", l2 = "power", l3 = nil }, {}, {}, U.evidence("name_electronics_power", 30)
@@ -128,7 +129,10 @@ local function classifySurvival(fullType, si)
 	if isSeedTag and U.hasTag(si, isSeedTag) then
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
 	end
-	if U.hasAnyToken(tokens, FARMING_TOKENS) then
+	-- dev28.1: los nombres debiles de agricultura no pisan una identidad
+	-- estructural de arma. GardenHoe declara base:weapon y debe llegar al
+	-- bloque Combat, que resuelve su WeaponCategory con confianza 100.
+	if itemType ~= "base:weapon" and U.hasAnyToken(tokens, FARMING_TOKENS) then
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("name_survival_farming", 30)
 	end
 	if U.hasAnyToken(tokens, FISHING_TOKENS) then
@@ -137,7 +141,9 @@ local function classifySurvival(fullType, si)
 	if U.hasAnyToken(tokens, TRAPPING_TOKENS) and not U.hasAnyToken(tokens, MUSIC_INSTRUMENT_EXCLUDE_TOKENS) then
 		return { l1 = "survival_outdoors", l2 = "trapping", l3 = nil }, {}, {}, U.evidence("name_survival_trapping", 30)
 	end
-	if U.hasAnyToken(tokens, CAMPING_TOKENS) then
+	-- dev28.1: "tarp" describe el material de varias bolsas, no su identidad.
+	-- Un ScriptItem base:container con Capacity se deja pasar a Containers.
+	if itemType ~= "base:container" and U.hasAnyToken(tokens, CAMPING_TOKENS) then
 		return { l1 = "survival_outdoors", l2 = "camping", l3 = nil }, {}, {}, U.evidence("name_survival_camping", 30)
 	end
 	if U.hasAnyToken(tokens, SECURITY_TOKENS) then

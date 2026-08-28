@@ -555,6 +555,9 @@ end
 ---@return string|nil
 function GlobalStorageSiK.Subcategories.jewelrySlotBucket(locLower)
 	if not locLower or locLower == "" then return nil end
+	-- Build 42 puede devolver ItemBodyLocation con namespace (p.ej.
+	-- base:rightwrist). El namespace no forma parte del hueco semantico.
+	locLower = locLower:gsub("^[^:]+:", "")
 	if JEWELRY_SLOT_BUCKET[locLower] then
 		return JEWELRY_SLOT_BUCKET[locLower]
 	end

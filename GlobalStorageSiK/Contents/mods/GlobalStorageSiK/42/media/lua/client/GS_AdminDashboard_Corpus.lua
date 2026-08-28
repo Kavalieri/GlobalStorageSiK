@@ -92,7 +92,8 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	elseif ui._nativeCorpusLastFailed then
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateError"), { r = 0.85, g = 0.4, b = 0.35 }
 	elseif ui._nativeCorpusLastReport then
-		local finishedText = ui._nativeCorpusFinishedAtText or "?"
+		local finishedText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeCorpusFinishedAtMs)
+		ui._nativeCorpusFinishedAtText = finishedText
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateDone", finishedText), { r = 0.55, g = 0.8, b = 0.5 }
 	else
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateIdle"), { r = 0.72, g = 0.75, b = 0.8 }
@@ -152,6 +153,10 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusFailureKindsLine",
 		tostring(report.classificationFailures), tostring(report.evidenceFailures),
 		tostring(report.facetAttributeFailures), tostring(report.requiredMissingFailures)),
+		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+
+	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyRunLine",
+		tostring(report.sessionId or "?"), tostring(report.runId or "?")),
 		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
 
 	-- dev25/dev26 (pedido explicito de sistemas §4: "mostrar en su resumen
@@ -221,8 +226,8 @@ function GlobalStorageSiK.AdminDashboardCorpus.onSummary(ui, report)
 	ui._nativeCorpusRunning = false
 	ui._nativeCorpusLastFailed = false
 	ui._nativeCorpusLastReport = report
-	local ms = report and report.finishedAtMs
-	ui._nativeCorpusFinishedAtText = (ms and os and os.date and os.date("%H:%M:%S", math.floor(ms / 1000))) or "?"
+	ui._nativeCorpusFinishedAtMs = report and tonumber(report.finishedAtMs) or nil
+	ui._nativeCorpusFinishedAtText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeCorpusFinishedAtMs)
 	GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 end
 

@@ -137,6 +137,15 @@ function GlobalStorageSiK.NativeClassifierUtils.itemTypeLower(si)
 	return it and string.lower(tostring(it)) or ""
 end
 
+--- DisplayCategory estructural del ScriptItem, normalizado a minusculas.
+---@param si table|nil
+---@return string
+function GlobalStorageSiK.NativeClassifierUtils.displayCategoryLower(si)
+	if not si or not si.getDisplayCategory then return "" end
+	local category = safeCall(function() return si:getDisplayCategory() end)
+	return category and string.lower(tostring(category)) or ""
+end
+
 -- dev14 (probe controlado de sistemas, confirmado via javap): ScriptItem
 -- hereda de GameEntityScript, que expone `containsComponent(ComponentType)`
 -- - señal ESTATICA real de "tiene un FluidContainer" (Base.Bucket/Canteen

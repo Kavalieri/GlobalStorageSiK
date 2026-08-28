@@ -613,6 +613,32 @@ function GS_AdminDashboardUI:initialise()
 	self:requestOnlinePlayers()
 end
 
+--- Mantiene vivo el texto relativo de las dos suites mientras la ventana
+--- permanece abierta. Solo reconstruye el bloque cuyo texto cambia y como
+--- maximo una vez por segundo; no envia ninguna peticion de red.
+function GS_AdminDashboardUI:prerender()
+	ISPanel.prerender(self)
+	local nowMs = getTimestampMs and tonumber(getTimestampMs()) or 0
+	if nowMs <= 0 then return end
+	if self._lastTaxonomyAgeRefreshMs and (nowMs - self._lastTaxonomyAgeRefreshMs) < 1000 then return end
+	self._lastTaxonomyAgeRefreshMs = nowMs
+
+	if self._nativeAuditLastReport then
+		local auditText = GlobalStorageSiK.SiK_UI.relativeAge(self._nativeAuditFinishedAtMs)
+		if auditText ~= self._nativeAuditFinishedAtText then
+			self._nativeAuditFinishedAtText = auditText
+			GlobalStorageSiK.AdminDashboardAudit.refreshSummary(self)
+		end
+	end
+	if self._nativeCorpusLastReport then
+		local corpusText = GlobalStorageSiK.SiK_UI.relativeAge(self._nativeCorpusFinishedAtMs)
+		if corpusText ~= self._nativeCorpusFinishedAtText then
+			self._nativeCorpusFinishedAtText = corpusText
+			GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(self)
+		end
+	end
+end
+
 function GS_AdminDashboardUI:destroy()
 	GlobalStorageSiK.AdminDashboard.instance = nil
 	self:setVisible(false)

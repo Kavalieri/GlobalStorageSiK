@@ -485,18 +485,17 @@ local function fmt(n)
 	return tostring(n or 0)
 end
 
---- Escribe el informe COMPLETO (incluidas las muestras) a fichero, en
---- <carpeta Zomboid>/Lua/GlobalStorageSiK_NativeAudit.log (misma API real
---- getFileWriter ya usada en GS_Log.lua). Sobrescribe cada vez (append=false)
---- - es una fotografia del catalogo en ESTE momento, no un historial
---- incremental de trazas; comparar ejecuciones se hace guardando copias del
---- fichero a mano si hace falta.
+--- Escribe el informe COMPLETO (incluidas las muestras) en la ruta única de
+--- `report.diagnosticReportFile`, asignada por DiagnosticsSession bajo
+--- Lua/SiKDiagnostics/GlobalStorageSiK/<sessionId>/taxonomy/. `append=false`
+--- solo inicializa ese runId nuevo: nunca sustituye otra ejecución.
 ---@param report table
 function GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 	if not getFileWriter then
 		return false
 	end
-	local ok, writer = pcall(getFileWriter, REPORT_FILE_NAME, true, false)
+	local fileName = (report and report.diagnosticReportFile) or REPORT_FILE_NAME
+	local ok, writer = pcall(getFileWriter, fileName, true, false)
 	if not ok or not writer then
 		return false
 	end
@@ -595,7 +594,7 @@ function GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 		-- invocar esta funcion, para poder informar GENERADO/NO GENERADO con
 		-- la causa real.
 		if report.unclassifiedTsvOk then
-			writer:write("--- Inventario completo de lo sin clasificar: GENERADO (" .. UNCLASSIFIED_TSV_NAME .. ") ---\r\n")
+			writer:write("--- Inventario completo de lo sin clasificar: GENERADO (" .. tostring(report.diagnosticUnclassifiedFile or UNCLASSIFIED_TSV_NAME) .. ") ---\r\n")
 		else
 			writer:write("--- Inventario completo de lo sin clasificar: NO GENERADO (" .. tostring(report.unclassifiedTsvError) .. ") ---\r\n")
 		end
@@ -656,7 +655,8 @@ function GlobalStorageSiK.NativeAudit.writeUnclassifiedTsv(report)
 	if not getFileWriter then return false, "getFileWriter_unavailable" end
 	local inventory = report.unclassifiedInventory
 	if not inventory or #inventory == 0 then return false, "empty_inventory" end
-	local ok, writer = pcall(getFileWriter, UNCLASSIFIED_TSV_NAME, true, false)
+	local fileName = (report and report.diagnosticUnclassifiedFile) or UNCLASSIFIED_TSV_NAME
+	local ok, writer = pcall(getFileWriter, fileName, true, false)
 	if not ok or not writer then return false, "getFileWriter_failed" end
 	local rowsWritten = 0
 	local okWrite, errMsg = pcall(function()

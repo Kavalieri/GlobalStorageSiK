@@ -98,8 +98,14 @@ function GlobalStorageSiK.SiK_UI.relativeAge(tsMs)
 	tsMs = tonumber(tsMs) or 0
 	if tsMs <= 0 then return "?" end
 	local T = GlobalStorageSiK.I18n.text
-	local nowTs = (getTimestampMs and getTimestampMs()) or tsMs
-	local deltaS = math.max(0, math.floor((nowTs - tsMs) / 1000))
+	local nowTs = getTimestampMs and tonumber(getTimestampMs()) or 0
+	if nowTs <= 0 then return "?" end
+	local deltaMs = nowTs - tsMs
+	-- Tolera el pequeno desfase de reloj entre servidor y cliente, pero no
+	-- presenta como "ahora" una marca invalida situada claramente al futuro.
+	if deltaMs < -5000 then return "?" end
+	local deltaS = math.max(0, math.floor(deltaMs / 1000))
+	if deltaS < 2 then return T("IGUI_GS_AdminAgeNow") end
 	if deltaS < 60 then return T("IGUI_GS_AdminAgeSeconds", deltaS) end
 	if deltaS < 3600 then return T("IGUI_GS_AdminAgeMinutes", math.floor(deltaS / 60)) end
 	if deltaS < 86400 then return T("IGUI_GS_AdminAgeHours", math.floor(deltaS / 3600)) end

@@ -138,11 +138,8 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	elseif ui._nativeAuditLastFailed then
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateError"), { r = 0.85, g = 0.4, b = 0.35 }
 	elseif ui._nativeAuditLastReport then
-		-- dev23 (pedido explicito de sistemas: "registrar hora de
-		-- finalizacion recibida, no recalcularla cada vez que se repinta
-		-- el resumen"): usa finishedAtMs del propio payload (una sola vez,
-		-- en onSummary), nunca os.date() en cada refresco.
-		local finishedText = ui._nativeAuditFinishedAtText or "?"
+		local finishedText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeAuditFinishedAtMs)
+		ui._nativeAuditFinishedAtText = finishedText
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateDone", finishedText), { r = 0.55, g = 0.8, b = 0.5 }
 	else
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateIdle"), { r = 0.72, g = 0.75, b = 0.8 }
@@ -209,6 +206,10 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 		tostring(report.tierVariantMatched), tostring(report.tierVariantTotal)),
 		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
 
+	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyRunLine",
+		tostring(report.sessionId or "?"), tostring(report.runId or "?")),
+		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+
 	-- dev23 (pedido explicito: "lineas independientes, sin asumir
 	-- exactamente 2 ficheros"): recorre una lista en vez de 2 campos fijos -
 	-- soporta ampliarse en el futuro sin tocar este bloque.
@@ -269,10 +270,8 @@ function GlobalStorageSiK.AdminDashboardAudit.onSummary(ui, report)
 	ui._nativeAuditRunning = false
 	ui._nativeAuditLastFailed = false
 	ui._nativeAuditLastReport = report
-	-- dev23: hora de finalizacion formateada UNA vez aqui (dato ya llegado
-	-- del servidor via finishedAtMs), nunca recalculada en refreshSummary().
-	local ms = report and report.finishedAtMs
-	ui._nativeAuditFinishedAtText = (ms and os and os.date and os.date("%H:%M:%S", math.floor(ms / 1000))) or "?"
+	ui._nativeAuditFinishedAtMs = report and tonumber(report.finishedAtMs) or nil
+	ui._nativeAuditFinishedAtText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeAuditFinishedAtMs)
 	GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 end
 

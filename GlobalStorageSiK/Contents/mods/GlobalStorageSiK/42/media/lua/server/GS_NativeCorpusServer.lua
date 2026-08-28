@@ -13,6 +13,7 @@
 ]]
 
 require "GS_NativeCorpus"
+require "GS_DiagnosticsSession"
 
 GlobalStorageSiK.NativeCorpusServer = GlobalStorageSiK.NativeCorpusServer or {}
 
@@ -50,6 +51,10 @@ function GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerM
 		return
 	end
 
+	local diagnosticRun = GlobalStorageSiK.DiagnosticsSession.beginRun("taxonomy", { "corpus" })
+	report.diagnosticSessionId = diagnosticRun.sessionId
+	report.diagnosticRunId = diagnosticRun.runId
+	report.diagnosticReportFile = diagnosticRun.paths.corpus
 	GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 
 	-- dev25/dev26 (pedido explicito de sistemas §4: "mostrar en su resumen
@@ -80,6 +85,8 @@ function GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerM
 	-- explicito: "no enviarlos completos por red").
 	sendCommandFn(player, "nativeCorpusSummary", {
 		requestId = requestId,
+		sessionId = diagnosticRun.sessionId,
+		runId = diagnosticRun.runId,
 		finishedAtMs = (getTimestampMs and getTimestampMs()) or 0,
 		corpusVersion = report.corpusVersion,
 		catalogEpoch = report.catalogEpoch,
@@ -107,6 +114,6 @@ function GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerM
 		containersBlockStatus = containersBlockStatus,
 		containersBlockReasons = containersBlockReasons,
 		timeMs = report.timeMs,
-		fileName = "GlobalStorageSiK_NativeCorpus.log",
+		fileName = diagnosticRun.paths.corpus,
 	})
 end

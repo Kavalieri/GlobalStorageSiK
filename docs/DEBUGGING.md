@@ -25,6 +25,20 @@ Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el 
 
 `GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, Router y el árbol **SiK UI** (ver más abajo). Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
 
+### Evidencias por sesión
+
+Las ejecuciones diagnósticas se aíslan bajo `Lua/SiKDiagnostics/GlobalStorageSiK/<sessionId>/`. La sesión permanece estable durante el proceso y cada ejecución recibe un `runId` distinto, de modo que repetir una prueba no sobrescribe la anterior:
+
+```text
+taxonomy/audit-<runId>.log
+taxonomy/unclassified-<runId>.log
+taxonomy/corpus-<runId>.log
+permissions/permissions-<runId>.log
+session.json
+```
+
+`session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId` y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` únicamente si necesitas el eco acotado en el cliente.
+
 ### Árbol "SiK UI" (dev36)
 
 Antes de dev36 existían tres interruptores sueltos, sin relación visible entre sí: `DebugModeUI` (clics/árbol de widgets/solapes, mecanismo propio distinto del resto), `DebugCatUI` (apertura de ventana + nombrado de nodo, mezclados en una sola categoría) y `DebugCatSearch` (caja de búsqueda). Los tres quedaron **retirados y sustituidos** por un único árbol de categorías `DebugCat`, con el mismo mecanismo estándar que Network/Craft/Inventory/Router, agrupado bajo el prefijo visible "SiK UI:" para poder depurar el framework de interfaz propio (`GS_SiK_UI_Core.lua`, `GS_SiK_UI_Table.lua`, `GS_TerminalUI_Scroll.lua`, `GS_TerminalUI_TabRail.lua`, `GS_TerminalUI_Extensions.lua`) por partes. El nombrado de nodo (`NodeNaming`), al no ser parte del framework visual sino lógica de negocio, pasó a su propia categoría independiente en vez de perderse.
