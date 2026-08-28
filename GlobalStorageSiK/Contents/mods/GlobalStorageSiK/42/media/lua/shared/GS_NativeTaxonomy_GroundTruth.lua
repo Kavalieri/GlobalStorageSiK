@@ -68,7 +68,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- dev27: incrementada a "5" - anade los 3 bloques completos de la ronda
 -- (Combate, Ropa/Proteccion, Contenedores), 76+141+108 casos nuevos (ver
 -- secciones 1ter/1quater/1quinquies mas abajo).
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "6"
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "7"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -2933,6 +2933,10 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v6_food_prepared", fullType="Base.CannedMushroomSoup", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="prepared_meal", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v6_food_other", fullType="Base.CannedPineapple", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="other_food", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v6_food_dairy", fullType="Base.CannedMilk_Box", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="dairy_egg", expectedL3=false, minConfidence=30, expectedSource="name_food_dairy_egg", expectationSource="product_policy:food_dairy_name" },
+	-- Corpus v7 / dev30.4. Anclajes de la señal estructural ScriptItem:isSpice().
+	{ caseId="v7_food_spice_pepper", fullType="Base.Pepper", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="ingredient", expectedL3="spice", minConfidence=100, expectedSource="script_item_is_spice", expectationSource="product_policy:script_item_is_spice", criticalAnchor=true },
+	{ caseId="v7_food_spice_salt", fullType="Base.Salt", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="ingredient", expectedL3="spice", minConfidence=100, expectedSource="script_item_is_spice", expectationSource="product_policy:script_item_is_spice", criticalAnchor=true },
+	{ caseId="v7_food_spice_seasoning_salt", fullType="Base.SeasoningSalt", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="ingredient", expectedL3="spice", minConfidence=100, expectedSource="script_item_is_spice", expectationSource="product_policy:script_item_is_spice", criticalAnchor=true },
 
 	{ caseId="v6_knowledge_magazine_collision", fullType="Base.Magazine_Science_New", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="general_magazine", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_literature_type", collisionWith="knowledge_fallback", criticalAnchor=true },
 	{ caseId="v6_knowledge_literature", fullType="Base.PhotoBook", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="literature", expectedL3=false, minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_literature_type" },

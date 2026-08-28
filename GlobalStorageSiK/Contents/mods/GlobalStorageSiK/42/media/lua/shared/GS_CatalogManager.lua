@@ -38,7 +38,7 @@ GlobalStorageSiK.CatalogManager = GlobalStorageSiK.CatalogManager or {}
 -- clave containers.wearable.backpack y se sustituye por
 -- clothing_protection.equipment.backpack (mochilas vestibles pasan a Ropa/
 -- Equipamiento, decision de producto de sistemas para DEV27).
-local CLASSIFIER_SCHEMA = "1"
+local CLASSIFIER_SCHEMA = "2"
 
 local state = {
 	catalogEpoch = 0,

@@ -55,7 +55,7 @@ local TREE = {
 	},
 	food_drink = {
 		meat_protein = {}, dairy_egg = {}, fish_seafood = {}, produce = {},
-		pantry = {}, ingredient = {}, prepared_meal = {}, beverage = {}, animal_feed = {},
+		pantry = {}, ingredient = { "spice" }, prepared_meal = {}, beverage = {}, animal_feed = {},
 		-- "other_food" añadido dev15 (hallazgo de sistemas): identidad L1
 		-- confirmada por ItemType=base:food, sin evidencia de nombre para
 		-- ningun L2 concreto - separa la certeza de familia de la certeza

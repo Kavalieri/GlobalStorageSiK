@@ -177,6 +177,12 @@ local function classifyFood(fullType, si)
 	end
 
 	local l2, weakSource = matchL2(tokens)
+	-- `isSpice()` es un getter oficial del ScriptItem, confirmado en B42. Es una
+	-- señal estática más fuerte que los tokens y evita instanciar objetos.
+	if U.safeCall(function() return si:isSpice() end) == true then
+		return { l1 = "food_drink", l2 = "ingredient", l3 = "spice" }, {}, {},
+			U.evidence("script_item_is_spice", 100)
+	end
 
 	if isConfirmedFood then
 		-- dev15 (hallazgo de sistemas): "usar ItemType como identidad

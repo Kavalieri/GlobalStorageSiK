@@ -30,6 +30,7 @@ require "GS_Network"
 
 require "GS_Index"
 require "GS_RuleSanitizer"
+require "GS_ExternalCategoryMigration"
 
 require "GS_NetworkCapacity"
 
@@ -451,6 +452,7 @@ end
 
 
 local LEGACY_RULE_SANITIZER_VERSION = 3
+local EXTERNAL_CATEGORY_MIGRATION_VERSION = 1
 
 local function migrationLogValue(value)
 	return tostring(value or "?"):gsub("[%c]", "?"):sub(1, 160)
@@ -548,6 +550,82 @@ local function sanitizePersistedRules(registry, networkId)
 	end
 end
 
+local function logExternalCategoryMigration(networkId, phase, report, result)
+	GlobalStorageSiK.Log.info("RuleMigration", "externalCategoryMigration"
+		.. " network=" .. migrationLogValue(networkId)
+		.. " phase=" .. migrationLogValue(phase)
+		.. " owners=" .. tostring(report.owners)
+		.. " matches=" .. tostring(report.matches)
+		.. " rules=" .. tostring(report.rules)
+		.. " categories=" .. tostring(report.categories)
+		.. " catalogReady=" .. tostring(report.catalogReady)
+		.. " missingNative=" .. tostring(report.missingNative)
+		.. " unexpectedNative=" .. tostring(report.unexpectedNative)
+		.. " missingCatalog=" .. tostring(report.missingCatalog)
+		.. " unknownPreserved=" .. tostring(report.unknownPreserved)
+		.. " equivalent=" .. tostring(report.equivalent)
+		.. " changedOwners=" .. tostring(result and result.changedOwners or 0))
+	for i = 1, #(report.samples or {}) do
+		local sample = report.samples[i]
+		GlobalStorageSiK.Log.info("RuleMigration", "externalCategoryMigrationRecord"
+			.. " network=" .. migrationLogValue(networkId)
+			.. " phase=" .. migrationLogValue(phase)
+			.. " ownerKind=" .. migrationLogValue(sample.ownerKind)
+			.. " ownerId=" .. migrationLogValue(sample.ownerId)
+			.. " source=" .. migrationLogValue(sample.source)
+			.. " index=" .. migrationLogValue(sample.index)
+			.. " previousValue=" .. migrationLogValue(sample.previousValue)
+			.. " mapping=" .. migrationLogValue(sample.mapping)
+			.. " targetPath=" .. migrationLogValue(sample.targetPath))
+	end
+end
+
+local function migrateExternalCategories(registry, networkId)
+	if type(registry.externalCategoryMigrationByNetwork) ~= "table" then
+		registry.externalCategoryMigrationByNetwork = {}
+	end
+	local previousMarker = registry.externalCategoryMigrationByNetwork[networkId]
+	if tonumber(previousMarker) == EXTERNAL_CATEGORY_MIGRATION_VERSION then return end
+	local migration = GlobalStorageSiK.ExternalCategoryMigration
+	local capture = migration.auditRegistry(registry, networkId)
+	logExternalCategoryMigration(networkId, "capture", capture, nil)
+	if not capture.equivalent then
+		registry.externalCategoryMigrationByNetwork[networkId] = nil
+		GlobalStorageSiK.Log.warn("RuleMigration", "externalCategoryMigrationMarker"
+			.. " network=" .. migrationLogValue(networkId)
+			.. " version=" .. tostring(EXTERNAL_CATEGORY_MIGRATION_VERSION)
+			.. " status=withheld")
+		return
+	end
+	local first = migration.applyAudit(capture)
+	logExternalCategoryMigration(networkId, "pass1", capture, first)
+	local secondAudit = migration.auditRegistry(registry, networkId)
+	local second = migration.applyAudit(secondAudit)
+	logExternalCategoryMigration(networkId, "pass2", secondAudit, second)
+	local post = migration.auditRegistry(registry, networkId)
+	logExternalCategoryMigration(networkId, "postvalidate", post, nil)
+	if post.matches ~= 0 or not post.equivalent then
+		registry.externalCategoryMigrationByNetwork[networkId] = nil
+		GlobalStorageSiK.Log.warn("RuleMigration", "externalCategoryMigrationMarker"
+			.. " network=" .. migrationLogValue(networkId)
+			.. " version=" .. tostring(EXTERNAL_CATEGORY_MIGRATION_VERSION)
+			.. " status=withheld remaining=" .. tostring(post.matches))
+		return
+	end
+	registry.externalCategoryMigrationByNetwork[networkId] = EXTERNAL_CATEGORY_MIGRATION_VERSION
+	GlobalStorageSiK.Log.info("RuleMigration", "externalCategoryMigrationMarker"
+		.. " network=" .. migrationLogValue(networkId)
+		.. " version=" .. tostring(EXTERNAL_CATEGORY_MIGRATION_VERSION)
+		.. " status=written")
+	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	end
+	if (first.changed or second.changed or previousMarker ~= nil) and GlobalStorageSiK.RegistryStore
+		and GlobalStorageSiK.RegistryStore.notifyChanged then
+		GlobalStorageSiK.RegistryStore.notifyChanged()
+	end
+end
+
 --- Construye estado completo del terminal.
 
 ---@param networkId string
@@ -561,6 +639,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	sanitizePersistedRules(registry, networkId)
+	migrateExternalCategories(registry, networkId)
 	local freshSnapshotScope = scanSummary and scanSummary._freshSnapshotScope or nil
 	local rows = GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	-- Los campos con prefijo "_" coordinan servidor/indice y no forman parte

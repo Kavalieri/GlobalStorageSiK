@@ -67,6 +67,8 @@ end
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_NativeProduct.lua")
 local Product = GlobalStorageSiK.NativeProduct
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_RuleSanitizer.lua")
+package.loaded["GS_NativeProduct"] = true
+dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_ExternalCategoryMigration.lua")
 local compatStatus = Product.getCompatibilityStatus()
 assertEqual(compatStatus.extendedCategories, false, "Extended Categories runtime detection")
 assertEqual(compatStatus.organizedCategories, false, "Organized Categories runtime detection")
@@ -155,6 +157,52 @@ assertEqual(secondSanitize.quarantined, 0, "second migration quarantines nothing
 assertEqual(#persisted.nodes.a.legacyJunkRules, 3, "quarantine not duplicated")
 assertEqual(GlobalStorageSiK.RuleSanitizer.inspectRegistry(persisted, "net-a").matches,
 	0, "postvalidation finds no active junk")
+
+local externalPersisted = { zones = {
+	z = { id = "z", networkId = "net-a", categories = { "__subgroup__:Food::FoodSpice", "__subgroup__:Food::UnknownExternal" }, rules = {
+		{ op = "NOT", condition = { type = "category", value = "FoodSpice" } },
+	} },
+}, nodes = {
+	n = { id = "n", zoneId = "z", categories = {}, rules = {
+		{ op = "AND", condition = { type = "category", value = "__subgroup__:Food::FoodSpice" } },
+	} },
+} }
+local spiceTypes = { "Base.Pepper", "Base.Salt", "Base.SeasoningSalt", "Base.Apple" }
+local function spicePath(fullType)
+	if fullType == "Base.Pepper" or fullType == "Base.Salt" or fullType == "Base.SeasoningSalt" then
+		return "native:food_drink/ingredient/spice"
+	end
+	return "native:food_drink/produce/fruit"
+end
+local ExternalMigration = GlobalStorageSiK.ExternalCategoryMigration
+local externalAudit = ExternalMigration.auditRegistry(externalPersisted, "net-a", spiceTypes, spicePath)
+assertEqual(externalAudit.equivalent, true, "FoodSpice set is equivalent to native spice")
+assertEqual(externalAudit.matches, 3, "rules and categories capture every known FoodSpice alias")
+assertEqual(externalAudit.unknownPreserved, 1, "unknown external key is reported but preserved")
+local externalFirst = ExternalMigration.applyAudit(externalAudit)
+assertEqual(externalFirst.changedOwners, 2, "external migration changes each affected owner once")
+assertEqual(externalPersisted.zones.z.categories[1], "native:food_drink/ingredient/spice", "legacy category becomes native path")
+assertEqual(externalPersisted.zones.z.rules[1].condition.value, "native:food_drink/ingredient/spice", "legacy rule value becomes native path")
+assertEqual(externalPersisted.zones.z.rules[1].condition.nativePath, "native:food_drink/ingredient/spice", "native rule path persists")
+assertEqual(externalPersisted.zones.z.rules[1].condition.legacyValue, nil, "router does not fall back to removed provider")
+assertEqual(#externalPersisted.zones.z.externalCategoryMigrationHistory, 2, "previous category and rule remain recoverable")
+assertEqual(externalPersisted.zones.z.categories[2], "__subgroup__:Food::UnknownExternal", "unknown external category remains active")
+local externalSecondAudit = ExternalMigration.auditRegistry(externalPersisted, "net-a", spiceTypes, spicePath)
+assertEqual(externalSecondAudit.matches, 0, "second external pass has no remaining known aliases")
+assertEqual(ExternalMigration.applyAudit(externalSecondAudit).changed, false, "second external pass is idempotent")
+
+local mismatchPersisted = { zones = {
+	z = { id = "z", networkId = "net-a", categories = {}, rules = {
+		{ op = "OR", condition = { type = "category", value = "FoodSpice" } },
+	} },
+}, nodes = {} }
+local mismatchAudit = ExternalMigration.auditRegistry(mismatchPersisted, "net-a", spiceTypes, function(fullType)
+	if fullType == "Base.Apple" then return "native:food_drink/ingredient/spice" end
+	return spicePath(fullType)
+end)
+assertEqual(mismatchAudit.equivalent, false, "unexpected native type withholds migration")
+assertEqual(ExternalMigration.applyAudit(mismatchAudit).changed, false, "mismatch never mutates a legacy rule")
+assertEqual(mismatchPersisted.zones.z.rules[1].condition.value, "FoodSpice", "mismatch preserves source value")
 
 local externalRow = { fullType = "Base.Apple", category = "ExternalFood",
 	nativePath = "native:food_drink/produce/fruit" }
