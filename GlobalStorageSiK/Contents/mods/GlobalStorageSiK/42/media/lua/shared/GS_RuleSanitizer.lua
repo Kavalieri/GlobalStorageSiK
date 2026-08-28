@@ -1,6 +1,6 @@
 --[[
 	GlobalStorageSiK - saneado recuperable de reglas legacy persistidas
-	Core 1.4.3-dev30.2
+	Core 1.4.3-dev30.3
 
 	Las versiones antiguas pudieron persistir dimensiones tecnicas de una sola
 	letra (B/F/W...) como si fueran categorias. Son inequívocamente basura, pero
@@ -19,6 +19,7 @@ local function cloneRule(rule)
 		op = rule and rule.op or "OR",
 		condition = condition,
 		legacySource = rule and rule.legacySource or nil,
+		legacyRuleIndex = rule and rule.legacyRuleIndex or nil,
 	}
 end
 
@@ -43,8 +44,12 @@ function GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(condition)
 		and GlobalStorageSiK.NativeProduct.decodePath(condition.nativePath) then
 		return false
 	end
-	local value = condition.value
-	return asciiDimension(value) ~= nil
+	-- UI y router priorizan nativePath incluso si es una ruta corrupta. DEV30.2
+	-- solo comprobaba value, por lo que { nativePath="F", value="Food" }
+	-- seguia mostrando F y quedaba fuera de la migracion.
+	local activeValue = condition.nativePath
+	if activeValue == nil then activeValue = condition.value end
+	return asciiDimension(activeValue) ~= nil
 end
 
 local function ruleSignature(rule)
@@ -56,7 +61,7 @@ local function ruleSignature(rule)
 	}, "\31")
 end
 
-local function appendSample(report, context, rule)
+local function appendSample(report, context, rule, ruleIndex)
 	if #report.samples >= 3 then return end
 	local condition = rule.condition or {}
 	report.samples[#report.samples + 1] = {
@@ -64,10 +69,14 @@ local function appendSample(report, context, rule)
 		ownerId = context and context.ownerId or "?",
 		networkId = context and context.networkId or "?",
 		source = rule.legacySource or "rules",
+		ruleIndex = ruleIndex or rule.legacyRuleIndex,
 		op = rule.op or "OR",
 		type = condition.type,
 		value = condition.value,
-		canonical = "legacy-junk:category-dimension:" .. tostring(asciiDimension(condition.value) or "?"),
+		nativePath = condition.nativePath,
+		legacyValue = condition.legacyValue,
+		canonical = "legacy-junk:category-dimension:"
+			.. tostring(asciiDimension(condition.nativePath ~= nil and condition.nativePath or condition.value) or "?"),
 	}
 end
 
@@ -103,11 +112,12 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 		else
 			local copy = cloneRule(rawRule)
 			copy.legacySource = copy.legacySource or "rules"
+			copy.legacyRuleIndex = copy.legacyRuleIndex or i
 			report.rulesBefore = report.rulesBefore + 1
 			report.before = report.before + 1
 			if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(copy.condition) then
 				quarantineRule(quarantine, seen, copy)
-				appendSample(report, context, copy)
+				appendSample(report, context, copy, i)
 				report.quarantined = report.quarantined + 1
 				report.changed = true
 				report.rulesChanged = true
@@ -132,10 +142,11 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 			op = "OR",
 			condition = { type = "category", value = value },
 			legacySource = "categories",
+			legacyRuleIndex = i,
 		}
 		if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(synthetic.condition) then
 			quarantineRule(quarantine, seen, synthetic)
-			appendSample(report, context, synthetic)
+			appendSample(report, context, synthetic, i)
 			report.quarantined = report.quarantined + 1
 			report.changed = true
 			report.categoriesChanged = true
@@ -151,6 +162,53 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 		owner.legacyJunkRules = quarantine
 	end
 	return report
+end
+
+---@param registry table|nil
+---@param networkId string|nil
+---@return table report
+function GlobalStorageSiK.RuleSanitizer.inspectRegistry(registry, networkId)
+	local total = { owners = 0, matches = 0, samples = {} }
+	local function visit(owners, ownerKind)
+		for ownerId, owner in pairs(owners or {}) do
+			local ownerNetworkId = owner.networkId
+			if ownerKind == "node" then
+				local zone = registry and registry.zones and registry.zones[owner.zoneId]
+				ownerNetworkId = zone and zone.networkId or ownerNetworkId
+			end
+			if networkId == nil or ownerNetworkId == networkId then
+				total.owners = total.owners + 1
+				for i = 1, #(owner.rules or {}) do
+					local rule = owner.rules[i]
+					if type(rule) == "table"
+						and GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+						total.matches = total.matches + 1
+						appendSample(total, {
+							ownerKind = ownerKind, ownerId = owner.id or ownerId,
+							networkId = ownerNetworkId,
+						}, rule, i)
+					end
+				end
+				for i = 1, #(owner.categories or {}) do
+					local synthetic = {
+						op = "OR",
+						condition = { type = "category", value = owner.categories[i] },
+						legacySource = "categories", legacyRuleIndex = i,
+					}
+					if GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(synthetic.condition) then
+						total.matches = total.matches + 1
+						appendSample(total, {
+							ownerKind = ownerKind, ownerId = owner.id or ownerId,
+							networkId = ownerNetworkId,
+						}, synthetic, i)
+					end
+				end
+			end
+		end
+	end
+	visit(registry and registry.nodes, "node")
+	visit(registry and registry.zones, "zone")
+	return total
 end
 
 ---@param registry table|nil

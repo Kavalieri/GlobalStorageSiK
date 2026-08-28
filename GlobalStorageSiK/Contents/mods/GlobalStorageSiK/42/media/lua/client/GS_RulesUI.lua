@@ -90,6 +90,23 @@ function GlobalStorageSiK.RulesUI.describeCondition(condition)
 	return GlobalStorageSiK.NodeFilters.describe(condition)
 end
 
+---@param condition table|nil
+---@param fallback table|nil
+---@return table RGB
+function GlobalStorageSiK.RulesUI.conditionColor(condition, fallback)
+	if type(condition) == "table" and condition.type == "category" then
+		local nativePath = condition.nativePath
+		if nativePath == nil and type(condition.value) == "string"
+			and condition.value:sub(1, 7) == "native:" then
+			nativePath = condition.value
+		end
+		if GlobalStorageSiK.NativeProduct.decodePath(nativePath) then
+			return GlobalStorageSiK.NativeProduct.getColor(nativePath)
+		end
+	end
+	return fallback or { 0.72, 0.75, 0.78 }
+end
+
 --- Copia profunda de una lista de reglas {op, condition}.
 ---@param source table
 ---@return table
@@ -175,6 +192,119 @@ function GlobalStorageSiK.RulesUI.buildSummary(rules)
 		return T("IGUI_GS_NodeRulesSummaryUnrestricted")
 	end
 	return sentence
+end
+
+local SUMMARY_MARKER = "__GS_RULE_SUMMARY_VALUE__"
+
+local function appendSummaryText(segments, text, condition)
+	if text and text ~= "" then
+		segments[#segments + 1] = { text = text, condition = condition }
+	end
+end
+
+---@param rules table
+---@return table[] {text=string,condition=table|nil}
+function GlobalStorageSiK.RulesUI.buildSummarySegments(rules)
+	local grouped = { OR = {}, AND = {}, NOT = {} }
+	for i = 1, #(rules or {}) do
+		local rule = rules[i]
+		if type(rule) == "table" and type(rule.condition) == "table"
+			and not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+			local op = grouped[rule.op] and rule.op or "OR"
+			grouped[op][#grouped[op] + 1] = rule.condition
+		end
+	end
+	if #grouped.OR == 0 and #grouped.AND == 0 and #grouped.NOT == 0 then
+		return { { text = T("IGUI_GS_NodeRulesSummaryUnrestricted") } }
+	end
+
+	local segments = {}
+	local function appendGroup(conditions, templateKey, joinKey)
+		if #conditions == 0 then return end
+		local template = T(templateKey, SUMMARY_MARKER)
+		local markerStart = template:find(SUMMARY_MARKER, 1, true)
+		if not markerStart then
+			appendSummaryText(segments, template)
+			return
+		end
+		appendSummaryText(segments, template:sub(1, markerStart - 1))
+		local joinText = T(joinKey)
+		for i = 1, #conditions do
+			if i > 1 then appendSummaryText(segments, joinText) end
+			appendSummaryText(segments,
+				GlobalStorageSiK.RulesUI.describeCondition(conditions[i]), conditions[i])
+		end
+		appendSummaryText(segments, template:sub(markerStart + #SUMMARY_MARKER))
+	end
+	appendGroup(grouped.OR, "IGUI_GS_NodeRulesSummaryAccepts", "IGUI_GS_NodeRulesJoinOr")
+	appendGroup(grouped.AND, "IGUI_GS_NodeRulesSummaryAlso", "IGUI_GS_NodeRulesJoinAnd")
+	appendGroup(grouped.NOT, "IGUI_GS_NodeRulesSummaryNever", "IGUI_GS_NodeRulesJoinNot")
+	return segments
+end
+
+---@param rules table
+---@param maxWidth number
+---@param font UIFont
+---@param fallbackColor table
+---@return table layout {runs=table[],lineCount=number,text=string}
+function GlobalStorageSiK.RulesUI.layoutSummary(rules, maxWidth, font, fallbackColor)
+	local segments = GlobalStorageSiK.RulesUI.buildSummarySegments(rules)
+	local tm = getTextManager()
+	local runs, plain = {}, ""
+	local x, line, pendingWhitespace = 0, 1, ""
+	maxWidth = math.max(40, tonumber(maxWidth) or 200)
+	font = font or UIFont.Small
+	fallbackColor = fallbackColor or { 0.72, 0.75, 0.78 }
+
+	local function nextLine()
+		x = 0
+		line = line + 1
+	end
+	local function addRun(text, color)
+		if text == "" then return end
+		runs[#runs + 1] = { text = text, x = x, line = line, color = color }
+		x = x + tm:MeasureStringX(font, text)
+	end
+	local function addWord(word, color)
+		local space = pendingWhitespace ~= "" and " " or ""
+		pendingWhitespace = ""
+		local wordWidth = tm:MeasureStringX(font, word)
+		if wordWidth > maxWidth then
+			if x > 0 then nextLine() end
+			local chunks = GlobalStorageSiK.SiK_UI.wrapTextLines(word, maxWidth, font)
+			for i = 1, #chunks do
+				addRun(chunks[i], color)
+				if i < #chunks then nextLine() end
+			end
+			return
+		end
+		local prefix = x > 0 and space or ""
+		if x > 0 and space ~= ""
+			and x + tm:MeasureStringX(font, prefix .. word) > maxWidth then
+			nextLine()
+			prefix = ""
+		end
+		addRun(prefix .. word, color)
+	end
+
+	for i = 1, #segments do
+		local segment = segments[i]
+		local text = tostring(segment.text or "")
+		plain = plain .. text
+		local color = GlobalStorageSiK.RulesUI.conditionColor(segment.condition, fallbackColor)
+		local pos = 1
+		while pos <= #text do
+			local wordStart, wordEnd = text:find("%S+", pos)
+			if not wordStart then
+				pendingWhitespace = pendingWhitespace .. text:sub(pos)
+				break
+			end
+			pendingWhitespace = pendingWhitespace .. text:sub(pos, wordStart - 1)
+			addWord(text:sub(wordStart, wordEnd), color)
+			pos = wordEnd + 1
+		end
+	end
+	return { runs = runs, lineCount = math.max(1, line), text = plain }
 end
 
 --- Convierte un filtro de tipo "weight" en un rango [lo, hi] (nil = sin
@@ -333,18 +463,23 @@ function GlobalStorageSiK.RulesUI.compactSummary(rules)
 	rules = rules or {}
 	if #rules == 0 then return nil end
 	local hasOr, hasAnd, hasNot = false, false, false
+	local visibleCount = 0
 	local firstOr, firstAnd, firstNot = nil, nil, nil
 	for i = 1, #rules do
 		local rule = rules[i]
-		if rule.op == "OR" then
-			hasOr = true
-			firstOr = firstOr or rule
-		elseif rule.op == "AND" then
-			hasAnd = true
-			firstAnd = firstAnd or rule
-		elseif rule.op == "NOT" then
-			hasNot = true
-			firstNot = firstNot or rule
+		if type(rule) == "table" and type(rule.condition) == "table"
+			and not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+			visibleCount = visibleCount + 1
+			if rule.op == "OR" then
+				hasOr = true
+				firstOr = firstOr or rule
+			elseif rule.op == "AND" then
+				hasAnd = true
+				firstAnd = firstAnd or rule
+			elseif rule.op == "NOT" then
+				hasNot = true
+				firstNot = firstNot or rule
+			end
 		end
 	end
 	local primary, opKey = firstOr, "OR"
@@ -354,8 +489,9 @@ function GlobalStorageSiK.RulesUI.compactSummary(rules)
 	return {
 		hasOr = hasOr, hasAnd = hasAnd, hasNot = hasNot,
 		label = GlobalStorageSiK.RulesUI.describeCondition(primary.condition),
+		condition = primary.condition,
 		opKey = opKey,
-		extraCount = #rules - 1,
+		extraCount = visibleCount - 1,
 	}
 end
 

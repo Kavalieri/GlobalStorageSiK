@@ -450,7 +450,7 @@ end
 
 
 
-local LEGACY_RULE_SANITIZER_VERSION = 2
+local LEGACY_RULE_SANITIZER_VERSION = 3
 
 local function migrationLogValue(value)
 	return tostring(value or "?"):gsub("[%c]", "?"):sub(1, 160)
@@ -474,10 +474,36 @@ local function logLegacyRuleSanitizerPass(networkId, pass, report)
 			.. " ownerKind=" .. migrationLogValue(sample.ownerKind)
 			.. " ownerId=" .. migrationLogValue(sample.ownerId)
 			.. " source=" .. migrationLogValue(sample.source)
+			.. " ruleIndex=" .. migrationLogValue(sample.ruleIndex)
 			.. " op=" .. migrationLogValue(sample.op)
 			.. " type=" .. migrationLogValue(sample.type)
 			.. " value=" .. migrationLogValue(sample.value)
+			.. " nativePath=" .. migrationLogValue(sample.nativePath)
+			.. " legacyValue=" .. migrationLogValue(sample.legacyValue)
 			.. " canonical=" .. migrationLogValue(sample.canonical))
+	end
+end
+
+local function logLegacyRuleInspection(networkId, phase, report)
+	GlobalStorageSiK.Log.info("RuleMigration", "legacyRuleSanitizerInspection"
+		.. " network=" .. migrationLogValue(networkId)
+		.. " phase=" .. migrationLogValue(phase)
+		.. " owners=" .. tostring(report.owners)
+		.. " matches=" .. tostring(report.matches))
+	for i = 1, #(report.samples or {}) do
+		local sample = report.samples[i]
+		GlobalStorageSiK.Log.info("RuleMigration", "legacyRuleSanitizerRecord"
+			.. " network=" .. migrationLogValue(sample.networkId)
+			.. " phase=" .. migrationLogValue(phase)
+			.. " ownerKind=" .. migrationLogValue(sample.ownerKind)
+			.. " ownerId=" .. migrationLogValue(sample.ownerId)
+			.. " source=" .. migrationLogValue(sample.source)
+			.. " ruleIndex=" .. migrationLogValue(sample.ruleIndex)
+			.. " op=" .. migrationLogValue(sample.op)
+			.. " type=" .. migrationLogValue(sample.type)
+			.. " value=" .. migrationLogValue(sample.value)
+			.. " nativePath=" .. migrationLogValue(sample.nativePath)
+			.. " legacyValue=" .. migrationLogValue(sample.legacyValue))
 	end
 end
 
@@ -485,18 +511,38 @@ local function sanitizePersistedRules(registry, networkId)
 	if type(registry.legacyRuleSanitizerByNetwork) ~= "table" then
 		registry.legacyRuleSanitizerByNetwork = {}
 	end
-	if tonumber(registry.legacyRuleSanitizerByNetwork[networkId]) == LEGACY_RULE_SANITIZER_VERSION then
+	local previousMarker = registry.legacyRuleSanitizerByNetwork[networkId]
+	if tonumber(previousMarker) == LEGACY_RULE_SANITIZER_VERSION then
 		return
 	end
+	local capture = GlobalStorageSiK.RuleSanitizer.inspectRegistry(registry, networkId)
+	logLegacyRuleInspection(networkId, "capture", capture)
 	local first = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry, networkId)
 	logLegacyRuleSanitizerPass(networkId, 1, first)
 	local second = GlobalStorageSiK.RuleSanitizer.sanitizeRegistry(registry, networkId)
 	logLegacyRuleSanitizerPass(networkId, 2, second)
-	registry.legacyRuleSanitizerByNetwork[networkId] = LEGACY_RULE_SANITIZER_VERSION
+	local post = GlobalStorageSiK.RuleSanitizer.inspectRegistry(registry, networkId)
+	logLegacyRuleInspection(networkId, "postvalidate", post)
+	local markerWritten = false
+	if post.matches == 0 then
+		registry.legacyRuleSanitizerByNetwork[networkId] = LEGACY_RULE_SANITIZER_VERSION
+		markerWritten = true
+		GlobalStorageSiK.Log.info("RuleMigration", "legacyRuleSanitizerMarker"
+			.. " network=" .. migrationLogValue(networkId)
+			.. " version=" .. tostring(LEGACY_RULE_SANITIZER_VERSION)
+			.. " status=written")
+	else
+		registry.legacyRuleSanitizerByNetwork[networkId] = nil
+		GlobalStorageSiK.Log.warn("RuleMigration", "legacyRuleSanitizerMarker"
+			.. " network=" .. migrationLogValue(networkId)
+			.. " version=" .. tostring(LEGACY_RULE_SANITIZER_VERSION)
+			.. " status=withheld remaining=" .. tostring(post.matches))
+	end
 	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end
-	if first.changed and GlobalStorageSiK.RegistryStore
+	if (first.changed or second.changed or markerWritten or previousMarker ~= nil)
+		and GlobalStorageSiK.RegistryStore
 		and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end

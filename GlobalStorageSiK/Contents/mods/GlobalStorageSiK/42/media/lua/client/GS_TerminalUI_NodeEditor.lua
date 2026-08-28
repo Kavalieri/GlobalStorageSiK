@@ -370,10 +370,22 @@ local categoryDisplayLabel = GlobalStorageSiK.RulesUI.categoryLabel
 local describeCondition    = GlobalStorageSiK.RulesUI.describeCondition
 local cloneRules           = GlobalStorageSiK.RulesUI.cloneRules
 local migrateLegacyToRules = GlobalStorageSiK.RulesUI.migrateLegacyToRules
-local buildRulesSummary    = GlobalStorageSiK.RulesUI.buildSummary
 local RULE_OP_TITLE_KEY    = GlobalStorageSiK.RulesUI.OP_TITLE_KEY
 local RULE_OP_ADD_KEY      = GlobalStorageSiK.RulesUI.OP_ADD_KEY
 local RULE_OPS             = GlobalStorageSiK.RulesUI.OPS
+
+local function addSummaryRuns(host, layout, offsetY)
+	offsetY = offsetY or 0
+	for i = 1, #(layout and layout.runs or {}) do
+		local run = layout.runs[i]
+		local color = run.color
+		local lbl = ISLabel:new(run.x,
+			offsetY + (run.line - 1) * (FONT_HGT_SMALL + 2), FONT_HGT_SMALL,
+			run.text, color[1], color[2], color[3], 1, UIFont.Small, true)
+		lbl:initialise()
+		host:addChild(lbl)
+	end
+end
 
 --- Color de acento (createSectionCard/createButton) por operador -
 --- mismo trio en las 3 tarjetas de reglas, los puntos de composicion de la
@@ -537,10 +549,11 @@ function GS_NodeEditorUI:ensureForm()
 	if zone and zone.rules and #zone.rules > 0 then
 		local inheritedLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
 			T("IGUI_GS_NodeInheritedFromZone", zone.name or "?"), innerW, UIFont.Small)
-		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(buildRulesSummary(zone.rules), innerW, UIFont.Small)) do
-			inheritedLines[#inheritedLines + 1] = line
-		end
-		local hostH = #inheritedLines * (FONT_HGT_SMALL + 2)
+		local inheritedNeutral = { 0.6, 0.63, 0.67 }
+		local inheritedLayout = GlobalStorageSiK.RulesUI.layoutSummary(
+			zone.rules, innerW - pad, UIFont.Small, inheritedNeutral)
+		local hostH = (#inheritedLines + inheritedLayout.lineCount)
+			* (FONT_HGT_SMALL + 2)
 		self.inheritedZoneHost = ISPanel:new(pad, y, innerW - pad, hostH)
 		self.inheritedZoneHost:initialise()
 		self.inheritedZoneHost.drawBackground = false
@@ -556,6 +569,7 @@ function GS_NodeEditorUI:ensureForm()
 			self.inheritedZoneHost:addChild(lbl)
 			iy = iy + FONT_HGT_SMALL + 2
 		end
+		addSummaryRuns(self.inheritedZoneHost, inheritedLayout, iy)
 		y = y + hostH + 4
 		self.editZoneFromNodeBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeInheritedEditZoneBtn"), scroll, function()
 			local zoneNodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
@@ -583,8 +597,11 @@ function GS_NodeEditorUI:ensureForm()
 	-- el hueco con el texto inicial para calcular su altura real (regla 7,
 	-- CLAUDE.md: texto de longitud variable, nunca ISLabel de una sola linea).
 	self._rulesSummaryY = y
-	local summaryLines = GlobalStorageSiK.SiK_UI.wrapTextLines(buildRulesSummary(self.node.rules), innerW, UIFont.Small)
-	self.rulesSummaryHost = ISPanel:new(pad, y, innerW - pad, math.max(FONT_HGT_SMALL, #summaryLines * (FONT_HGT_SMALL + 2)))
+	local summaryW = innerW - pad
+	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(self.node.rules,
+		summaryW, UIFont.Small, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary)
+	self.rulesSummaryHost = ISPanel:new(pad, y, summaryW,
+		math.max(FONT_HGT_SMALL, summaryLayout.lineCount * (FONT_HGT_SMALL + 2)))
 	self.rulesSummaryHost:initialise()
 	self.rulesSummaryHost.drawBackground = false
 	self.rulesSummaryHost.backgroundColor = { r=0,g=0,b=0,a=0 }
@@ -607,6 +624,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- consumida aqui.
 	local _sugCache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
 	local _sugPayload = self.node and _sugCache[self.node.id]
+	local suggestedNativePath = _sugPayload and _sugPayload.suggestedNativePath
 	local sugKey = _sugPayload and _sugPayload.suggestedProjectedCategory
 		and _sugPayload.suggestedProjectedCategory ~= "" and _sugPayload.suggestedProjectedCategory
 		or (_sugPayload and _sugPayload.suggestedNativePath and _sugPayload.suggestedNativePath ~= ""
@@ -624,10 +642,15 @@ function GS_NodeEditorUI:ensureForm()
 	if sugKey and sugKey ~= "" then
 		local alreadyPresent = false
 		for _, rule in ipairs(self.node.rules or {}) do
-			if rule.condition and rule.condition.type == "category"
-				and string.lower(rule.condition.nativePath or rule.condition.value or "") == string.lower(sugKey) then
-				alreadyPresent = true
-				break
+			if rule.condition and rule.condition.type == "category" then
+				local existingNative = string.lower(tostring(rule.condition.nativePath or ""))
+				local existingValue = string.lower(tostring(rule.condition.value or ""))
+				if existingValue == string.lower(tostring(sugKey))
+					or (suggestedNativePath
+						and existingNative == string.lower(tostring(suggestedNativePath))) then
+					alreadyPresent = true
+					break
+				end
 			end
 		end
 		if not alreadyPresent then
@@ -635,16 +658,19 @@ function GS_NodeEditorUI:ensureForm()
 			-- sugerida"): pasa de etiqueta+botón sueltos a una tarjeta más,
 			-- la PRIMERA del bloque de reglas (justo encima de OR) - mismo
 			-- patrón visual que las tarjetas OR/AND/NOT (createSectionCard),
-			-- color neutro (PALETTE.textMuted) para no insinuar que ya es
-			-- una regla activa. Dos botones (OR/AND, sin NOT - excluir por
+			-- color L1 derivado siempre de suggestedNativePath; el prefijo queda
+			-- neutro porque no forma parte de la categoria. Dos botones (OR/AND,
+			-- sin NOT - excluir por
 			-- una sugerencia automática no tiene caso de uso real), los dos
 			-- pasan por el mismo detector de contradicciones que cualquier
 			-- otro camino de añadir regla (GS_FilterEditor.lua:onAddClicked)
 			-- - antes el único botón (solo OR) se lo saltaba (bug real
 			-- cerrado en la auditoria pre-release del mismo día).
 			local pal = GlobalStorageSiK.SiK_UI.PALETTE
-			local neutral = GlobalStorageSiK.NativeProduct.decodePath(sugKey)
-				and GlobalStorageSiK.NativeProduct.getColor(sugKey) or pal.textMuted
+			local neutral = GlobalStorageSiK.RulesUI.conditionColor({
+				type = "category", value = sugKey,
+				nativePath = suggestedNativePath,
+			}, pal.textMuted)
 			local cardPad = 8
 			local cardX = pad
 			local cardW = innerW - pad
@@ -655,16 +681,30 @@ function GS_NodeEditorUI:ensureForm()
 			local sugCard = GlobalStorageSiK.SiK_UI.createSectionCard(cardX, cardTop, cardW, 10, neutral)
 			GlobalStorageSiK.TerminalScroll.addChild(scroll, sugCard)
 
-			local sugLabel = T("IGUI_GS_NodeSuggestedCat") .. " " .. categoryDisplayLabel(sugKey)
-			local sugLbl = ISLabel:new(cx, cy, FONT_HGT_SMALL, sugLabel, neutral[1], neutral[2], neutral[3], 1, UIFont.Small, true)
-			sugLbl:initialise()
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, sugLbl)
+			local sugPrefix = T("IGUI_GS_NodeSuggestedCat") .. " "
+			local prefixColor = pal.textSecondary
+			local sugPrefixLbl = ISLabel:new(cx, cy, FONT_HGT_SMALL, sugPrefix,
+				prefixColor[1], prefixColor[2], prefixColor[3], 1, UIFont.Small, true)
+			sugPrefixLbl:initialise()
+			GlobalStorageSiK.TerminalScroll.addChild(scroll, sugPrefixLbl)
+			local sugValueX = cx + getTextManager():MeasureStringX(UIFont.Small, sugPrefix)
+			local sugValue = GlobalStorageSiK.SiK_UI.truncateText(
+				categoryDisplayLabel(sugKey), cardW - (sugValueX - cardX) - cardPad,
+				UIFont.Small)
+			local sugValueLbl = ISLabel:new(sugValueX, cy, FONT_HGT_SMALL, sugValue,
+				neutral[1], neutral[2], neutral[3], 1, UIFont.Small, true)
+			sugValueLbl:initialise()
+			GlobalStorageSiK.TerminalScroll.addChild(scroll, sugValueLbl)
 			cy = cy + FONT_HGT_SMALL + 6
 
 			local function applySuggested(op)
 				if not self.node then return end
 				local condition = { type = "category", value = sugKey }
-				if GlobalStorageSiK.NativeProduct.decodePath(sugKey) then condition.nativePath = sugKey end
+				if GlobalStorageSiK.NativeProduct.decodePath(suggestedNativePath) then
+					condition.nativePath = suggestedNativePath
+				elseif GlobalStorageSiK.NativeProduct.decodePath(sugKey) then
+					condition.nativePath = sugKey
+				end
 				local newRule = { op = op, condition = condition }
 				local function applyRule()
 					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addRule = newRule })
@@ -926,14 +966,9 @@ function GS_NodeEditorUI:refreshRulesSummary()
 		if ch.removeFromUIManager then ch:removeFromUIManager() end
 	end
 	local rules = (self.node and self.node.rules) or {}
-	local summary = buildRulesSummary(rules)
-	local sy = 0
-	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(summary, host.width, UIFont.Small)) do
-		local lbl = ISLabel:new(0, sy, FONT_HGT_SMALL, line, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-		lbl:initialise()
-		host:addChild(lbl)
-		sy = sy + FONT_HGT_SMALL + 2
-	end
+	local layout = GlobalStorageSiK.RulesUI.layoutSummary(rules, host.width,
+		UIFont.Small, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary)
+	addSummaryRuns(host, layout, 0)
 end
 
 --- Rellena los chips de UN grupo de reglas (OR/AND/NOT) dentro de su host.
@@ -965,7 +1000,10 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 			shown = shown + 1
 			local label = describeCondition(rule.condition)
 			label = GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small)
-			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[1], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[2], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[3], 1, UIFont.Small, true)
+			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
+				rule.condition, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary)
+			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label,
+				labelColor[1], labelColor[2], labelColor[3], 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
 
@@ -1066,9 +1104,10 @@ local function contentsFingerprint(node)
 	local rowCount = #rows
 	local firstType = rowCount > 0 and (rows[1].fullType or "") or ""
 	return string.format(
-		"%s|%s|%s|%s|%d|%s",
+		"%s|%s|%s|%s|%s|%d|%s",
 		tostring(payload.source or ""),
 		tostring(payload.suggestedNativePath or ""),
+		tostring(payload.suggestedProjectedCategory or ""),
 		tostring(payload.suggestedCategory or ""),
 		tostring(rowCount),
 		tostring(node.itemTypeCount or 0),

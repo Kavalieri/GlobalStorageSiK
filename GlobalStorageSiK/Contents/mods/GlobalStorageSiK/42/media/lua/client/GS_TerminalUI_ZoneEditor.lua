@@ -38,6 +38,18 @@ local PAD = 10
 local RESIZE_GRAB = 12
 local INFO_BTN_SIZE = FONT_HGT_SMALL
 
+local function addSummaryRuns(host, layout)
+	for i = 1, #(layout and layout.runs or {}) do
+		local run = layout.runs[i]
+		local color = run.color
+		local lbl = ISLabel:new(run.x, (run.line - 1) * (FONT_HGT_SMALL + 2),
+			FONT_HGT_SMALL, run.text, color[1], color[2], color[3], 1,
+			UIFont.Small, true)
+		lbl:initialise()
+		host:addChild(lbl)
+	end
+end
+
 --- Coloca un boton "?" justo despues de un titulo de bloque ya creado, con
 --- el texto largo que antes vivia siempre visible debajo como parrafo -
 --- dev26 ronda 4, mismo helper que GS_TerminalUI_NodeEditor.lua.
@@ -360,13 +372,18 @@ function GS_ZoneEditorUI:ensureForm()
 	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
 	y = y + FONT_HGT_SMALL + 8
 
-	local summary = GlobalStorageSiK.RulesUI.buildSummary(self.zone and self.zone.rules)
-	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(summary, innerW, UIFont.Small)) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-		lbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
+	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
+		self.zone and self.zone.rules, innerW - pad, UIFont.Small,
+		GlobalStorageSiK.SiK_UI.PALETTE.textSecondary)
+	local summaryHost = ISPanel:new(pad, y, innerW - pad,
+		summaryLayout.lineCount * (FONT_HGT_SMALL + 2))
+	summaryHost:initialise()
+	summaryHost.drawBackground = false
+	summaryHost.backgroundColor = { r=0,g=0,b=0,a=0 }
+	summaryHost.borderColor = { r=0,g=0,b=0,a=0 }
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, summaryHost)
+	addSummaryRuns(summaryHost, summaryLayout)
+	y = y + summaryHost:getHeight()
 	y = y + 6
 
 	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
@@ -594,7 +611,10 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 			shown = shown + 1
 			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
 			label = GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small)
-			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[1], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[2], GlobalStorageSiK.SiK_UI.PALETTE.textPrimary[3], 1, UIFont.Small, true)
+			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
+				rule.condition, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary)
+			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label,
+				labelColor[1], labelColor[2], labelColor[3], 1, UIFont.Small, true)
 			lbl:initialise()
 			host:addChild(lbl)
 

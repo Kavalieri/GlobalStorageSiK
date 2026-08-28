@@ -124,14 +124,8 @@ local COL_GAP = 16
 -- NODE_TABLE_COLUMNS: cabecera, filas y deteccion de clic consumen el mismo
 -- layout resuelto por SiK_UI.Table.
 
---- Color de texto por operador (mismo trio que las tarjetas de reglas de
---- los editores y el modal "Anadir regla") - dev26 ronda 3, columna
---- "Protocolo" (sustituye a la antigua "Categoria").
-local RULE_OP_TEXT_COLOR = {
-	OR  = GlobalStorageSiK.SiK_UI.PALETTE.ruleOr,
-	AND = GlobalStorageSiK.SiK_UI.PALETTE.ruleAnd,
-	NOT = GlobalStorageSiK.SiK_UI.PALETTE.ruleNot,
-}
+--- La ruta categórica usa color L1. Los colores de operador quedan reservados
+--- a los puntos y a las tarjetas OR/AND/NOT de los editores.
 -- Azul apagado para "heredado de la zona, sin regla propia" - mismo tono
 -- que el bloque "Heredado de tu zona" del editor de contenedor.
 local INHERIT_COLOR = { 0.36, 0.48, 0.58 }
@@ -150,7 +144,8 @@ local function nodeProtocolInfo(ownRules, zoneRules)
 	if ownRules and #ownRules > 0 then
 		local sum = GlobalStorageSiK.RulesUI.compactSummary(ownRules)
 		if sum then
-			local c = RULE_OP_TEXT_COLOR[sum.opKey] or pal.textPrimary
+			local c = GlobalStorageSiK.RulesUI.conditionColor(
+				sum.condition, pal.textSecondary)
 			local label = sum.label
 			if sum.extraCount > 0 then
 				label = label .. " +" .. tostring(sum.extraCount)
@@ -161,7 +156,8 @@ local function nodeProtocolInfo(ownRules, zoneRules)
 	if zoneRules and #zoneRules > 0 then
 		local zsum = GlobalStorageSiK.RulesUI.compactSummary(zoneRules)
 		if zsum then
-			return zsum.label, INHERIT_COLOR[1], INHERIT_COLOR[2], INHERIT_COLOR[3], false
+			local c = GlobalStorageSiK.RulesUI.conditionColor(zsum.condition, INHERIT_COLOR)
+			return zsum.label, c[1], c[2], c[3], false
 		end
 	end
 	return T("IGUI_GS_ProtocolGlobal"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], false
@@ -184,7 +180,8 @@ local PROTOCOL_DOTS_RESERVED_W = PROTOCOL_DOTS_COUNT * (PROTOCOL_DOT_SIZE + PROT
 local NODE_TABLE_COLUMNS = {
 	{ key = "name", titleKey = "IGUI_GS_ColName", widthFraction = 0.15, minWidth = 80, pad = 0 },
 	{ key = "protocol", titleKey = "IGUI_GS_ColProtocol", flex = 1, minWidth = 60,
-		hardMinWidth = 60, pad = PROTOCOL_DOTS_RESERVED_W },
+		hardMinWidth = 60, pad = 0, contentLeading = PROTOCOL_DOTS_RESERVED_W,
+		contentTrailing = 4 },
 	{ key = "priority", titleKey = "IGUI_GS_ColPriority", align = "center",
 		measureValues = { "100" }, measurePad = 12 },
 	{ key = "status", titleKey = "IGUI_GS_ColStatus", align = "center",
@@ -208,9 +205,13 @@ local function drawProtocolDots(panel, x, yMid, rules)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local hasOr, hasAnd, hasNot = false, false, false
 	for i = 1, #rules do
-		if rules[i].op == "OR" then hasOr = true
-		elseif rules[i].op == "AND" then hasAnd = true
-		elseif rules[i].op == "NOT" then hasNot = true end
+		local rule = rules[i]
+		if type(rule) == "table" and type(rule.condition) == "table"
+			and not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
+			if rule.op == "OR" then hasOr = true
+			elseif rule.op == "AND" then hasAnd = true
+			elseif rule.op == "NOT" then hasNot = true end
+		end
 	end
 	local dy = yMid + math.floor((FONT_HGT_SMALL - PROTOCOL_DOT_SIZE) / 2)
 	local specs = { { hasOr, pal.ruleOr }, { hasAnd, pal.ruleAnd }, { hasNot, pal.ruleNot } }
@@ -225,6 +226,38 @@ local function drawProtocolDots(panel, x, yMid, rules)
 		dx = dx + PROTOCOL_DOT_SIZE + PROTOCOL_DOT_GAP
 	end
 	return x + PROTOCOL_DOTS_RESERVED_W
+end
+
+local function protocolContentLayout(protocolCol)
+	local leading = protocolCol.spec and protocolCol.spec.contentLeading
+		or PROTOCOL_DOTS_RESERVED_W
+	local trailing = protocolCol.spec and protocolCol.spec.contentTrailing or 0
+	return protocolCol.x, protocolCol.x + leading,
+		math.max(0, protocolCol.width - leading - trailing)
+end
+
+local function updateProtocolTooltip(panel, protocolCol, fullSummary, enabled)
+	local overProtocol = enabled and panel:isMouseOver()
+		and panel:getMouseX() >= protocolCol.x
+		and panel:getMouseX() < protocolCol.finish
+	if overProtocol then
+		if not panel._gsCatTooltip then
+			panel._gsCatTooltip = ISToolTip:new()
+			panel._gsCatTooltip:initialise()
+			panel._gsCatTooltip:instantiate()
+			panel._gsCatTooltip:setOwner(panel)
+		end
+		panel._gsCatTooltip:setName(T("IGUI_GS_CategoryTooltipTitle"))
+		panel._gsCatTooltip:setDescription(fullSummary)
+		panel._gsCatTooltip:setVisible(true)
+		panel._gsCatTooltip:addToUIManager()
+		panel._gsCatTooltip:bringToTop()
+		panel._gsCatTooltip:setX(getMouseX() + 16)
+		panel._gsCatTooltip:setY(getMouseY() + 16)
+	elseif panel._gsCatTooltip and panel._gsCatTooltip:isVisible() then
+		panel._gsCatTooltip:removeFromUIManager()
+		panel._gsCatTooltip:setVisible(false)
+	end
 end
 
 --- Calcula el layout completo de columnas de la tabla de nodos a partir del
@@ -501,7 +534,7 @@ local function createNodeRow(scroll, listPanel, terminal)
 			local columns = nodeColumnLayout(w)
 			local nameCol, protocolCol, priorityCol, statusCol, occupancyCol =
 				columns[1], columns[2], columns[3], columns[4], columns[5]
-			local nameX, protocolX, priorityX = nameCol.x, protocolCol.x, priorityCol.x
+			local nameX, protocolX = nameCol.x, protocolCol.x
 			local titleMaxW = math.max(40, protocolX - 16)
 			local tr, tg, tb = pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3]
 			local titleTruncated = truncateText(title, titleMaxW, UIFont.Small)
@@ -545,21 +578,23 @@ local function createNodeRow(scroll, listPanel, terminal)
 			-- dato vive en su propia columna, igual que en las filas de
 			-- contenedor.
 			local zLabel, zr, zg, zb, zDots = nodeProtocolInfo(data.zoneRules, nil)
-			local zTextX = protocolX + PROTOCOL_DOTS_RESERVED_W
+			local zDotsX, zTextX, zTextW = protocolContentLayout(protocolCol)
 			if zDots then
-				drawProtocolDots(self, protocolX, yMid, data.zoneRules)
+				drawProtocolDots(self, zDotsX, yMid, data.zoneRules)
 			end
-			-- Truncar contra priorityX (borde IZQUIERDO/cercano de la
-			-- siguiente columna), nunca contra el borde lejano de Estado -
-			-- ese era exactamente el bug que dejaba el resumen de reglas
-			-- solapado con el texto de Estado (capturas del usuario).
-			self:drawText(truncateText(zLabel, priorityX - zTextX - 8, UIFont.Small), zTextX, yMid, zr, zg, zb, 1, UIFont.Small)
+			-- La propia geometria de Protocolo fija inicio y ancho del texto;
+			-- no se deriva desde una columna vecina.
+			self:drawText(truncateText(zLabel, zTextW, UIFont.Small), zTextX,
+				yMid, zr, zg, zb, 1, UIFont.Small)
 			local zStatusText = zoneExcluded and T("IGUI_GS_NodeStatusOffShort") or T("IGUI_GS_NodeStatusOk")
 			local zsr, zsg, zsb = 0.45, 0.85, 0.45
 			if zoneExcluded then zsr, zsg, zsb = 0.92, 0.35, 0.3 end
 			self:drawTextCentre(zStatusText, statusCol.x + math.floor(statusCol.width / 2), yMid, zsr, zsg, zsb, 1, UIFont.Small)
 			local zOccText, zor, zog, zob = occupancyDisplay(data.zoneOccupancy)
 			self:drawTextCentre(zOccText, occupancyCol.x + math.floor(occupancyCol.width / 2), yMid, zor, zog, zob, 1, UIFont.Small)
+			updateProtocolTooltip(self, protocolCol,
+				GlobalStorageSiK.RulesUI.buildSummary(data.zoneRules),
+				data.zoneRules and #data.zoneRules > 0)
 			return
 		end
 
@@ -575,7 +610,7 @@ local function createNodeRow(scroll, listPanel, terminal)
 		local columns = nodeColumnLayout(w)
 		local nameCol, protocolCol, priorityCol, statusCol, occupancyCol =
 			columns[1], columns[2], columns[3], columns[4], columns[5]
-		local nameX, protocolX, priorityX = nameCol.x, protocolCol.x, priorityCol.x
+		local nameX, protocolX = nameCol.x, protocolCol.x
 		local name = node.displayName or node.name or "?"
 		local status = nodeStatusText(node)
 		local priority = tostring(node.priority or 50)
@@ -583,13 +618,13 @@ local function createNodeRow(scroll, listPanel, terminal)
 		self:drawTextCentre(priority, priorityCol.x + math.floor(priorityCol.width / 2), yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 
 		local label, pr, pg, pb, showDots = nodeProtocolInfo(node.rules, data.zoneRules)
-		local textX = protocolX + PROTOCOL_DOTS_RESERVED_W
+		local dotsX, textX, textW = protocolContentLayout(protocolCol)
 		if showDots then
-			drawProtocolDots(self, protocolX, yMid, node.rules)
+			drawProtocolDots(self, dotsX, yMid, node.rules)
 		end
-		-- Truncar contra priorityX, no contra statusColRightX (borde lejano
-		-- de Estado) - mismo bug/fix que en la fila de cabecera de zona.
-		self:drawText(truncateText(label, priorityX - textX - 8, UIFont.Small), textX, yMid, pr, pg, pb, 1, UIFont.Small)
+		-- Mismo descriptor que cabecera, puntos, tooltip e hitbox.
+		self:drawText(truncateText(label, textW, UIFont.Small), textX, yMid,
+			pr, pg, pb, 1, UIFont.Small)
 
 		local sr, sg, sb = nodeStatusColor(node)
 		self:drawTextCentre(status, statusCol.x + math.floor(statusCol.width / 2), yMid, sr, sg, sb, 1, UIFont.Small)
@@ -631,31 +666,15 @@ local function createNodeRow(scroll, listPanel, terminal)
 		-- frase-resumen COMPLETA sin truncar (misma que en los editores, ver
 		-- GS_RulesUI.buildSummary) - mucho mas util que el viejo recuento de
 		-- categorias legacy.
-		local overProtocolCol = self:isMouseOver() and self:getMouseX() >= protocolX and self:getMouseX() < priorityX
-		if overProtocolCol and ((node.rules and #node.rules > 0) or (data.zoneRules and #data.zoneRules > 0)) then
-			local fullSummary = (node.rules and #node.rules > 0)
-				and GlobalStorageSiK.RulesUI.buildSummary(node.rules)
-				or T("IGUI_GS_NodeInheritedFromZone", node.zoneName or "?") .. " " .. GlobalStorageSiK.RulesUI.buildSummary(data.zoneRules)
-			if not self._gsCatTooltip then
-				self._gsCatTooltip = ISToolTip:new()
-				self._gsCatTooltip:initialise()
-				self._gsCatTooltip:instantiate()
-				self._gsCatTooltip:setOwner(self)
-			end
-			self._gsCatTooltip:setName(T("IGUI_GS_CategoryTooltipTitle"))
-			self._gsCatTooltip:setDescription(fullSummary)
-			self._gsCatTooltip:setVisible(true)
-			self._gsCatTooltip:addToUIManager()
-			self._gsCatTooltip:bringToTop()
-			-- BUG REAL (mismo hallazgo que el tooltip de Nombre, captura del
-			-- usuario "Categoría completa" pintada arriba a la derecha sin
-			-- relacion con el cursor): faltaba setX/setY cada fotograma.
-			self._gsCatTooltip:setX(getMouseX() + 16)
-			self._gsCatTooltip:setY(getMouseY() + 16)
-		elseif self._gsCatTooltip and self._gsCatTooltip:isVisible() then
-			self._gsCatTooltip:removeFromUIManager()
-			self._gsCatTooltip:setVisible(false)
-		end
+		local hasOwnProtocol = node.rules and #node.rules > 0
+		local hasZoneProtocol = data.zoneRules and #data.zoneRules > 0
+		local fullSummary = hasOwnProtocol
+			and GlobalStorageSiK.RulesUI.buildSummary(node.rules)
+			or (hasZoneProtocol and (T("IGUI_GS_NodeInheritedFromZone",
+				node.zoneName or "?") .. " "
+				.. GlobalStorageSiK.RulesUI.buildSummary(data.zoneRules)) or "")
+		updateProtocolTooltip(self, protocolCol, fullSummary,
+			hasOwnProtocol or hasZoneProtocol)
 	end
 
 	row.onMouseUp = function(self, x, y, button)
