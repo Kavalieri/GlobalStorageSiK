@@ -113,6 +113,24 @@ local function matchL2(tokens)
 	return nil, nil
 end
 
+--- Dev30.5.2: `isSpice()` es una señal oficial, pero no identifica por sí
+--- sola el sub-tipo de un alimento que ya tiene una identidad más concreta.
+--- B42 marca también como spice algunos platos de arroz y conservas. La
+--- precedencia no se corrige con nombres concretos: `cannedFood` es el campo
+--- público de ScriptItem confirmado por javap y `base:ricerecipe` es el tag
+--- oficial del plato de arroz. Ambos ganan solo cuando ItemType ya confirmó
+--- que estamos ante comida; Pepper/Salt/SeasoningSalt no llevan ninguna de
+--- estas señales y conservan su L3 spice.
+---@param si table|nil
+---@return boolean
+local function hasSpecificFoodIdentity(si)
+	if si and si.cannedFood == true then
+		return true
+	end
+	local riceRecipeTag = U.tagByLocation("base", "ricerecipe")
+	return riceRecipeTag and U.hasTag(si, riceRecipeTag) or false
+end
+
 ---@param fullType string
 ---@param si table|nil
 ---@return table|nil primaryPath
@@ -178,8 +196,11 @@ local function classifyFood(fullType, si)
 
 	local l2, weakSource = matchL2(tokens)
 	-- `isSpice()` es un getter oficial del ScriptItem, confirmado en B42. Es una
-	-- señal estática más fuerte que los tokens y evita instanciar objetos.
-	if U.safeCall(function() return si:isSpice() end) == true then
+	-- señal estática más fuerte que los tokens, salvo una identidad alimentaria
+	-- concreta ya confirmada (conserva o plato de arroz); esa identidad decide
+	-- primero el L2 y evita que un falso spice destruya la ruta de comida.
+	local isSpice = U.safeCall(function() return si:isSpice() end) == true
+	if isSpice and not (isConfirmedFood and hasSpecificFoodIdentity(si)) then
 		return { l1 = "food_drink", l2 = "ingredient", l3 = "spice" }, {}, {},
 			U.evidence("script_item_is_spice", 100)
 	end

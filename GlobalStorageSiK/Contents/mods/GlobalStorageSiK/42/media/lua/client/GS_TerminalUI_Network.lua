@@ -138,9 +138,13 @@ function GlobalStorageSiK.TerminalNetwork.syncScrollLayout(terminal)
 
 	local newInnerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	if ui._lastInnerW and math.abs(newInnerW - ui._lastInnerW) > 1 then
-		scroll._gsNetUi = nil
+		-- DEV30.5.2: un resize solo cambia geometría. Invalidar `_gsNetUi`
+		-- construía un árbol nuevo y perdía su tabla compartida `collapsedZones`,
+		-- además de selección, orden y offset que pertenecen al árbol vivo.
+		-- `refreshScroll()`/TerminalNodes.layout ya reposicionan los widgets
+		-- existentes; conservar esta misma tabla es el contrato de resize.
+		ui._lastInnerW = newInnerW
 		GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, terminal.terminalState)
-		if scroll._gsNetUi then scroll._gsNetUi._lastInnerW = newInnerW end
 		return
 	end
 	local newInnerH = scroll.height or 0
