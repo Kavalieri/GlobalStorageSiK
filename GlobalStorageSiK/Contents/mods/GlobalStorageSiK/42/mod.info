@@ -1,8 +1,8 @@
 name=Global Storage SiK
 id=GlobalStorageSiK
-description=Build 42.20+ v1.4.3-dev32. Todos los contenedores de tu base en un inventario de red unificado, buscable y auto-organizado, con SiK UI integrada y addons opcionales.
+description=Build 42.20+ v1.4.3-dev32.1. Todos los contenedores de tu base en un inventario de red unificado, buscable y auto-organizado, con SiK UI integrada y addons opcionales.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.4.3-dev32
+modversion=1.4.3-dev32.1
 versionMin=42.19.0

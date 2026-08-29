@@ -22,6 +22,9 @@ local MAX_STEP_MS = 5
 local STALL_TIMEOUT_MS = 30000
 
 local jobs = {}
+-- Último cierre por red: el terminal debe poder distinguir un trabajo acabado
+-- de la ausencia histórica de trabajo, incluso después de liberar el job.
+local terminalStates = {}
 local tickInstalled = false
 local nextGlobalRunMs = 0
 
@@ -136,9 +139,22 @@ local function discardJobState(job)
 
 end
 
+local function recordTerminalState(networkId, job, state, reason)
+	local zone = currentZone(job)
+	terminalStates[networkId] = {
+		state = state, reason = reason, phase = job.phase or "finalizing",
+		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
+		zonesDone = math.max(0, (job.zoneIndex or 1) - 1), zonesTotal = #(job.zones or {}),
+		startedMs = job.startedMs or 0, lastProgressMs = job.lastProgressMs or 0,
+		finishedMs = nowMs(), failedZones = job.totals and job.totals.failedZones or 0,
+	}
+end
+
 local function finishCancelled(networkId, job, reason)
 
 	jobs[networkId] = nil
+	local state = reason == "timed_out" and "TIMED_OUT" or "CANCELLED"
+	recordTerminalState(networkId, job, state, reason)
 	local durationMs = math.max(0, nowMs() - (job.startedMs or nowMs()))
 	GlobalStorageSiK.Log.warn("ZoneScanJob", "cancel network=" .. tostring(networkId)
 		.. " reason=" .. tostring(reason or "manual") .. " durationMs=" .. tostring(durationMs))
@@ -152,19 +168,22 @@ end
 local function finishJob(networkId, job)
 	jobs[networkId] = nil
 	job.totals.durationMs = math.max(0, nowMs() - job.startedMs)
-	job.totals._freshSnapshotScope = job.zoneId or "network"
+	local state = (job.totals.failedZones or 0) > 0 and "FAILED" or "COMPLETED"
+	job.totals._terminalState = state
+	if state == "COMPLETED" then job.totals._freshSnapshotScope = job.zoneId or "network" end
 	job.totals._background = job.background == true
 	job.totals._startRevision = job.startRevision or 0
+	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error" or "complete")
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 	GlobalStorageSiK.Log.info("ZoneScanJob", string.format(
-		"complete network=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d cookingExcluded=%d removedIneligible=%d limitHit=%s",
-		tostring(networkId), job.totals.durationMs or 0, job.totals.zones or 0,
+		"complete network=%s state=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d failedZones=%d cookingExcluded=%d removedIneligible=%d limitHit=%s",
+		tostring(networkId), state, job.totals.durationMs or 0, job.totals.zones or 0,
 		job.totals.nodesScanned or 0, job.totals.itemInstances or 0,
 		job.totals.distinctTypes or 0, job.totals.snapshotRows or 0,
 		job.totals.squaresVisited or 0, job.totals.loadedSquares or 0,
-		job.totals.added or 0, job.totals.updated or 0, job.totals.offline or 0,
+		job.totals.added or 0, job.totals.updated or 0, job.totals.offline or 0, job.totals.failedZones or 0,
 		job.totals.cookingContainersExcluded or 0, job.totals.removedIneligible or 0,
 		tostring(job.totals.limitHit == true)))
 	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanComplete then
@@ -296,6 +315,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 			failedZones = 0,
 		},
 	}
+	terminalStates[networkId] = nil
 	if opts.background ~= true then addWatcher(job, player, opts.searchQuery) end
 	jobs[networkId] = job
 	ensureTickInstalled()
@@ -322,10 +342,10 @@ end
 function GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
 
 	local job = networkId and jobs[networkId] or nil
-	if not job then return { state = "idle" } end
+	if not job then return terminalStates[networkId] or { state = "IDLE" } end
 	local zone = currentZone(job)
 	return {
-		state = "running",
+		state = "RUNNING",
 		phase = job.phase or "preparing",
 		zoneId = zone and zone.id or nil,
 		zoneName = zone and zone.name or nil,

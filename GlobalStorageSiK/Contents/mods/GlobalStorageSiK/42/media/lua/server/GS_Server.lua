@@ -1917,6 +1917,18 @@ end
 --- Callback del job: un unico resumen y un terminalState dirigido por cliente.
 --- No hay ModData.transmit; clientes sin esta red abierta no reciben snapshots.
 function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, requestedWatchers)
+	if summary._terminalState == "FAILED" then
+		forEachOnlinePlayer(function(player)
+			if isTerminalWatcher(player, networkId) then
+				gsSendServerCommand(player, "actionResult", {
+					ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanPartialFailed"),
+					jobType = "zoneScan", jobState = "FAILED",
+				})
+				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
+			end
+		end)
+		return
+	end
 	local startRevision = summary._startRevision or 0
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	if currentRevision ~= startRevision then
@@ -1968,7 +1980,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 							summary.itemInstances or 0, summary.distinctTypes or 0,
 							summary.snapshotRows or 0),
 						jobType = "zoneScan",
-						jobState = "finished",
+					jobState = "COMPLETED",
 					})
 				end
 			end
@@ -1983,7 +1995,7 @@ function GlobalStorageSiK.Server.onNetworkScanFailed(networkId, requestedWatcher
 				ok = false,
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanFailed"),
 				jobType = "zoneScan",
-				jobState = "finished",
+				jobState = timedOut and "TIMED_OUT" or "CANCELLED",
 			})
 		end
 	end)

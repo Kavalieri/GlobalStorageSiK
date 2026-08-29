@@ -38,10 +38,13 @@ local ROW_H = math.max(TABLE_METRICS.rowHeight, ICON_SIZE + 8)
 local HEADER_H = TABLE_METRICS.headerHeight
 local DRAG_THRESHOLD = 6
 local ITEM_TEXTURE_CACHE = {}
+-- Las dos columnas de la derecha no participan en el reparto flexible:
+-- Table.resolveColumns las coloca desde right hacia la izquierda. Así Cant.
+-- queda anclada al borde y Zona a su lado en cabecera, filas y hitboxes.
 local ITEM_TABLE_COLUMNS = {
-	{ key = "displayName", titleKey = "IGUI_GS_ColName", flex = 1.5, minWidth = 180, pad = 6 },
-	{ key = "category", titleKey = "IGUI_GS_ColCategory", flex = 1.0, minWidth = 130, pad = 6 },
-	{ key = "zone", titleKey = "IGUI_GS_ColZone", flex = 0.9, minWidth = 110, pad = 6 },
+	{ key = "displayName", titleKey = "IGUI_GS_ColName", flex = 1.0, minWidth = 100, pad = 6 },
+	{ key = "category", titleKey = "IGUI_GS_ColCategory", flex = 1.35, minWidth = 145, pad = 6 },
+	{ key = "zone", titleKey = "IGUI_GS_ColZone", flex = 0, minWidth = 72, pad = 6 },
 	{ key = "count", titleKey = "IGUI_GS_ColCount", align = "right", measureValues = { "999999" }, pad = 8 },
 }
 local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 4 }

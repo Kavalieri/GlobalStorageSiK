@@ -1457,6 +1457,14 @@ function GS_TerminalUI:onRemoveNode(nodeId)
 	})
 end
 
+function GS_TerminalUI:onRebindNode(nodeId, targetNodeId)
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("rebindNode", {
+		nodeId = nodeId, targetNodeId = targetNodeId,
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
 function GS_TerminalUI:onUpdateNode(nodeId, displayName, category, enabled, membership)
 	if not self:canEditNetworkConfig(true) then return end
 	local payload = {

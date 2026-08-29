@@ -310,8 +310,18 @@ function GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId)
 	local targetZone = target and registry.zones and registry.zones[target.zoneId]
 	if not source or not target or not sourceZone or not targetZone
 		or sourceZone.networkId ~= networkId or targetZone.networkId ~= networkId then return false end
-	if target.membership ~= "auto" or target.rules or target.filters or target.categories
-		or target.notes or target.priority or target.displayName ~= target.name then return false end
+	local candidateCount = 0
+	for id, candidate in pairs(registry.nodes or {}) do
+		local candidateZone = registry.zones and registry.zones[candidate.zoneId]
+		if id ~= sourceId and candidateZone and candidateZone.networkId == networkId
+			and candidate.membership == "auto" and not candidate.rules and not candidate.filters
+			and not candidate.categories and not candidate.notes and not candidate.priority
+			and candidate.displayName == candidate.name then
+			candidateCount = candidateCount + 1
+			if id ~= targetId then return false end
+		end
+	end
+	if candidateCount ~= 1 then return false end
 	local preserved = {
 		zoneId = source.zoneId, membership = source.membership, enabled = source.enabled,
 		displayName = source.displayName, priority = source.priority, notes = source.notes,

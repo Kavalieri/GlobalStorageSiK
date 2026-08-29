@@ -399,6 +399,31 @@ function GS_NodeEditorUI:confirmRemoveFromNetwork()
 	end)
 end
 
+function GS_NodeEditorUI:uniqueRebindCandidate()
+	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+	local candidate = nil
+	for i = 1, #nodes do
+		local node = nodes[i]
+		if node and node.id ~= self.node.id and node.membership == "auto"
+			and not node.rules and not node.filters and not node.categories and not node.notes
+			and not node.priority and node.displayName == node.name then
+			if candidate then return nil end
+			candidate = node
+		end
+	end
+	return candidate
+end
+
+function GS_NodeEditorUI:confirmRebind()
+	local candidate = self:uniqueRebindCandidate()
+	if not candidate or not self.node or not self.terminal then return end
+	local sourceName = self.node.displayName or self.node.name or "?"
+	local targetName = candidate.displayName or candidate.name or "?"
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_NodeRebindConfirm", sourceName, targetName), function()
+		self.terminal:onRebindNode(self.node.id, candidate.id)
+	end)
+end
+
 --- Color de acento (createSectionCard/createButton) por operador -
 --- mismo trio en las 3 tarjetas de reglas, los puntos de composicion de la
 --- lista de contenedores (GS_TerminalUI_Nodes.lua) y el borde del modal
@@ -876,7 +901,17 @@ function GS_NodeEditorUI:ensureForm()
 		end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
 	self.removeBtn:setTooltip(T("IGUI_GS_NodeRemoveTooltip"))
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.removeBtn)
-	y = y + BTN_H + 12
+	y = y + BTN_H + 6
+	local candidate = self:uniqueRebindCandidate()
+	if candidate then
+		self.rebindBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeBtnRebind"), scroll, function()
+			self:confirmRebind()
+		end)
+		self.rebindBtn:setTooltip(T("IGUI_GS_NodeRebindTooltip", candidate.displayName or candidate.name or "?"))
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rebindBtn)
+		y = y + BTN_H + 6
+	end
+	y = y + 6
 
 	-- ── Contenido del contenedor ──────────────────────────────────────────
 	local contentsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NodeContentsTitle"))
