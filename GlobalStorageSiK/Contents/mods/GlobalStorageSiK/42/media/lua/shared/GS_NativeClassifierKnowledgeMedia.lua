@@ -71,6 +71,20 @@ local LITERATURE_TOKENS = toSet({ "book", "novel", "comic" })
 local DOCUMENT_TOKENS = toSet({ "document", "note", "letter" })
 local RECORDED_MEDIA_TOKENS = toSet({ "vhs", "cd", "dvd", "cassette" })
 
+--- Los manuales propios son revistas de receta por contrato del producto, no
+--- literatura genérica. La identidad estable combina el namespace/marcador
+--- propio, `DisplayCategory=RecipeResource` y `base:magazine`; no depende
+--- del título traducido ni de que Kahlua exponga `getLearnedRecipes()`.
+local function isGsRecipeManual(fullType, si)
+	local ownManual = type(fullType) == "string"
+		and (string.find(fullType, "^GlobalStorageSiK%.GS_Manual_")
+			or string.find(fullType, "^GSSiK_Addon_[A-Za-z]+%.GS_Manual_")) ~= nil
+	if not ownManual then return false end
+	if U.displayCategoryLower(si) ~= "reciperesource" then return false end
+	local magazineTag = U.tagByLocation("base", "magazine")
+	return magazineTag ~= nil and U.hasTag(si, magazineTag)
+end
+
 -- Orden fijo: { l2, tokens, fuente-débil }. Mismo recorrido tanto si la
 -- identidad viene confirmada por ItemType como si viene solo por nombre.
 local L2_RULES = {
@@ -103,6 +117,10 @@ end
 ---@return table|nil evidence
 local function classifyKnowledgeMedia(fullType, si)
 	if not si or isWearable(si) then return nil end
+	if isGsRecipeManual(fullType, si) then
+		return { l1 = "knowledge_media", l2 = "recipe_magazine", l3 = nil }, {}, {},
+			U.evidence("gs_recipe_manual_structural", 100)
+	end
 
 	local isConfirmedLiterature = U.itemTypeLower(si) == "base:literature"
 

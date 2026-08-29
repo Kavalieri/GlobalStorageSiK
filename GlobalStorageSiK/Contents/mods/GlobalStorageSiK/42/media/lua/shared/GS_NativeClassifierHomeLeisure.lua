@@ -83,6 +83,12 @@ local MEDIA_TOKENS = toSet({ "painting" })
 -- correspondiente en GS_NativeClassifierSurvival.lua).
 local MUSIC_TOKENS = toSet({ "guitar", "harmonica", "drum" })
 local GAME_TOKENS = toSet({ "chess", "boardgame", "playingcard", "dice" })
+-- Movibles vanilla: el prefijo `Mov_` identifica un objeto colocable, pero
+-- no su uso. Solo se clasifica cuando el nombre real aporta una función
+-- inequívoca; no se captura el resto con un cajón genérico.
+local MOVABLE_STORAGE_TOKENS = toSet({ "drawer", "drawers", "cabinet", "chest", "dresser", "shelf", "shelves", "bookcase" })
+local MOVABLE_SURFACE_TOKENS = toSet({ "table", "desk", "counter", "workbench" })
+local MOVABLE_SEATING_TOKENS = toSet({ "chair", "sofa", "armchair", "bench", "stool" })
 
 ---@param fullType string
 ---@param si table|nil
@@ -95,6 +101,18 @@ local function classifyHomeLeisure(fullType, si)
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end
 	if U.hasAnyToken(tokens, COOKED_FOOD_RESULT_TOKENS) then return nil end
+	if U.hasAnyToken(tokens, MOVABLE_STORAGE_TOKENS) then
+		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "storage" }, {}, {},
+			U.evidence("name_movable_storage", 30)
+	end
+	if U.hasAnyToken(tokens, MOVABLE_SURFACE_TOKENS) then
+		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "surface" }, {}, {},
+			U.evidence("name_movable_surface", 30)
+	end
+	if U.hasAnyToken(tokens, MOVABLE_SEATING_TOKENS) then
+		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "seating" }, {}, {},
+			U.evidence("name_movable_seating", 30)
+	end
 
 	if U.hasAnyToken(tokens, COOKWARE_TOKENS) then
 		return

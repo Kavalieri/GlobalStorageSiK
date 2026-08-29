@@ -54,13 +54,8 @@ local TREE = {
 		explosive = { "throwable", "trap", "incendiary", "flashbang", "component" },
 	},
 	food_drink = {
-		meat_protein = {}, dairy_egg = {}, fish_seafood = {}, produce = {},
-		pantry = {}, ingredient = { "spice" }, prepared_meal = {}, beverage = {}, animal_feed = {},
-		-- "other_food" añadido dev15 (hallazgo de sistemas): identidad L1
-		-- confirmada por ItemType=base:food, sin evidencia de nombre para
-		-- ningun L2 concreto - separa la certeza de familia de la certeza
-		-- de subtipo, nunca afirma "ingredient" sin evidencia real.
-		other_food = {},
+		perishable = { "meat_protein", "dairy_egg", "fish_seafood", "produce", "prepared_meal", "ingredient", "preserved", "beverage", "other_food" },
+		non_perishable = { "meat_protein", "dairy_egg", "fish_seafood", "produce", "pantry", "ingredient", "spice", "preserved", "prepared_meal", "beverage", "animal_feed", "other_food" },
 	},
 	-- Precedencia entre bloques (pedido explicito del usuario, aplicada en
 	-- el ORDEN DE REGISTRO en GS_NativeClassifier.lua, nunca aqui): si un
@@ -128,6 +123,7 @@ local TREE = {
 		farming = {}, fishing = {}, trapping = {}, camping = {}, security = {},
 	},
 	home_leisure_collection = {
+		furnishing = { "storage", "surface", "seating", "appliance", "decor" },
 		-- L3 poblado 2026-08-27 junto con GS_NativeClassifierHomeLeisure.lua
 		-- (senal de nombre interno, confianza baja - ver nota de "medicine").
 		kitchen = { "cookware", "appliance" },

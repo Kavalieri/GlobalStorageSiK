@@ -13,6 +13,7 @@
 
 require "ISUI/ISInventoryPane"
 require "GS_CategoryResolution"
+require "GS_FluidTaxonomy"
 require "GS_NativeProduct"
 require "GS_Sandbox"
 require "GS_Log"
@@ -101,45 +102,9 @@ local function vanillaLabel(item)
 	return text and text ~= "" and text or key
 end
 
-local function getFluidContainer(item)
-	if not item or not item.getFluidContainer then return nil end
-	local fluid = safeCall(function() return item:getFluidContainer() end)
-	if fluid then return fluid end
-	local worldItem = item.getWorldItem and safeCall(function() return item:getWorldItem() end) or nil
-	if worldItem and worldItem.getFluidContainer then
-		return safeCall(function() return worldItem:getFluidContainer() end)
-	end
-	return nil
-end
-
-local function hasFluidCategory(fluid, category)
-	if not fluid or not category or not fluid.isCategory then return false end
-	return safeCall(function() return fluid:isCategory(category) end) == true
-end
-
---- Lee exclusivamente APIs públicas B42. No modifica amount/capacity/fluido.
---- Si mezcla o identidad no son fiables, devuelve nil y se conserva la forma.
 local function dynamicFluidPath(item)
-	local fluid = getFluidContainer(item)
-	if not fluid or not fluid.isEmpty then return nil, nil end
-	local empty = safeCall(function() return fluid:isEmpty() end)
-	if empty == true then return nil, "empty" end
-	if empty ~= false then return nil, "unknown" end
-	local amount = fluid.getAmount and safeCall(function() return fluid:getAmount() end) or nil
-	local capacity = fluid.getCapacity and safeCall(function() return fluid:getCapacity() end) or nil
-	local mixture = fluid.isMixture and safeCall(function() return fluid:isMixture() end) or nil
-	local primary = fluid.getPrimaryFluid and safeCall(function() return fluid:getPrimaryFluid() end) or nil
-	local fluidType = primary and primary.getFluidTypeString and safeCall(function() return primary:getFluidTypeString() end) or nil
-	local signature = "amount=" .. tostring(amount) .. " capacity=" .. tostring(capacity)
-		.. " mixture=" .. tostring(mixture) .. " fluidType=" .. tostring(fluidType)
-	if mixture ~= false or not primary then return nil, signature end
-	if FluidCategory and (hasFluidCategory(fluid, FluidCategory.Beverage) or hasFluidCategory(fluid, FluidCategory.Water)) then
-		return "native:food_drink/beverage", signature
-	end
-	if FluidCategory and hasFluidCategory(fluid, FluidCategory.Fuel) then
-		return "native:vehicles/consumable", signature
-	end
-	return nil, signature
+	local path, signature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
+	return path and GlobalStorageSiK.NativeProduct.encodePath(path) or nil, signature
 end
 
 local function queueVisibleItem(pane, item)
@@ -185,6 +150,10 @@ local function resolveQueuedItem(pane, state, item)
 	local basePath = cacheBase(state, fullType, item)
 	local contentPath, fluidSignature = dynamicFluidPath(item)
 	local nativePath = contentPath or basePath
+	if contentPath and GlobalStorageSiK.DisplayCategoryPublisher
+		and GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem then
+		GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem(item, contentPath)
+	end
 	state.byItem[item] = { nativePath = nativePath, facetPath = basePath, fluidSignature = fluidSignature }
 	local previousSignature = state.probeSignatureByItem[item]
 	state.probeSignatureByItem[item] = fluidSignature

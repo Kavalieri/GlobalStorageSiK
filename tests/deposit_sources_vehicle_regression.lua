@@ -75,13 +75,16 @@ local vehicle = {
 }
 truckBed.vehicle = vehicle
 lockedGlovebox.vehicle = vehicle
+-- Reproducción del dedicado: no hay una colección global de vehículos de
+-- celda, pero la baldosa próxima expone el BaseVehicle directamente.
+playerSquare.getVehicleContainer = function() return vehicle end
 
 local cell = {
 	getGridSquare = function(_, x, y, z)
 		if x == 10 and y == 20 and z == 0 then return playerSquare end
 		return nil
 	end,
-	getVehicles = function() return { vehicle } end,
+	getVehicles = function() return {} end,
 }
 playerSquare.getCell = function() return cell end
 
@@ -108,7 +111,7 @@ assertEqual(GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, tru
 assertEqual(GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, lockedGlovebox.container), false,
 	"locked GloveBox must fail the per-part access check")
 local nearby = GlobalStorageSiK.DepositSources.collectNearbyContainers(player)
-assertEqual(vehicleAccessCalls, 5, "scan must check each vehicle part and revalidate the accepted one")
+assertEqual(vehicleAccessCalls, 5, "square vehicle scan must check each part and revalidate the accepted one")
 assertEqual(#nearby, 1, "only the accessible vehicle part may be collected")
 assertEqual(nearby[1], truckBed.container, "TruckBed must remain available")
 assertEqual(nearby[1] == lockedGlovebox.container, false, "locked GloveBox must remain excluded")

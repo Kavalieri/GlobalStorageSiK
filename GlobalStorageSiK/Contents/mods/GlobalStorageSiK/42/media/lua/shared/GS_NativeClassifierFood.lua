@@ -41,7 +41,9 @@ local function toSet(list)
 	return set
 end
 
-local MEAT_PROTEIN_TOKENS = toSet({ "steak", "chicken", "bacon", "sausage", "ham", "meat" })
+local MEAT_PROTEIN_TOKENS = toSet({
+	"steak", "beef", "pork", "mutton", "venison", "chicken", "bacon", "sausage", "ham", "meat",
+})
 local DAIRY_EGG_TOKENS = toSet({ "cheese", "milk", "egg", "yogurt", "butter" })
 local FISH_SEAFOOD_TOKENS = toSet({ "fish", "shrimp", "crab", "lobster" })
 local PRODUCE_TOKENS = toSet({ "apple", "banana", "carrot", "tomato", "lettuce", "onion", "corn", "pepper", "potato" })
@@ -49,8 +51,12 @@ local PANTRY_TOKENS = toSet({ "flour", "sugar", "salt", "rice", "pasta", "cereal
 local INGREDIENT_TOKENS = toSet({ "dough", "batter", "stock", "broth" })
 -- "clipping" (RecipeClipping) NO va aqui - es un documento de conocimiento
 -- (ItemType=base:literature confirmado, ver GS_NativeClassifierKnowledgeMedia.lua).
-local PREPARED_MEAL_TOKENS = toSet({ "recipe", "stew", "soup", "fried", "boiled", "roasted", "pancake", "cooked" })
+local PREPARED_MEAL_TOKENS = toSet({
+	"recipe", "stew", "soup", "fried", "boiled", "roasted", "pancake", "cooked",
+	"burger", "pizza", "omelette", "sandwich", "pasta", "rice",
+})
 local BEVERAGE_TOKENS = toSet({ "juice", "soda", "beer", "wine", "cola", "coffee", "tea" })
+local SNACK_TOKENS = toSet({ "chips", "crisp", "candy", "chocolate", "cookie", "popcorn" })
 local ANIMAL_FEED_TOKENS = toSet({ "petfood" })
 
 -- Orden fijo: { l2, tokens, fuente-débil }. Recorrido una vez para decidir
@@ -64,6 +70,7 @@ local L2_RULES = {
 	{ l2 = "produce", tokens = PRODUCE_TOKENS, weakSource = "name_food_produce" },
 	{ l2 = "pantry", tokens = PANTRY_TOKENS, weakSource = "name_food_pantry" },
 	{ l2 = "ingredient", tokens = INGREDIENT_TOKENS, weakSource = "name_food_ingredient" },
+	{ l2 = "snack", tokens = SNACK_TOKENS, weakSource = "name_food_snack" },
 	{ l2 = "beverage", tokens = BEVERAGE_TOKENS, weakSource = "name_food_beverage" },
 	{ l2 = "animal_feed", tokens = ANIMAL_FEED_TOKENS, weakSource = "name_food_animal_feed" },
 }
@@ -123,12 +130,41 @@ end
 --- estas señales y conservan su L3 spice.
 ---@param si table|nil
 ---@return boolean
-local function hasSpecificFoodIdentity(si)
-	if si and si.cannedFood == true then
-		return true
+local SPICE_TOKENS = toSet({ "salt", "pepper", "seasoning", "seasoningsalt" })
+
+--- `isSpice()` no es una clasificación de contenido: B42 lo marca también en
+--- conservas, carnes y platos. Solo completa una identidad de especia cuando
+--- coincide con un token entero del producto; nunca se usa como atajo previo
+--- a la clasificación alimentaria ordinaria.
+local function isConfirmedSpice(si, tokens)
+	return U.safeCall(function() return si:isSpice() end) == true
+		and U.hasAnyToken(tokens, SPICE_TOKENS)
+end
+
+local function foodShelfLife(si)
+	local days = U.safeCall(function() return si:getDaysFresh() end)
+	if type(days) == "number" and days > 0 and days < 1000000 then
+		return "perishable"
 	end
-	local riceRecipeTag = U.tagByLocation("base", "ricerecipe")
-	return riceRecipeTag and U.hasTag(si, riceRecipeTag) or false
+	return "non_perishable"
+end
+
+local function contentFromTags(si)
+	local groups = {
+		{ key = "fish_seafood", tags = { "fish_meat" } },
+		{ key = "dairy_egg", tags = { "egg", "milk", "cheese" } },
+		{ key = "preserved", tags = { "preserved_food", "dried_food" } },
+		{ key = "pasta", tags = { "pasta" } },
+		{ key = "spice", tags = { "salt" } },
+	}
+	for i = 1, #groups do
+		local group = groups[i]
+		for j = 1, #group.tags do
+			local tag = U.tagByLocation("base", group.tags[j])
+			if tag and U.hasTag(si, tag) then return group.key end
+		end
+	end
+	return nil
 end
 
 ---@param fullType string
@@ -195,14 +231,18 @@ local function classifyFood(fullType, si)
 	end
 
 	local l2, weakSource = matchL2(tokens)
-	-- `isSpice()` es un getter oficial del ScriptItem, confirmado en B42. Es una
-	-- señal estática más fuerte que los tokens, salvo una identidad alimentaria
-	-- concreta ya confirmada (conserva o plato de arroz); esa identidad decide
-	-- primero el L2 y evita que un falso spice destruya la ruta de comida.
-	local isSpice = U.safeCall(function() return si:isSpice() end) == true
-	if isSpice and not (isConfirmedFood and hasSpecificFoodIdentity(si)) then
-		return { l1 = "food_drink", l2 = "ingredient", l3 = "spice" }, {}, {},
-			U.evidence("script_item_is_spice", 100)
+	local taggedContent = contentFromTags(si)
+	local shelfLife = foodShelfLife(si)
+	if taggedContent == "pasta" then
+		-- `PASTA` identifica la familia con más precisión que el nombre. La
+		-- caducidad distingue pasta seca de la olla/plato ya preparado.
+		l2, weakSource = shelfLife == "perishable" and "prepared_meal" or "pantry", "script_food_tag"
+	elseif taggedContent then
+		l2, weakSource = taggedContent, "script_food_tag"
+	end
+	if isConfirmedFood and isConfirmedSpice(si, tokens) then
+		return { l1 = "food_drink", l2 = shelfLife, l3 = "spice" }, {}, {},
+			U.evidence("script_item_is_spice_confirmed", 100)
 	end
 
 	if isConfirmedFood then
@@ -212,11 +252,12 @@ local function classifyFood(fullType, si)
 		-- ser conserva, plato preparado, alimento crudo, bebida...).
 		-- "other_food" separa la certeza de L1 (confirmada por ItemType,
 		-- confianza 100) de la certeza de L2 (sin evidencia, honesto).
-		return { l1 = "food_drink", l2 = l2 or "other_food", l3 = nil }, {}, {}, U.evidence("script_item_type", 100)
+		local source = taggedContent and "script_food_tag" or "script_item_type"
+		return { l1 = "food_drink", l2 = shelfLife, l3 = l2 or "other_food" }, {}, {}, U.evidence(source, 100)
 	end
 
 	if l2 then
-		return { l1 = "food_drink", l2 = l2, l3 = nil }, {}, {}, U.evidence(weakSource, 30)
+		return { l1 = "food_drink", l2 = shelfLife, l3 = l2 }, {}, {}, U.evidence(weakSource, 30)
 	end
 
 	return nil

@@ -6,12 +6,14 @@
 	una clave plana, estable y sin traducir en el ScriptItem para que el
 	inventario vanilla y los lectores externos reciban la misma categoría. No
 	modifica InventoryItem vivos salvo que exista una variante realmente
-	dinámica (no hay ninguna declarada actualmente).
+	dinámica declarada. Los fluidos llenos son la única variante dinámica
+	actual: no se publica nada para un envase vacío, desconocido o mezcla.
 ]]
 
 require "GS_CatalogManager"
 require "GS_I18n"
 require "GS_NativeProduct"
+require "GS_FluidTaxonomy"
 
 GlobalStorageSiK.DisplayCategoryPublisher = GlobalStorageSiK.DisplayCategoryPublisher or {}
 
@@ -60,6 +62,24 @@ end
 ---@return boolean
 function Publisher.isPublishedKey(value)
 	return type(value) == "string" and value:match("^" .. PREFIX .. "[a-z0-9_]+$") ~= nil
+end
+
+--- Publica exclusivamente una variante dinámica declarada. Nunca fuerza una
+--- categoría sobre un envase vacío: en ese caso el ScriptItem conserva su
+--- DisplayCategory de contenedor. El caller proporciona la ruta ya resuelta
+--- para no repetir getters del fluido durante el pintado de inventario.
+---@param item InventoryItem|nil
+---@param path table|string|nil
+---@return boolean
+function Publisher.publishDynamicItem(item, path)
+	path = GlobalStorageSiK.NativeProduct.decodePath(path)
+	if not item or not path or not item.setDisplayCategory then return false end
+	if state.status == "conflict" then return false end
+	local key = Publisher.publicKey(path)
+	if not key then return false end
+	local current = item.getDisplayCategory and safeCall(function() return item:getDisplayCategory() end) or nil
+	if current == key then return false end
+	return pcall(function() item:setDisplayCategory(key) end)
 end
 
 ---@return table estado de solo lectura para diagnostico/soporte

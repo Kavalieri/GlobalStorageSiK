@@ -4,6 +4,7 @@
 package.loaded["GS_CatalogManager"] = true
 package.loaded["GS_I18n"] = true
 package.loaded["GS_NativeProduct"] = true
+package.loaded["GS_FluidTaxonomy"] = true
 
 local bootHandler = nil
 Events = { OnGameBoot = { Add = function(fn) bootHandler = fn end } }
@@ -68,6 +69,19 @@ assert(unknown.category == "Tool", "unclassified item must retain author categor
 assert(epochBumps == 1, "a changed publication must invalidate ScriptItem caches once")
 assert(GlobalStorageSiK.DisplayCategoryPublisher.isPublishedKey(nails.category), "published key detection")
 assert(not GlobalStorageSiK.DisplayCategoryPublisher.isPublishedKey("Tool"), "vanilla key is not published")
+
+local filledBottle = {
+	category = "Container",
+	getDisplayCategory = function(self) return self.category end,
+	setDisplayCategory = function(self, value) self.category = value end,
+}
+assert(GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem(filledBottle,
+	{ l1 = "food_drink", l2 = "non_perishable", l3 = "beverage" }),
+	"declared dynamic variant must publish on the live instance")
+assert(filledBottle.category == "GSSiK_food_drink_non_perishable_beverage",
+	"dynamic instance uses the stable public category key")
+assert(not GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem(filledBottle, nil),
+	"empty or unknown containers must retain their static category")
 
 BScats = {}
 nails.category = "Misc"

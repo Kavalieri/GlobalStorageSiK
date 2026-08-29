@@ -9,6 +9,7 @@
 
 require "GS_NativeProduct"
 require "GS_I18n"
+require "GS_FluidTaxonomy"
 
 GlobalStorageSiK.CategoryResolution = GlobalStorageSiK.CategoryResolution or {}
 
@@ -134,7 +135,13 @@ local function buildBase(fullType, item)
 	end
 	local result = GlobalStorageSiK.NativeClassifier.classify(fullType)
 	local path = result and GlobalStorageSiK.NativeProduct.normalizePath(result.primaryPath) or nil
-	local status = nativeStatus(result, path)
+	local fluidPath = item and GlobalStorageSiK.FluidTaxonomy.resolve(item) or nil
+	if fluidPath then path = GlobalStorageSiK.NativeProduct.normalizePath(fluidPath) end
+	-- El contenido de un contenedor es una variante declarada por instancia.
+	-- Puede sustituir una ruta estática "containers/liquid" (o incluso una
+	-- abstención del ScriptItem), por lo que no debe heredar el estado de la
+	-- clasificación estática al decidir si la ruta dinámica es utilizable.
+	local status = fluidPath and "classified" or nativeStatus(result, path)
 	if status ~= "classified" then path = nil end
 	local vanillaKey = itemDisplayCategory(item) or scriptDisplayCategory(fullType) or "Misc"
 	local categorySource = sourceCategoryKind(vanillaKey)

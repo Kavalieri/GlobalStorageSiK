@@ -201,6 +201,13 @@ function Table.drawHeader(panel, columns, sortKey, sortAsc, y, font, options)
 		else
 			panel:drawText(text, col.x + col.pad, y, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, font)
 		end
+		-- Un único divisor por límite compartido: la geometría de la cabecera
+		-- sigue siendo exactamente la de las filas, y el área de arrastre se
+		-- superpone sin dibujar una segunda línea.
+		if i < #layout then
+			panel:drawRect(col.finish, 0, 1, panel.height - 1, 0.72,
+				pal.divider[1], pal.divider[2], pal.divider[3])
+		end
 	end
 	GlobalStorageSiK.SiK_UI.drawTableHeaderLine(panel)
 	return layout

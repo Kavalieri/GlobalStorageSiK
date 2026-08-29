@@ -305,6 +305,8 @@ end
 ---@param sq IsoGridSquare|nil
 ---@param list ItemContainer[]
 ---@param seen table
+local tryAddVehicleContainers
+
 local function scanSquare(player, sq, list, seen)
 	if not sq then
 		return
@@ -325,6 +327,14 @@ local function scanSquare(player, sq, list, seen)
 		for i = 0, specials:size() - 1 do
 			tryAddFromObject(player, specials:get(i), list, seen)
 		end
+	end
+	-- En dedicado la colección global de vehículos de la celda puede no estar
+	-- poblada, pero la baldosa próxima sí expone el BaseVehicle. B42 devuelve el
+	-- vehículo (no un ItemContainer): se deduplica en `seen` a través de sus
+	-- piezas y se recorren únicamente los compartimentos accesibles.
+	local vehicle = sq.getVehicleContainer and sq:getVehicleContainer() or nil
+	if vehicle then
+		tryAddVehicleContainers(player, vehicle, list, seen)
 	end
 end
 
@@ -371,7 +381,7 @@ end
 ---@param vehicle BaseVehicle|nil
 ---@param list ItemContainer[]
 ---@param seen table
-local function tryAddVehicleContainers(player, vehicle, list, seen)
+tryAddVehicleContainers = function(player, vehicle, list, seen)
 	if not vehicle or not vehicle.getPartCount then
 		return
 	end
