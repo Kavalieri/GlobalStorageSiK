@@ -1038,6 +1038,13 @@ function GS_TerminalUI:onRescanNetwork()
 	})
 end
 
+function GS_TerminalUI:onCancelZoneScan()
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("cancelZoneScan", {
+		searchQuery = self:getSearchQuery(),
+	})
+end
+
 function GS_TerminalUI:onRequestOpen()
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 	local payload = GlobalStorageSiK.TerminalAccess.enrichCommandPayload(player, {
@@ -1438,6 +1445,14 @@ function GS_TerminalUI:onDeleteZone(zoneId)
 	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("deleteZone", {
 		zoneId = zoneId,
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
+function GS_TerminalUI:onRemoveNode(nodeId)
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("removeNode", {
+		nodeId = nodeId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end

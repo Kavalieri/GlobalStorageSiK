@@ -266,12 +266,59 @@ function GlobalStorageSiK.Zones.removeZone(zoneId)
 	if not registry.zones or not registry.zones[zoneId] then
 		return false
 	end
-	registry.zones[zoneId] = nil
+	-- No mutar registry.nodes mientras pairs() lo recorre: en Kahlua puede
+	-- saltarse entradas y dejar reglas/reservas fantasma tras una cascada.
+	local nodeIds = {}
 	for id, node in pairs(registry.nodes or {}) do
-		if node.zoneId == zoneId then
-			registry.nodes[id] = nil
-		end
+		if node.zoneId == zoneId then nodeIds[#nodeIds + 1] = id end
 	end
+	registry.zones[zoneId] = nil
+	for i = 1, #nodeIds do
+		registry.nodes[nodeIds[i]] = nil
+	end
+	return true, #nodeIds
+end
+
+--- Elimina solo el registro lógico de un contenedor. Nunca modifica el
+--- IsoObject ni vacía su inventario; un escaneo posterior lo descubre limpio.
+---@param nodeId string
+---@param networkId string
+---@return boolean removed
+function GlobalStorageSiK.Zones.removeNode(nodeId, networkId)
+	if not nodeId or nodeId == "" or not networkId then return false end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local node = registry.nodes and registry.nodes[nodeId]
+	local zone = node and registry.zones and registry.zones[node.zoneId]
+	if not node or not zone or zone.networkId ~= networkId then return false end
+	registry.nodes[nodeId] = nil
+	return true
+end
+
+--- Asocia la configuración de un nodo desaparecido a un nuevo hallazgo único.
+--- El destino debe ser una entrada automática todavía sin personalizar: así no
+--- puede absorber por accidente reglas o reservas de otro contenedor ya usado.
+---@param sourceId string
+---@param targetId string
+---@param networkId string
+---@return boolean rebound
+function GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId)
+	if not sourceId or not targetId or sourceId == targetId or not networkId then return false end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local source = registry.nodes and registry.nodes[sourceId]
+	local target = registry.nodes and registry.nodes[targetId]
+	local sourceZone = source and registry.zones and registry.zones[source.zoneId]
+	local targetZone = target and registry.zones and registry.zones[target.zoneId]
+	if not source or not target or not sourceZone or not targetZone
+		or sourceZone.networkId ~= networkId or targetZone.networkId ~= networkId then return false end
+	if target.membership ~= "auto" or target.rules or target.filters or target.categories
+		or target.notes or target.priority or target.displayName ~= target.name then return false end
+	local preserved = {
+		zoneId = source.zoneId, membership = source.membership, enabled = source.enabled,
+		displayName = source.displayName, priority = source.priority, notes = source.notes,
+		categories = source.categories, filters = source.filters, rules = source.rules,
+	}
+	for key, value in pairs(preserved) do target[key] = value end
+	registry.nodes[sourceId] = nil
 	return true
 end
 

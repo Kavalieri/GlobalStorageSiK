@@ -19,6 +19,7 @@ local STEP_DELAY_MS = 50
 local BUSY_DELAY_MS = 250
 local MAX_UNITS_PER_STEP = 50
 local MAX_STEP_MS = 5
+local STALL_TIMEOUT_MS = 30000
 
 local jobs = {}
 local tickInstalled = false
@@ -73,6 +74,30 @@ local function mergeDistinctTypes(job, state)
 	end
 end
 
+local function markProgress(job, now, phase)
+
+	job.lastProgressMs = now
+	job.phase = phase or job.phase or "preparing"
+
+end
+
+local function currentZone(job)
+
+	return job and job.zones and job.zones[job.zoneIndex] or nil
+
+end
+
+local function stateProgressToken(state)
+
+	if not state then return "none" end
+	return table.concat({
+		tostring(state.phase or ""), tostring(state.x or ""), tostring(state.y or ""),
+		tostring(state.z or ""), tostring(state.taskIndex or ""),
+		tostring(state.itemIndex or ""), tostring(#(state.results or {})),
+	}, "|")
+
+end
+
 local function completeZone(job)
 	local state = job.zoneState
 	local zone = job.zones[job.zoneIndex]
@@ -99,6 +124,29 @@ local function completeZone(job)
 	mergeDistinctTypes(job, state)
 	job.zoneState = nil
 	job.zoneIndex = job.zoneIndex + 1
+end
+
+local function discardJobState(job)
+
+	if not job then return end
+	job.zoneState = nil
+	job.zones = {}
+	job.watchers = {}
+	job.distinctTypeSet = {}
+
+end
+
+local function finishCancelled(networkId, job, reason)
+
+	jobs[networkId] = nil
+	local durationMs = math.max(0, nowMs() - (job.startedMs or nowMs()))
+	GlobalStorageSiK.Log.warn("ZoneScanJob", "cancel network=" .. tostring(networkId)
+		.. " reason=" .. tostring(reason or "manual") .. " durationMs=" .. tostring(durationMs))
+	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanCancelled then
+		GlobalStorageSiK.Server.onNetworkScanCancelled(networkId, job.watchers, reason or "manual")
+	end
+	discardJobState(job)
+
 end
 
 local function finishJob(networkId, job)
@@ -141,6 +189,10 @@ local function onTick()
 		return
 	end
 	nextGlobalRunMs = now + STEP_DELAY_MS
+	if now > 0 and job.lastProgressMs and now - job.lastProgressMs > STALL_TIMEOUT_MS then
+		finishCancelled(networkId, job, "timed_out")
+		return
+	end
 
 	if GlobalStorageSiK.RedistributeJob and GlobalStorageSiK.RedistributeJob.isActive(networkId) then
 		job.nextRunMs = now + BUSY_DELAY_MS
@@ -150,8 +202,7 @@ local function onTick()
 	if not player then
 		-- La captura es util solo para una peticion viva. Liberar referencias a
 		-- contenedores si todos los observadores se desconectaron.
-		jobs[networkId] = nil
-		GlobalStorageSiK.Log.warn("ZoneScanJob", "cancel no_player network=" .. tostring(networkId))
+		finishCancelled(networkId, job, "no_player")
 		return
 	end
 	local acquired = GlobalStorageSiK.TransferLock.acquire(networkId, player, "zoneScan")
@@ -159,6 +210,7 @@ local function onTick()
 		job.nextRunMs = now + BUSY_DELAY_MS
 		return
 	end
+	local beforeToken = stateProgressToken(job.zoneState)
 	local ok, err = pcall(function()
 		if job.zoneIndex > #job.zones then return end
 		if not job.zoneState then
@@ -175,12 +227,15 @@ local function onTick()
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
 	if not ok then
-		jobs[networkId] = nil
-		GlobalStorageSiK.Log.error("ZoneScanJob", "failed network=" .. tostring(networkId) .. " error=" .. tostring(err))
-		if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanFailed then
-			GlobalStorageSiK.Server.onNetworkScanFailed(networkId, job.watchers, tostring(err))
-		end
-		return
+		local zone = currentZone(job)
+		job.totals.failedZones = (job.totals.failedZones or 0) + 1
+		GlobalStorageSiK.Log.warn("ZoneScanJob", "zone_failed network=" .. tostring(networkId)
+			.. " zone=" .. tostring(zone and zone.id or "?") .. " error=" .. tostring(err))
+		job.zoneState = nil
+		job.zoneIndex = job.zoneIndex + 1
+		markProgress(job, now, "recovering")
+	elseif beforeToken ~= stateProgressToken(job.zoneState) then
+		markProgress(job, now, job.zoneState and job.zoneState.phase or "merging")
 	end
 	if job.zoneIndex > #job.zones then
 		finishJob(networkId, job)
@@ -226,6 +281,8 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		zoneState = nil,
 		background = opts.background == true,
 		startedMs = nowMs(),
+		lastProgressMs = nowMs(),
+		phase = "preparing",
 		startRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 		nextRunMs = 0,
 		watchers = {},
@@ -236,6 +293,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 			zones = 0, limitHit = false, squaresVisited = 0,
 			loadedSquares = 0, nodesScanned = 0, itemInstances = 0,
 			distinctTypes = 0, snapshotRows = 0,
+			failedZones = 0,
 		},
 	}
 	if opts.background ~= true then addWatcher(job, player, opts.searchQuery) end
@@ -257,4 +315,37 @@ end
 ---@return boolean
 function GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 	return networkId ~= nil and jobs[networkId] ~= nil
+end
+
+---@param networkId string|nil
+---@return table
+function GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
+
+	local job = networkId and jobs[networkId] or nil
+	if not job then return { state = "idle" } end
+	local zone = currentZone(job)
+	return {
+		state = "running",
+		phase = job.phase or "preparing",
+		zoneId = zone and zone.id or nil,
+		zoneName = zone and zone.name or nil,
+		zonesDone = math.max(0, (job.zoneIndex or 1) - 1),
+		zonesTotal = #(job.zones or {}),
+		startedMs = job.startedMs or 0,
+		lastProgressMs = job.lastProgressMs or 0,
+		failedZones = job.totals and job.totals.failedZones or 0,
+	}
+
+end
+
+---@param networkId string|nil
+---@param reason string|nil
+---@return boolean cancelled
+function GlobalStorageSiK.ZoneScanJob.cancel(networkId, reason)
+
+	local job = networkId and jobs[networkId] or nil
+	if not job then return false end
+	finishCancelled(networkId, job, reason or "manual")
+	return true
+
 end

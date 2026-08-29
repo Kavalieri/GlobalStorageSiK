@@ -388,6 +388,17 @@ local function addSummaryRuns(host, layout, offsetY)
 	end
 end
 
+function GS_NodeEditorUI:confirmRemoveFromNetwork()
+	if not self.node or not self.terminal then return end
+	local nodeName = self.node.displayName or self.node.name or "?"
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_NodeRemoveConfirm", nodeName), function()
+		if self.node and self.terminal then
+			self.terminal:onRemoveNode(self.node.id)
+			GlobalStorageSiK.TerminalNodeEditor.close()
+		end
+	end)
+end
+
 --- Color de acento (createSectionCard/createButton) por operador -
 --- mismo trio en las 3 tarjetas de reglas, los puntos de composicion de la
 --- lista de contenedores (GS_TerminalUI_Nodes.lua) y el borde del modal
@@ -857,6 +868,14 @@ function GS_NodeEditorUI:ensureForm()
 	end, membActiveColor, true)
 	self.membBtn:setTooltip(T("IGUI_GS_NodeExcludeTooltip"))
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.membBtn)
+	y = y + BTN_H + 6
+
+	self.removeBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, innerW, BTN_H,
+		T("IGUI_GS_NodeBtnRemove"), scroll, function()
+			self:confirmRemoveFromNetwork()
+		end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
+	self.removeBtn:setTooltip(T("IGUI_GS_NodeRemoveTooltip"))
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.removeBtn)
 	y = y + BTN_H + 12
 
 	-- ── Contenido del contenedor ──────────────────────────────────────────

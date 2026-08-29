@@ -239,6 +239,12 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.rescanBtn)
 	y = y + btnH + 4
+	ui.cancelScanBtn = GlobalStorageSiK.SiK_UI.createButton(leftX, y, contentW, btnH, T("IGUI_GS_ScanCancel"), scroll, function()
+		if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end
+	end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
+	ui.cancelScanBtn:setVisible(false)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.cancelScanBtn)
+	y = y + btnH + 4
 	-- Boton "Auto-ordenar" MOVIDO (2026-08-17, pedido explicito) a la
 	-- pestaña Items/almacén, arriba a la derecha del título
 	-- (GS_TerminalUI.lua:buildItemsToolbar) - ya no vive aquí.
@@ -396,8 +402,14 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 	end
 
 	local scan = state.scan or {}
+	local scanStatus = state.scanStatus or {}
 	local scanRunning = state.scanActive == true or scan.running == true
-	setText(ui.stats.scanNew, scanRunning and T("IGUI_GS_ScanRunning")
+	local progressText = T("IGUI_GS_ScanRunning")
+	if scanRunning and (scanStatus.zonesTotal or 0) > 0 then
+		progressText = T("IGUI_GS_ScanProgress", scanStatus.zonesDone or 0, scanStatus.zonesTotal or 0,
+			scanStatus.zoneName or "?")
+	end
+	setText(ui.stats.scanNew, scanRunning and progressText
 		or T("IGUI_GS_ScanNew", scan.added or 0),
 		scanRunning and 0.95 or 0.82, scanRunning and 0.75 or 0.86,
 		scanRunning and 0.3 or 0.92, ui.contentW)
@@ -424,6 +436,11 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 		else
 			ui.rescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
 		end
+	end
+	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.cancelScanBtn) then
+		ui.cancelScanBtn:setVisible(scanRunning)
+		ui.cancelScanBtn:setEnable(scanRunning)
+		ui.cancelScanBtn:setTooltip(T("IGUI_GS_ScanCancelHint"))
 	end
 
 	local name = state.networkName
@@ -513,6 +530,10 @@ function GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
 	if ui.rescanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.rescanBtn, leftX)
 		ui.rescanBtn:setWidth(contentW)
+	end
+	if ui.cancelScanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.cancelScanBtn) then
+		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.cancelScanBtn, leftX)
+		ui.cancelScanBtn:setWidth(contentW)
 	end
 	resizeCard(ui.statsCard, ui.statsY, ui.statsEndY)
 

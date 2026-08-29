@@ -616,6 +616,8 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		scanActive = GlobalStorageSiK.ZoneScanJob.isActive(networkId),
 
+		scanStatus = GlobalStorageSiK.ZoneScanJob.getStatus(networkId),
+
 		zones = zonesList,
 
 		terminals = serializeTerminals(networkId),
@@ -1989,6 +1991,24 @@ function GlobalStorageSiK.Server.onNetworkScanFailed(networkId, requestedWatcher
 		.. " error=" .. tostring(errorText))
 end
 
+--- El cierre único de ZoneScanJob, sea por decisión administrativa, timeout o
+--- desconexión. Los observadores reciben el mismo contrato final y el siguiente
+--- refresco reconstruye la pestaña sin conservar un estado "ejecutando" viejo.
+function GlobalStorageSiK.Server.onNetworkScanCancelled(networkId, requestedWatchers, reason)
+	local timedOut = reason == "timed_out"
+	forEachOnlinePlayer(function(player)
+		if isTerminalWatcher(player, networkId) then
+			gsSendServerCommand(player, "actionResult", {
+				ok = timedOut == false,
+				message = GlobalStorageSiK.I18n.remote(timedOut and "IGUI_GS_ScanTimedOut" or "IGUI_GS_ScanCancelled"),
+				jobType = "zoneScan",
+				jobState = "finished",
+			})
+			pushTerminalState(player, networkId, nil, requestedWatchers and requestedWatchers[player:getUsername()] or "")
+		end
+	end)
+end
+
 local function clearDeletedNetworkReferences(networkId)
 	pendingSnapshotSync[networkId] = nil
 	local watcherKeys = {}
@@ -2975,6 +2995,18 @@ local function onClientCommand(module, command, player, args)
 		end
 		startIncrementalScan(player, networkId, searchQuery)
 
+	elseif command == "cancelZoneScan" then
+		if not requireAdminAccess(player, networkId) then return end
+		if GlobalStorageSiK.ZoneScanJob.cancel(networkId, "manual") then
+			GlobalStorageSiK.Log.info("ZoneScanJob", "cancel requested network=" .. tostring(networkId)
+				.. " by=" .. tostring(player:getUsername()))
+		else
+			gsSendServerCommand(player, "actionResult", {
+				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanNotRunning"),
+				jobType = "zoneScan", jobState = "finished",
+			})
+		end
+
 	elseif command == "getNodeContents" then
 		if not requireTerminalAccess(player, networkId) then
 			return
@@ -3675,17 +3707,22 @@ local function onClientCommand(module, command, player, args)
 			logZoneGateRejected("deleteZone", "sin rol admin")
 			return
 		end
-		if not blockIfNetworkJobRunning(player, networkId) then
+		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+			blockIfNetworkJobRunning(player, networkId)
 			logZoneGateRejected("deleteZone", "job de red en curso")
 			return
 		end
 		local registry = GlobalStorageSiK.Zones.getRegistry()
 		local zone = registry.zones and registry.zones[args.zoneId]
-		if not zone then
+		if not zone or zone.networkId ~= networkId then
 			GlobalStorageSiK.Log.debug("Zones", "deleteZone zona no encontrada", "zoneId=" .. tostring(args.zoneId))
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg") })
 			return
 		end
+		-- Esta operación de recuperación es deliberadamente la excepción al
+		-- bloqueo del escaneo: primero cancela y libera el job, después aplica la
+		-- cascada atómica. Nunca edita la estructura a mitad de una pasada viva.
+		GlobalStorageSiK.ZoneScanJob.cancel(networkId, "delete_zone")
 		local zoneName = zone.name or args.zoneId
 		-- Recuento ANTES de borrar (categoria "Zones", ver comentario de
 		-- logZoneCommand): cuantos contenedores (nodos) se pierden con esta
@@ -3713,6 +3750,59 @@ local function onClientCommand(module, command, player, args)
 				.. " de " .. tostring(GlobalStorageSiK.Sandbox.getMaxZonesPerNetwork()))
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
+		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
+
+	elseif command == "removeNode" then
+		return (function()
+		if not requireAdminAccess(player, networkId) then return end
+		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+			blockIfNetworkJobRunning(player, networkId)
+			return
+		end
+		local registry = GlobalStorageSiK.Zones.getRegistry()
+		local node = registry.nodes and registry.nodes[args.nodeId]
+		local zone = node and registry.zones and registry.zones[node.zoneId]
+		if not node or not zone or zone.networkId ~= networkId then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
+			return
+		end
+		local nodeName = node.displayName or node.name or args.nodeId
+		GlobalStorageSiK.ZoneScanJob.cancel(networkId, "remove_node")
+		if not GlobalStorageSiK.Zones.removeNode(args.nodeId, networkId) then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRemoveFailed") })
+			return
+		end
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.Log.info("Zones", "logical node removed network=" .. tostring(networkId)
+			.. " node=" .. tostring(args.nodeId) .. " by=" .. tostring(player:getUsername()))
+		gsSendServerCommand(player, "actionResult", { ok = true,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRemovedMsg", nodeName) })
+		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
+
+	elseif command == "rebindNode" then
+		return (function()
+		if not requireAdminAccess(player, networkId) then return end
+		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
+			blockIfNetworkJobRunning(player, networkId)
+			return
+		end
+		local sourceId = tostring(args.nodeId or "")
+		local targetId = tostring(args.targetNodeId or "")
+		GlobalStorageSiK.ZoneScanJob.cancel(networkId, "rebind_node")
+		if not GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId) then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected") })
+			return
+		end
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.Log.info("Zones", "logical node rebound network=" .. tostring(networkId)
+			.. " from=" .. sourceId .. " to=" .. targetId .. " by=" .. tostring(player:getUsername()))
+		gsSendServerCommand(player, "actionResult", { ok = true,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeReboundMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
 

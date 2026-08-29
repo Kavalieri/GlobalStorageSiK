@@ -682,7 +682,12 @@ function GS_ZoneEditorUI:confirmExcludeZone()
 end
 
 function GS_ZoneEditorUI:confirmDelete()
-	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_ZoneDeleteConfirm", self.zone and self.zone.name or "?"), function()
+	local count = 0
+	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+	for i = 1, #nodes do
+		if self.zone and nodes[i].zoneId == self.zone.id then count = count + 1 end
+	end
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_ZoneDeleteConfirm", self.zone and self.zone.name or "?", count), function()
 		if self.zone and self.terminal then
 			self.terminal:onDeleteZone(self.zone.id)
 			GlobalStorageSiK.TerminalZoneEditor.close()
