@@ -21,8 +21,17 @@ local function isCleanUIActive()
 	return mods:contains("CleanUI")
 end
 
+local function hasCleanUI4219Signature()
+	return type(CleanUI_getItemCategoryColor) == "function"
+		and type(CleanUI_getCachedCategoryText) == "function"
+end
+
 function Adapter.install()
 	if Adapter._installed or not isCleanUIActive() then return Adapter._installed == true end
+	if not hasCleanUI4219Signature() then
+		GlobalStorageSiK.Log.warn("CleanUITaxonomy", "adaptador desactivado: firma CleanUI 42.19 no disponible")
+		return false
+	end
 	-- CleanUI ya estaba cargado cuando Core instalo su wrapper generico: ese
 	-- wrapper soporta drawText y drawTextRight, por lo que no hace falta una
 	-- segunda capa.
@@ -33,7 +42,7 @@ function Adapter.install()
 	if not ISInventoryPane or type(ISInventoryPane.renderdetails) ~= "function"
 		or type(ISUIElement.drawText) ~= "function" or type(ISUIElement.drawTextRight) ~= "function"
 		or not Projection or type(Projection.decorateDraw) ~= "function" then
-		GlobalStorageSiK.Log.warn("CleanUITaxonomy", "adaptador desactivado: firma 42.19 no disponible")
+		GlobalStorageSiK.Log.warn("CleanUITaxonomy", "adaptador desactivado: renderer compatible no disponible")
 		return false
 	end
 
