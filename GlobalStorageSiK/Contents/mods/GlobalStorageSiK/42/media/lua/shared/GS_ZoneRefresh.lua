@@ -35,6 +35,7 @@ end
 ---@return table summary
 function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected, zoneAreaTiles,
 	zoneHadLoadedSquares, excludedEntryIds)
+	local scanMs = getTimestampMs and getTimestampMs() or 0
 	registry.nodes = registry.nodes or {}
 	local summary = {
 		added = 0, updated = 0, offline = 0, limitHit = false,
@@ -89,6 +90,8 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 				summary.limitHit = true
 			else
 				entry.membership = entry.membership or "auto"
+				entry.discoveredAtMs = scanMs
+				entry.lastSeenMs = scanMs
 				registry.nodes[id] = entry
 				summary.added = summary.added + 1
 			end
@@ -101,6 +104,17 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 				existing.y = entry.y
 				existing.z = entry.z
 				existing.name = entry.name
+				if existing.physicalSignature
+					and not GlobalStorageSiK.Zones.samePhysicalSignature(existing.physicalSignature, entry.physicalSignature) then
+					existing.physicalAnomaly = {
+						code = "SIG", observedAtMs = scanMs,
+						observedSignature = entry.physicalSignature,
+					}
+				elseif entry.physicalSignature then
+					existing.physicalSignature = entry.physicalSignature
+					existing.physicalAnomaly = nil
+				end
+				existing.lastSeenMs = scanMs
 				existing.offline = false
 				if existing.membership == "excluded" then
 					existing.enabled = false

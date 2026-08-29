@@ -399,28 +399,36 @@ function GS_NodeEditorUI:confirmRemoveFromNetwork()
 	end)
 end
 
-function GS_NodeEditorUI:uniqueRebindCandidate()
-	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
-	local candidate = nil
-	for i = 1, #nodes do
-		local node = nodes[i]
-		if node and node.id ~= self.node.id and node.membership == "auto"
-			and not node.rules and not node.filters and not node.categories and not node.notes
-			and not node.priority and node.displayName == node.name then
-			if candidate then return nil end
-			candidate = node
-		end
-	end
-	return candidate
+function GS_NodeEditorUI:requestRebindProposal(targetNodeId)
+	if not self.node or not self.terminal then return end
+	self.terminal:onRequestRebindProposal(self.node.id, targetNodeId)
 end
 
-function GS_NodeEditorUI:confirmRebind()
-	local candidate = self:uniqueRebindCandidate()
-	if not candidate or not self.node or not self.terminal then return end
+-- La lista nunca se infiere en cliente: llega ya filtrada por el servidor y
+-- solo sirve para que el jugador elija cuando hay más de un destino válido.
+function GS_NodeEditorUI:showRebindCandidates(response)
+	if not response or response.sourceId ~= (self.node and self.node.id) then return end
+	self._rebindCandidates = response.candidates or {}
+	local ids = {}
+	for i = 1, #self._rebindCandidates do
+		ids[#ids + 1] = self._rebindCandidates[i].nodeId
+	end
+	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.highlightNodes then
+		GlobalStorageSiK.NodeHighlight.highlightNodes(ids, nodes)
+	end
+	self:resetForm()
+	self:ensureForm()
+end
+
+function GS_NodeEditorUI:confirmRebindProposal(proposal)
+	if not proposal or not proposal.rebindToken or not self.node or not self.terminal
+		or proposal.sourceId ~= self.node.id then return end
 	local sourceName = self.node.displayName or self.node.name or "?"
-	local targetName = candidate.displayName or candidate.name or "?"
+	local targetName = proposal.targetName or "?"
+	self._rebindCandidates = nil
 	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_NodeRebindConfirm", sourceName, targetName), function()
-		self.terminal:onRebindNode(self.node.id, candidate.id)
+		self.terminal:onRebindNode(self.node.id, proposal.rebindToken)
 	end)
 end
 
@@ -902,14 +910,30 @@ function GS_NodeEditorUI:ensureForm()
 	self.removeBtn:setTooltip(T("IGUI_GS_NodeRemoveTooltip"))
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.removeBtn)
 	y = y + BTN_H + 6
-	local candidate = self:uniqueRebindCandidate()
-	if candidate then
+	if node and node.offline == true then
 		self.rebindBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeBtnRebind"), scroll, function()
-			self:confirmRebind()
+			self:requestRebindProposal()
 		end)
-		self.rebindBtn:setTooltip(T("IGUI_GS_NodeRebindTooltip", candidate.displayName or candidate.name or "?"))
+		self.rebindBtn:setTooltip(T("IGUI_GS_NodeRebindTooltip"))
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rebindBtn)
 		y = y + BTN_H + 6
+		if self._rebindCandidates and #self._rebindCandidates > 0 then
+			local chooseLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y,
+				T("IGUI_GS_NodeRebindChooseTarget"))
+			GlobalStorageSiK.TerminalScroll.addChild(scroll, chooseLbl)
+			y = y + FONT_HGT_SMALL + 4
+			for i = 1, #self._rebindCandidates do
+				local candidate = self._rebindCandidates[i]
+				local label = T("IGUI_GS_NodeRebindCandidate", candidate.name or "?",
+					candidate.x or "?", candidate.y or "?", candidate.z or "?")
+				local choiceBtn = createBtn(pad, y, innerW, label, scroll, function()
+					self:requestRebindProposal(candidate.nodeId)
+				end)
+				choiceBtn:setTooltip(T("IGUI_GS_NodeRebindCandidateTooltip"))
+				GlobalStorageSiK.TerminalScroll.addChild(scroll, choiceBtn)
+				y = y + BTN_H + 4
+			end
+		end
 	end
 	y = y + 6
 

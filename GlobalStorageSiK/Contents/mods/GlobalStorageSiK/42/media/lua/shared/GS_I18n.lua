@@ -236,6 +236,34 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ScanCancelled = "Network scan cancelled safely.",
 	IGUI_GS_ScanTimedOut = "Network scan stopped after no progress. Check inaccessible containers and try again.",
 	IGUI_GS_ScanPartialFailed = "Network scan ended with errors. Its snapshot was not certified as complete.",
+	IGUI_GS_ScanState = "Scan state: {1}",
+	IGUI_GS_ScanFailedZones = "failed zones: {1}",
+	IGUI_GS_ScanState_IDLE = "idle",
+	IGUI_GS_ScanState_RUNNING = "running",
+	IGUI_GS_ScanState_COMPLETED = "completed; snapshot certified",
+	IGUI_GS_ScanState_FAILED = "failed; snapshot not certified",
+	IGUI_GS_ScanState_CANCELLED = "cancelled; snapshot not certified",
+	IGUI_GS_ScanState_TIMED_OUT = "timed out; snapshot not certified",
+	IGUI_GS_ScanReason_zone_error = "one or more zones could not be scanned",
+	IGUI_GS_ScanReason_snapshot_stale = "inventory changed while scanning",
+	IGUI_GS_ScanReason_timed_out = "no progress was detected",
+	IGUI_GS_ScanReason_manual = "cancelled by an administrator",
+	IGUI_GS_ScanReason_no_player = "all observers disconnected",
+	IGUI_GS_ScanReason_not_running = "no scan is active",
+	IGUI_GS_ScanReason_invalid = "the request is invalid",
+	IGUI_GS_ScanReason_zone_not_found = "the requested zone no longer exists",
+	IGUI_GS_ScanReason_redistribute_active = "auto sort is using this network",
+	IGUI_GS_ScanCode_ZERR = "Zone error",
+	IGUI_GS_ScanCode_GERR = "Global error",
+	IGUI_GS_ScanCode_STAL = "Stale snapshot",
+	IGUI_GS_ScanCode_TIME = "Timeout",
+	IGUI_GS_ScanCode_CANC = "Cancelled",
+	IGUI_GS_ScanCode_OBSV = "No observer",
+	IGUI_GS_ScanCode_ZONE = "Zone unavailable",
+	IGUI_GS_ScanCode_REQ = "Invalid request",
+	IGUI_GS_ScanCode_BUSY = "Busy",
+	IGUI_GS_ScanCode_IDLE = "Idle",
+	IGUI_GS_ScanCode_UNKN = "Unknown error",
 	IGUI_GS_ScanNotRunning = "There is no network scan running.",
 	IGUI_GS_NodeBtnRemove = "Remove from network",
 	IGUI_GS_NodeRemoveTooltip = "Removes only this logical network entry. The physical container and its items stay in the world.",
@@ -243,10 +271,17 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodeRemovedMsg = "Removed '{1}' from the network. It can be rediscovered as a new container.",
 	IGUI_GS_NodeRemoveFailed = "The container could not be removed from this network.",
 	IGUI_GS_NodeRebindRejected = "That replacement container is not a unique clean discovery in this network.",
+	IGUI_GS_NodeRebindConflict = "A new container was found in the same place, but its type or sprite differs. Nothing was moved: keep or remove the old configuration, then configure the new container if desired.",
+	IGUI_GS_NodeRebindAmbiguous = "Several matching replacement containers were found. Select the intended one; nothing is moved until you confirm it.",
+	IGUI_GS_NodeRebindSourceOnline = "This container is still online. Nothing was moved.",
 	IGUI_GS_NodeReboundMsg = "Container configuration rebound to the new discovery.",
 	IGUI_GS_NodeBtnRebind = "Rebind configuration",
-	IGUI_GS_NodeRebindTooltip = "Move this configuration to the only clean discovery: {1}.",
+	IGUI_GS_NodeRebindTooltip = "Ask the server to find recent matching replacements. If there is more than one, it highlights them and requires your choice.",
 	IGUI_GS_NodeRebindConfirm = "Rebind '{1}' to '{2}'? Its rules and coverage move once; physical containers stay unchanged.",
+	IGUI_GS_NodeRebindProposal = "Safe replacement found: {1}.",
+	IGUI_GS_NodeRebindChooseTarget = "Choose the compatible replacement",
+	IGUI_GS_NodeRebindCandidate = "{1} ({2}, {3}, {4})",
+	IGUI_GS_NodeRebindCandidateTooltip = "Server-authoritative compatible destination. It is highlighted in the world.",
 	IGUI_GS_ScanCompleteMetrics = "Scan complete in {1} ms: {2} containers, {3} item instances, {4} types, {5} snapshot rows.",
 	IGUI_GS_ScanMetricsTooltip = "Last scan: {1} ms | {2} containers | {3} item instances | {4} types | {5} rows",
 	IGUI_GS_ItemTypes = "Item types in network: {1}",
@@ -625,6 +660,21 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_PermOwnershipTransferredMsg = "Ownership transferred to {1}",
 	IGUI_GS_ZoneSourceStructure = "Structure",
 }
+
+-- Códigos estables de diagnóstico breve para estados de escaneo. Son un
+-- complemento del mensaje localizado, no sustituyen su explicación.
+local SCAN_REASON_CODES = {
+	zone_error = "ZERR", global_error = "GERR", snapshot_stale = "STAL",
+	timed_out = "TIME", manual = "CANC", no_player = "OBSV",
+	invalid = "REQ", zone_not_found = "ZONE", redistribute_active = "BUSY",
+	not_running = "IDLE",
+}
+
+---@param reason string|nil
+---@return string
+function GlobalStorageSiK.I18n.scanReasonCode(reason)
+	return SCAN_REASON_CODES[reason or ""] or "UNKN"
+end
 
 --- Sustitución literal (sin patrones Lua) para evitar corrupción de %1, %2...
 ---@param str string

@@ -1401,7 +1401,7 @@ local function blockIfNetworkJobRunning(player, networkId)
 			ok = false,
 			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanConfigLocked"),
 			jobType = "zoneScan",
-			jobState = "running",
+			jobState = "RUNNING",
 		})
 		return false
 	end
@@ -1884,6 +1884,155 @@ GlobalStorageSiK.Server = GlobalStorageSiK.Server or {}
 GlobalStorageSiK.Server.pushTerminalState = pushTerminalState
 GlobalStorageSiK.Server.sendCommand = gsSendServerCommand
 
+-- Propuestas efímeras, exclusivamente de servidor. Un token no es una
+-- autorización: al confirmarlo se comprueban de nuevo red, permisos, firmas y
+-- estado del mundo. Solo evita que el cliente sustituya el destino entre ambas
+-- pulsaciones.
+local rebindProposals = {}
+local rebindProposalCounter = 0
+local REBIND_PROPOSAL_MS = 60000
+
+local function scanResult(networkId, state, key, reason, summary)
+	local scanStatus = GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
+	if not scanStatus or scanStatus.state ~= state then
+		scanStatus = {
+			state = state, reason = reason, failedZones = summary and summary.failedZones or 0,
+		}
+	end
+	return {
+		ok = state == "COMPLETED", message = GlobalStorageSiK.I18n.remote(key),
+		jobType = "zoneScan", jobState = state, reason = reason,
+		reasonCode = scanStatus.reasonCode or GlobalStorageSiK.I18n.scanReasonCode(reason),
+		failedZones = scanStatus.failedZones or 0,
+		snapshotCertified = state == "COMPLETED",
+		scanStatus = scanStatus,
+	}
+end
+
+local function rebindNodeZone(registry, node, networkId)
+	local zone = node and registry.zones and registry.zones[node.zoneId]
+	if zone and zone.networkId == networkId then return zone end
+	return nil
+end
+
+local function isResolvableStorageNode(node)
+	local object = GlobalStorageSiK.Network.findWorldObject(node)
+	local container = GlobalStorageSiK.Utils.getObjectContainer(object, node and node.containerIndex)
+	return object and container and GlobalStorageSiK.Utils.isNetworkStorageContainer(object, node.containerIndex)
+end
+
+local function rebindRevision(source, target)
+	return table.concat({
+		tostring(source and source.zoneId), tostring(source and source.lastSeenMs),
+		tostring(source and source.offline), tostring(target and target.zoneId),
+		tostring(target and target.discoveredAtMs), tostring(target and target.lastSeenMs),
+		tostring(target and target.offline),
+	}, ":")
+end
+
+local function strictRebindCandidates(registry, networkId, sourceId)
+	local source = registry.nodes and registry.nodes[sourceId]
+	if not source or not rebindNodeZone(registry, source, networkId)
+		or not source.physicalSignature then return nil, nil, "source_not_found" end
+	-- Un origen presente todavía no puede absorber otro nodo. Si su chunk no es
+	-- resoluble, `offline` conserva la evidencia del último escaneo válido.
+	if source.offline ~= true and GlobalStorageSiK.Network.findWorldObject(source) then
+		return nil, nil, "source_still_online"
+	end
+	local candidates = {}
+	local incompatibleAtSource = false
+	for id, candidate in pairs(registry.nodes or {}) do
+		if id ~= sourceId and rebindNodeZone(registry, candidate, networkId)
+			and candidate.offline ~= true
+			and GlobalStorageSiK.Zones.isCleanAutomaticNode(candidate)
+			and candidate.discoveredAtMs and source.lastSeenMs
+			and candidate.discoveredAtMs > source.lastSeenMs
+			and isResolvableStorageNode(candidate) then
+			if GlobalStorageSiK.Zones.samePhysicalSignature(source.physicalSignature, candidate.physicalSignature) then
+				candidates[#candidates + 1] = candidate
+			elseif candidate.x == source.x and candidate.y == source.y and candidate.z == source.z
+				and candidate.containerIndex == source.containerIndex then
+				-- Misma celda no demuestra continuidad de identidad. El contrato
+				-- rechaza expresamente esta sustitución: el jugador podrá retirar
+				-- el registro viejo y configurar el nuevo, pero no migrarlo.
+				incompatibleAtSource = true
+			end
+		end
+	end
+	if #candidates == 0 and incompatibleAtSource then
+		return source, candidates, "signature_mismatch"
+	end
+	return source, candidates, nil
+end
+
+local function rebindProposalMessageKey(reason)
+	if reason == "signature_mismatch" then return "IGUI_GS_NodeRebindConflict" end
+	if reason == "ambiguous" then return "IGUI_GS_NodeRebindAmbiguous" end
+	if reason == "source_still_online" then return "IGUI_GS_NodeRebindSourceOnline" end
+	return "IGUI_GS_NodeRebindRejected"
+end
+
+local function describeRebindCandidate(candidate)
+	return {
+		nodeId = candidate.id, name = candidate.displayName or candidate.name or "?",
+		zoneId = candidate.zoneId, x = candidate.x, y = candidate.y, z = candidate.z,
+	}
+end
+
+local function createRebindProposal(player, networkId, sourceId, requestedTargetId)
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local source, candidates, reason = strictRebindCandidates(registry, networkId, sourceId)
+	if not source then return nil, reason end
+	if #candidates == 0 then return nil, reason or "no_candidate" end
+	local target = nil
+	if requestedTargetId and requestedTargetId ~= "" then
+		for i = 1, #candidates do
+			if candidates[i].id == requestedTargetId then target = candidates[i] break end
+		end
+		if not target then return nil, "target_invalid" end
+	elseif #candidates == 1 then
+		target = candidates[1]
+	else
+		local result = { candidates = {} }
+		for i = 1, #candidates do result.candidates[i] = describeRebindCandidate(candidates[i]) end
+		return result, "ambiguous"
+	end
+	rebindProposalCounter = rebindProposalCounter + 1
+	local username = player:getUsername()
+	local token = "rebind-" .. tostring(rebindProposalCounter) .. "-" .. tostring(username)
+	local now = getTimestampMs and getTimestampMs() or 0
+	rebindProposals[token] = {
+		username = username, networkId = networkId, sourceId = sourceId,
+		targetId = target.id, revision = rebindRevision(source, target),
+		expiresMs = now + REBIND_PROPOSAL_MS,
+	}
+	return { token = token, targetId = target.id, targetName = target.displayName or target.name or "?",
+		targetZoneId = target.zoneId, targetX = target.x, targetY = target.y, targetZ = target.z,
+	}, nil
+end
+
+local function consumeRebindProposal(player, networkId, sourceId, token)
+	local proposal = token and rebindProposals[token] or nil
+	if token then rebindProposals[token] = nil end
+	local now = getTimestampMs and getTimestampMs() or 0
+	if not proposal or proposal.username ~= player:getUsername() or proposal.networkId ~= networkId
+		or proposal.sourceId ~= sourceId or now > (proposal.expiresMs or 0) then
+		return nil, "expired"
+	end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local source, candidates, reason = strictRebindCandidates(registry, networkId, sourceId)
+	if not source then return nil, reason end
+	local target = nil
+	for i = 1, #(candidates or {}) do
+		if candidates[i].id == proposal.targetId then target = candidates[i] break end
+	end
+	if not target or target.id ~= proposal.targetId
+		or proposal.revision ~= rebindRevision(source, target) then
+		return nil, reason or "changed"
+	end
+	return target, nil
+end
+
 --- Inicia/reengancha un reescaneo incremental. El estado inicial se sirve
 --- desde snapshots ya persistidos; el job enviara el resultado fresco solo a
 --- quienes observen esta red cuando termine.
@@ -1896,21 +2045,11 @@ local function startIncrementalScan(player, networkId, searchQuery, zoneId)
 		local key = reason == "zone_not_found" and "IGUI_GS_ZoneNotFoundMsg"
 			or (reason == "redistribute_active" and "IGUI_GS_RedistributeConfigLocked")
 			or "IGUI_GS_ScanFailed"
-		gsSendServerCommand(player, "actionResult", {
-			ok = false,
-			message = GlobalStorageSiK.I18n.remote(key),
-			jobType = "zoneScan",
-			jobState = "finished",
-		})
+		gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", key, reason))
 		return false, reason
 	end
-	gsSendServerCommand(player, "actionResult", {
-		ok = true,
-		message = GlobalStorageSiK.I18n.remote(reason == "active"
-			and "IGUI_GS_ScanAlreadyRunning" or "IGUI_GS_ScanStarted"),
-		jobType = "zoneScan",
-		jobState = "running",
-	})
+	gsSendServerCommand(player, "actionResult", scanResult(networkId, "RUNNING",
+		reason == "active" and "IGUI_GS_ScanAlreadyRunning" or "IGUI_GS_ScanStarted", reason))
 	return true, reason
 end
 
@@ -1920,10 +2059,8 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 	if summary._terminalState == "FAILED" then
 		forEachOnlinePlayer(function(player)
 			if isTerminalWatcher(player, networkId) then
-				gsSendServerCommand(player, "actionResult", {
-					ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanPartialFailed"),
-					jobType = "zoneScan", jobState = "FAILED",
-				})
+				summary.networkId = networkId
+				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanPartialFailed", "zone_error", summary))
 				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
 			end
 		end)
@@ -1951,6 +2088,14 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		GlobalStorageSiK.Log.warn("ZoneScanJob", "discard unstable network="
 			.. tostring(networkId) .. " startRevision=" .. tostring(startRevision)
 			.. " currentRevision=" .. tostring(currentRevision))
+		GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, "FAILED", "snapshot_stale")
+		summary.networkId = networkId
+		forEachOnlinePlayer(function(player)
+			if isTerminalWatcher(player, networkId) then
+				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanFailed", "snapshot_stale", summary))
+				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
+			end
+		end)
 		return
 	end
 	if summary._freshSnapshotScope == "network" then
@@ -1973,15 +2118,13 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 				local query = explicitlyRequested and requestedWatchers[username] or ""
 				pushTerminalState(player, networkId, summary, query)
 				if summary._background ~= true then
-					gsSendServerCommand(player, "actionResult", {
-						ok = true,
-						message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanCompleteMetrics",
-							summary.durationMs or 0, summary.nodesScanned or 0,
-							summary.itemInstances or 0, summary.distinctTypes or 0,
-							summary.snapshotRows or 0),
-						jobType = "zoneScan",
-					jobState = "COMPLETED",
-					})
+					summary.networkId = networkId
+					local payload = scanResult(networkId, "COMPLETED", "IGUI_GS_ScanCompleteMetrics", "complete", summary)
+					payload.message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanCompleteMetrics",
+						summary.durationMs or 0, summary.nodesScanned or 0,
+						summary.itemInstances or 0, summary.distinctTypes or 0,
+						summary.snapshotRows or 0)
+					gsSendServerCommand(player, "actionResult", payload)
 				end
 			end
 		end
@@ -1991,12 +2134,8 @@ end
 function GlobalStorageSiK.Server.onNetworkScanFailed(networkId, requestedWatchers, errorText)
 	forEachOnlinePlayer(function(player)
 		if isTerminalWatcher(player, networkId) then
-			gsSendServerCommand(player, "actionResult", {
-				ok = false,
-				message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanFailed"),
-				jobType = "zoneScan",
-				jobState = timedOut and "TIMED_OUT" or "CANCELLED",
-			})
+			gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanFailed", "global_error"))
+			pushTerminalState(player, networkId, nil, requestedWatchers and requestedWatchers[player:getUsername()] or "")
 		end
 	end)
 	GlobalStorageSiK.Log.error("Server", "zoneScan callback network=" .. tostring(networkId)
@@ -2010,12 +2149,9 @@ function GlobalStorageSiK.Server.onNetworkScanCancelled(networkId, requestedWatc
 	local timedOut = reason == "timed_out"
 	forEachOnlinePlayer(function(player)
 		if isTerminalWatcher(player, networkId) then
-			gsSendServerCommand(player, "actionResult", {
-				ok = timedOut == false,
-				message = GlobalStorageSiK.I18n.remote(timedOut and "IGUI_GS_ScanTimedOut" or "IGUI_GS_ScanCancelled"),
-				jobType = "zoneScan",
-				jobState = "finished",
-			})
+			gsSendServerCommand(player, "actionResult", scanResult(networkId,
+				timedOut and "TIMED_OUT" or "CANCELLED",
+				timedOut and "IGUI_GS_ScanTimedOut" or "IGUI_GS_ScanCancelled", reason))
 			pushTerminalState(player, networkId, nil, requestedWatchers and requestedWatchers[player:getUsername()] or "")
 		end
 	end)
@@ -3013,10 +3149,8 @@ local function onClientCommand(module, command, player, args)
 			GlobalStorageSiK.Log.info("ZoneScanJob", "cancel requested network=" .. tostring(networkId)
 				.. " by=" .. tostring(player:getUsername()))
 		else
-			gsSendServerCommand(player, "actionResult", {
-				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ScanNotRunning"),
-				jobType = "zoneScan", jobState = "finished",
-			})
+			gsSendServerCommand(player, "actionResult", scanResult(
+				networkId, "IDLE", "IGUI_GS_ScanNotRunning", "not_running"))
 		end
 
 	elseif command == "getNodeContents" then
@@ -3795,16 +3929,44 @@ local function onClientCommand(module, command, player, args)
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
 
+	elseif command == "requestRebindProposal" then
+		return (function()
+		if not requireAdminAccess(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local sourceId = tostring(args.nodeId or "")
+		local requestedTargetId = args.targetNodeId and tostring(args.targetNodeId) or nil
+		local proposal, reason = createRebindProposal(player, networkId, sourceId, requestedTargetId)
+		if not proposal then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote(rebindProposalMessageKey(reason)),
+				rebindProposal = true, reason = reason })
+			return
+		end
+		if proposal.candidates then
+			gsSendServerCommand(player, "actionResult", { ok = true,
+				rebindCandidates = true, sourceId = sourceId, candidates = proposal.candidates,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindAmbiguous") })
+			return
+		end
+		proposal.ok = true
+		proposal.rebindProposal = true
+		proposal.sourceId = sourceId
+		proposal.message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindProposal", proposal.targetName)
+		gsSendServerCommand(player, "actionResult", proposal)
+		end)()
+
 	elseif command == "rebindNode" then
 		return (function()
 		if not requireAdminAccess(player, networkId) then return end
-		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
-			blockIfNetworkJobRunning(player, networkId)
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local sourceId = tostring(args.nodeId or "")
+		local target, reason = consumeRebindProposal(player, networkId, sourceId, args.rebindToken)
+		if not target then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected"), reason = reason })
 			return
 		end
-		local sourceId = tostring(args.nodeId or "")
-		local targetId = tostring(args.targetNodeId or "")
-		GlobalStorageSiK.ZoneScanJob.cancel(networkId, "rebind_node")
+		local targetId = target.id
 		if not GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId) then
 			gsSendServerCommand(player, "actionResult", { ok = false,
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected") })
@@ -4842,6 +5004,14 @@ local function onClientCommand(module, command, player, args)
 
 	end
 
+end
+
+
+-- Solo para la regresión Lua local: conserva exactamente el dispatcher y el
+-- transporte del servidor, pero permite inyectar un IsoPlayer/paquete falso.
+-- No existe ni se publica en runtime normal de PZ.
+if GlobalStorageSiK.TEST_HARNESS then
+	GlobalStorageSiK.Server.dispatchClientCommandForTest = onClientCommand
 end
 
 

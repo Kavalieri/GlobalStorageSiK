@@ -7,6 +7,7 @@
 
 require "GS_Config"
 require "GS_Sandbox"
+require "GS_RuleCoverage"
 
 GlobalStorageSiK.Zones = {}
 
@@ -294,9 +295,82 @@ function GlobalStorageSiK.Zones.removeNode(nodeId, networkId)
 	return true
 end
 
---- Asocia la configuración de un nodo desaparecido a un nuevo hallazgo único.
---- El destino debe ser una entrada automática todavía sin personalizar: así no
---- puede absorber por accidente reglas o reservas de otro contenedor ya usado.
+--- Compara firmas físicas persistidas sin depender de ids posicionales.
+---@param left table|nil
+---@param right table|nil
+---@return boolean
+function GlobalStorageSiK.Zones.samePhysicalSignature(left, right)
+	if not left or not right then return false end
+	return left.sprite == right.sprite
+		and left.containerType == right.containerType
+		and left.containerIndex == right.containerIndex
+end
+
+--- Indica si un alta es todavía limpia y puede recibir una configuración lógica.
+---@param node table|nil
+---@return boolean
+function GlobalStorageSiK.Zones.isCleanAutomaticNode(node)
+	return node and node.membership == "auto" and not node.rules and not node.filters
+		and not node.categories and not node.notes and not node.priority
+		and (node.displayName == nil or node.displayName == "" or node.displayName == node.name)
+end
+
+local PHYSICAL_NODE_FIELDS = {
+	id = true, x = true, y = true, z = true, name = true, zoneId = true,
+	containerIndex = true, itemSnapshot = true, storedCapacity = true,
+	offline = true, physicalSignature = true, physicalAnomaly = true,
+	discoveredAtMs = true, lastSeenMs = true,
+}
+
+local function copyLogicalConfig(source)
+	local copied = {}
+	for key, value in pairs(source or {}) do
+		if not PHYSICAL_NODE_FIELDS[key] then copied[key] = value end
+	end
+	return copied
+end
+
+local function cloneRule(rule)
+	local condition = {}
+	for key, value in pairs((rule and rule.condition) or {}) do
+		if key == "coverageExclusions" and type(value) == "table" then
+			local copied = {}
+			for i = 1, #value do copied[i] = value[i] end
+			condition[key] = copied
+		else
+			condition[key] = value
+		end
+	end
+	return { op = rule and rule.op, condition = condition }
+end
+
+-- Recalcula la reserva de las reglas trasladadas contra los hermanos REALES
+-- de la zona de destino. Las exclusiones de la zona anterior no se reutilizan:
+-- podrían ocultar rutas libres o colisionar con una regla ya presente allí.
+local function prepareTargetZoneRules(registry, sourceId, target, sourceRules)
+	local scopeRules = {}
+	for id, node in pairs(registry.nodes or {}) do
+		if id ~= sourceId and id ~= target.id and node.zoneId == target.zoneId then
+			for i = 1, #(node.rules or {}) do
+				scopeRules[#scopeRules + 1] = node.rules[i]
+			end
+		end
+	end
+	local prepared = {}
+	for i = 1, #(sourceRules or {}) do
+		local rule = cloneRule(sourceRules[i])
+		if not GlobalStorageSiK.RuleCoverage.prepareNewRule(rule, scopeRules) then
+			return nil
+		end
+		prepared[#prepared + 1] = rule
+		scopeRules[#scopeRules + 1] = rule
+	end
+	return prepared
+end
+
+--- Asocia configuración lógica ya validada por servidor a un destino físico
+--- concreto. El destino conserva siempre zona, identidad, coordenadas, snapshot
+--- y capacidad: moverlo de zona es una operación de producto distinta.
 ---@param sourceId string
 ---@param targetId string
 ---@param networkId string
@@ -310,24 +384,21 @@ function GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId)
 	local targetZone = target and registry.zones and registry.zones[target.zoneId]
 	if not source or not target or not sourceZone or not targetZone
 		or sourceZone.networkId ~= networkId or targetZone.networkId ~= networkId then return false end
-	local candidateCount = 0
-	for id, candidate in pairs(registry.nodes or {}) do
-		local candidateZone = registry.zones and registry.zones[candidate.zoneId]
-		if id ~= sourceId and candidateZone and candidateZone.networkId == networkId
-			and candidate.membership == "auto" and not candidate.rules and not candidate.filters
-			and not candidate.categories and not candidate.notes and not candidate.priority
-			and candidate.displayName == candidate.name then
-			candidateCount = candidateCount + 1
-			if id ~= targetId then return false end
-		end
+	if source.offline ~= true or target.offline == true
+		or not GlobalStorageSiK.Zones.isCleanAutomaticNode(target)
+		or not GlobalStorageSiK.Zones.samePhysicalSignature(source.physicalSignature, target.physicalSignature) then
+		return false
 	end
-	if candidateCount ~= 1 then return false end
-	local preserved = {
-		zoneId = source.zoneId, membership = source.membership, enabled = source.enabled,
-		displayName = source.displayName, priority = source.priority, notes = source.notes,
-		categories = source.categories, filters = source.filters, rules = source.rules,
-	}
+	local preserved = copyLogicalConfig(source)
+	-- La zona del alta física es soberana. Si cambia, las reservas se deben
+	-- recalcular ANTES de mutar nada; una colisión deja ambos registros intactos.
+	local preparedRules = prepareTargetZoneRules(registry, sourceId, target, source.rules)
+	if not preparedRules then return false end
+	if source.rules ~= nil then preserved.rules = preparedRules end
 	for key, value in pairs(preserved) do target[key] = value end
+	for key, value in pairs(preserved) do
+		if target[key] ~= value then return false end
+	end
 	registry.nodes[sourceId] = nil
 	return true
 end

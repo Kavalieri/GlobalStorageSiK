@@ -201,6 +201,14 @@ function GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
 		name = GlobalStorageSiK.Utils.detectContainerTypeName(obj, containerIndex)
 	end
 
+	local container = GlobalStorageSiK.Utils.getObjectContainer(obj, containerIndex)
+	local sprite = obj:getSprite() and obj:getSprite():getName() or "unknown"
+	local containerType = ""
+	if container and container.getType then
+		local ok, value = pcall(function() return container:getType() end)
+		if ok and value then containerType = tostring(value) end
+	end
+
 	return {
 		id = id,
 		x = square:getX(),
@@ -208,5 +216,13 @@ function GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
 		z = square:getZ(),
 		name = name,
 		containerIndex = containerIndex,
+		-- Firma independiente del id posicional. Solo sirve para proponer una
+		-- revinculación segura cuando un objeto se mueve y cambia de id; nunca se
+		-- reconstruye parseando el identificador persistido.
+		physicalSignature = {
+			sprite = sprite,
+			containerType = containerType,
+			containerIndex = containerIndex,
+		},
 	}
 end

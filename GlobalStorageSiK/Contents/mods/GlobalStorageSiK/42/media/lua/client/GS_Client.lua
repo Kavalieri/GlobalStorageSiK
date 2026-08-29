@@ -170,12 +170,27 @@ local function onServerCommand(module, command, args)
 		if args and args.jobType == "zoneScan" then
 			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 			if ui and ui.terminalState then
-				ui.terminalState.scanActive = args.jobState == "running"
+				local scanState = args.jobState or "IDLE"
+				ui.terminalState.scanActive = scanState == "RUNNING"
 				ui.terminalState.scan = ui.terminalState.scan or {}
-				ui.terminalState.scan.running = args.jobState == "running"
+				ui.terminalState.scan.running = scanState == "RUNNING"
+				ui.terminalState.scanStatus = args.scanStatus or ui.terminalState.scanStatus or {}
+				ui.terminalState.scanStatus.state = scanState
+				ui.terminalState.scanStatus.reason = args.reason or ui.terminalState.scanStatus.reason
+				ui.terminalState.scanStatus.reasonCode = args.reasonCode or ui.terminalState.scanStatus.reasonCode
+				ui.terminalState.scanStatus.failedZones = args.failedZones or ui.terminalState.scanStatus.failedZones or 0
+				ui.terminalState.scanStatus.snapshotCertified = args.snapshotCertified == true
 				if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
 					GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
 				end
+			end
+		end
+		if args and args.ok and GlobalStorageSiK.TerminalNodeEditor
+			and GlobalStorageSiK.TerminalNodeEditor.instance then
+			if args.rebindCandidates then
+				GlobalStorageSiK.TerminalNodeEditor.instance:showRebindCandidates(args)
+			elseif args.rebindProposal then
+				GlobalStorageSiK.TerminalNodeEditor.instance:confirmRebindProposal(args)
 			end
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then

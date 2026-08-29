@@ -1457,10 +1457,18 @@ function GS_TerminalUI:onRemoveNode(nodeId)
 	})
 end
 
-function GS_TerminalUI:onRebindNode(nodeId, targetNodeId)
+function GS_TerminalUI:onRequestRebindProposal(nodeId, targetNodeId)
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("requestRebindProposal", {
+		nodeId = nodeId, targetNodeId = targetNodeId,
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
+function GS_TerminalUI:onRebindNode(nodeId, rebindToken)
 	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("rebindNode", {
-		nodeId = nodeId, targetNodeId = targetNodeId,
+		nodeId = nodeId, rebindToken = rebindToken,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end

@@ -143,6 +143,8 @@ local function recordTerminalState(networkId, job, state, reason)
 	local zone = currentZone(job)
 	terminalStates[networkId] = {
 		state = state, reason = reason, phase = job.phase or "finalizing",
+		reasonCode = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.scanReasonCode
+			and GlobalStorageSiK.I18n.scanReasonCode(reason) or "UNKN",
 		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
 		zonesDone = math.max(0, (job.zoneIndex or 1) - 1), zonesTotal = #(job.zones or {}),
 		startedMs = job.startedMs or 0, lastProgressMs = job.lastProgressMs or 0,
@@ -356,6 +358,23 @@ function GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
 		failedZones = job.totals and job.totals.failedZones or 0,
 	}
 
+end
+
+--- Reemplaza un cierre ya registrado cuando la certificación final de snapshot
+--- detecta una condición posterior al barrido. No reabre ni muta el job.
+---@param networkId string|nil
+---@param state string
+---@param reason string|nil
+function GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, state, reason)
+	if not networkId or jobs[networkId] then return false end
+	local status = terminalStates[networkId] or { state = "IDLE" }
+	status.state = state
+	status.reason = reason
+	status.reasonCode = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.scanReasonCode
+		and GlobalStorageSiK.I18n.scanReasonCode(reason) or "UNKN"
+	status.finishedMs = nowMs()
+	terminalStates[networkId] = status
+	return true
 end
 
 ---@param networkId string|nil

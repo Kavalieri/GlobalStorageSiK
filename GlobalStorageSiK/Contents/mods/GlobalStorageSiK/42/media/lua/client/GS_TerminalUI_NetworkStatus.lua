@@ -403,16 +403,40 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 
 	local scan = state.scan or {}
 	local scanStatus = state.scanStatus or {}
-	local scanRunning = state.scanActive == true or scan.running == true
+	local scanState = scanStatus.state or (state.scanActive == true and "RUNNING" or "IDLE")
+	local scanRunning = scanState == "RUNNING"
 	local progressText = T("IGUI_GS_ScanRunning")
 	if scanRunning and (scanStatus.zonesTotal or 0) > 0 then
 		progressText = T("IGUI_GS_ScanProgress", scanStatus.zonesDone or 0, scanStatus.zonesTotal or 0,
 			scanStatus.zoneName or "?")
 	end
-	setText(ui.stats.scanNew, scanRunning and progressText
-		or T("IGUI_GS_ScanNew", scan.added or 0),
+	local stateLabel = T("IGUI_GS_ScanState_" .. tostring(scanState))
+	local terminalText = scanRunning and progressText or T("IGUI_GS_ScanState", stateLabel)
+	local reason = scanStatus.reason
+	local reasonCode = scanStatus.reasonCode or (GlobalStorageSiK.I18n
+		and GlobalStorageSiK.I18n.scanReasonCode and GlobalStorageSiK.I18n.scanReasonCode(reason)) or "UNKN"
+	if scanState == "FAILED" or scanState == "TIMED_OUT" then
+		terminalText = "ERR · " .. reasonCode .. " · " .. terminalText
+	end
+	if not scanRunning and reason and reason ~= "" and reason ~= "complete" then
+		terminalText = terminalText .. " · " .. T("IGUI_GS_ScanReason_" .. tostring(reason))
+	end
+	if not scanRunning and (scanStatus.failedZones or 0) > 0 then
+		terminalText = terminalText .. " · " .. T("IGUI_GS_ScanFailedZones", scanStatus.failedZones)
+	end
+	setText(ui.stats.scanNew, terminalText,
 		scanRunning and 0.95 or 0.82, scanRunning and 0.75 or 0.86,
 		scanRunning and 0.3 or 0.92, ui.contentW)
+	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.stats.scanNew) and ui.stats.scanNew.setTooltip then
+		if scanState == "FAILED" or scanState == "TIMED_OUT" then
+			local reasonText = T("IGUI_GS_ScanReason_" .. tostring(reason))
+			local codeName = T("IGUI_GS_ScanCode_" .. tostring(reasonCode))
+			ui.stats.scanNew:setTooltip(codeName .. " (" .. reasonCode .. ")\n"
+				.. reasonText .. "\n" .. T("IGUI_GS_ScanState_" .. scanState))
+		else
+			ui.stats.scanNew:setTooltip(nil)
+		end
+	end
 	setText(ui.stats.scanUpdated, T("IGUI_GS_ScanUpdated", scan.updated or 0), 0.82, 0.86, 0.92, ui.contentW)
 	local offlineText = T("IGUI_GS_ScanOffline", scan.offline or 0)
 	if scan.limitHit then offlineText = offlineText .. T("IGUI_GS_ScanLimitHit") end
