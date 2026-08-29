@@ -837,6 +837,10 @@
 	"IGUI_GS_TerminalUnverified": "Sin verificar (chunk descargado)",
 	"IGUI_GS_TerminalSuspended": "En inventario / suspendido",
 	"IGUI_GS_NetBlockNetworks": "Redes GS",
+	"IGUI_GS_NetSelected": "Red seleccionada",
+	"IGUI_GS_NetResourceSummary": "{1} contenedores · {2} tipos",
+	"IGUI_GS_NetCapacityAvailable": "Capacidad de red: disponible",
+	"IGUI_GS_NetCapacityLine": "Capacidad · {1} / {2} kg",
 	"IGUI_GS_NetUseSelected": "Usar red",
 	"IGUI_GS_NetCreateNew": "Nueva red",
 	"IGUI_GS_NetLinkTerminal": "Vincular terminal aquí",
@@ -1417,5 +1421,12 @@
 	"IGUI_ItemCat_GSSiK_tools_maintenance_sewing": "Herramientas > Mantenimiento > Costura",
 	"IGUI_ItemCat_GSSiK_vehicles_accessory": "Vehículos > Accesorios",
 	"IGUI_ItemCat_GSSiK_vehicles_consumable": "Vehículos > Consumibles",
-	"IGUI_ItemCat_GSSiK_vehicles_part": "Vehículos > Piezas"
+	"IGUI_ItemCat_GSSiK_vehicles_part": "Vehículos > Piezas",
+	"IGUI_ItemCat_GSSiK_vehicles_consumable_fuel": "Vehículos > Consumibles > Combustible",
+	"IGUI_ItemCat_GSSiK_food_drink_non_perishable_water": "Comida y bebida > No perecedero > Agua",
+	"IGUI_ItemCat_GSSiK_containers_liquid_empty": "Contenedores > Líquidos > Vacío",
+	"IGUI_ItemCat_GSSiK_containers_liquid_mixture": "Contenedores > Líquidos > Mezcla",
+	"IGUI_ItemCat_GSSiK_containers_liquid_other_fluid": "Contenedores > Líquidos > Otro líquido",
+	"IGUI_GS_WithdrawExactSelectionRequired": "Despliega esta fila y elige el objeto exacto que quieres retirar.",
+	"IGUI_GS_ItemPage": "Unidades {1}-{2} de {3}"
 }

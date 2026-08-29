@@ -34,6 +34,8 @@ require "GS_I18n"
 require "GS_Libs"
 require "GS_NativeClassifierOwnItems"
 require "GS_NativeClassifierUtils"
+require "GS_CategoryResolution"
+require "GS_NativeProduct"
 
 -- dev26 (pedido explicito de sistemas: "generalizar el mecanismo de DEV25
 -- para poder calcular tools sin codigo especifico duplicado... la
@@ -345,6 +347,27 @@ local function evaluateCase(case, result)
 	end
 
 	return #reasons == 0, reasons, kind
+end
+
+--- Ejecuta una expectativa de corpus sobre la superficie correcta. El
+--- catálogo estático usa ScriptItem; un estado dinámico declarado crea una
+--- InventoryItem real y pasa por CategoryResolution, exactamente como el
+--- inventario de red. Nunca se infiere "lleno" desde el ScriptItem.
+---@param case table
+---@return table result
+local function classificationForCase(case)
+	if case.fixtureMode ~= "inventory_instance" then
+		return GlobalStorageSiK.NativeClassifier.classify(case.fullType)
+	end
+	if not instanceItem then return nil end
+	local ok, item = pcall(instanceItem, case.fullType)
+	if not ok or not item then return nil end
+	local resolved = GlobalStorageSiK.CategoryResolution.resolve(case.fullType, nil, item)
+	local path = resolved and GlobalStorageSiK.NativeProduct.decodePath(resolved.nativePath) or nil
+	return {
+		primaryPath = path,
+		evidence = { primary = { source = "instance_fluid_state", confidence = 100 } },
+	}
 end
 
 -- dev25 (pedido explicito de sistemas, §3: "auditoria bidireccional del
@@ -772,7 +795,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 			blockStats.applicable = blockStats.applicable + 1
 			if case.criticalAnchor then blockStats.criticalAnchorsExercised = blockStats.criticalAnchorsExercised + 1 end
 
-			local result = GlobalStorageSiK.NativeClassifier.classify(case.fullType)
+			local result = classificationForCase(case)
 			local path = (result and result.primaryPath) or {}
 			local expectedL1 = case.expectAbstain and "other" or case.expectedL1
 			local expectedL2 = case.expectAbstain and "unclassified_modded" or case.expectedL2

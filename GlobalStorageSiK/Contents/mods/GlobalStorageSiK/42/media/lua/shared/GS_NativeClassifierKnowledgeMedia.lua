@@ -139,6 +139,16 @@ local function classifyKnowledgeMedia(fullType, si)
 	end
 
 	local isConfirmedLiterature = U.itemTypeLower(si) == "base:literature"
+	local tokens = U.tokenize(U.typeName(si))
+	-- Las bolsas de semillas B42 son literatura porque su etiqueta enseña la
+	-- temporada de cultivo, pero su identidad de producto es farming. Tanto
+	-- Gardening como RecipeResource aparecen en variantes llenas/vacías; la
+	-- combinación estructural `base:literature` + bag/seed debe llegar al
+	-- bloque Survival antes que la regla genérica de recetas.
+	if isConfirmedLiterature and U.hasAnyToken(tokens, { seed = true })
+		and U.hasAnyToken(tokens, { bag = true, packet = true }) then
+		return nil
+	end
 	if isConfirmedLiterature and hasSkillTraining(si) then
 		return { l1 = "knowledge_media", l2 = "skill_book", l3 = nil }, {}, {},
 			U.evidence("script_skill_trained", 100)
@@ -159,7 +169,6 @@ local function classifyKnowledgeMedia(fullType, si)
 		end
 	end
 
-	local tokens = U.tokenize(U.typeName(si))
 	if not isConfirmedLiterature and #tokens == 0 then return nil end
 
 	local l2, weakSource = matchL2(tokens)

@@ -1168,7 +1168,7 @@ function GS_TerminalUI:applyItemsFilter(rows)
 	rows = GlobalStorageSiK.TerminalItems.filterBySubCategory(rows, self:getSubCategoryFilterKey())
 	rows = GlobalStorageSiK.TerminalItems.filterByLeafCategory(rows, self:getLeafCategoryFilterKey())
 	local q = self:getSearchQuery()
-	if q == "" or (#q < 3 and not self._searchForceApply) then
+	if q == "" then
 		return rows
 	end
 	if isClient and isClient() and GlobalStorageSiK.I18n.filterItemRows then

@@ -115,7 +115,9 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return string
-local function countsCacheKey(fullType, mediaTitle)
+local function countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	if mediaIndex ~= nil then return fullType .. "\31mediaIndex:" .. tostring(mediaIndex) end
+	if dynamicStateKey then return fullType .. "\31state:" .. tostring(dynamicStateKey) end
 	return mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType
 end
 
@@ -125,11 +127,11 @@ end
 ---@param networks table[]
 ---@param hasAnyNetwork boolean|nil si el jugador tiene AL MENOS una red accesible (independientemente de si este fullType esta en ella) - distingue "no tienes redes todavia" de "no esta en ninguna de tus redes"
 ---@param mediaTitle string|nil
-function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle)
+function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle, mediaIndex, dynamicStateKey)
 	if not fullType then
 		return
 	end
-	local key = countsCacheKey(fullType, mediaTitle)
+	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	cache[key] = {
 		networks = networks or {},
 		hasAnyNetwork = hasAnyNetwork and true or false,
@@ -150,23 +152,28 @@ local function isTrueSingleplayer()
 	return not (isClient and isClient()) and not (isServer and isServer())
 end
 
-local function requestCounts(fullType, mediaTitle)
-	local key = countsCacheKey(fullType, mediaTitle)
+local function requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	if pending[key] then
 		return
 	end
 	if isTrueSingleplayer() then
 		local player = GlobalStorageSiK.NetClient.getPlayer()
 		if player and GlobalStorageSiK.Index and GlobalStorageSiK.Index.getNetworkCountsForItem then
-			local ok, networks, hasAnyNetwork = pcall(GlobalStorageSiK.Index.getNetworkCountsForItem, player, fullType, mediaTitle)
+			local ok, networks, hasAnyNetwork = pcall(GlobalStorageSiK.Index.getNetworkCountsForItem,
+				player, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 			if ok then
-				GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle)
+				GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks,
+					hasAnyNetwork, mediaTitle, mediaIndex, dynamicStateKey)
 			end
 		end
 		return
 	end
 	pending[key] = true
-	GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", { fullType = fullType, mediaTitle = mediaTitle })
+	GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", {
+		fullType = fullType, mediaTitle = mediaTitle, mediaIndex = mediaIndex,
+		dynamicStateKey = dynamicStateKey,
+	})
 end
 
 --- Devuelve conteos cacheados y dispara refresco en segundo plano si caducó.
@@ -177,12 +184,12 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return table[]|nil, boolean loaded, boolean hasAnyNetwork
-local function getCachedCounts(fullType, mediaTitle)
-	local key = countsCacheKey(fullType, mediaTitle)
+local function getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	local entry = cache[key]
 	local now = getTimestampMs and getTimestampMs() or 0
 	if not entry or (now - entry.ts) >= CACHE_TTL_MS then
-		requestCounts(fullType, mediaTitle)
+		requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	end
 	if not entry then
 		return nil, false, false
@@ -198,8 +205,8 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return table[]|nil, boolean
-function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType, mediaTitle)
-	return getCachedCounts(fullType, mediaTitle)
+function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	return getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
 end
 
 local NET_FONT = UIFont.Small
@@ -605,7 +612,12 @@ local function buildTooltipBlocks(item)
 	-- con ese mismo contenido en vez de sumar todas las del fullType generico.
 	local mediaTitle = GlobalStorageSiK.ItemSnapshot and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
 		and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
-	local networks, loaded, hasAnyNetwork = getCachedCounts(fullType, mediaTitle)
+	local mediaIndex = GlobalStorageSiK.ItemSnapshot and GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem
+		and GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
+	local dynamicStateKey = GlobalStorageSiK.FluidTaxonomy and GlobalStorageSiK.FluidTaxonomy.stateKey
+		and GlobalStorageSiK.FluidTaxonomy.stateKey(item)
+	local networks, loaded, hasAnyNetwork = getCachedCounts(
+		fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	if networks and #networks > 0 then
 		for i = 1, #networks do
 			lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))

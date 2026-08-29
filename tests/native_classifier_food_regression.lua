@@ -75,20 +75,18 @@ assertPath("perishable pasta tag", classify("perishable pasta tag", "Base.PastaB
 	{ ["base:pasta"] = true }), "perishable", "prepared_meal", "script_food_tag")
 assertPath("preserved food tag", classify("preserved food tag", "Base.DriedFish", 1000000, false,
 	{ ["base:dried_food"] = true }), "non_perishable", "preserved", "script_food_tag")
-assertPath("cake batter", classify("cake batter", "Base.CakeBatter", 1000000, false),
-	"perishable", "ingredient", "script_item_type")
+assertPath("cake batter", classify("cake batter", "Base.CakeBatter", 1000000, false, nil, "base:normal"),
+	"perishable", "ingredient", "name_food_ingredient")
 assertPath("canned pineapple", classify("canned pineapple", "Base.CannedPineapple", 1000000, false),
 	"non_perishable", "produce", "script_item_type")
-assertPath("fresh carrot", classify("fresh carrot", "Base.Carrot", 12, false),
+assertPath("fresh carrots", classify("fresh carrots", "Base.Carrots", 12, false),
 	"perishable", "produce", "script_item_type")
-assertPath("beer bottle contents", classify("beer bottle contents", "Base.BeerBottle", 1000000, false),
-	"non_perishable", "beverage", "script_item_type")
-assertPath("milk bottle contents", classify("milk bottle contents", "Base.MilkBottle", 1000000, false),
-	"perishable", "dairy_egg", "script_item_type")
-assertPath("filled meat cooler", classify("filled meat cooler", "Base.Cooler_Meat", 1000000, false),
-	"non_perishable", "meat_protein", "script_item_type")
-assertPath("filled beer cooler", classify("filled beer cooler", "Base.Cooler_Beer", 1000000, false, nil,
-	"base:normal"), "non_perishable", "beverage", "name_food_beverage")
+local beerScript = classifier("Base.BeerBottle", item("Base.BeerBottle", 1000000, false, nil, "base:normal"))
+assert(beerScript == nil, "a static fluid-capable bottle does not prove its current contents")
+local milkScript = classifier("Base.MilkBottle", item("Base.MilkBottle", 1000000, false, nil, "base:normal"))
+assert(milkScript == nil, "milk bottle contents are resolved from the live fluid instance")
+local meatCooler = classifier("Base.Cooler_Meat", item("Base.Cooler_Meat", 1000000, false, nil, "base:container"))
+assert(meatCooler == nil, "Cooler_Meat is structurally a container, not meat")
 
 local empty = classifier("Base.EmptyBottle", item("Base.EmptyBottle", 4, false))
 assert(empty == nil, "empty container must defer to the container classifier")

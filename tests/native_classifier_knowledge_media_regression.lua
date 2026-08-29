@@ -47,4 +47,8 @@ local vanillaRecipe, _, _, recipeEvidence = classifier("Base.MagazineCooking1",
 assert(vanillaRecipe and vanillaRecipe.l2 == "recipe_magazine", "recipe data identifies vanilla recipe magazines")
 assert(recipeEvidence.primary.source == "script_recipe_resource", "recipe structural evidence")
 
+local seedPacket = classifier("Base.WheatBagSeed",
+	scriptItem("Base.WheatBagSeed", "Gardening", false, nil, { "Wheat growing season" }))
+assert(seedPacket == nil, "seed packets must reach farming before generic RecipeResource")
+
 print("native_classifier_knowledge_media_regression: OK")

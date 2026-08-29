@@ -65,8 +65,16 @@ local function mergeLiveContainer(byType, container, nodeId)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
 				dynamicSignature = row.dynamicSignature,
+				dynamicStateKey = row.dynamicStateKey,
+				dynamicPercent = row.dynamicPercent,
+				conditionSignature = row.conditionSignature,
+				condition = row.condition,
+				conditionMax = row.conditionMax,
+				detailKind = row.detailKind,
+				variantKey = row.variantKey,
 				itemIds = row.itemIds or {},
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,
@@ -110,8 +118,16 @@ local function mergeNodeSnapshot(byType, node)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
 				dynamicSignature = row.dynamicSignature,
+				dynamicStateKey = row.dynamicStateKey,
+				dynamicPercent = row.dynamicPercent,
+				conditionSignature = row.conditionSignature,
+				condition = row.condition,
+				conditionMax = row.conditionMax,
+				detailKind = row.detailKind,
+				variantKey = row.variantKey,
 				itemIds = row.itemIds or {},
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,
@@ -131,6 +147,139 @@ local function mergeNodeSnapshot(byType, node)
 			addLocation(existing, node.id, row.count or 0)
 		end
 	end
+end
+
+local variantFamilyCache = {}
+local function variantFamilyKey(fullType)
+	if variantFamilyCache[fullType] then return variantFamilyCache[fullType] end
+	local mod, name = tostring(fullType or ""):match("^([^%.]+)%.(.+)$")
+	local family = fullType
+	if mod and name then
+		local base = name:match("^(.-)%d+$")
+		if base and base ~= "" then
+			local candidate = mod .. "." .. base
+			local script = GlobalStorageSiK.I18n.getScriptItem
+				and GlobalStorageSiK.I18n.getScriptItem(candidate) or nil
+			if script then family = candidate end
+		end
+	end
+	variantFamilyCache[fullType] = family
+	return family
+end
+
+local function parentKeyForRow(row)
+	return tostring(variantFamilyKey(row.fullType) or "") .. "\31sprite:" .. tostring(row.worldSprite or "")
+end
+
+local function detailKindForRow(row)
+	if row.detailKind then return row.detailKind end
+	if row.mediaIndex ~= nil or row.mediaTitle then return "recorded_media" end
+	if row.dynamicSignature then return "fluid" end
+	if row.conditionSignature then return "condition" end
+	if row.literatureTitle or row.learnedRecipeNames or row.numberOfPages then return "literature" end
+	return nil
+end
+
+local function compactParentRows(detailRows)
+	local byParent = {}
+	for i = 1, #detailRows do
+		local detail = detailRows[i]
+		local parentKey = parentKeyForRow(detail)
+		local parent = byParent[parentKey]
+		if not parent then
+			parent = {
+				rowKey = parentKey, fullType = detail.fullType,
+				displayName = detail.displayName, worldSprite = detail.worldSprite,
+				category = detail.category, subCategory = detail.subCategory,
+				gsSubKeys = detail.gsSubKeys or {}, gsSubKeysStr = detail.gsSubKeysStr or "",
+				learnedRecipeNames = detail.learnedRecipeNames,
+				numberOfPages = detail.numberOfPages,
+				count = 0, locations = {}, variantSummary = {},
+				_variantSeen = {}, _pathSeen = {}, _detailKinds = {}, _fullTypeSeen = {},
+			}
+			byParent[parentKey] = parent
+		end
+		parent.count = parent.count + (detail.count or 0)
+		parent._fullTypeSeen[detail.fullType] = true
+		for j = 1, #(detail.locations or {}) do
+			addLocation(parent, detail.locations[j].nodeId, detail.locations[j].count)
+		end
+		if detail.nodeId and #(detail.locations or {}) == 0 then
+			addLocation(parent, detail.nodeId, detail.count or 0)
+		end
+		local detailKind = detailKindForRow(detail)
+		local variantKey = tostring(detail.fullType) .. "\31" .. tostring(detail.variantKey or detail.rowKey or "fungible")
+		local summary = parent._variantSeen[variantKey]
+		if not summary then
+			summary = {
+				key = variantKey, count = 0, detailKind = detailKind,
+				mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+				dynamicSignature = detail.dynamicSignature,
+				dynamicStateKey = detail.dynamicStateKey,
+				dynamicPercent = detail.dynamicPercent,
+				condition = detail.condition, conditionMax = detail.conditionMax,
+				nativePath = detail.nativePath,
+			}
+			parent._variantSeen[variantKey] = summary
+			parent.variantSummary[#parent.variantSummary + 1] = summary
+		end
+		summary.count = summary.count + (detail.count or 0)
+		if detailKind then parent._detailKinds[detailKind] = true end
+		if detail.nativePath then parent._pathSeen[detail.nativePath] = true end
+	end
+
+	local rows = {}
+	for _, parent in pairs(byParent) do
+		local variantCount, pathCount, kindCount, fullTypeCount = 0, 0, 0, 0
+		for _ in pairs(parent._variantSeen) do variantCount = variantCount + 1 end
+		for _ in pairs(parent._pathSeen) do pathCount = pathCount + 1 end
+		for _ in pairs(parent._detailKinds) do kindCount = kindCount + 1 end
+		for _ in pairs(parent._fullTypeSeen) do fullTypeCount = fullTypeCount + 1 end
+		parent.variantCount = variantCount
+		local variantSearchParts = {}
+		for i = 1, #parent.variantSummary do
+			local summary = parent.variantSummary[i]
+			variantSearchParts[#variantSearchParts + 1] = tostring(summary.key or "")
+			if summary.mediaTitle then variantSearchParts[#variantSearchParts + 1] = summary.mediaTitle end
+			if summary.dynamicStateKey then variantSearchParts[#variantSearchParts + 1] = summary.dynamicStateKey end
+		end
+		parent.variantSearchText = table.concat(variantSearchParts, " ")
+		if parent._detailKinds.recorded_media then
+			parent.displayName = GlobalStorageSiK.I18n.typeDisplayName(parent.fullType)
+		end
+		parent.cosmeticVariants = fullTypeCount > 1
+		parent.fullTypes = {}
+		for fullType in pairs(parent._fullTypeSeen) do parent.fullTypes[#parent.fullTypes + 1] = fullType end
+		table.sort(parent.fullTypes)
+		if parent.cosmeticVariants then
+			local familyFullType = variantFamilyKey(parent.fullType)
+			parent.fullType = familyFullType
+			parent.displayName = GlobalStorageSiK.I18n.typeDisplayName(familyFullType)
+		end
+		parent.expandable = parent.count > 1
+		parent.aggregateAllowed = parent.count == 1 or kindCount == 0
+		parent.detailMode = parent.cosmeticVariants and kindCount == 0 and "variants" or "instances"
+		parent.mixedVariants = pathCount > 1
+		if parent.mixedVariants and kindCount == 1 and parent._detailKinds.fluid then
+			parent.nativePath = "native:containers/liquid"
+			parent.nativeStatus = "classified"
+			parent.vanillaKey = "WaterContainer"
+			parent.effective = "native"
+			parent.categoryEffective = "native"
+			parent.routingIdentity = parent.nativePath
+			parent.categorySource = "VANILLA"
+		elseif not parent.mixedVariants and #parent.variantSummary > 0 then
+			parent.nativePath = parent.variantSummary[1].nativePath
+		end
+		parent._variantSeen, parent._pathSeen, parent._detailKinds, parent._fullTypeSeen = nil, nil, nil, nil
+		rows[#rows + 1] = parent
+	end
+	table.sort(rows, function(a, b)
+		local an, bn = tostring(a.displayName or ""), tostring(b.displayName or "")
+		if an == bn then return tostring(a.rowKey) < tostring(b.rowKey) end
+		return an < bn
+	end)
+	return rows
 end
 
 --- Construye índice serializable para el cliente.
@@ -175,23 +324,170 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 		end
 	end
 
-	local rows = GlobalStorageSiK.ItemSnapshot.toRows(byType)
+	local rows = compactParentRows(GlobalStorageSiK.ItemSnapshot.toRows(byType))
 	-- La clasificación se resuelve en el proceso autoritativo al construir el
 	-- snapshot serializable, nunca desde refresh/search/sort del cliente. El
 	-- propio NativeProduct conserva una referencia por fullType/epoch, por lo
 	-- que snapshots posteriores no vuelven a invocar al clasificador.
 	for i = 1, #rows do
-		local resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
-		rows[i].nativePath = resolution.nativePath
-		rows[i].nativeStatus = resolution.nativeStatus
-		rows[i].vanillaKey = resolution.vanillaKey
-		rows[i].effective = resolution.effective
-		rows[i].categoryEffective = resolution.effective
-		rows[i].routingIdentity = resolution.routingIdentity
-		rows[i].categorySource = resolution.categorySource
+		local resolution = nil
+		if not rows[i].mixedVariants or rows[i].nativePath then
+			resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
+			rows[i].nativePath = resolution.nativePath
+			rows[i].nativeStatus = resolution.nativeStatus
+			rows[i].vanillaKey = resolution.vanillaKey
+			rows[i].effective = resolution.effective
+			rows[i].categoryEffective = resolution.effective
+			rows[i].routingIdentity = resolution.routingIdentity
+			rows[i].categorySource = resolution.categorySource
+		else
+			rows[i].nativeStatus = "variants"
+			rows[i].effective = "variants"
+			rows[i].categoryEffective = "variants"
+			rows[i].routingIdentity = "variants:" .. tostring(rows[i].rowKey)
+		end
+		-- El snapshot ordinario nunca transporta todos los IDs físicos.
+		rows[i].itemIds = nil
 		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
 	end
 	return rows
+end
+
+---@param networkId string
+---@param player IsoPlayer|nil
+---@param rowKey string
+---@param page number|nil
+---@param pageSize number|nil
+---@return table
+function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page, pageSize)
+	page = math.max(1, math.floor(tonumber(page) or 1))
+	pageSize = math.max(1, math.min(25, math.floor(tonumber(pageSize) or 15)))
+	local details = {}
+	local hasStateful = false
+	local detailFullTypes = {}
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
+			for _, row in pairs(node.itemSnapshot or {}) do
+				if parentKeyForRow(row) == rowKey then
+					local detailKind = detailKindForRow(row)
+					if detailKind then hasStateful = true end
+					detailFullTypes[row.fullType] = true
+					for i = 1, #(row.itemIds or {}) do
+							details[#details + 1] = {
+							rowKey = rowKey .. "\31item:" .. tostring(row.itemIds[i]),
+							parentRowKey = rowKey, fullType = row.fullType, itemId = row.itemIds[i],
+							itemIds = { row.itemIds[i] }, aggregateAllowed = false,
+							count = 1,
+							displayName = row.mediaTitle or row.displayName,
+							nodeId = node.id, zoneId = node.zoneId,
+							detailKind = detailKind, variantKey = row.variantKey,
+							mediaIndex = row.mediaIndex, mediaTitle = row.mediaTitle,
+							dynamicSignature = row.dynamicSignature,
+							dynamicStateKey = row.dynamicStateKey,
+							dynamicPercent = row.dynamicPercent,
+							condition = row.condition, conditionMax = row.conditionMax,
+							literatureTitle = row.literatureTitle,
+							nativePath = row.nativePath,
+							nativeStatus = row.nativePath and "classified" or row.nativeStatus,
+							effective = row.nativePath and "native" or row.effective,
+							categoryEffective = row.nativePath and "native" or row.categoryEffective,
+						}
+					end
+				end
+			end
+		end
+	end
+	local detailFullTypeCount = 0
+	for _ in pairs(detailFullTypes) do detailFullTypeCount = detailFullTypeCount + 1 end
+	local cosmeticOnly = not hasStateful and detailFullTypeCount > 1
+	local recordedMediaOnly = #details > 0
+	for i = 1, #details do
+		if details[i].detailKind ~= "recorded_media" then recordedMediaOnly = false break end
+	end
+	if cosmeticOnly or recordedMediaOnly then
+		local grouped, compact = {}, {}
+		for i = 1, #details do
+			local detail = details[i]
+			local identity = recordedMediaOnly
+				and ("media:" .. tostring(detail.mediaIndex or ("unknown:" .. tostring(detail.itemId))))
+				or detail.fullType
+			local group = grouped[identity]
+			if not group then
+				group = { rowKey = rowKey .. "\31detail:" .. identity,
+					parentRowKey = rowKey, fullType = detail.fullType,
+					displayName = detail.displayName,
+					detailKind = recordedMediaOnly and "recorded_media" or "cosmetic_variant",
+					mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+					nativePath = detail.nativePath,
+					nativeStatus = detail.nativePath and "classified" or nil,
+					effective = detail.nativePath and "native" or nil,
+					categoryEffective = detail.nativePath and "native" or nil,
+					aggregateAllowed = not recordedMediaOnly,
+					fullTypes = not recordedMediaOnly and { detail.fullType } or nil,
+					count = 0, itemIds = {}, nodeIds = {}, locations = {} }
+				grouped[identity] = group
+				compact[#compact + 1] = group
+			end
+			group.count = group.count + 1
+			group.itemIds[#group.itemIds + 1] = detail.itemId
+			group.nodeIds[#group.nodeIds + 1] = detail.nodeId
+			addLocation(group, detail.nodeId, 1)
+		end
+		details = compact
+		table.sort(details, function(a, b) return tostring(a.displayName) < tostring(b.displayName) end)
+	end
+	if not cosmeticOnly and not recordedMediaOnly then
+		table.sort(details, function(a, b)
+			local av, bv = tostring(a.variantKey or ""), tostring(b.variantKey or "")
+			if av == bv then return tonumber(a.itemId) < tonumber(b.itemId) end
+			return av < bv
+		end)
+	end
+	local total = #details
+	local first = (page - 1) * pageSize + 1
+	local last = math.min(total, first + pageSize - 1)
+	local items = {}
+	for i = first, last do items[#items + 1] = details[i] end
+	return { rowKey = rowKey, page = page, pageSize = pageSize, total = total,
+		hasPrevious = page > 1, hasNext = last < total, items = items }
+end
+
+function GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType)
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local total, stateful = 0, false
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
+			for _, row in pairs(node.itemSnapshot or {}) do
+				if row.fullType == fullType then
+					total = total + (row.count or 0)
+					if detailKindForRow(row) then stateful = true end
+				end
+			end
+		end
+	end
+	return stateful and total > 1
+end
+
+function GlobalStorageSiK.Index.sanitizeFungibleFamily(fullType, values)
+	if type(fullType) ~= "string" or type(values) ~= "table" then return nil end
+	local family = variantFamilyKey(fullType)
+	local out, seen = {}, {}
+	for i = 1, math.min(#values, 16) do
+		local value = type(values[i]) == "string" and string.sub(values[i], 1, 160) or nil
+		if value and not seen[value] and variantFamilyKey(value) == family
+			and GlobalStorageSiK.I18n.getScriptItem(value) then
+			seen[value] = true
+			out[#out + 1] = value
+		end
+	end
+	return #out > 1 and out or nil
 end
 
 --- Refresca el itemSnapshot de UN nodo concreto ya resuelto por la propia
@@ -339,11 +635,11 @@ end
 ---  Sin esto, el tooltip sumaba TODAS las cintas VHS de la red sin importar
 ---  que habilidad enseñaba cada una, dando una cifra enganosa.
 ---@return table[], boolean out { name, count } ordenado por nombre; hasAnyNetwork indica si el jugador tiene AL MENOS una red accesible (para distinguir, en el tooltip, "no tienes redes todavia" de "tienes redes pero este item no esta en ninguna")
-function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaTitle)
+function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	if not player or not fullType or not GlobalStorageSiK.Network then
 		return {}, false
 	end
-	local familyKey = fullType
+	local familyKey = variantFamilyKey(fullType)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local out = {}
@@ -360,11 +656,19 @@ function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaT
 					local snapshot = node.itemSnapshot
 					if snapshot then
 						for _, row in pairs(snapshot) do
-							if mediaTitle then
+							if mediaIndex ~= nil then
+								if row.fullType == fullType and row.mediaIndex == mediaIndex then
+									total = total + (row.count or 0)
+								end
+							elseif dynamicStateKey then
+								if row.fullType == fullType and row.dynamicStateKey == dynamicStateKey then
+									total = total + (row.count or 0)
+								end
+							elseif mediaTitle then
 								if row.fullType == fullType and row.mediaTitle == mediaTitle then
 									total = total + (row.count or 0)
 								end
-							elseif row.fullType == familyKey then
+							elseif variantFamilyKey(row.fullType) == familyKey then
 								total = total + (row.count or 0)
 							end
 						end

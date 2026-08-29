@@ -128,15 +128,37 @@ end
 --- vez de cada uno duplicar su propia version del mismo pcall.
 ---@param item InventoryItem|nil
 ---@return string|nil
-function GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
+function GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
 	if not item or not item.getRecordedMediaIndex then return nil end
 	local okIdx, idx = pcall(function() return item:getRecordedMediaIndex() end)
 	if not okIdx or not idx or idx < 0 then return nil end
+	return math.floor(tonumber(idx) or -1)
+end
+
+function GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
+	local idx = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
+	if not idx then return nil end
 	local okName, name = pcall(function() return item:getDisplayName() end)
 	if not okName or not name or name == "" then return nil end
 	return name
 end
 local recordedMediaTitleFromItem = GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
+
+local function conditionState(item)
+	if not item or not item.getCondition or not item.getConditionMax then return nil, nil, nil end
+	local ok, current, maximum = pcall(function() return item:getCondition(), item:getConditionMax() end)
+	if not ok or type(current) ~= "number" or type(maximum) ~= "number" or maximum <= 0 then
+		return nil, nil, nil
+	end
+	current, maximum = math.floor(current), math.floor(maximum)
+	return "condition=" .. tostring(current) .. "/" .. tostring(maximum), current, maximum
+end
+
+local function looksRecordedMedia(fullType)
+	local lower = string.lower(tostring(fullType or ""))
+	return lower:find("vhs", 1, true) ~= nil or lower:find("cassette", 1, true) ~= nil
+		or lower:find("dvd", 1, true) ~= nil or lower:find("cd", 1, true) ~= nil
+end
 
 local function metadataForItem(item, fullType)
 	local worldSprite = readWorldSprite(item)
@@ -197,14 +219,40 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- como el tipo real (retirada/instanceItem lo necesitan intacto); la
 	-- clave compuesta solo decide como se agrupan las filas, nunca que se
 	-- transfiere.
+	local mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
 	local mediaTitle = recordedMediaTitleFromItem(item)
 	local dynamicPath, dynamicSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
+	local dynamicStateKey = GlobalStorageSiK.FluidTaxonomy.stateKey(item)
+	local dynamicPercent = GlobalStorageSiK.FluidTaxonomy.fillPercent(item)
+	local conditionSignature, condition, conditionMax = conditionState(item)
+	local literatureTitle = literatureTitleFromItem(item)
+	local itemId = nil
+	if item.getID then
+		local okId, value = pcall(function() return item:getID() end)
+		if okId and value ~= nil then itemId = value end
+	end
+	local detailKind = nil
+	local variantKey = "fungible"
+	if mediaIndex ~= nil or looksRecordedMedia(fullType) then
+		detailKind = "recorded_media"
+		variantKey = mediaIndex ~= nil and ("media:" .. tostring(mediaIndex))
+			or ("media:unknown:" .. tostring(itemId or "missing"))
+	elseif dynamicSignature then
+		detailKind = "fluid"
+		variantKey = "fluid:" .. dynamicSignature
+	elseif conditionSignature then
+		detailKind = "condition"
+		variantKey = conditionSignature
+	elseif literatureTitle or learnedRecipeNamesFromItem(item) or numberOfPagesFromItem(item) then
+		detailKind = "literature"
+		variantKey = "literature:" .. tostring(literatureTitle or fullType)
+	end
 	local groupKey = fullType
-	if mediaTitle then groupKey = groupKey .. "\31media:" .. mediaTitle end
-	if dynamicSignature then groupKey = groupKey .. "\31state:" .. dynamicSignature end
+	if variantKey ~= "fungible" then groupKey = groupKey .. "\31variant:" .. variantKey end
 	local row = byType[groupKey]
 	if not row then
 		local metadata = metadataForItem(item, fullType)
+		local instanceDisplayName = GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 		row = {
 			rowKey = groupKey,
 			fullType = fullType,
@@ -213,7 +261,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			-- Tape") cuando existe - es mas especifico y es exactamente lo que
 			-- ya usa vanilla para distinguir cintas, sin inventar redaccion
 			-- propia.
-			displayName = mediaTitle or metadata.displayName,
+			displayName = mediaTitle or (detailKind and instanceDisplayName) or metadata.displayName,
 			worldSprite = metadata.worldSprite,
 			category = metadata.category,
 			subCategory = metadata.subCategory,
@@ -221,9 +269,17 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			gsSubKeysStr = metadata.gsSubKeysStr,
 			learnedRecipeNames = metadata.learnedRecipeNames,
 			numberOfPages = metadata.numberOfPages,
-			literatureTitle = literatureTitleFromItem(item),
+			literatureTitle = literatureTitle,
+			mediaIndex = mediaIndex,
 			mediaTitle = mediaTitle,
 			dynamicSignature = dynamicSignature,
+			dynamicStateKey = dynamicStateKey,
+			dynamicPercent = dynamicPercent,
+			conditionSignature = conditionSignature,
+			condition = condition,
+			conditionMax = conditionMax,
+			detailKind = detailKind,
+			variantKey = variantKey,
 			itemIds = {},
 			count = 0,
 		}
@@ -248,10 +304,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- una sola entrada física. Usarlo aquí inflaba 84 clavos hasta 420 y hacía
 	-- que la retirada eliminase 84 IDs mientras confirmaba 420 unidades.
 	row.count = row.count + 1
-	if item.getID then
-		local okId, itemId = pcall(function() return item:getID() end)
-		if okId and itemId ~= nil then row.itemIds[#row.itemIds + 1] = itemId end
-	end
+	if itemId ~= nil then row.itemIds[#row.itemIds + 1] = itemId end
 	return true
 end
 
@@ -289,8 +342,16 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				learnedRecipeNames = row.learnedRecipeNames,
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
+				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
 				dynamicSignature = row.dynamicSignature,
+				dynamicStateKey = row.dynamicStateKey,
+				dynamicPercent = row.dynamicPercent,
+				conditionSignature = row.conditionSignature,
+				condition = row.condition,
+				conditionMax = row.conditionMax,
+				detailKind = row.detailKind,
+				variantKey = row.variantKey,
 				itemIds = row.itemIds or {},
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,

@@ -1289,7 +1289,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			end, nil, true)
 		ui.nodesRescanCard:addChild(ui.nodesRescanBtn)
 		ui.nodesCancelScanBtn = GlobalStorageSiK.SiK_UI.createButton(
-			10, scanBtnY + FONT_HGT_SMALL + 12, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
+			10, scanBtnY, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
 			T("IGUI_GS_ScanCancel"), ui.nodesRescanCard, function()
 				if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end
 			end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
@@ -1327,8 +1327,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 	local scanRunning = state.scanRunning == true or scan.state == "RUNNING"
 	local cardY = (ui.nodesPriorityInfoEndY or (y + ui.nodesEmbedHeight + infoH)) + 8
 	local scanBtnH = FONT_HGT_SMALL + 8
-	local cardH = scanRunning and (FONT_HGT_SMALL * 3 + scanBtnH * 2 + 32)
-		or (FONT_HGT_SMALL * 2 + scanBtnH + 26)
+	local cardH = FONT_HGT_SMALL * 2 + scanBtnH + 26
 	if ui.nodesRescanCard then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRescanCard, pad)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRescanCard, cardY)
@@ -1341,13 +1340,19 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			or T("IGUI_GS_ScanSummary", scan.new or 0, scan.updated or 0, scan.offline or 0))
 	end
 	if ui.nodesRescanBtn then
-		ui.nodesRescanBtn:setWidth(innerW - pad * 2 - 20)
+		local availableW = innerW - pad * 2 - 20
+		local buttonW = scanRunning and math.floor((availableW - 6) / 2) or availableW
+		ui.nodesRescanBtn:setX(10)
+		ui.nodesRescanBtn:setWidth(buttonW)
 		ui.nodesRescanBtn:setEnable(not scanRunning)
 		ui.nodesRescanBtn._sikUiLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
 		ui.nodesRescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
 	end
 	if ui.nodesCancelScanBtn then
-		ui.nodesCancelScanBtn:setWidth(innerW - pad * 2 - 20)
+		local availableW = innerW - pad * 2 - 20
+		local buttonW = math.floor((availableW - 6) / 2)
+		ui.nodesCancelScanBtn:setX(10 + buttonW + 6)
+		ui.nodesCancelScanBtn:setWidth(buttonW)
 		ui.nodesCancelScanBtn:setVisible(scanRunning)
 		ui.nodesCancelScanBtn:setEnable(scanRunning)
 		ui.nodesCancelScanBtn:setTooltip(T("IGUI_GS_ScanCancelHint"))

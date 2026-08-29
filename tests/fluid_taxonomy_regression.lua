@@ -23,9 +23,9 @@ local function item(empty, category, fluidType)
 end
 
 local path = GlobalStorageSiK.FluidTaxonomy.resolve(item(true, nil, nil))
-if path ~= nil then error("empty container must retain form") end
+assertPath(path, "containers", "liquid", "empty", "empty")
 path = GlobalStorageSiK.FluidTaxonomy.resolve(item(false, FluidCategory.Fuel, "Gasoline"))
-assertPath(path, "vehicles", "consumable", nil, "fuel")
+assertPath(path, "vehicles", "consumable", "fuel", "fuel")
 path = GlobalStorageSiK.FluidTaxonomy.resolve(item(false, FluidCategory.Water, "Water"))
-assertPath(path, "food_drink", "non_perishable", "beverage", "water")
+assertPath(path, "food_drink", "non_perishable", "water", "water")
 print("fluid_taxonomy_regression: OK")

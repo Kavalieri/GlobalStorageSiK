@@ -46,6 +46,7 @@ local renderWrappedLines = GlobalStorageSiK.SiK_UI.renderWrappedLinePool
 function GlobalStorageSiK.AdminDashboardCorpus.build(ui, pad, y, textW, bottomLimitY)
 	local function track(widget)
 		ui._taxonomyTabWidgets[#ui._taxonomyTabWidgets + 1] = widget
+		if widget and widget.setVisible then widget:setVisible(ui._activeStaffTab == "taxonomy") end
 	end
 	local function trackAddChild(host, widget)
 		host:addChild(widget)
@@ -101,6 +102,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	local function addStateLabel(host, widget)
 		host:addChild(widget)
 		ui._taxonomyTabWidgets[#ui._taxonomyTabWidgets + 1] = widget
+		if widget and widget.setVisible then widget:setVisible(ui._activeStaffTab == "taxonomy") end
 	end
 	local afterStateY = renderWrappedLines(ui, ui._corpusStatePool, stateText, pad, ui._corpusStateY, textW, addStateLabel)
 	for i = 1, #ui._corpusStatePool do

@@ -129,6 +129,13 @@ local function classifySurvival(fullType, si)
 	if isSeedTag and U.hasTag(si, isSeedTag) then
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
 	end
+	local displayCategory = U.displayCategoryLower(si)
+	if itemType == "base:literature" and U.hasAnyToken(tokens, { seed = true })
+		and U.hasAnyToken(tokens, { bag = true, packet = true })
+		and (displayCategory == "gardening" or displayCategory == "reciperesource") then
+		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {},
+			U.evidence("script_gardening_seed_packet", 100)
+	end
 	-- dev28.1: los nombres debiles de agricultura no pisan una identidad
 	-- estructural de arma. GardenHoe declara base:weapon y debe llegar al
 	-- bloque Combat, que resuelve su WeaponCategory con confianza 100.

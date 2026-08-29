@@ -27,8 +27,11 @@ require "GS_SiK_UI_Table"
 require "GS_SiK_UI_Core"
 require "GS_ItemNetworkTooltip"
 require "GS_NetworkReadAction"
+require "GS_NetClient"
 
 GlobalStorageSiK.TerminalItems = {}
+
+local detailPagesByRowKey = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -48,6 +51,34 @@ local ITEM_TABLE_COLUMNS = {
 	{ key = "count", titleKey = "IGUI_GS_ColCount", align = "right", measureValues = { "999999" }, pad = 8 },
 }
 local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 4 }
+
+function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
+	if not terminal or not row or not row.rowKey or not row.expandable then return false end
+	local state = terminal.terminalState or {}
+	if not state.networkId then return false end
+	return GlobalStorageSiK.NetClient.sendCommand("getItemDetails", {
+		networkId = state.networkId,
+		rowKey = row.rowKey,
+		page = math.max(1, math.floor(tonumber(page) or 1)),
+		pageSize = 15,
+	})
+end
+
+function GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
+	if not args or not args.rowKey then return end
+	detailPagesByRowKey[args.rowKey] = args
+	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
+		local panel = terminal.itemsListPanel
+		panel._detailPending = panel._detailPending or {}
+		panel._detailPending[args.rowKey] = nil
+		terminal:refreshItemsTab()
+	end
+end
+
+function GlobalStorageSiK.TerminalItems.getDetails(rowKey)
+	return rowKey and detailPagesByRowKey[rowKey] or nil
+end
 
 ---@param panel ISPanel
 ---@param fullType string|nil
@@ -80,7 +111,7 @@ local function getSelectedRows(panel)
 	for i = 1, #items do
 		local row = items[i]
 		local key = rowIdentity(row)
-		if key and panel._selectedKeys[key] then
+		if key and row.fullType and not row._gsPager and panel._selectedKeys[key] then
 			out[#out + 1] = row
 		end
 	end
@@ -127,7 +158,7 @@ local function selectRangeTo(panel, toIndex)
 	for i = lo, hi do
 		local row = items[i]
 		local key = rowIdentity(row)
-		if key then
+		if key and row.fullType and not row._gsPager then
 			panel._selectedKeys[key] = true
 		end
 	end
@@ -730,6 +761,59 @@ local function sortRows(rows, sortKey, ascending, terminal)
 	return sorted
 end
 
+local function buildDisplayRows(panel, terminal, parents)
+	panel._expandedKeys = panel._expandedKeys or {}
+	panel._detailPageByKey = panel._detailPageByKey or {}
+	panel._detailPending = panel._detailPending or {}
+	local liveParents = {}
+	local out = {}
+	local revision = terminal and terminal.terminalState and terminal.terminalState.inventoryRevision or 0
+	local networkId = terminal and terminal.terminalState and terminal.terminalState.networkId or nil
+	for i = 1, #parents do
+		local parent = parents[i]
+		local key = rowIdentity(parent)
+		liveParents[key] = true
+		parent._gsRowKind = "parent"
+		parent._gsDepth = 0
+		out[#out + 1] = parent
+		if parent.expandable and panel._expandedKeys[key] then
+			local wantedPage = panel._detailPageByKey[key] or 1
+			local detailPage = detailPagesByRowKey[key]
+			local stale = not detailPage or detailPage.page ~= wantedPage
+				or detailPage.networkId ~= networkId
+				or tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
+			if stale and not panel._detailPending[key] then
+				panel._detailPending[key] = true
+				GlobalStorageSiK.TerminalItems.requestDetails(terminal, parent, wantedPage)
+			end
+			if detailPage and not stale then
+				for j = 1, #(detailPage.items or {}) do
+					local child = detailPage.items[j]
+					child._gsRowKind = "child"
+					child._gsDepth = 1
+					child.locations = child.locations or (child.nodeId and { { nodeId = child.nodeId, count = child.count or 1 } } or nil)
+					out[#out + 1] = child
+				end
+				if (detailPage.total or 0) > (detailPage.pageSize or 15) then
+					out[#out + 1] = {
+						rowKey = key .. "\31pager:" .. tostring(detailPage.page),
+						parentRowKey = key, _gsRowKind = "pager", _gsPager = true,
+						page = detailPage.page, pageSize = detailPage.pageSize,
+						total = detailPage.total, hasPrevious = detailPage.hasPrevious,
+						hasNext = detailPage.hasNext,
+					}
+				end
+			end
+		end
+	end
+	local expandedKeys = {}
+	for key in pairs(panel._expandedKeys) do
+		if liveParents[key] then expandedKeys[key] = true end
+	end
+	panel._expandedKeys = expandedKeys
+	return out
+end
+
 --- Taxonomía vanilla resuelta de una fila.
 ---@param row table|nil
 ---@return table
@@ -1066,9 +1150,11 @@ local function openItemContextMenu(listPanel, terminal, data)
 		-- construia exactamente el submenu "Retirar" agrupado que hacia
 		-- falta (usado en otro punto del proyecto), simplemente no se llamaba
 		-- aqui todavia. Cero codigo nuevo, solo la llamada correcta.
-		GlobalStorageSiK.WithdrawMenu.addToContext(cm, player, data, function(rowData, amount, targetKey)
-			withdrawFromRowData(terminal, rowData, amount, targetKey)
-		end, getSelectedRows(listPanel))
+		if data.aggregateAllowed ~= false or (data.itemIds and #data.itemIds > 0) then
+			GlobalStorageSiK.WithdrawMenu.addToContext(cm, player, data, function(rowData, amount, targetKey)
+				withdrawFromRowData(terminal, rowData, amount, targetKey)
+			end, getSelectedRows(listPanel))
+		end
 
 		-- "Localizar objeto" (dev26 ronda 4quinquies, ver Documentacion/
 		-- pending-work/DEFERRED.md): ilumina TODOS los contenedores reales que
@@ -1106,6 +1192,22 @@ local function openItemContextMenu(listPanel, terminal, data)
 	GlobalStorageSiK.ContextMenuUi.scheduleTerminalRestore(menuState)
 end
 
+local function toggleExpanded(listPanel, terminal, data)
+	if not listPanel or not terminal or not data or not data.expandable then return false end
+	local key = rowIdentity(data)
+	if not key then return false end
+	listPanel._expandedKeys = listPanel._expandedKeys or {}
+	listPanel._detailPageByKey = listPanel._detailPageByKey or {}
+	if listPanel._expandedKeys[key] then
+		listPanel._expandedKeys[key] = nil
+	else
+		listPanel._expandedKeys[key] = true
+		listPanel._detailPageByKey[key] = listPanel._detailPageByKey[key] or 1
+	end
+	terminal:refreshItemsTab()
+	return true
+end
+
 --- Crea una fila reutilizable de la lista virtual SiK UI.
 ---@param scroll ISPanel
 ---@param listPanel ISPanel
@@ -1138,12 +1240,25 @@ local function createItemRow(scroll, listPanel, terminal)
 				self:drawRect(0, 0, self.width, self.height, 0.25, 0.28, 0.28, 0.28)
 			end
 		end
-		if data then
+		if data and data._gsPager then
+			local page, pageSize, total = data.page or 1, data.pageSize or 15, data.total or 0
+			local first = (page - 1) * pageSize + 1
+			local last = math.min(total, first + pageSize - 1)
+			local label = T("IGUI_GS_ItemPage", tostring(first), tostring(last), tostring(total))
+			local labelW = getTextManager():MeasureStringX(UIFont.Small, label)
+			local right = self.width - 8
+			self:drawText(label, math.max(8, right - 58 - labelW), math.floor((self.height - FONT_HGT_SMALL) / 2),
+				0.55, 0.6, 0.66, 1, UIFont.Small)
+			self:drawText("<", right - 50, math.floor((self.height - FONT_HGT_SMALL) / 2),
+				data.hasPrevious and 0.75 or 0.35, data.hasPrevious and 0.8 or 0.35, data.hasPrevious and 0.85 or 0.35, 1, UIFont.Small)
+			self:drawText(">", right - 18, math.floor((self.height - FONT_HGT_SMALL) / 2),
+				data.hasNext and 0.75 or 0.35, data.hasNext and 0.8 or 0.35, data.hasNext and 0.85 or 0.35, 1, UIFont.Small)
+		elseif data then
 			local pal = GlobalStorageSiK.SiK_UI.PALETTE
 			local tex = itemTexture(data)
 			local iconY = math.floor((self.height - ICON_SIZE) / 2)
 			if tex then
-				self:drawTextureScaledAspect(tex, 6, iconY, ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
+				self:drawTextureScaledAspect(tex, 20, iconY, ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
 			end
 			-- Mismo tick vanilla (media/ui/Tick_Mark-10.png) que ISInventoryPane
 			-- dibuja sobre un libro/revista ya leido - reconocible al instante,
@@ -1153,14 +1268,29 @@ local function createItemRow(scroll, listPanel, terminal)
 			if isLiteratureReadSafe(player, data) then
 				local tick = getTexture("media/ui/Tick_Mark-10.png")
 				if tick then
-					self:drawTexture(tick, 6, iconY - 1, 1, 1, 1, 1)
+					self:drawTexture(tick, 20, iconY - 1, 1, 1, 1, 1)
 				end
 			end
 			local columns = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
 				self.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
 			local nameCol, catCol, zoneCol, countCol = columns[1], columns[2], columns[3], columns[4]
-			local textX = nameCol.x + 6 + ICON_SIZE + 8
+			local indicator = "."
+			if data._gsRowKind == "child" then
+				indicator = "L"
+			elseif data.expandable then
+				indicator = self.listPanel and self.listPanel._expandedKeys
+					and self.listPanel._expandedKeys[rowIdentity(data)] and "v" or ">"
+			end
+			self:drawText(indicator, nameCol.x + 3, math.floor((self.height - FONT_HGT_SMALL) / 2),
+				0.55, 0.72, 0.9, 1, UIFont.Small)
+			local textX = nameCol.x + 20 + ICON_SIZE + 8
 			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
+			if data._gsRowKind == "child" and data.detailKind == "condition"
+				and data.condition and data.conditionMax then
+				name = name .. "  [" .. tostring(data.condition) .. "/" .. tostring(data.conditionMax) .. "]"
+			elseif data._gsRowKind == "child" and data.detailKind == "fluid" and data.dynamicPercent then
+				name = name .. "  [" .. tostring(data.dynamicPercent) .. "%]"
+			end
 			local projection = GlobalStorageSiK.NativeProduct.getRowProjection(data)
 			local cat = projection.fullLabel ~= "" and projection.fullLabel
 				or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
@@ -1193,7 +1323,9 @@ local function createItemRow(scroll, listPanel, terminal)
 		-- si el texto no cabe en la columna, se trunca con "..." (ver
 		-- drawText de arriba) y el detalle completo se lee en este tooltip.
 		-- Se oculta mientras hay un arrastre activo (no tapar el preview de drop).
-		if data and self:isMouseOver() and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+		if data and not data._gsPager and not (data._gsRowKind == "parent" and (data.count or 0) > 1)
+			and not (data._gsRowKind == "child" and data.detailKind ~= "cosmetic_variant")
+			and self:isMouseOver() and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			local tooltipKey = tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or "")
 			if not self._gsTooltip or self._gsTooltip._gsItemKey ~= tooltipKey then
 				local probe = itemProbe(data)
@@ -1240,6 +1372,11 @@ local function createItemRow(scroll, listPanel, terminal)
 		if not self._gsDragPending or not self.itemData or not self.terminal then
 			return false
 		end
+		if self.itemData._gsPager
+			or (self.itemData.aggregateAllowed == false and not self.itemData.itemIds) then
+			self._gsDragPending = false
+			return false
+		end
 		self._gsDragAccum = (self._gsDragAccum or 0) + math.abs(dx or 0) + math.abs(dy or 0)
 		if self._gsDragAccum >= DRAG_THRESHOLD then
 			self._gsDragPending = false
@@ -1266,8 +1403,23 @@ local function createItemRow(scroll, listPanel, terminal)
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			return false
 		end
+		if self.itemData and self.itemData._gsPager and self.listPanel then
+			local data = self.itemData
+			local nextPage = data.page or 1
+			if x >= self.width - 34 and data.hasNext then nextPage = nextPage + 1
+			elseif x >= self.width - 68 and data.hasPrevious then nextPage = nextPage - 1
+			else return true end
+			self.listPanel._detailPageByKey[data.parentRowKey] = nextPage
+			self.listPanel._detailPending[data.parentRowKey] = nil
+			if self.terminal.refreshItemsTab then self.terminal:refreshItemsTab() end
+			return true
+		end
 		if self._gsDragPending and self.listPanel then
 			self._gsDragPending = false
+			if self.itemData and self.itemData._gsRowKind == "parent"
+				and self.itemData.expandable and x <= 20 then
+				return toggleExpanded(self.listPanel, self.terminal, self.itemData)
+			end
 			handleRowClick(self.listPanel, self)
 			return true
 		end
@@ -1276,6 +1428,10 @@ local function createItemRow(scroll, listPanel, terminal)
 
 	row.onMouseDoubleClick = function(self, x, y)
 		if self.itemData and self.terminal then
+			if self.itemData._gsPager then return true end
+			if self.itemData.aggregateAllowed == false and not self.itemData.itemIds then
+				return toggleExpanded(self.listPanel, self.terminal, self.itemData)
+			end
 			withdrawRowWithActiveTarget(self.terminal, self.itemData, 1)
 			return true
 		end
@@ -1284,6 +1440,7 @@ local function createItemRow(scroll, listPanel, terminal)
 
 	row.onRightMouseUp = function(self, x, y)
 		if self.itemData and self.listPanel and self.terminal then
+			if self.itemData._gsPager then return true end
 			if not isRowSelected(self.listPanel, rowIdentity(self.itemData)) then
 				selectSingleRow(self.listPanel, rowIdentity(self.itemData), self.rowIndex)
 			end
@@ -1482,10 +1639,12 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 	end
 
 	items = items or {}
+	panel._itemsCatalog = items
 	panel.itemsSortKey = panel.itemsSortKey or "displayName"
 	panel.itemsSortAsc = panel.itemsSortAsc ~= false
 	panel._selectedKeys = panel._selectedKeys or {}
 	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc, terminal)
+	items = buildDisplayRows(panel, terminal, items)
 	-- BUG REAL (Shift+Click seleccionaba rango incorrecto/inconsistente,
 	-- reportado 2026-08-16): _lastItems se asignaba ANTES de ordenar, con la
 	-- referencia SIN ORDENAR - pero sortRows() copia a una tabla NUEVA y

@@ -31,6 +31,29 @@ local ACCENT_MAP = {
 	["Ñ"] = "n", ["Ç"] = "c", ["Ý"] = "y",
 }
 
+-- Kahlua/PZ puede corromper literales no ASCII al cargar el fuente antes de
+-- que el normalizador los vea (confirmado por el probe del corpus). Reconstruir
+-- las mismas claves desde codepoints numéricos hace que `bidon` compare contra
+-- `Bidón` con el carácter que realmente entrega java.lang.String.
+local ACCENT_CODEPOINTS = {
+	{ 0x00E1, "a" }, { 0x00E0, "a" }, { 0x00E2, "a" }, { 0x00E4, "a" }, { 0x00E3, "a" },
+	{ 0x00E9, "e" }, { 0x00E8, "e" }, { 0x00EA, "e" }, { 0x00EB, "e" },
+	{ 0x00ED, "i" }, { 0x00EC, "i" }, { 0x00EE, "i" }, { 0x00EF, "i" },
+	{ 0x00F3, "o" }, { 0x00F2, "o" }, { 0x00F4, "o" }, { 0x00F6, "o" }, { 0x00F5, "o" },
+	{ 0x00FA, "u" }, { 0x00F9, "u" }, { 0x00FB, "u" }, { 0x00FC, "u" },
+	{ 0x00F1, "n" }, { 0x00E7, "c" }, { 0x00FD, "y" },
+	{ 0x00C1, "a" }, { 0x00C0, "a" }, { 0x00C2, "a" }, { 0x00C4, "a" }, { 0x00C3, "a" },
+	{ 0x00C9, "e" }, { 0x00C8, "e" }, { 0x00CA, "e" }, { 0x00CB, "e" },
+	{ 0x00CD, "i" }, { 0x00CC, "i" }, { 0x00CE, "i" }, { 0x00CF, "i" },
+	{ 0x00D3, "o" }, { 0x00D2, "o" }, { 0x00D4, "o" }, { 0x00D6, "o" }, { 0x00D5, "o" },
+	{ 0x00DA, "u" }, { 0x00D9, "u" }, { 0x00DB, "u" }, { 0x00DC, "u" },
+	{ 0x00D1, "n" }, { 0x00C7, "c" }, { 0x00DD, "y" },
+}
+for i = 1, #ACCENT_CODEPOINTS do
+	local pair = ACCENT_CODEPOINTS[i]
+	ACCENT_MAP[string.char(pair[1])] = pair[2]
+end
+
 --- Normaliza texto de busqueda para comparacion "por mejor aproximacion":
 --- minusculas ASCII + tildes/dieresis/cedilla latinas plegadas a su base,
 --- CUALQUIER otro byte (chino, cirilico, etc.) intacto. Sustituye a
@@ -430,6 +453,8 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_WithdrawnCount = "Withdrawn: {1}",
 	IGUI_GS_WithdrawnPartial = "Withdrawn: {1} of {2} requested",
 	IGUI_GS_WithdrawErrorReason = "Error: {1}",
+	IGUI_GS_WithdrawExactSelectionRequired = "Expand this row and choose the exact item to withdraw.",
+	IGUI_GS_ItemPage = "Units {1}-{2} of {3}",
 	IGUI_GS_ZoneLimitReached = "Zone limit reached",
 	IGUI_GS_InvalidEntry = "Invalid entry",
 	IGUI_GS_AlreadyMarked = "Already marked",
@@ -628,6 +653,10 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_TerminalUnverified = "Unverified (chunk unloaded)",
 	IGUI_GS_TerminalSuspended = "In inventory / suspended",
 	IGUI_GS_NetBlockNetworks = "GS Networks",
+	IGUI_GS_NetSelected = "Selected network",
+	IGUI_GS_NetResourceSummary = "{1} containers · {2} types",
+	IGUI_GS_NetCapacityAvailable = "Network capacity: available",
+	IGUI_GS_NetCapacityLine = "Capacity · {1} / {2} kg",
 	IGUI_GS_NetUseSelected = "Use network",
 	IGUI_GS_NetCreateNew = "New network",
 	IGUI_GS_NetLinkTerminal = "Link terminal here",
@@ -1314,7 +1343,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	local cacheKey = tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
-		.. "\1" .. tostring(row.nativePath or "")
+		.. "\1" .. tostring(row.nativePath or "") .. "\1" .. tostring(row.variantSearchText or "")
 	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
@@ -1357,6 +1386,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	addPart(row.displayName)
 	addPart(row.category)
 	addPart(row.subCategory)
+	addPart(row.variantSearchText)
 	addPart(fullType)
 	local shortName = fullType:match("^[^.]+%.(.+)$")
 	if shortName and shortName ~= fullType then
@@ -1378,11 +1408,19 @@ function GlobalStorageSiK.I18n.filterItemRows(rows, query)
 	end
 	local q = GlobalStorageSiK.I18n.asciiLower(query)
 	local filtered = {}
+	local samples = {}
 	for i = 1, #rows do
 		local row = rows[i]
-		if string.find(GlobalStorageSiK.I18n.itemSearchHaystack(row), q, 1, true) then
+		local haystack = GlobalStorageSiK.I18n.itemSearchHaystack(row)
+		if #samples < 3 then samples[#samples + 1] = tostring(row.fullType) .. "=" .. haystack end
+		if string.find(haystack, q, 1, true) then
 			filtered[#filtered + 1] = row
 		end
+	end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("SiKUISearch", "filter raw=" .. tostring(query)
+			.. " normalized=" .. tostring(q) .. " rows=" .. tostring(#rows)
+			.. " matches=" .. tostring(#filtered) .. " samples=[" .. table.concat(samples, " | ") .. "]")
 	end
 	return filtered
 end

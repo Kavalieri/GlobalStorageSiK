@@ -187,6 +187,8 @@ local function dispatchCurrent()
 		-- fullType generico, sino una que enseñe justo esto. nil para
 		-- cualquier otro item (comportamiento identico a siempre).
 		mediaTitle = current.rowData.mediaTitle,
+		mediaIndex = current.rowData.mediaIndex,
+		fullTypes = current.rowData.aggregateAllowed and current.rowData.fullTypes or nil,
 		dynamicSignature = current.rowData.dynamicSignature,
 		itemIds = exactItemIds,
 		amount = requested,

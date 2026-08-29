@@ -55,7 +55,7 @@ local TREE = {
 	},
 	food_drink = {
 		perishable = { "meat_protein", "dairy_egg", "fish_seafood", "produce", "prepared_meal", "ingredient", "preserved", "beverage", "other_food" },
-		non_perishable = { "meat_protein", "dairy_egg", "fish_seafood", "produce", "pantry", "ingredient", "spice", "preserved", "prepared_meal", "beverage", "animal_feed", "other_food" },
+		non_perishable = { "meat_protein", "dairy_egg", "fish_seafood", "produce", "pantry", "ingredient", "spice", "preserved", "prepared_meal", "beverage", "water", "animal_feed", "other_food" },
 	},
 	-- Precedencia entre bloques (pedido explicito del usuario, aplicada en
 	-- el ORDEN DE REGISTRO en GS_NativeClassifier.lua, nunca aqui): si un
@@ -104,7 +104,7 @@ local TREE = {
 		equipment = { "backpack", "ammo_strap" },
 	},
 	containers = {
-		portable = {}, liquid = {}, special = {},
+		portable = {}, liquid = { "empty", "mixture", "other_fluid" }, special = {},
 	},
 	knowledge_media = {
 		-- "general_magazine" añadido dev10 (hallazgo de sistemas: "mag"/
@@ -117,7 +117,7 @@ local TREE = {
 		power = {}, communication = {}, lighting = {}, component = {}, entertainment = {},
 	},
 	vehicles = {
-		part = {}, consumable = {}, accessory = {},
+		part = {}, consumable = { "fuel" }, accessory = {},
 	},
 	survival_outdoors = {
 		farming = {}, fishing = {}, trapping = {}, camping = {}, security = {},

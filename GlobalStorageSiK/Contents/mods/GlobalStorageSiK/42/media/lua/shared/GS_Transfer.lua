@@ -177,6 +177,11 @@ local function matchesMediaTitle(item, mediaTitle)
 	return name ~= nil and name == mediaTitle
 end
 
+local function matchesMediaIndex(item, mediaIndex)
+	local index = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
+	return index ~= nil and index == mediaIndex
+end
+
 local function matchesDynamicSignature(item, dynamicSignature)
 	local _, liveSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
 	return liveSignature == dynamicSignature
@@ -228,7 +233,7 @@ local function logWithdrawCapacity(source, dest, item, sourceNodeId, networkId, 
 			.. " result=" .. tostring(result))
 end
 
-local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
+local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes)
 
 	destContainer = destContainer or player:getInventory()
 
@@ -253,6 +258,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 		requestedIds = {}
 		for i = 1, #requestedItemIds do requestedIds[requestedItemIds[i]] = true end
 	end
+	local acceptedTypes = { [fullType] = true }
+	for i = 1, #(familyFullTypes or {}) do acceptedTypes[familyFullTypes[i]] = true end
 
 	-- Nodos realmente tocados en este micro-lote, para refrescar su
 	-- itemSnapshot UNA sola vez cada uno al final (no por item movido).
@@ -285,11 +292,13 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 				local item = items:get(j)
 
 				local itemId = item and item.getID and item:getID() or nil
-				if not item or item.getFullType == nil or item:getFullType() ~= fullType then
+				if not item or item.getFullType == nil or not acceptedTypes[item:getFullType()] then
 
 					j = j + 1
 
-				elseif mediaTitle and not matchesMediaTitle(item, mediaTitle) then
+				elseif mediaIndex ~= nil and not matchesMediaIndex(item, mediaIndex) then
+					j = j + 1
+				elseif mediaIndex == nil and mediaTitle and not matchesMediaTitle(item, mediaTitle) then
 
 					-- Mismo fullType generico (ej. VHS Tape) pero contenido
 					-- distinto (otra habilidad) - no es la fila que se pidio,
@@ -538,7 +547,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes)
 
 	if not player or not fullType or fullType == "" then
 
@@ -571,7 +580,8 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(
-		player, fullType, networkId, target, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
+		player, fullType, networkId, target, destContainer, mediaTitle, dynamicSignature,
+		requestedItemIds, mediaIndex, familyFullTypes)
 
 	if moved > 0 then
 

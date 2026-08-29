@@ -47,7 +47,7 @@ local MEAT_PROTEIN_TOKENS = toSet({
 local DAIRY_EGG_TOKENS = toSet({ "cheese", "milk", "egg", "yogurt", "butter" })
 local FISH_SEAFOOD_TOKENS = toSet({ "fish", "shrimp", "crab", "lobster" })
 local PRODUCE_TOKENS = toSet({
-	"apple", "banana", "carrot", "tomato", "lettuce", "onion", "corn", "pepper", "potato",
+	"apple", "banana", "carrot", "carrots", "tomato", "lettuce", "onion", "corn", "pepper", "potato",
 	"pineapple", "jalapeno", "habanero", "fruit", "vegetable",
 })
 local PANTRY_TOKENS = toSet({ "flour", "sugar", "salt", "rice", "pasta", "cereal" })
@@ -240,6 +240,10 @@ local function classifyFood(fullType, si)
 	-- `_` identifica contenido y gana al envase. Un tipo `base:food` también
 	-- representa contenido real y mantiene prioridad sobre la forma.
 	if not isConfirmedFood and U.hasAnyToken(tokens, CONTAINER_FORM_TOKENS) then
+		-- Cooler_Meat/Cooler_Beer son `base:container` reales en los scripts
+		-- B42. El sufijo forma parte del nombre técnico del objeto, no prueba
+		-- contenido. Un contenedor estructural conserva siempre su forma.
+		if itemType == "base:container" then return nil end
 		local localName = tostring(fullType or ""):match("^[^%.]+%.(.+)$") or tostring(fullType or "")
 		local contentSuffix = localName:match("_(.+)$")
 		local suffixL2 = contentSuffix and matchL2(U.tokenize(contentSuffix)) or nil
@@ -256,7 +260,8 @@ local function classifyFood(fullType, si)
 	-- CakeBatter y masas equivalentes son ingredientes preparados perecederos.
 	-- DaysFresh no es fiable para estas variantes generadas, pero ItemType
 	-- confirma alimento y la familia de ingrediente distingue su función.
-	if isConfirmedFood and l2 == "ingredient" and shelfLife == "non_perishable" then
+	if l2 == "ingredient" and shelfLife == "non_perishable"
+		and U.hasAnyToken(tokens, { batter = true, dough = true }) then
 		shelfLife = "perishable"
 	end
 	-- La leche no enlatada representa contenido fresco aunque la variante de

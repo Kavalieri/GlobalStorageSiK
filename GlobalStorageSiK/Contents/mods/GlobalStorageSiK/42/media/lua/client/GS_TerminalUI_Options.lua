@@ -127,7 +127,7 @@ local function syncTabContent(scroll, ui, terminal, key, state, innerW)
 		GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 		GlobalStorageSiK.TerminalNetworkList.layout(scroll, ui, innerW)
 		GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
-		y = ui.block1EndY or y
+		y = ui.paletteEndY or ui.block1EndY or y
 
 	elseif key == "admin" then
 		GlobalStorageSiK.TerminalNetworkTerminals.sync(ui, state)

@@ -51,9 +51,9 @@ local COL_SEEN_W = math.max(
 local MEMBER_TABLE_COLUMNS = {
 	{ key = "role", titleKey = "IGUI_GS_PermColRole", width = COL_ROLE_W, pad = COL_ROLE_X },
 	{ key = "name", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 80, pad = 4 },
-	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, pad = 0 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, align = "right", pad = 4 },
 }
-local MEMBER_TABLE_OPTIONS = { left = 0, right = 8, gap = 12 }
+local MEMBER_TABLE_OPTIONS = { left = 0, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 12 }
 local ADD_W = 72
 -- v20: fila de miembro simplificada (sin botones "Quitar"/"Roles" inline) -
 -- un clic en la fila abre GS_TerminalUI_MemberEditor.lua, igual patron que
@@ -441,13 +441,13 @@ local function createMemberRow(host, terminal, ui)
 		-- en verde para quien sigue en linea ahora mismo, "Desconectado hace
 		-- X" para el resto. Solo ayuda a detectar a simple vista un caso
 		-- "colgado" que un fallecido normal.
-		local seenX = cols[3].x
+		local seenX = cols[3].finish - cols[3].pad
 		if data.online then
 			local gr, gg, gb = pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
-			self:drawText(truncate(T("IGUI_GS_AdminOnline"), COL_SEEN_W), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
+			self:drawTextRight(truncate(T("IGUI_GS_AdminOnline"), COL_SEEN_W), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
 		elseif data.lastSeenAt then
 			local seenText = T("IGUI_GS_AdminOffline", GlobalStorageSiK.SiK_UI.relativeAge(data.lastSeenAt))
-			self:drawText(truncate(seenText, COL_SEEN_W), seenX, yMid,
+			self:drawTextRight(truncate(seenText, COL_SEEN_W), seenX, yMid,
 				pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		end
 	end

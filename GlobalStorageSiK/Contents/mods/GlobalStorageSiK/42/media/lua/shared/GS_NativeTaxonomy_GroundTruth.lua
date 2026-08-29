@@ -71,7 +71,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- DEV32.3: incrementada a "8" al incorporar ocho anclas vanilla exactas
 -- (materiales y soplete). Dos ejecuciones con la misma versión comparan el
 -- mismo contrato, nunca una lista de casos distinta.
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "10"
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "11"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -2164,10 +2164,11 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- (esos son Combate, no Contenedores - ver Bag_AmmoBox_*/
 	-- Bag_ProtectiveCaseBulkyAmmo_* en el corpus de Combate).
 	{
-		caseId = "containers_liquid_beerbottle", fullType = "Base.BeerBottle", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "beverage",
-		minConfidence = 100, expectedSource = "script_item_type",
-		note = "Recipiente lleno definido por su contenido: cerveza; no exige faceta de recipiente en la clasificacion estatica vigente.",
+		caseId = "containers_liquid_beerbottle", fullType = "Base.BeerBottle", block = "containers", presence = "required",
+		expectedL1 = "containers", expectedL2 = "liquid", expectedL3 = false,
+		minConfidence = 100, expectedSource = "script_fluid_container_component",
+		expectFacets = { containerForm = "liquid" },
+		note = "El ScriptItem solo prueba la forma; el contenido de cerveza se valida mediante fixture de InventoryItem.",
 	},
 	{
 		caseId = "containers_liquid_bottlecrafted", fullType = "Base.BottleCrafted", block = "containers", presence = "required",
@@ -2227,10 +2228,11 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "component FluidContainer confirmado real (media/scripts/generated/items/normal.txt) - señal estructural oficial, no heuristica de nombre.",
 	},
 	{
-		caseId = "containers_liquid_milkbottle", fullType = "Base.MilkBottle", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "perishable", expectedL3 = "dairy_egg",
-		minConfidence = 100, expectedSource = "script_item_type",
-		note = "Recipiente lleno definido por su contenido: leche; no exige faceta de recipiente en la clasificacion estatica vigente.",
+		caseId = "containers_liquid_milkbottle", fullType = "Base.MilkBottle", block = "containers", presence = "required",
+		expectedL1 = "containers", expectedL2 = "liquid", expectedL3 = false,
+		minConfidence = 100, expectedSource = "script_fluid_container_component",
+		expectFacets = { containerForm = "liquid" },
+		note = "El ScriptItem solo prueba la forma; el contenido de leche se valida mediante fixture de InventoryItem.",
 	},
 	{
 		caseId = "containers_liquid_popbottle", fullType = "Base.PopBottle", block = "containers", presence = "required",
@@ -2731,10 +2733,11 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
 	},
 	{
-		caseId = "containers_portable_cooler_meat", fullType = "Base.Cooler_Meat", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "meat_protein",
-		minConfidence = 100, expectedSource = "script_item_type",
-		note = "Nevera llena definida por su contenido: carne; no exige faceta de recipiente.",
+		caseId = "containers_portable_cooler_meat", fullType = "Base.Cooler_Meat", block = "containers", presence = "required",
+		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
+		minConfidence = 30, expectedSource = "name_containers_portable",
+		expectFacets = { containerForm = "bag_or_box" },
+		note = "container.txt confirma ItemType=base:container: el sufijo Meat no es contenido físico y no convierte la nevera en alimento.",
 	},
 	{
 		caseId = "containers_abstain_bottleopener", fullType = "Base.BottleOpener", block = "other", presence = "required",
@@ -2945,7 +2948,9 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v9_food_produce", fullType="Base.CannedTomatoOpen", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v9_food_prepared", fullType="Base.CannedMushroomSoup", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="prepared_meal", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v9_food_produce_canned", fullType="Base.CannedPineapple", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
-	{ caseId="v10_food_produce_carrot", fullType="Base.Carrot", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="systems_contract:structural_food_shelf_life", criticalAnchor=true },
+	{ caseId="v11_food_produce_carrots", fullType="Base.Carrots", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="systems_contract:structural_food_shelf_life", criticalAnchor=true },
+	{ caseId="v11_fluid_beer_instance", fullType="Base.BeerBottle", fixtureMode="inventory_instance", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="beverage", minConfidence=100, expectedSource="instance_fluid_state", expectationSource="systems_contract:dynamic_fluid_instance", criticalAnchor=true },
+	{ caseId="v11_fluid_milk_instance", fullType="Base.MilkBottle", fixtureMode="inventory_instance", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="beverage", minConfidence=100, expectedSource="instance_fluid_state", expectationSource="systems_contract:dynamic_fluid_instance", criticalAnchor=true },
 	{ caseId="v10_knowledge_skill_electrician1", fullType="Base.BookElectrician1", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="skill_book", expectedL3=false, minConfidence=100, expectedSource="script_skill_trained", expectationSource="systems_contract:structural_skill_book", criticalAnchor=true },
 	{ caseId="v9_food_dairy", fullType="Base.CannedMilk_Box", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="dairy_egg", minConfidence=30, expectedSource="name_food_dairy_egg", expectationSource="product_policy:food_dairy_name" },
 	-- Corpus v7 / dev30.4. Anclajes de la señal estructural ScriptItem:isSpice().
@@ -2995,12 +3000,12 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v6_vehicles_consumable", fullType="Base.PetrolCan", block="vehicles", presence="required", expectedL1="vehicles", expectedL2="consumable", expectedL3=false, minConfidence=30, expectedSource="name_vehicles_consumable", expectationSource="product_policy:vehicle_consumable_name" },
 	{ caseId="v6_vehicles_collision", fullType="Base.utilityBoxBumperRear2", block="vehicles", presence="required", expectedL1="vehicles", expectedL2="part", expectedL3=false, minConfidence=30, expectedSource="name_vehicles_part", expectationSource="product_policy:vehicle_part_over_container", collisionWith="containers", criticalAnchor=true },
 
-	{ caseId="v6_survival_farming_collision", fullType="Base.WheatBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=30, expectedSource="name_survival_farming", expectationSource="product_policy:seed_content_over_container", collisionWith="containers", criticalAnchor=true },
+	{ caseId="v6_survival_farming_collision", fullType="Base.WheatBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=100, expectedSource="script_gardening_seed_packet", expectationSource="product_policy:seed_content_over_container", collisionWith="knowledge_media", criticalAnchor=true },
 	{ caseId="v6_survival_fishing", fullType="Base.JigLure", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="fishing", expectedL3=false, minConfidence=30, expectedSource="name_survival_fishing", expectationSource="product_policy:fishing_name" },
 	{ caseId="v6_survival_trapping_collision", fullType="Base.TrapCrate", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_over_container", collisionWith="containers", criticalAnchor=true },
 	{ caseId="v6_survival_camping_collision", fullType="Base.SleepingBag_HighQuality_Brown", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="camping", expectedL3=false, minConfidence=30, expectedSource="name_survival_camping", expectationSource="product_policy:camping_over_container", collisionWith="containers" },
 	{ caseId="v6_survival_security", fullType="Base.Padlock", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="security", expectedL3=false, minConfidence=30, expectedSource="name_survival_security", expectationSource="product_policy:security_name" },
 	{ caseId="v6_survival_strong_seed", fullType="Base.Corn", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=95, expectedSource="script_tag_isseed", expectationSource="product_policy:script_seed_tag", criticalAnchor=true },
 	{ caseId="v6_survival_modded", fullType="AuthenticZClothing.FlameTrapRemote", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_name", moddedOrigin="AuthenticZClothing" },
-	{ caseId="v6_survival_farming_weak", fullType="Base.LemonGrassBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=30, expectedSource="name_survival_farming", expectationSource="product_policy:seed_name" },
+	{ caseId="v6_survival_farming_weak", fullType="Base.LemonGrassBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=100, expectedSource="script_gardening_seed_packet", expectationSource="product_policy:seed_name" },
 }

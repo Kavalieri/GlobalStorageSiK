@@ -1248,7 +1248,7 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 		local text = searchEntry:getText() or ""
 		local charCount, wide = unicodeCharLengthAndWidth(text)
 		local minChars = wide and 2 or SEARCH_MIN_CHARS
-		lastEffectiveActive = text ~= "" and charCount >= minChars - 1
+		lastEffectiveActive = text ~= "" and charCount >= minChars
 		runSearch(true)
 	end
 
@@ -1273,16 +1273,9 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 		-- arriba. "wide" (algun caracter de 3+ bytes UTF-8) distingue CJK de
 		-- acentos latinos (siempre 2 bytes) sin depender del idioma de la UI.
 		local minChars = wide and 2 or SEARCH_MIN_CHARS
-		-- Compensacion empirica de un desfase de una pulsacion (reportado
-		-- 2026-08-18: "empieza a buscar en el 4º caracter, no en el 3º" -
-		-- osea, con minChars=3 la busqueda no arrancaba hasta charCount=4).
-		-- Sin poder probarlo en vivo no se puede confirmar la causa exacta
-		-- dentro del motor (sospecha: onTextChange se dispara con el texto
-		-- DE ANTES de aplicar la pulsacion que lo disparo, no con el ya
-		-- actualizado), pero el efecto observado es reproducible y
-		-- consistente - se compensa aqui restando 1 al umbral efectivo en
-		-- vez de dejar el gate a ciegas del texto que reporte el motor.
-		if text == "" or charCount < minChars - 1 then
+		-- Se evalúa el texto actual entregado por el control. El antiguo -1 era
+		-- una compensación empírica que hacía divergir el gate del valor real.
+		if text == "" or charCount < minChars then
 			if lastEffectiveActive then
 				-- Transicion real: habia un filtro activo y acaba de caer por
 				-- debajo del umbral (o se borro del todo) - una sola

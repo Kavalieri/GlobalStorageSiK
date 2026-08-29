@@ -433,6 +433,14 @@ local function onServerCommand(module, command, args)
 		else
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "cached items=" .. tostring(itemCount))
 		end
+	elseif command == "itemDetails" then
+		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}
+		if args and args.rowKey then
+			GlobalStorageSiK.Client.itemDetailsCache[args.rowKey] = args
+		end
+		if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onDetailsReceived then
+			GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
+		end
 	elseif command == "nodeContents" then
 		GlobalStorageSiK.Client.nodeContentsCache = GlobalStorageSiK.Client.nodeContentsCache or {}
 		if args and args.nodeId then
@@ -550,7 +558,9 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "itemNetworkCounts" then
 		if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived then
-			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType, args and args.networks or {}, args and args.hasAnyNetwork, args and args.mediaTitle)
+			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType,
+				args and args.networks or {}, args and args.hasAnyNetwork,
+				args and args.mediaTitle, args and args.mediaIndex, args and args.dynamicStateKey)
 		end
 	elseif command == "networkList" then
 		if not GlobalStorageSiK.Client then

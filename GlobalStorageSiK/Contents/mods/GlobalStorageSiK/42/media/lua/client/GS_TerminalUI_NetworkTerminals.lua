@@ -35,9 +35,9 @@ local TERMINAL_TABLE_COLUMNS = {
 	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", flex = 0.30, minWidth = 90, pad = 0 },
 	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", flex = 0.28, minWidth = 82, pad = 0 },
 	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", flex = 0.22, minWidth = 74, pad = 0 },
-	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", flex = 0.20, minWidth = 84, pad = 0 },
+	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", flex = 0.20, minWidth = 84, align = "right", pad = 4 },
 }
-local TERMINAL_TABLE_OPTIONS = { left = 4, right = 4, gap = 4 }
+local TERMINAL_TABLE_OPTIONS = { left = 4, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 4 }
 
 ---@param row table|nil
 ---@return string
@@ -151,7 +151,7 @@ local function createTerminalRow(host, terminal, ui)
 			cols[1].x, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		self:drawText(coordsLabel(data), cols[2].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		self:drawText(roleLabel(data), cols[3].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(statusLabel(data), cols[4].x, 2, sr, sg, sb, 1, UIFont.Small)
+		self:drawTextRight(statusLabel(data), cols[4].finish - cols[4].pad, 2, sr, sg, sb, 1, UIFont.Small)
 	end
 -- Un clic en la fila abre SIEMPRE el editor completo (renombrar, marcar
 	-- como principal, suspender, eliminar) - a peticion del usuario, en vez de

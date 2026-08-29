@@ -63,10 +63,9 @@ local COL_SEEN_W = math.max(
 ) + 14
 local ADMIN_MEMBER_TABLE_COLUMNS = {
 	{ key = "member", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 100, pad = 6 },
-	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, pad = 0 },
-	{ key = "actions", titleKey = "IGUI_GS_ColZoneActions", align = "right", width = 96, pad = 0 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, align = "right", pad = 4 },
 }
-local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = 0, gap = 6 }
+local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 6 }
 
 local function staffActionCallback(action, dashboard)
 	return function()
@@ -565,32 +564,47 @@ end
 --- que aqui se restaura la posicion previa despues para no "saltar" al
 --- centro cada vez que se suelta el asa de redimensionado.
 function GS_AdminDashboardUI:rebuildAfterResize()
-	local x, y = self:getX(), self:getY()
-	self:clearChildren()
-	self:buildStaticFrame()
-	-- BUG REAL cerrado (2026-08-26, reportado en pruebas reales: "no tenemos
-	-- como cerrar la ventana, el boton desaparece al reescalar"): el boton de
-	-- cerrar lo crea/posiciona setupModalPanel() UNA vez en initialise() como
-	-- hijo directo del panel, FUERA de buildStaticFrame() - clearChildren()
-	-- lo borraba junto con todo lo demas y nunca se recreaba. No se puede
-	-- volver a llamar setupModalPanel() entero aqui (tambien reinstalaria
-	-- setupHeaderDrag(), que chocaria con los manejadores de arrastre/resize
-	-- propios de installMouseHandlers) - se recrea solo el boton
-	-- (createCloseButton) y se reposiciona con layoutModalFrame(), las 2
-	-- unicas funciones responsables de el.
-	GlobalStorageSiK.SiK_UI.createCloseButton(self, self, function() self:destroy() end)
 	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, self.padding)
-	self:setX(x)
-	self:setY(y)
-	if self._networks then
-		self:refreshNetworkList(self._networks)
+	local textW = math.max(240, self.width - PAD * 2)
+	local tabW = math.floor((textW - 8) / 2)
+	if self.staffTabNetworkBtn then self.staffTabNetworkBtn:setWidth(tabW) end
+	if self.staffTabTaxonomyBtn then self.staffTabTaxonomyBtn:setX(PAD + tabW + 8); self.staffTabTaxonomyBtn:setWidth(tabW) end
+	if self.networkCombo then self.networkCombo:setWidth(textW) end
+	local halfW = math.floor(textW / 2) - 4
+	if self.reloadBtn then self.reloadBtn:setWidth(halfW) end
+	if self.historyBtn then self.historyBtn:setX(PAD + halfW + 8); self.historyBtn:setWidth(halfW) end
+	for i = 1, #(self.staffActionButtons or {}) do
+		local button = self.staffActionButtons[i]
+		local column = (i - 1) % 2
+		button:setX(PAD + column * (halfW + 8))
+		button:setWidth(halfW)
 	end
-	if self._selectedNetworkId then
-		self:refreshInfoLines()
+	local addBtnW = 90
+	if self.addMemberCombo then self.addMemberCombo:setWidth(math.max(100, textW - addBtnW - 8)) end
+	if self.addMemberBtn then self.addMemberBtn:setX(PAD + textW - addBtnW) end
+
+	local hintLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
+	local hintPool = self.dashboardHintLabels or {}
+	local hintH = math.max(1, #hintPool) * (FONT_HGT_SMALL + 2) + ROW_GAP
+	local memberTop = self.memberScrollTopY or (self.memberScroll and self.memberScroll:getY()) or 200
+	local memberH = math.max(3 * (ROW_H + ROW_GAP), self.height - memberTop - BTN_H - hintH - PAD - ROW_GAP)
+	if self.memberScroll then
+		GlobalStorageSiK.TerminalScroll.resize(self.memberScroll, textW, memberH)
 	end
-	if self._members then
-		self:refreshMemberPanel(self._members)
+	local actionsY = memberTop + memberH + ROW_GAP
+	if self.releaseBtn then self.releaseBtn:setY(actionsY); self.releaseBtn:setWidth(halfW) end
+	if self.deleteBtn then self.deleteBtn:setX(PAD + halfW + 8); self.deleteBtn:setY(actionsY); self.deleteBtn:setWidth(halfW) end
+	local hintY = actionsY + BTN_H + ROW_GAP
+	for i = 1, #hintPool do
+		local label = hintPool[i]
+		label:setY(hintY)
+		label:setName(hintLines[i] or (i == #hintPool and table.concat(hintLines, " ") or ""))
+		label:setVisible((hintLines[i] or "") ~= "")
+		hintY = hintY + FONT_HGT_SMALL + 2
 	end
+	if self._members then self:refreshMemberPanel(self._members) end
+	self:layoutTaxonomyTab()
+	self:selectStaffTab(self._activeStaffTab or "network")
 end
 
 --- Recalcula en un unico punto los limites de las dos suites de Taxonomia.
@@ -598,6 +612,17 @@ end
 --- sido pobladas, tanto en apertura como en cada reconstruccion por resize.
 function GS_AdminDashboardUI:layoutTaxonomyTab()
 	if not self._taxonomyTabY then return end
+	local textW = math.max(200, self.width - PAD * 2)
+	self._auditContentW = textW
+	self._corpusContentW = textW
+	if self.nativeAuditBtn then self.nativeAuditBtn:setWidth(textW) end
+	if self.nativeCorpusBtn then self.nativeCorpusBtn:setWidth(textW) end
+	if self.nativeAuditSummaryScroll then
+		self.nativeAuditSummaryScroll:setWidth(textW)
+	end
+	if self.nativeCorpusSummaryScroll then
+		self.nativeCorpusSummaryScroll:setWidth(textW)
+	end
 	local bottomY = self.height - PAD
 	local midY = self._taxonomyTabY + math.floor((bottomY - self._taxonomyTabY) / 2)
 	self._auditBottomLimit = midY - 4
@@ -859,22 +884,6 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	trackNetworkTabWidget(self, self.historyBtn)
 	y = y + BTN_H + LINE_GAP
 
-	-- Diagnostico DEV puntual (2026-08-22, ver comentario en GS_Server.lua,
-	-- scanContainerForBrokenItems): boton temporal para localizar el item con
-	-- fullType roto que provoca el spam de consola - escanea el inventario
-	-- de QUIEN pulsa el boton (no de la red), el resultado sale por chat y
-	-- por console.txt (Log.error, siempre visible). Quitar cuando ya no haga
-	-- falta.
-	self.diagBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, T("IGUI_GS_AdminFindBrokenItems"), self, function()
-			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-				GlobalStorageSiK.NetClient.sendCommand("gsDiagFindBrokenItems", {})
-			end
-		end)
-	self:addChild(self.diagBtn)
-	trackNetworkTabWidget(self, self.diagBtn)
-	y = y + BTN_H + LINE_GAP + 6
-
 	-- dev22 (pedido explicito de sistemas: "Auditar catalogo, trasladado
 	-- desde Soporte de redes... su unico hogar sera Taxonomia, no duplicar
 	-- el boton en ambas pestañas"): construccion completa de la pestaña
@@ -896,6 +905,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	-- el registro neutral; cada addon conserva la responsabilidad de abrir su
 	-- ruta vanilla y de decidir como se integra con una sesion de red activa.
 	local staffActions = GlobalStorageSiK.TerminalExtensions.getStaffActions()
+	self.staffActionButtons = {}
 	if #staffActions > 0 then
 		local toolsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AdminInternalTests"))
 		self:addChild(toolsTitle)
@@ -915,6 +925,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 				staffActionCallback(action, self))
 			self:addChild(actionBtn)
 			trackNetworkTabWidget(self, actionBtn)
+			self.staffActionButtons[#self.staffActionButtons + 1] = actionBtn
 		end
 		local actionRows = math.ceil(#staffActions / 2)
 		y = y + actionRows * (BTN_H + LINE_GAP) + 6
@@ -951,6 +962,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
 	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
 	self.memberScroll = GlobalStorageSiK.TerminalScroll.create(self, pad, y, textW, memberH)
+	self.memberScrollTopY = y
 	trackNetworkTabWidget(self, self.memberScroll)
 	local actionsY = y + memberH + ROW_GAP
 
@@ -970,11 +982,13 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	trackNetworkTabWidget(self, self.deleteBtn)
 
 	local hintY = actionsY + BTN_H + ROW_GAP
+	self.dashboardHintLabels = {}
 	for _, line in ipairs(hintLines) do
 		local hintLbl = ISLabel:new(pad, hintY, FONT_HGT_SMALL, line, 0.55, 0.57, 0.6, 1, UIFont.Small, true)
 		hintLbl:initialise()
 		self:addChild(hintLbl)
 		trackNetworkTabWidget(self, hintLbl)
+		self.dashboardHintLabels[#self.dashboardHintLabels + 1] = hintLbl
 		hintY = hintY + FONT_HGT_SMALL + 2
 	end
 
@@ -1060,12 +1074,12 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 	self._members = members or {}
 	self:refreshOnlinePlayersCombo()
 	local scroll = self.memberScroll
+	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	GlobalStorageSiK.TerminalScroll.clear(scroll)
 	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ADMIN_MEMBER_TABLE_COLUMNS, ADMIN_MEMBER_TABLE_OPTIONS)
-	local btnW = cols[3].width
 	local nameMaxW = cols[1].width - cols[1].pad * 2
-	local seenX = cols[2].x
+	local seenX = cols[2].finish - cols[2].pad
 	local headerMetrics = GlobalStorageSiK.SiK_UI.Table.metrics()
 	local header = ISPanel:new(0, 0, w, headerMetrics.headerHeight)
 	header:initialise()
@@ -1092,6 +1106,7 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 		row:initialise()
 		row.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 		row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+		row.memberData = m
 		row.prerender = function(self)
 			ISPanel.prerender(self)
 			GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, i, self:isMouseOver(), false)
@@ -1105,18 +1120,20 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 			self:drawText(GlobalStorageSiK.SiK_UI.truncateText(label, nameMaxW, UIFont.Small),
 				cols[1].x + cols[1].pad, yMid, 0.85, 0.87, 0.9, 1, UIFont.Small)
 			local seenText, sr, sg, sb = connectionLabel(m)
-			self:drawText(GlobalStorageSiK.SiK_UI.truncateText(seenText, COL_SEEN_W, UIFont.Small),
+			self:drawTextRight(GlobalStorageSiK.SiK_UI.truncateText(seenText, COL_SEEN_W, UIFont.Small),
 				seenX, yMid, sr, sg, sb, 1, UIFont.Small)
 		end
+		row.onMouseDown = function(self) return self.memberData ~= nil end
+		row.onMouseUp = function(self)
+			if not self.memberData then return false end
+			GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, self.memberData)
+			return true
+		end
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
-		local editBtn = GlobalStorageSiK.SiK_UI.createButton(
-			cols[3].x, math.floor((ROW_H - BTN_H) / 2), btnW, BTN_H, T("IGUI_GS_AdminEditMember"), row, function()
-				GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, m)
-			end)
-		row:addChild(editBtn)
 		y = y + ROW_H + ROW_GAP
 	end
 	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y)
+	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
 end
 

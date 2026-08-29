@@ -407,6 +407,20 @@ function GS_ZoneEditorUI:ensureForm()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.applyAllBtn)
 	y = y + BTN_H + 6
 
+	local role = self.terminal and self.terminal.terminalState
+		and self.terminal.terminalState.permissions and self.terminal.terminalState.permissions.myRole
+	if role == "owner" or role == "admin" then
+		self.rescanZoneBtn = GlobalStorageSiK.SiK_UI.createButton(
+			pad, y, innerW, BTN_H, T("IGUI_GS_ZoneCtxRescan"), scroll, function()
+				if self.zone and self.terminal and self.terminal.onRescanZone then
+					self.terminal:onRescanZone(self.zone.id)
+				end
+			end)
+		self.rescanZoneBtn:setTooltip(T("IGUI_GS_ZonesManageHint"))
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rescanZoneBtn)
+		y = y + BTN_H + 6
+	end
+
 	-- Simetrico al de contenedor: unica forma real de sacar TODA una zona
 	-- (y por tanto sus contenedores) de deposito/extraccion - ver
 	-- GS_Router.matchWithZoneGate. Rojo (PALETTE.statusDanger) SOLO cuando
@@ -497,6 +511,7 @@ function GS_ZoneEditorUI:resetForm()
 	self.priorityPresetLowBtn = nil
 	self.rulesTitleLbl = nil
 	self.applyAllBtn = nil
+	self.rescanZoneBtn = nil
 	self.zoneMembBtn = nil
 	self.deleteBtn = nil
 	self._ruleChipsHosts = nil

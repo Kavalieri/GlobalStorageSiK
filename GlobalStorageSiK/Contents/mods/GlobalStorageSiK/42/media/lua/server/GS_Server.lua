@@ -1094,64 +1094,6 @@ end
 
 
 
---- Diagnostico DEV puntual (2026-08-22): el spam "Couldn't find item
---- Base.carpentry_01_16" reaparecio 3 veces pese a cerrar el mismo numero de
---- fuentes distintas de esta sesion (GS_I18n.lua, 5 sitios de
---- ScriptManager:getItem() sin cache, itemProbe/itemTexture del terminal) -
---- hipotesis final, no confirmada, a validar de forma directa: el item en si
---- esta FISICAMENTE guardado con un fullType corrupto (probablemente la
---- "Caja de madera" mencionada por el usuario, deuda de una version antigua
---- de categorizacion/iconos) en el inventario del jugador - si es asi, el
---- PROPIO panel de inventario VANILLA de Project Zomboid (no nuestro
---- terminal, no ningun codigo de este mod) redibuja ese item cada frame
---- mientras el panel de inventario este abierto (siempre, es un panel base
---- del juego) y dispara este mismo log el motor internamente, sin pasar por
---- ninguna de las funciones ya cacheadas - no seria arreglable desde Lua del
---- mod en absoluto, habria que localizar y quitar/reparar el item corrupto
---- de los datos guardados. Escanea recursivamente el inventario del propio
---- jugador (incluye mochilas anidadas) buscando items cuyo fullType no
---- resuelva a un ScriptItem real Y que no tengan worldSprite (para no marcar
---- falsos positivos en muebles recogidos legitimos, que nunca resuelven
---- como ScriptItem y es esperado).
----@param container ItemContainer|nil
----@param path string
----@param out table[]
-local function scanContainerForBrokenItems(container, path, out)
-	if not container or not container.getItems then return end
-	local okItems, items = pcall(function() return container:getItems() end)
-	if not okItems or not items then return end
-	for i = 0, items:size() - 1 do
-		local item = items:get(i)
-		if item and item.getFullType then
-			local okType, fullType = pcall(function() return item:getFullType() end)
-			if okType and fullType and fullType ~= "" then
-				local hasWorldSprite = false
-				if item.getWorldSprite then
-					local okWs, ws = pcall(function() return item:getWorldSprite() end)
-					hasWorldSprite = okWs and ws ~= nil and ws ~= ""
-				end
-				if not hasWorldSprite then
-					local script = GlobalStorageSiK.I18n.getScriptItem(fullType)
-					if not script then
-						local okName, name = pcall(function() return item:getName() end)
-						out[#out + 1] = path .. ": " .. tostring(fullType)
-							.. " (" .. tostring(okName and name or "?") .. ")"
-					end
-				end
-			end
-			if item.getInventory then
-				local okInv, nested = pcall(function() return item:getInventory() end)
-				if okInv and nested and nested ~= container then
-					local label = "?"
-					local okDisp, disp = pcall(function() return item:getDisplayName() end)
-					if okDisp and disp then label = disp end
-					scanContainerForBrokenItems(nested, path .. " > " .. label, out)
-				end
-			end
-		end
-	end
-end
-
 local playerCraftProbe = {}
 
 -- dev14: la guarda de concurrencia del boton "Auditar catalogo" vive ahora
@@ -2821,6 +2763,23 @@ local function runIdentityBootstrap(player, reason)
 	end
 end
 
+local function handleGetItemDetails(player, args, networkId)
+	if not requireTerminalAccess(player, networkId) then return end
+	local rowKey = type(args.rowKey) == "string" and string.sub(args.rowKey, 1, 240) or nil
+	if not rowKey or rowKey == "" then
+		gsSendServerCommand(player, "itemDetails", {
+			networkId = networkId, rowKey = rowKey, page = 1, pageSize = 15,
+			total = 0, hasPrevious = false, hasNext = false, items = {}, reason = "invalid_row",
+		})
+		return
+	end
+	local detailPage = GlobalStorageSiK.Index.buildDetailPage(
+		networkId, player, rowKey, args.page, args.pageSize)
+	detailPage.networkId = networkId
+	detailPage.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	gsSendServerCommand(player, "itemDetails", detailPage)
+end
+
 local function onClientCommand(module, command, player, args)
 
 	if module ~= GlobalStorageSiK.MOD_ID or not player then
@@ -3021,23 +2980,6 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "getLastNativeCorpusSummary" then
 		GlobalStorageSiK.NativeCorpusServer.sendLast(player, requireServerMod, gsSendServerCommand)
 
-	elseif command == "gsDiagFindBrokenItems" then
-		-- Diagnostico DEV puntual, ver comentario de scanContainerForBrokenItems.
-		-- Cualquier jugador puede escanear SU PROPIO inventario - de solo
-		-- lectura, no requiere ser staff.
-		local out = {}
-		local inv = player and player.getInventory and player:getInventory()
-		scanContainerForBrokenItems(inv, "Inventario", out)
-		local message
-		if #out == 0 then
-			message = "Sin items con fullType roto en tu inventario."
-		else
-			message = tostring(#out) .. " item(s) con fullType roto:\n" .. table.concat(out, "\n")
-		end
-		GlobalStorageSiK.Log.error("Diag", "findBrokenItems",
-			tostring(player and player:getUsername()) .. " -> " .. message)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = message })
-
 	elseif command == "adminListOnlinePlayers" then
 		if requireServerMod(player, command, nil) then
 			gsSendServerCommand(player, "adminOnlinePlayers",
@@ -3231,6 +3173,9 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", scanResult(
 				networkId, "IDLE", "IGUI_GS_ScanNotRunning", "not_running"))
 		end
+
+	elseif command == "getItemDetails" then
+		handleGetItemDetails(player, args, networkId)
 
 	elseif command == "getNodeContents" then
 		if not requireTerminalAccess(player, networkId) then
@@ -3759,8 +3704,15 @@ local function onClientCommand(module, command, player, args)
 			-- ignorando cual enseña de verdad. nil para cualquier otro item.
 			local mediaTitle = type(args.mediaTitle) == "string"
 				and string.sub(args.mediaTitle, 1, 200) or nil
+			local mediaIndex = tonumber(args.mediaIndex)
+			if mediaIndex ~= nil then
+				mediaIndex = math.floor(mediaIndex)
+				if mediaIndex < 0 or mediaIndex > 32767 then mediaIndex = nil end
+			end
 			local dynamicSignature = type(args.dynamicSignature) == "string"
 				and string.sub(args.dynamicSignature, 1, 200) or nil
+			local familyFullTypes = GlobalStorageSiK.Index.sanitizeFungibleFamily(
+				fullType, args.fullTypes)
 			local requested = math.floor(tonumber(args.amount) or 1)
 			if requested <= 0 then requested = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
 			requested = math.min(requested, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
@@ -3777,13 +3729,24 @@ local function onClientCommand(module, command, player, args)
 				end
 				if #sanitizedItemIds > 0 then requestedItemIds = sanitizedItemIds end
 			end
+			if GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType)
+				and not requestedItemIds then
+				gsSendServerCommand(player, "actionResult", {
+					ok = false,
+					message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawExactSelectionRequired"),
+					withdrawId = withdrawId,
+					transfer = { op = "withdraw", networkId = networkId, fullType = fullType,
+						requested = requested, moved = 0, reason = "exact_selection_required" },
+				})
+				return
+			end
 			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
 			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
 			-- antes de confirmar al cliente, que decide si queda otro.
 			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
 					player, fullType, networkId, requested, dest, mediaTitle,
-					dynamicSignature, requestedItemIds
+					dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes
 				)
 			end)
 
@@ -5131,14 +5094,24 @@ local function onClientCommand(module, command, player, args)
 		-- GS_Index.getNetworkCountsForItem para el motivo completo.
 		local mediaTitle = type(args.mediaTitle) == "string"
 			and string.sub(args.mediaTitle, 1, 200) or nil
+		local mediaIndex = tonumber(args.mediaIndex)
+		if mediaIndex ~= nil then
+			mediaIndex = math.floor(mediaIndex)
+			if mediaIndex < 0 or mediaIndex > 32767 then mediaIndex = nil end
+		end
+		local dynamicStateKey = type(args.dynamicStateKey) == "string"
+			and string.sub(args.dynamicStateKey, 1, 120) or nil
 		local networks = {}
 		local hasAnyNetwork = false
 		if fullType and GlobalStorageSiK.Index and GlobalStorageSiK.Index.getNetworkCountsForItem then
-			networks, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaTitle)
+			networks, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(
+				player, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 		end
 		gsSendServerCommand(player, "itemNetworkCounts", {
 			fullType = fullType,
 			mediaTitle = mediaTitle,
+			mediaIndex = mediaIndex,
+			dynamicStateKey = dynamicStateKey,
 			networks = networks,
 			hasAnyNetwork = hasAnyNetwork,
 		})

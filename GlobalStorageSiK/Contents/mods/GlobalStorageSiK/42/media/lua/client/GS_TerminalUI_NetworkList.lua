@@ -20,7 +20,7 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local BTN_H = FONT_HGT_SMALL + 6
 local ROW_GAP = 6
-local INFO_LINE_COUNT = 8
+local INFO_LINE_COUNT = 2
 
 ---@param state table|nil
 ---@return table[]
@@ -60,10 +60,21 @@ local function refreshSelectedNetworkInfo(ui, state)
 	local row = selectedNetworkRow(ui, state)
 	local info = {}
 	if row then
-		info[#info + 1] = row.activeTerminals == 0
-			and T("IGUI_GS_NetStatusSuspended") or T("IGUI_GS_NetStatusActive")
-		info[#info + 1] = T("IGUI_GS_NetCounts", row.zoneCount or 0, row.nodeCount or 0)
-		info[#info + 1] = T("IGUI_GS_NetLastLocation", locationText(row))
+		info[1] = T("IGUI_GS_NetCounts", row.zoneCount or 0, row.nodeCount or 0)
+			.. " · " .. T("IGUI_GS_NetLastLocation", locationText(row))
+		if ui.netListTitle then
+			ui.netListTitle:setName(row.label or row.name or row.networkId or "?")
+		end
+		if ui.netStatusLbl then
+			local status = row.activeTerminals == 0
+				and T("IGUI_GS_NetStatusSuspended") or T("IGUI_GS_NetStatusActive")
+			ui.netStatusLbl:setName("· " .. status)
+			ui.netStatusLbl.r = row.activeTerminals == 0 and 0.9 or 0.35
+			ui.netStatusLbl.g = row.activeTerminals == 0 and 0.7 or 0.75
+			ui.netStatusLbl.b = row.activeTerminals == 0 and 0.3 or 0.45
+			local w = getTextManager():MeasureStringX(UIFont.Small, ui.netStatusLbl.name or "")
+			ui.netStatusLbl:setX(math.max(8, (ui._netInnerW or 200) - 14 - w))
+		end
 	end
 	local wrapped = {}
 	local infoW = math.max(120, (ui.netCombo and ui.netCombo.width or 200) - 4)
@@ -88,26 +99,6 @@ local function refreshSelectedNetworkInfo(ui, state)
 		ui.netUseBtn:setTooltip(canUse and T("IGUI_GS_NetUseSelectedHint")
 			or T("IGUI_GS_NetReactivateViaTerminal"))
 	end
-	if ui.netDeleteBtn then
-		local canDelete = row and row.activeTerminals == 0 and row.isOwner == true
-		ui.netDeleteBtn._sikUiLocked = not canDelete
-		ui.netDeleteBtn:setEnable(canDelete == true)
-		ui.netDeleteBtn:setTooltip(row and row.activeTerminals ~= 0
-			and T("IGUI_GS_NetworkDeleteActive")
-			or (row and row.isOwner ~= true and T("IGUI_GS_NetworkDeleteOwnerOnly")
-				or T("IGUI_GS_NetworkDeleteHint")))
-	end
-end
-
-local function showDeleteConfirm(terminal, row)
-	if not row or not row.networkId or row.activeTerminals ~= 0 or row.isOwner ~= true then return end
-	local text = T("IGUI_GS_NetworkDeleteConfirm", row.label or row.name or row.networkId,
-		row.zoneCount or 0, row.nodeCount or 0)
-	GlobalStorageSiK.SiK_UI.Modal.confirm(text, function()
-		GlobalStorageSiK.NetClient.sendCommand("deleteSuspendedNetwork", {
-			targetNetworkId = row.networkId,
-		})
-	end)
 end
 
 ---@param scroll ISPanel
@@ -125,10 +116,17 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 	ui.netListCard = card
 
-	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_NetBlockNetworks"))
+	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, "")
 	ui.netListTitle = title
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
 	y = y + FONT_HGT_SMALL + 8
+	ui.netStatusLbl = ISLabel:new(pad, ui.netListBlockY + 2, FONT_HGT_SMALL, "", 0.35, 0.75, 0.45, 1, UIFont.Small, true)
+	ui.netStatusLbl:initialise()
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netStatusLbl)
+	local selectedLabel = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NetSelected"))
+	ui.netSelectedLabel = selectedLabel
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, selectedLabel)
+	y = y + FONT_HGT_SMALL + 6
 
 	local comboW = math.max(160, innerW - pad * 2)
 	ui.netCombo = ISComboBox:new(pad, y, comboW, BTN_H + 2, terminal, nil)
@@ -176,13 +174,8 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netRefreshBtn)
 	y = y + BTN_H + 10
 
-	ui.netDeleteBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, comboW, BTN_H + 2, T("IGUI_GS_NetworkDeleteSuspended"), scroll, function()
-			showDeleteConfirm(terminal, selectedNetworkRow(ui, terminal and terminal.terminalState or {}))
-		end, nil, true)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netDeleteBtn)
-	y = y + BTN_H + 10
 	ui.netListBlockEndY = y
+	ui._netInnerW = innerW
 
 	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
 		pad - 4, ui.netListBlockY - 2,
@@ -246,13 +239,18 @@ function GlobalStorageSiK.TerminalNetworkList.layout(scroll, ui, innerW)
 		return
 	end
 	local pad = 8
+	ui._netInnerW = innerW
 	local comboW = math.max(160, innerW - pad * 2)
 	ui.netCombo:setWidth(comboW)
 	local btnW = math.floor((comboW - ROW_GAP) / 2)
 	if ui.netUseBtn then ui.netUseBtn:setWidth(btnW) end
 	if ui.netRefreshBtn then ui.netRefreshBtn:setX(pad + btnW + ROW_GAP); ui.netRefreshBtn:setWidth(btnW) end
-	if ui.netDeleteBtn then ui.netDeleteBtn:setWidth(comboW) end
 	if ui.netListTitle then ui.netListTitle:setX(pad + 6) end
+	if ui.netSelectedLabel then ui.netSelectedLabel:setX(pad) end
+	if ui.netStatusLbl then
+		local w = getTextManager():MeasureStringX(UIFont.Small, ui.netStatusLbl.name or "")
+		ui.netStatusLbl:setX(math.max(8, innerW - 14 - w))
+	end
 	if ui.netListCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.netListCard) then
 		ui.netListCard:setX(pad - 4)
 		ui.netListCard:setWidth(innerW - (pad - 4) * 2)
