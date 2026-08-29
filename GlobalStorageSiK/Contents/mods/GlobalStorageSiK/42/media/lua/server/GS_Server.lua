@@ -30,6 +30,7 @@ require "GS_Network"
 
 require "GS_Index"
 require "GS_RuleSanitizer"
+require "GS_RuleCoverage"
 
 require "GS_NetworkCapacity"
 
@@ -2381,13 +2382,29 @@ local function sanitizeRuleCondition(condition)
 			local encoded = GlobalStorageSiK.NativeProduct.encodePath(decoded)
 			if not encoded then return nil end
 			local legacyValue = condition.legacyValue and tostring(condition.legacyValue):sub(1, 160) or nil
-			return {
+			local clean = {
 				type = "category",
 				value = value ~= "" and value or encoded,
 				nativePath = encoded,
 				legacyValue = legacyValue,
 				categorySource = "NATIVE",
 			}
+			-- Las exclusiones solo se originan en prepareCoverageRule(). Se
+			-- conservan al copiar/editar una lista ya aceptada para no ensanchar
+			-- de nuevo una ruta parcial; cada valor se vuelve a canonicalizar y
+			-- queda acotado para que no entre payload arbitrario persistente.
+			if type(condition.coverageExclusions) == "table" then
+				local exclusions = {}
+				for i = 1, math.min(#condition.coverageExclusions, 160) do
+					local exclusion = GlobalStorageSiK.NativeProduct.encodePath(
+						GlobalStorageSiK.NativeProduct.decodePath(condition.coverageExclusions[i]))
+					if exclusion and GlobalStorageSiK.NativeProduct.pathMatches(encoded, exclusion) then
+						exclusions[#exclusions + 1] = exclusion
+					end
+				end
+				clean.coverageExclusions = exclusions
+			end
+			return clean
 		end
 		if value == "" or GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({
 			type = "category", value = value,
@@ -2424,6 +2441,46 @@ local function sanitizeNodeRules(rules)
 	return result
 end
 
+--- Reúne reglas de los destinos hermanos que compiten por la misma cobertura.
+--- Las zonas se comparan entre sí dentro de la red; los nodos solo contra los
+--- demás nodos de su propia zona. La puerta de zona no se trata como un nodo.
+---@param registry table
+---@param targetKind string "zone"|"node"
+---@param target table
+---@return table[]
+local function collectCoverageScopeRules(registry, targetKind, target)
+	local rules = {}
+	if targetKind == "zone" then
+		for id, zone in pairs((registry and registry.zones) or {}) do
+			if id ~= target.id and zone.networkId == target.networkId then
+				for i = 1, #(zone.rules or {}) do
+					rules[#rules + 1] = zone.rules[i]
+				end
+			end
+		end
+		return rules
+	end
+	for id, node in pairs((registry and registry.nodes) or {}) do
+		if id ~= target.id and node.zoneId == target.zoneId then
+			for i = 1, #(node.rules or {}) do
+				rules[#rules + 1] = node.rules[i]
+			end
+		end
+	end
+	return rules
+end
+
+---@param registry table
+---@param targetKind string
+---@param target table
+---@param rule table
+---@return boolean
+local function prepareCoverageRule(registry, targetKind, target, rule)
+	local scopeRules = collectCoverageScopeRules(registry, targetKind, target)
+	local ok = GlobalStorageSiK.RuleCoverage.prepareNewRule(rule, scopeRules)
+	return ok == true
+end
+
 --- Copia profunda de una lista de reglas YA validadas (sanitizeNodeRules) -
 --- usado por "Extender a la zona" para que cada contenedor destino reciba su
 --- propia tabla, nunca una referencia compartida entre nodos (un
@@ -2433,7 +2490,15 @@ local function cloneRuleList(rules)
 	for i = 1, #(rules or {}) do
 		local rule = rules[i]
 		local condition = {}
-		for k, v in pairs(rule.condition or {}) do condition[k] = v end
+		for k, v in pairs(rule.condition or {}) do
+			if k == "coverageExclusions" and type(v) == "table" then
+				local copied = {}
+				for j = 1, #v do copied[j] = v[j] end
+				condition[k] = copied
+			else
+				condition[k] = v
+			end
+		end
 		result[i] = { op = rule.op, condition = condition }
 	end
 	return result
@@ -3761,6 +3826,13 @@ local function onClientCommand(module, command, player, args)
 		elseif args.addRule ~= nil then
 			local clean = sanitizeNodeRule(args.addRule)
 			if clean then
+				if not prepareCoverageRule(registry, "node", node, clean) then
+					gsSendServerCommand(player, "actionResult", {
+						ok = false,
+						message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleCoverageUnavailable"),
+					})
+					return
+				end
 				node.rules = node.rules or {}
 				if #node.rules < 20 then
 					table.insert(node.rules, clean)
@@ -3943,6 +4015,13 @@ local function onClientCommand(module, command, player, args)
 		elseif args.addRule ~= nil then
 			local clean = sanitizeNodeRule(args.addRule)
 			if clean then
+				if not prepareCoverageRule(registry, "zone", zone, clean) then
+					gsSendServerCommand(player, "actionResult", {
+						ok = false,
+						message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleCoverageUnavailable"),
+					})
+					return
+				end
 				zone.rules = zone.rules or {}
 				if #zone.rules < 20 then
 					table.insert(zone.rules, clean)

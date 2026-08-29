@@ -8,6 +8,7 @@
 
 require "GS_Sandbox"
 require "GS_NativeProduct"
+require "GS_RuleCoverage"
 require "GS_CategoryResolution"
 require "GS_RuleSanitizer"
 require "GS_Log"
@@ -136,6 +137,28 @@ local function categoryRuleTier(rule, item, categorySource)
 	return categoryMatches(rule, resolved.vanillaKey) and 1 or nil
 end
 
+--- Aplica las exclusiones de cobertura calculadas por el servidor a una
+--- condición de categoría. La ruta base mantiene su presentación/jerarquía;
+--- las hojas ya reservadas por otro destino no pueden volver a hacer match.
+---@param condition table
+---@param item InventoryItem
+---@return number|nil
+local function categoryConditionTier(condition, item)
+	local tier = categoryRuleTier(condition.nativePath or condition.value, item, condition.categorySource)
+	if not tier then return nil end
+	local exclusions = condition.coverageExclusions
+	if not exclusions or #exclusions == 0 then return tier end
+	local fullType = item and item.getFullType and item:getFullType() or nil
+	local resolved = fullType and GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item) or nil
+	if not resolved or resolved.effective ~= "native" then return tier end
+	for i = 1, #exclusions do
+		if GlobalStorageSiK.NativeProduct.pathMatches(exclusions[i], resolved.nativePath) then
+			return nil
+		end
+	end
+	return tier
+end
+
 function GlobalStorageSiK.Router.matchSpecificity(entry, item)
 	if not entry or not item then return 4 end
 	-- Motor nuevo (dev26): si el contenedor ya usa el modelo unificado
@@ -186,7 +209,7 @@ function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 			-- mientras la migración aditiva todavía no añadió nativePath.
 			local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition)
 			if status == "DEPRECATED_EXTERNAL" or status == "TECHNICAL_RESIDUE" then return nil end
-			return categoryRuleTier(condition.nativePath or condition.value, item, condition.categorySource)
+			return categoryConditionTier(condition, item)
 		end
 		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then
 			return 1

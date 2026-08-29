@@ -21,6 +21,7 @@ require "GS_NetClient"
 require "GS_NodeHighlight"
 require "GS_NodeFilters"
 require "GS_RulesUI"
+require "GS_RuleCoverage"
 require "GS_FilterEditor"
 require "GS_TerminalUI_ZoneEditor"
 require "GS_CompatMods"
@@ -625,6 +626,17 @@ function GS_NodeEditorUI:ensureForm()
 	-- cuando de verdad llegue la sugerencia (ver mas abajo en este fichero).
 	self._sugCardMissingData = not sugKey
 	if sugKey and sugKey ~= "" then
+		local scopeRules = {}
+		local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+		for i = 1, #nodes do
+			local sibling = nodes[i]
+			if sibling.id ~= self.node.id and sibling.zoneId == self.node.zoneId then
+				for j = 1, #(sibling.rules or {}) do
+					scopeRules[#scopeRules + 1] = sibling.rules[j]
+				end
+			end
+		end
+		local suggestedAvailability = GlobalStorageSiK.RuleCoverage.categoryAvailability(sugKey, scopeRules)
 		local alreadyPresent = false
 		for _, rule in ipairs(self.node.rules or {}) do
 			if rule.condition and rule.condition.type == "category" then
@@ -638,7 +650,7 @@ function GS_NodeEditorUI:ensureForm()
 				end
 			end
 		end
-		if not alreadyPresent then
+		if not alreadyPresent and suggestedAvailability.available > 0 then
 			-- Rediseño (2026-08-25, protocolo de aceptación §07, "Categoría
 			-- sugerida"): pasa de etiqueta+botón sueltos a una tarjeta más,
 			-- la PRIMERA del bloque de reglas (justo encima de OR) - mismo
@@ -691,12 +703,9 @@ function GS_NodeEditorUI:ensureForm()
 					condition.nativePath = sugKey
 				end
 				local newRule = { op = op, condition = condition }
-				local function applyRule()
-					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addRule = newRule })
-					self.node.rules = self.node.rules or {}
-					table.insert(self.node.rules, newRule)
-					self:rebuildForm()
-				end
+			local function applyRule()
+				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addRule = newRule })
+			end
 				local conflict = GlobalStorageSiK.RulesUI.detectContradiction(self.node.rules, newRule)
 				if not conflict then
 					applyRule()
@@ -925,7 +934,17 @@ function GS_NodeEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 
 	local addBtn = createBtn(cx, cy, cardW - cardPad * 2 - 4, T(RULE_OP_ADD_KEY[op]), scroll, function()
 		if not self.node then return end
-		GlobalStorageSiK.FilterEditor.show({ kind = "node", id = self.node.id, rules = self.node.rules }, op, function()
+		local scopeRules = {}
+		local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+		for i = 1, #nodes do
+			local sibling = nodes[i]
+			if sibling.id ~= self.node.id and sibling.zoneId == self.node.zoneId then
+				for j = 1, #(sibling.rules or {}) do
+					scopeRules[#scopeRules + 1] = sibling.rules[j]
+				end
+			end
+		end
+		GlobalStorageSiK.FilterEditor.show({ kind = "node", id = self.node.id, rules = self.node.rules, scopeRules = scopeRules }, op, function()
 			self:rebuildForm()
 		end)
 	end)

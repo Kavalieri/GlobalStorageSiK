@@ -15,6 +15,7 @@ require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Config"
 require "GS_RulesUI"
+require "GS_RuleCoverage"
 
 GlobalStorageSiK.FilterEditor = {}
 GlobalStorageSiK.FilterEditor.instance = nil
@@ -114,6 +115,12 @@ local function searchItems(query)
 		end
 	end
 	return results
+end
+
+local function categoryIsAvailable(target, key)
+	local availability = GlobalStorageSiK.RuleCoverage.categoryAvailability(
+		key, target and target.scopeRules)
+	return availability.available > 0
 end
 
 function GS_FilterEditorUI:initialise()
@@ -243,7 +250,9 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catMainCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catMainCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catMainCombo)
-	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "")
+	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "", function(key)
+		return categoryIsAvailable(self.target, key)
+	end)
 	self:addChild(self.catMainCombo)
 	y = y + ENTRY_H + 8
 
@@ -255,7 +264,9 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catSubCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catSubCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catSubCombo)
-	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {})
+	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {}, function(key)
+		return categoryIsAvailable(self.target, key)
+	end)
 	self:addChild(self.catSubCombo)
 	y = y + ENTRY_H + 8
 
@@ -267,18 +278,26 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catLeafCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catLeafCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catLeafCombo)
-	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "")
+	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "", function(key)
+		return categoryIsAvailable(self.target, key)
+	end)
 	self:addChild(self.catLeafCombo)
 
 	self.catMainCombo.onChange = function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
-		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {})
-		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "")
+		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {}, function(key)
+			return categoryIsAvailable(self.target, key)
+		end)
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "", function(key)
+			return categoryIsAvailable(self.target, key)
+		end)
 	end
 	self.catSubCombo.onChange = function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
 		local subKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
-		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "")
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "", function(key)
+			return categoryIsAvailable(self.target, key)
+		end)
 	end
 	y = y + ENTRY_H + 4
 	return y
@@ -424,7 +443,14 @@ function GS_FilterEditorUI:refreshItemResults()
 		if child.removeFromUIManager then child:removeFromUIManager() end
 	end
 	local query = self.itemSearchEntry and self.itemSearchEntry:getText() or ""
-	local results = searchItems(query)
+	local searched = searchItems(query)
+	local results = {}
+	for i = 1, #searched do
+		if GlobalStorageSiK.RuleCoverage.isExactItemAvailable(searched[i].fullType,
+			self.target and self.target.scopeRules) then
+			results[#results + 1] = searched[i]
+		end
+	end
 	local innerW = self.itemResultsHost.width
 	local ry = 0
 	for i = 1, #results do

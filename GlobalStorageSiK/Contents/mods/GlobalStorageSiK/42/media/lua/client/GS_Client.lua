@@ -101,6 +101,10 @@ safeRequire("GS_WithdrawMenu")
 safeRequire("GS_TransferMenu")
 safeRequire("GS_TerminalWithdrawDrag")
 safeRequire("GS_ItemActions")
+safeRequire("GS_VanillaInventoryTaxonomy")
+if GlobalStorageSiK.VanillaInventoryTaxonomy and GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks then
+	GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks()
+end
 
 if GlobalStorageSiK.TerminalDrop and GlobalStorageSiK.TerminalDrop.installHooks then
 	GlobalStorageSiK.TerminalDrop.installHooks()

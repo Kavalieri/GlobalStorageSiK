@@ -190,15 +190,17 @@ end
 ---@param combo ISComboBox
 ---@param items table[]|nil sin uso, ver nota de arriba
 ---@param selectedKey string|nil
-function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, selectedKey)
+function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, selectedKey, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_CategoryAny"))
 	local filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then
@@ -218,7 +220,7 @@ end
 ---@param mainKey string|nil categoria principal ya elegida ("" = ninguna -> combo vacio)
 ---@param selectedKey string|nil
 ---@param items table[]|nil sin uso, ver nota de fillMainCategoryCombo
-function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, selectedKey, items)
+function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, selectedKey, items, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
@@ -227,8 +229,10 @@ function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, se
 		and GlobalStorageSiK.NativeProduct.listOptions(mainKey)
 		or {}
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then
@@ -249,7 +253,7 @@ end
 ---@param mainKey string|nil categoria de Nivel 1 ya elegida
 ---@param subKey string|nil categoria de Nivel 2 ya elegida, o "" para no restringir
 ---@param selectedKey string|nil
-function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, subKey, selectedKey)
+function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, subKey, selectedKey, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
@@ -263,8 +267,10 @@ function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, s
 			or {}
 	end
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then

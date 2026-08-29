@@ -564,13 +564,23 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 		-- avise si esta nueva regla de zona neutraliza algo ya configurado
 		-- a nivel de contenedor.
 		local containerGroups = {}
+		local scopeRules = {}
+		local zones = self.terminal and self.terminal.terminalState and self.terminal.terminalState.zones or {}
+		for i = 1, #zones do
+			local sibling = zones[i]
+			if sibling.id ~= self.zone.id then
+				for j = 1, #(sibling.rules or {}) do
+					scopeRules[#scopeRules + 1] = sibling.rules[j]
+				end
+			end
+		end
 		local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
 		for i = 1, #nodes do
 			if nodes[i].zoneId == self.zone.id and nodes[i].rules and #nodes[i].rules > 0 then
 				containerGroups[#containerGroups + 1] = { name = nodes[i].displayName or nodes[i].name or "?", rules = nodes[i].rules }
 			end
 		end
-		GlobalStorageSiK.FilterEditor.show({ kind = "zone", id = self.zone.id, rules = self.zone.rules, containerGroups = containerGroups }, op, function()
+		GlobalStorageSiK.FilterEditor.show({ kind = "zone", id = self.zone.id, rules = self.zone.rules, containerGroups = containerGroups, scopeRules = scopeRules }, op, function()
 			self:rebuildForm()
 		end)
 	end)

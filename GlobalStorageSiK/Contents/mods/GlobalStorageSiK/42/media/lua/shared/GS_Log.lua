@@ -63,6 +63,10 @@ local AREA_CATEGORY = {
 	RedistributeJob = "Inventory",
 	ItemTaxonomy = "Inventory",
 	Subcategories = "Inventory",
+	-- Proyección cliente de la taxonomía sobre la columna vanilla Categoría.
+	-- Comparte Inventario porque sus sondas son exclusivamente de ítems y se
+	-- activan solo durante la prueba dirigida de DEV31.
+	VanillaInventoryProjection = "Inventory",
 	-- Migración recuperable y acotada de protocolos legacy persistidos. Tiene
 	-- categoría propia para obtener evidencia de primera/segunda pasada sin
 	-- activar el resto del inventario ni el subsistema de permisos.
