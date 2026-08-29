@@ -9,32 +9,10 @@ require "GS_CatalogManager"
 
 GlobalStorageSiK.I18n = GlobalStorageSiK.I18n or {}
 
---- Vocales/consonantes acentuadas latinas mas comunes (ES/FR/DE/PT/IT) ->
---- su base ASCII. Pedido explicito (2026-08-17): la busqueda debe ser "por
---- mejor aproximacion", sin distinguir mayus/minus NI tildes/dieresis/cedilla
---- - un jugador que escribe "pocion" debe encontrar "Poción" igual. Cada
---- clave es un caracter UTF-8 literal (2 bytes, rango Latin-1 Supplement) -
---- los patrones de Lua tratan estos bytes como literales normales (ninguno es
---- caracter magico de patron), no hace falta escapar nada.
-local ACCENT_MAP = {
-	["á"] = "a", ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["ã"] = "a",
-	["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e",
-	["í"] = "i", ["ì"] = "i", ["î"] = "i", ["ï"] = "i",
-	["ó"] = "o", ["ò"] = "o", ["ô"] = "o", ["ö"] = "o", ["õ"] = "o",
-	["ú"] = "u", ["ù"] = "u", ["û"] = "u", ["ü"] = "u",
-	["ñ"] = "n", ["ç"] = "c", ["ý"] = "y",
-	["Á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a", ["Ã"] = "a",
-	["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
-	["Í"] = "i", ["Ì"] = "i", ["Î"] = "i", ["Ï"] = "i",
-	["Ó"] = "o", ["Ò"] = "o", ["Ô"] = "o", ["Ö"] = "o", ["Õ"] = "o",
-	["Ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
-	["Ñ"] = "n", ["Ç"] = "c", ["Ý"] = "y",
-}
-
--- Kahlua/PZ puede corromper literales no ASCII al cargar el fuente antes de
--- que el normalizador los vea (confirmado por el probe del corpus). Reconstruir
--- las mismas claves desde codepoints numéricos hace que `bidon` compare contra
--- `Bidón` con el carácter que realmente entrega java.lang.String.
+-- Vocales/consonantes latinas acentuadas (ES/FR/DE/PT/IT) -> base ASCII.
+-- No se conservan claves literales: Kahlua/PZ puede reinterpretarlas al cargar
+-- el fuente. Reconstruirlas desde codepoints numéricos cubre tanto UTF-8 como
+-- la unidad Latin-1 que puede entregar java.lang.String.
 local ACCENT_CODEPOINTS = {
 	{ 0x00E1, "a" }, { 0x00E0, "a" }, { 0x00E2, "a" }, { 0x00E4, "a" }, { 0x00E3, "a" },
 	{ 0x00E9, "e" }, { 0x00E8, "e" }, { 0x00EA, "e" }, { 0x00EB, "e" },
@@ -49,9 +27,39 @@ local ACCENT_CODEPOINTS = {
 	{ 0x00DA, "u" }, { 0x00D9, "u" }, { 0x00DB, "u" }, { 0x00DC, "u" },
 	{ 0x00D1, "n" }, { 0x00C7, "c" }, { 0x00DD, "y" },
 }
+local ACCENT_UTF8_MAP = {}
+local ACCENT_UNIT_MAP = {}
 for i = 1, #ACCENT_CODEPOINTS do
 	local pair = ACCENT_CODEPOINTS[i]
-	ACCENT_MAP[string.char(pair[1])] = pair[2]
+	local cp, base = pair[1], pair[2]
+	local unit = string.char(cp)
+	ACCENT_UNIT_MAP[unit] = base
+	if cp >= 0x80 and cp <= 0x7FF then
+		local utf8 = string.char(0xC0 + math.floor(cp / 0x40), 0x80 + (cp % 0x40))
+		if utf8 ~= unit then ACCENT_UTF8_MAP[utf8] = base end
+	end
+end
+
+local function foldLatinAccents(value)
+	local folded = {}
+	local i = 1
+	while i <= #value do
+		local consumedUtf8 = false
+		local byte = string.byte(value, i)
+		local nextByte = i < #value and string.byte(value, i + 1) or nil
+		if byte == 0xC3 and nextByte and nextByte >= 0x80 and nextByte <= 0xBF then
+			local pair = value:sub(i, i + 1)
+			folded[#folded + 1] = ACCENT_UTF8_MAP[pair] or pair
+			i = i + 2
+			consumedUtf8 = true
+		end
+		if not consumedUtf8 then
+			local unit = value:sub(i, i)
+			folded[#folded + 1] = ACCENT_UNIT_MAP[unit] or unit
+			i = i + 1
+		end
+	end
+	return table.concat(folded)
 end
 
 --- Normaliza texto de busqueda para comparacion "por mejor aproximacion":
@@ -90,9 +98,9 @@ function GlobalStorageSiK.I18n.asciiLower(s)
 		return cached
 	end
 	local result = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
-	for accented, base in pairs(ACCENT_MAP) do
-		result = result:gsub(accented, base)
-	end
+	-- Una sola lectura distingue una secuencia UTF-8 conocida de una unidad
+	-- Latin-1. Un carácter UTF-8 ajeno al mapa conserva todos sus bytes.
+	result = foldLatinAccents(result)
 	asciiLowerCache[s] = result
 	return result
 end
