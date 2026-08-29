@@ -21,10 +21,15 @@ GlobalStorageSiK = {
 	I18n = {
 		remote = function(key) return key end,
 	},
+	Libs = {
+		formatCodepoints = function() return "" end,
+	},
 	Log = {
 		info = function(category, event, detail)
 			migrationLogs[#migrationLogs + 1] = category .. ":" .. event .. ":" .. detail
 		end,
+		debug = function() end,
+		warn = function() end,
 	},
 }
 
@@ -138,7 +143,7 @@ assertEqual(Permissions.getPlayerDisplayName(adminKalva), "Kalva",
 local adminNetwork = {
 	id = "admin_kalva",
 	owner = "Kalva",
-	ownerAccount = "admin",
+	ownerAccountLogin = "admin",
 	ownerCharacterId = "account:admin|sql:909",
 	allowedUsers = {},
 	adminUsers = {},
@@ -150,10 +155,12 @@ local adminNetwork = {
 	},
 }
 registry.networks.admin_kalva = adminNetwork
+assertEqual(Permissions.canAccess(adminKalva, "admin_kalva"), true,
+	"the DEV4 dedicated owner must migrate through the authorization gate")
 assertEqual(Permissions.isOwnerPlayer(adminKalva, "admin_kalva"), true,
 	"the DEV4 dedicated owner must migrate to its UUID")
 assertEqual(adminNetwork.owner, "Kalva", "owner presentation must use the character")
-assertEqual(adminNetwork.ownerAccount, "admin", "the account must remain the authorization anchor")
+assertEqual(adminNetwork.ownerAccountLogin, "admin", "the account must remain the authorization anchor")
 assert(adminNetwork.ownerCharacterId:match("^character:gsc_") ~= nil,
 	"the migrated owner key must be the character UUID")
 assertEqual(adminNetwork.characterPermissions["account:admin|sql:909"], nil,

@@ -21,6 +21,13 @@ require "GS_NativeClassifierUtils"
 
 local U = GlobalStorageSiK.NativeClassifierUtils
 
+-- Ancla exacta DEV32.3: el catálogo vanilla identifica el soplete como
+-- herramienta de metalurgia incluso cuando el tag de la partida no está
+-- disponible todavía durante el arranque del catálogo.
+local EXACT = {
+	["Base.BlowTorch"] = { l2 = "construction", l3 = "metalworking" },
+}
+
 --- Orden fijo de comprobación: { l2, l3, lista de nombres de ItemTag.XXX }.
 --- Los nombres de tag son constantes reales del motor (confirmadas en
 --- Documentacion/GSSiK_Taxonomia_Nativa_Analisis.md §3.2) - se resuelven
@@ -77,6 +84,10 @@ end
 -- resolver casos de arma pura mal etiquetada (si los hay) con excepciones
 -- EXACTAS por fullType, nunca con una regla global de precedencia.
 local function classifyTools(fullType, si)
+	local exact = EXACT[fullType]
+	if exact then
+		return { l1 = "tools", l2 = exact.l2, l3 = exact.l3 }, {}, {}, U.evidence("exact_fulltype_tool", 100)
+	end
 	if not si then return nil end
 	for i = 1, #RESOLVED_RULES do
 		local rule = RESOLVED_RULES[i]

@@ -153,6 +153,17 @@ function GS_TerminalTabSlot:render()
 			self:drawText(firstChar, iconX + (iconSize - tw) / 2, iconY + (iconSize - FONT_HGT_MEDIUM) / 2, r, g, b, a, UIFont.Medium)
 		end
 	end
+	if self.alertCount and self.alertCount > 0 then
+		local ar, ag, ab = 0.92, 0.35, 0.3
+		if self.alertLevel == "amber" then ar, ag, ab = 0.92, 0.75, 0.35 end
+		local alertSize = math.max(11, math.floor(self.width * 0.22))
+		local alertX, alertY = self.width - alertSize - 3, 3
+		self:drawRect(alertX, alertY, alertSize, alertSize, 0.96, ar * 0.25, ag * 0.25, ab * 0.25)
+		self:drawRectBorder(alertX, alertY, alertSize, alertSize, 0.95, ar, ag, ab)
+		local markW = getTextManager():MeasureStringX(UIFont.Small, "!")
+		self:drawText("!", alertX + math.floor((alertSize - markW) / 2),
+			alertY + math.floor((alertSize - FONT_HGT_SMALL) / 2), ar, ag, ab, 1, UIFont.Small)
+	end
 end
 
 --- Panel lateral de pestañas.
@@ -257,11 +268,19 @@ end
 
 function GS_TerminalTabRail:syncSelection()
 	local active = self.terminal and self.terminal.activeTabKey or "items"
+	local networkIncident = self.terminal and self.terminal.networkIncident or nil
 	for key, slot in pairs(self.tabSlots) do
 		if slot.setSelected then
 			slot:setSelected(key == active)
 		else
 			slot.isSelected = (key == active)
+		end
+		if key == "network" and networkIncident and networkIncident.count > 0 then
+			slot.alertCount = networkIncident.count
+			slot.alertLevel = networkIncident.level
+			slot.alertTooltip = networkIncident.tooltip
+		else
+			slot.alertCount, slot.alertLevel, slot.alertTooltip = nil, nil, nil
 		end
 	end
 end
@@ -284,7 +303,8 @@ function GS_TerminalTabRail:showFlyoutForSlot(slot)
 		return
 	end
 	local tm = getTextManager()
-	local textW = tm:MeasureStringX(UIFont.Small, slot.displayName) + 16
+	local flyoutText = slot.alertTooltip or slot.displayName
+	local textW = tm:MeasureStringX(UIFont.Small, flyoutText) + 16
 	local flyH = FONT_HGT_SMALL + 10
 	if not self.flyoutLbl then
 		self.flyoutLbl = ISPanel:new(-200, 0, textW, flyH)
@@ -300,7 +320,7 @@ function GS_TerminalTabRail:showFlyoutForSlot(slot)
 		end
 		self:addChild(self.flyoutLbl)
 	end
-	self.flyoutLbl._flyoutText = slot.displayName
+	self.flyoutLbl._flyoutText = flyoutText
 	self.flyoutLbl:setWidth(textW)
 	self.flyoutLbl:setHeight(flyH)
 	self.flyoutLbl:setX(-textW - 4)

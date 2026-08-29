@@ -404,6 +404,21 @@ function GS_NodeEditorUI:requestRebindProposal(targetNodeId)
 	self.terminal:onRequestRebindProposal(self.node.id, targetNodeId)
 end
 
+function GS_NodeEditorUI:requestConfigTransferProposal(targetNodeId)
+	if not self.node or not self.terminal then return end
+	self.terminal:onRequestConfigTransferProposal(self.node.id, targetNodeId)
+end
+
+function GS_NodeEditorUI:confirmConfigTransferProposal(proposal)
+	if not proposal or not proposal.token or not self.node or not self.terminal
+		or proposal.sourceId ~= self.node.id then return end
+	local sourceName = self.node.displayName or self.node.name or "?"
+	local targetName = proposal.targetName or "?"
+	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_NodeTransferConfigConfirm", sourceName, targetName), function()
+		self.terminal:onTransferNodeConfiguration(self.node.id, proposal.token)
+	end)
+end
+
 -- La lista nunca se infiere en cliente: llega ya filtrada por el servidor y
 -- solo sirve para que el jugador elija cuando hay más de un destino válido.
 function GS_NodeEditorUI:showRebindCandidates(response)
@@ -536,6 +551,42 @@ function GS_NodeEditorUI:ensureForm()
 	self.occupancyLbl:initialise()
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
+	if node.offline == true then
+		local recoveryBody = T("IGUI_GS_NodeRecoveryBody")
+		local bodyLines = GlobalStorageSiK.SiK_UI.wrapTextLines(recoveryBody, innerW - 16, UIFont.Small)
+		local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(node.rules or {}, innerW - 16,
+			UIFont.Small, GlobalStorageSiK.SiK_UI.PALETTE.textSecondary)
+		local cardH = FONT_HGT_SMALL + (#bodyLines + summaryLayout.lineCount) * (FONT_HGT_SMALL + 2) + BTN_H * 2 + 28
+		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, y, innerW - pad, cardH,
+			GlobalStorageSiK.SiK_UI.PALETTE.statusDanger)
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+		local cy = y + 8
+		local title = ISLabel:new(pad + 8, cy, FONT_HGT_SMALL, T("IGUI_GS_NodeRecoveryTitle"), 0.92, 0.35, 0.3, 1, UIFont.Small, true)
+		title:initialise(); GlobalStorageSiK.TerminalScroll.addChild(scroll, title); cy = cy + FONT_HGT_SMALL + 3
+		for _, line in ipairs(bodyLines) do
+			local label = ISLabel:new(pad + 8, cy, FONT_HGT_SMALL, line, 0.72, 0.74, 0.78, 1, UIFont.Small, true)
+			label:initialise(); GlobalStorageSiK.TerminalScroll.addChild(scroll, label); cy = cy + FONT_HGT_SMALL + 2
+		end
+		self.recoverySummaryHost = ISPanel:new(pad + 8, cy, innerW - 16,
+			math.max(FONT_HGT_SMALL, summaryLayout.lineCount * (FONT_HGT_SMALL + 2)))
+		self.recoverySummaryHost:initialise()
+		self.recoverySummaryHost.drawBackground = false
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.recoverySummaryHost)
+		addSummaryRuns(self.recoverySummaryHost, summaryLayout, 0)
+		cy = cy + self.recoverySummaryHost.height + 2
+		self.recoveryTransferBtn = createBtn(pad + 8, cy + 3, innerW - pad - 16, T("IGUI_GS_NodeBtnTransferConfig"), scroll, function()
+			self:requestConfigTransferProposal()
+		end)
+		self.recoveryTransferBtn:setTooltip(T("IGUI_GS_NodeTransferConfigTip"))
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.recoveryTransferBtn)
+		self.recoveryRemoveBtn = GlobalStorageSiK.SiK_UI.createButton(pad + 8, cy + BTN_H + 7,
+			innerW - pad - 16, BTN_H, T("IGUI_GS_NodeBtnRemove"), scroll, function()
+			self:confirmRemoveFromNetwork()
+		end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
+		self.recoveryRemoveBtn:setTooltip(T("IGUI_GS_NodeRemoveTooltip"))
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.recoveryRemoveBtn)
+		y = y + cardH + 10
+	end
 
 	-- ── Nombre (Aplicar unificado mas abajo, junto a Prioridad y Notas) ─────
 	self.nameLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NodeRenameLabel"))

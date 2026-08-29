@@ -186,7 +186,9 @@ local NODE_TABLE_COLUMNS = {
 		measureValues = { "100" }, measurePad = 12 },
 	{ key = "status", titleKey = "IGUI_GS_ColStatus", align = "center",
 		measureValues = { T("IGUI_GS_NodeStatusOk"), T("IGUI_GS_NodeStatusOffShort"),
-			T("IGUI_GS_NodeStatusErrorShort") }, measurePad = 12 },
+			T("IGUI_GS_NodeStatusErrorShort"), T("IGUI_GS_NodeStatusOffline"),
+			T("IGUI_GS_NodeStatusExcluded"), T("IGUI_GS_NodeStatusDisabled"),
+			T("IGUI_GS_NodeStatusNew"), T("IGUI_GS_NodeStatusConflict") }, measurePad = 12 },
 	{ key = "occupancy", titleKey = "IGUI_GS_ColOccupancy", align = "center",
 		measureValues = { "100%" }, measurePad = 12 },
 }
@@ -260,6 +262,34 @@ local function updateProtocolTooltip(panel, protocolCol, fullSummary, enabled)
 	end
 end
 
+--- Muestra el detalle de un estado de nodo o de una incidencia agregada.
+---@param panel ISPanel
+---@param statusCol table
+---@param title string
+---@param description string|nil
+local function updateStatusTooltip(panel, statusCol, title, description)
+	local overStatus = description and panel:isMouseOver()
+		and panel:getMouseX() >= statusCol.x and panel:getMouseX() < statusCol.finish
+	if overStatus then
+		if not panel._gsStatusTooltip then
+			panel._gsStatusTooltip = ISToolTip:new()
+			panel._gsStatusTooltip:initialise()
+			panel._gsStatusTooltip:instantiate()
+			panel._gsStatusTooltip:setOwner(panel)
+		end
+		panel._gsStatusTooltip:setName(title)
+		panel._gsStatusTooltip:setDescription(description)
+		panel._gsStatusTooltip:setVisible(true)
+		panel._gsStatusTooltip:addToUIManager()
+		panel._gsStatusTooltip:bringToTop()
+		panel._gsStatusTooltip:setX(getMouseX() + 16)
+		panel._gsStatusTooltip:setY(getMouseY() + 16)
+	elseif panel._gsStatusTooltip and panel._gsStatusTooltip:isVisible() then
+		panel._gsStatusTooltip:removeFromUIManager()
+		panel._gsStatusTooltip:setVisible(false)
+	end
+end
+
 --- Calcula el layout completo de columnas de la tabla de nodos a partir del
 --- ancho disponible. Unica fuente de verdad para cabecera, filas y clics.
 --- Orden (pedido explicito del usuario, ronda de ajuste de espacio):
@@ -274,38 +304,57 @@ local function nodeColumnLayout(w)
 	return GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, NODE_TABLE_COLUMNS, NODE_TABLE_OPTIONS)
 end
 
---- Texto de estado del nodo para la tabla: solo indica si su inventario es
---- accesible para operar (OK) o no (ERROR), en vez de detalles internos de
---- membresia que confundian mas de lo que aclaraban (p.ej. "Detectado
---- automaticamente" sonaba a aviso, no a que todo funciona bien).
+--- Estado visible y detalle accionable de un nodo. La tabla no vuelve a usar
+--- ERR como cajón: cada estado explica su causa en el tooltip.
 ---@param node table
----@return string
-local function nodeStatusText(node)
-	-- dev26, ronda 2 (ver §4.5 del plan): un contenedor EXCLUIDO es una
-	-- decision deliberada del jugador, no un fallo - antes compartia el
-	-- mismo texto "ERROR" que un contenedor offline/inaccesible, indistinguible
-	-- en la tabla. Ambos siguen en rojo, pero con su propia etiqueta.
-	-- dev24: esta tabla usa las variantes CORTAS (OFF/ERR/OK) para que el
-	-- descriptor reserve un hueco pequeno y constante - el texto largo
-	-- ("Excluded from network"/"ERROR") se sigue usando en el editor de
-	-- contenedor y en el detalle de zona, solo esta tabla es corta.
+---@return table info
+local function nodeStatusInfo(node)
+	if node.offline then
+		return { key = "offline", label = T("IGUI_GS_NodeStatusOffline"),
+			detail = T("IGUI_GS_NodeStatusOfflineTip"), r = 0.92, g = 0.35, b = 0.3, incident = "red" }
+	end
+	if node.physicalAnomaly then
+		return { key = "conflict", label = T("IGUI_GS_NodeStatusConflict"),
+			detail = T("IGUI_GS_NodeStatusConflictTip"), r = 0.92, g = 0.35, b = 0.3, incident = "red" }
+	end
 	if node.membership == "excluded" then
-		return T("IGUI_GS_NodeStatusOffShort")
+		return { key = "excluded", label = T("IGUI_GS_NodeStatusExcluded"),
+			detail = T("IGUI_GS_NodeStatusExcludedTip"), r = 0.75, g = 0.78, b = 0.82 }
 	end
-	if node.offline or node.enabled == false then
-		return T("IGUI_GS_NodeStatusErrorShort")
+	if node.enabled == false then
+		return { key = "disabled", label = T("IGUI_GS_NodeStatusDisabled"),
+			detail = T("IGUI_GS_NodeStatusDisabledTip"), r = 0.92, g = 0.75, b = 0.35 }
 	end
-	return T("IGUI_GS_NodeStatusOk")
+	if node.membership == "auto" and node.discoveredAtMs and node.lastSeenMs
+		and node.discoveredAtMs == node.lastSeenMs then
+		return { key = "new", label = T("IGUI_GS_NodeStatusNew"),
+			detail = T("IGUI_GS_NodeStatusNewTip"), r = 0.45, g = 0.7, b = 0.95 }
+	end
+	return { key = "ok", label = T("IGUI_GS_NodeStatusOk"), r = 0.45, g = 0.85, b = 0.45 }
 end
 
---- Color del texto de estado: rojo si excluido o el inventario no es accesible, verde si OK.
----@param node table
----@return number, number, number
-local function nodeStatusColor(node)
-	if node.membership == "excluded" or node.offline or node.enabled == false then
-		return 0.92, 0.35, 0.3
+local function nodeStatusText(node)
+	return nodeStatusInfo(node).label
+end
+
+--- Incidencias que requieren revisión humana, no elecciones explícitas de
+--- exclusión/desactivación. Se reutiliza en cabecera de zona y pestaña Red.
+---@param list table[]|nil
+---@return table info
+local function incidentInfo(list)
+	local count, hasRed = 0, false
+	for i = 1, #(list or {}) do
+		local info = nodeStatusInfo(list[i])
+		if info.incident then
+			count = count + 1
+			hasRed = hasRed or info.incident == "red"
+		end
 	end
-	return 0.45, 0.85, 0.45
+	return { count = count, level = hasRed and "red" or (count > 0 and "amber" or nil) }
+end
+
+function GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo(nodes)
+	return incidentInfo(nodes)
 end
 
 --- Texto + color de la columna "% Ocupación" - mismos umbrales que la barra
@@ -474,6 +523,7 @@ local function buildGroupedDisplayRows(nodes, zones, collapsedZones, sortColumn,
 			zoneEnabled = zoneEnabledMap[zoneId],
 			zoneRules = zoneRulesMap[zoneId],
 			zoneOccupancy = zoneOccupancyMap[zoneId],
+			zoneIncident = incidentInfo(list),
 			collapsed = collapsed,
 		}
 		if not collapsed then
@@ -586,10 +636,23 @@ local function createNodeRow(scroll, listPanel, terminal)
 			-- no se deriva desde una columna vecina.
 			self:drawText(truncateText(zLabel, zTextW, UIFont.Small), zTextX,
 				yMid, zr, zg, zb, 1, UIFont.Small)
-			local zStatusText = zoneExcluded and T("IGUI_GS_NodeStatusOffShort") or T("IGUI_GS_NodeStatusOk")
+			local zoneIncident = data.zoneIncident or { count = 0 }
+			local zStatusText = zoneExcluded and T("IGUI_GS_NodeStatusExcluded") or T("IGUI_GS_NodeStatusOk")
 			local zsr, zsg, zsb = 0.45, 0.85, 0.45
-			if zoneExcluded then zsr, zsg, zsb = 0.92, 0.35, 0.3 end
+			local zStatusDetail = zoneExcluded and T("IGUI_GS_NodeStatusExcludedTip") or nil
+			if zoneExcluded then
+				zsr, zsg, zsb = 0.75, 0.78, 0.82
+			elseif zoneIncident.count > 0 then
+				zStatusText = "! " .. tostring(zoneIncident.count)
+				zStatusDetail = T("IGUI_GS_ZoneIncidentTip", zoneIncident.count)
+				if zoneIncident.level == "red" then
+					zsr, zsg, zsb = 0.92, 0.35, 0.3
+				else
+					zsr, zsg, zsb = 0.92, 0.75, 0.35
+				end
+			end
 			self:drawTextCentre(zStatusText, statusCol.x + math.floor(statusCol.width / 2), yMid, zsr, zsg, zsb, 1, UIFont.Small)
+			updateStatusTooltip(self, statusCol, T("IGUI_GS_NodeStatusTipTitle"), zStatusDetail)
 			local zOccText, zor, zog, zob = occupancyDisplay(data.zoneOccupancy)
 			self:drawTextCentre(zOccText, occupancyCol.x + math.floor(occupancyCol.width / 2), yMid, zor, zog, zob, 1, UIFont.Small)
 			updateProtocolTooltip(self, protocolCol,
@@ -612,7 +675,8 @@ local function createNodeRow(scroll, listPanel, terminal)
 			columns[1], columns[2], columns[3], columns[4], columns[5]
 		local nameX, protocolX = nameCol.x, protocolCol.x
 		local name = node.displayName or node.name or "?"
-		local status = nodeStatusText(node)
+		local statusInfo = nodeStatusInfo(node)
+		local status = statusInfo.label
 		local priority = tostring(node.priority or 50)
 		self:drawText(truncateText(name, protocolX - nameX - 8, UIFont.Small), nameX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		self:drawTextCentre(priority, priorityCol.x + math.floor(priorityCol.width / 2), yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
@@ -626,8 +690,9 @@ local function createNodeRow(scroll, listPanel, terminal)
 		self:drawText(truncateText(label, textW, UIFont.Small), textX, yMid,
 			pr, pg, pb, 1, UIFont.Small)
 
-		local sr, sg, sb = nodeStatusColor(node)
-		self:drawTextCentre(status, statusCol.x + math.floor(statusCol.width / 2), yMid, sr, sg, sb, 1, UIFont.Small)
+		self:drawTextCentre(status, statusCol.x + math.floor(statusCol.width / 2), yMid,
+			statusInfo.r, statusInfo.g, statusInfo.b, 1, UIFont.Small)
+		updateStatusTooltip(self, statusCol, T("IGUI_GS_NodeStatusTipTitle"), statusInfo.detail)
 
 		local occText, ocr, ocg, ocb = occupancyDisplay(node.occupancyPercent)
 		self:drawTextCentre(occText, occupancyCol.x + math.floor(occupancyCol.width / 2), yMid, ocr, ocg, ocb, 1, UIFont.Small)

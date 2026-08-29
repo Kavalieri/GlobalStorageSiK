@@ -101,6 +101,7 @@ safeRequire("GS_WithdrawMenu")
 safeRequire("GS_TransferMenu")
 safeRequire("GS_TerminalWithdrawDrag")
 safeRequire("GS_ItemActions")
+safeRequire("GS_DisplayCategoryPublisher")
 safeRequire("GS_VanillaInventoryTaxonomy")
 if GlobalStorageSiK.VanillaInventoryTaxonomy and GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks then
 	GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks()
@@ -191,6 +192,8 @@ local function onServerCommand(module, command, args)
 				GlobalStorageSiK.TerminalNodeEditor.instance:showRebindCandidates(args)
 			elseif args.rebindProposal then
 				GlobalStorageSiK.TerminalNodeEditor.instance:confirmRebindProposal(args)
+			elseif args.configTransferProposal then
+				GlobalStorageSiK.TerminalNodeEditor.instance:confirmConfigTransferProposal(args)
 			end
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then

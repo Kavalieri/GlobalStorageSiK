@@ -29,15 +29,17 @@
 
 GlobalStorageSiK.CatalogManager = GlobalStorageSiK.CatalogManager or {}
 
---- Version interna del clasificador nativo - se incrementa cuando cambia el
---- comportamiento de clasificacion en si (no cuando solo cambian datos), para
---- que un catalogFingerprint calculado con una version vieja del codigo nunca
---- se confunda con uno calculado con la version nueva.
+--- Version interna del clasificador nativo. Se incrementa con un cambio de
+--- comportamiento o con rutas publicadas nuevas que alteren el resultado de un
+--- fullType, para que un catalogFingerprint anterior no se confunda con uno
+--- calculado con el contrato de rutas nuevo.
 -- dev27: bump obligatorio (GS_NativeTaxonomyRegistry.lua:19) - se retira la
 -- clave containers.wearable.backpack y se sustituye por
 -- clothing_protection.equipment.backpack (mochilas vestibles pasan a Ropa/
 -- Equipamiento, decision de producto de sistemas para DEV27).
-local CLASSIFIER_SCHEMA = "2"
+-- DEV32.3: nuevas hojas estables y anclas exactas de Materiales/Herramientas.
+-- El bump separa las cachés/fingerprints previos de las rutas L3 nuevas.
+local CLASSIFIER_SCHEMA = "4"
 
 local state = {
 	catalogEpoch = 0,

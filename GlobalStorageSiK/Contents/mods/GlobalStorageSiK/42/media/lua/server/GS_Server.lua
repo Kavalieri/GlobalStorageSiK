@@ -16,6 +16,8 @@ require "GS_Config"
 
 require "GS_I18n"
 
+require "GS_DisplayCategoryPublisher"
+
 require "GS_Utils"
 
 require "GS_Sandbox"
@@ -360,6 +362,9 @@ local function serializeNodes(networkId, player)
 				membership = n.membership or "auto",
 				offline = n.offline == true,
 				enabled = n.enabled ~= false,
+				physicalAnomaly = n.physicalAnomaly,
+				discoveredAtMs = n.discoveredAtMs,
+				lastSeenMs = n.lastSeenMs,
 				priority = n.priority or 50,
 				itemTypeCount = countSnapshotTypes(n.itemSnapshot),
 				x = n.x,
@@ -2033,6 +2038,70 @@ local function consumeRebindProposal(player, networkId, sourceId, token)
 	return target, nil
 end
 
+-- La transferencia manual no es una revinculación relajada. Solo considera un
+-- alta limpia, posterior y resoluble en la misma baldosa/compartimento del
+-- registro offline; la firma puede diferir porque el jugador sustituyó el
+-- cofre. El token conserva las mismas garantías anti-cambio que rebind.
+local function manualTransferCandidate(registry, networkId, sourceId, requestedTargetId)
+	local source = registry.nodes and registry.nodes[sourceId]
+	if not source or not rebindNodeZone(registry, source, networkId) or source.offline ~= true then
+		return nil, "source_not_found"
+	end
+	local target = requestedTargetId and registry.nodes[tostring(requestedTargetId)] or nil
+	if not target and not requestedTargetId then
+		for id, candidate in pairs(registry.nodes or {}) do
+			if id ~= sourceId and candidate.offline ~= true
+				and candidate.x == source.x and candidate.y == source.y and candidate.z == source.z
+				and candidate.containerIndex == source.containerIndex
+				and GlobalStorageSiK.Zones.isCleanAutomaticNode(candidate) then
+				target = candidate
+				break
+			end
+		end
+	end
+	if not target or not rebindNodeZone(registry, target, networkId)
+		or target.offline == true or not GlobalStorageSiK.Zones.isCleanAutomaticNode(target)
+		or target.x ~= source.x or target.y ~= source.y or target.z ~= source.z
+		or target.containerIndex ~= source.containerIndex
+		or not target.discoveredAtMs or not source.lastSeenMs
+		or target.discoveredAtMs <= source.lastSeenMs or not isResolvableStorageNode(target) then
+		return source, "no_same_position_candidate"
+	end
+	return source, target
+end
+
+local function createManualTransferProposal(player, networkId, sourceId, targetId)
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local source, targetOrReason = manualTransferCandidate(registry, networkId, sourceId, targetId)
+	if not source or type(targetOrReason) == "string" then return nil, targetOrReason end
+	local target = targetOrReason
+	rebindProposalCounter = rebindProposalCounter + 1
+	local token = "transfer-" .. tostring(rebindProposalCounter) .. "-" .. tostring(player:getUsername())
+	local now = getTimestampMs and getTimestampMs() or 0
+	rebindProposals[token] = {
+		kind = "manualTransfer", username = player:getUsername(), networkId = networkId,
+		sourceId = sourceId, targetId = target.id, revision = rebindRevision(source, target),
+		expiresMs = now + REBIND_PROPOSAL_MS,
+	}
+	return { token = token, targetId = target.id, targetName = target.displayName or target.name or "?",
+		targetZoneId = target.zoneId, targetX = target.x, targetY = target.y, targetZ = target.z }, nil
+end
+
+local function consumeManualTransferProposal(player, networkId, sourceId, token)
+	local proposal = token and rebindProposals[token] or nil
+	if token then rebindProposals[token] = nil end
+	local now = getTimestampMs and getTimestampMs() or 0
+	if not proposal or proposal.kind ~= "manualTransfer" or proposal.username ~= player:getUsername()
+		or proposal.networkId ~= networkId or proposal.sourceId ~= sourceId
+		or now > (proposal.expiresMs or 0) then return nil, "expired" end
+	local source, targetOrReason = manualTransferCandidate(GlobalStorageSiK.Zones.getRegistry(), networkId,
+		sourceId, proposal.targetId)
+	if not source or type(targetOrReason) == "string" then return nil, targetOrReason end
+	local target = targetOrReason
+	if proposal.revision ~= rebindRevision(source, target) then return nil, "changed" end
+	return target, nil
+end
+
 --- Inicia/reengancha un reescaneo incremental. El estado inicial se sirve
 --- desde snapshots ya persistidos; el job enviara el resultado fresco solo a
 --- quienes observen esta red cuando termine.
@@ -3134,7 +3203,11 @@ local function onClientCommand(module, command, player, args)
 		end
 
 	elseif command == "rescanNetwork" then
-		if not requireTerminalAccess(player, networkId) then
+		-- DEV32.3: abrir el almacen sigue actualizando para cualquier miembro
+		-- autorizado; forzar un reescaneo/cancelarlo es mantenimiento de la
+		-- topologia y solo pertenece a owner/admin DE ESTA red. El rango staff
+		-- del servidor no participa en este contrato (panel de soporte aparte).
+		if not requireAdminAccess(player, networkId) then
 			return
 		end
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
@@ -3656,10 +3729,16 @@ local function onClientCommand(module, command, player, args)
 		runLockedTransfer(player, networkId, "withdrawItem", function()
 			local dest = nil
 			if args.targetKey and args.targetKey ~= "" then
-				dest = GlobalStorageSiK.DepositSources.resolveContainerKey(player, args.targetKey)
-				if dest and (GlobalStorageSiK.DepositSources.isNetworkNodeContainer(dest)
-					or not GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, dest)) then
-					dest = nil
+				local targetReason = nil
+				dest, targetReason = GlobalStorageSiK.DepositSources.resolveExternalTarget(player, args.targetKey)
+				if not dest then
+					gsSendServerCommand(player, "actionResult", {
+						ok = false,
+						message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawTargetUnavailable"),
+						transfer = { op = "withdraw", networkId = networkId, moved = 0,
+							reason = targetReason or "target_unavailable" },
+					})
+					return
 				end
 			end
 
@@ -3783,7 +3862,7 @@ local function onClientCommand(module, command, player, args)
 	-- por lo que estos handlers se aislan: no volver a inlinearlos aqui.
 	elseif command == "rescanZone" then
 		return (function()
-		if not requireTerminalAccess(player, networkId) then
+		if not requireAdminAccess(player, networkId) then
 			return
 		end
 		if GlobalStorageSiK.RedistributeJob.isActive(networkId) then
@@ -3975,6 +4054,44 @@ local function onClientCommand(module, command, player, args)
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 		GlobalStorageSiK.Log.info("Zones", "logical node rebound network=" .. tostring(networkId)
 			.. " from=" .. sourceId .. " to=" .. targetId .. " by=" .. tostring(player:getUsername()))
+		gsSendServerCommand(player, "actionResult", { ok = true,
+			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeReboundMsg") })
+		pushTerminalState(player, networkId, nil, searchQuery)
+		end)()
+
+	elseif command == "requestConfigTransferProposal" then
+		return (function()
+		if not requireAdminAccess(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local sourceId = tostring(args.nodeId or "")
+		local targetId = args.targetNodeId and tostring(args.targetNodeId) or nil
+		local proposal, reason = createManualTransferProposal(player, networkId, sourceId, targetId)
+		if not proposal then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected"),
+				configTransferProposal = true, reason = reason })
+			return
+		end
+		proposal.ok = true
+		proposal.configTransferProposal = true
+		proposal.sourceId = sourceId
+		gsSendServerCommand(player, "actionResult", proposal)
+		end)()
+
+	elseif command == "transferNodeConfiguration" then
+		return (function()
+		if not requireAdminAccess(player, networkId) then return end
+		if not blockIfNetworkJobRunning(player, networkId) then return end
+		local sourceId = tostring(args.nodeId or "")
+		local target, reason = consumeManualTransferProposal(player, networkId, sourceId, args.transferToken)
+		if not target or not GlobalStorageSiK.Zones.transferConfigurationAtSamePosition(sourceId, target.id, networkId) then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected"), reason = reason })
+			return
+		end
+		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.Log.info("Zones", "manual configuration transfer network=" .. tostring(networkId)
+			.. " from=" .. sourceId .. " to=" .. target.id .. " by=" .. tostring(player:getUsername()))
 		gsSendServerCommand(player, "actionResult", { ok = true,
 			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeReboundMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)

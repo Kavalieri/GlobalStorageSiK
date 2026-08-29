@@ -76,7 +76,7 @@ local TREE = {
 	},
 	materials = {
 		metal = {}, wood = {}, textile = {}, leather_hide = {}, mineral = {},
-		component = {}, organic = {},
+		component = { "adhesive", "fastener", "welding_consumable" }, organic = {},
 	},
 	medicine = {
 		-- L3 poblado 2026-08-27 junto con GS_NativeClassifierMedicine.lua

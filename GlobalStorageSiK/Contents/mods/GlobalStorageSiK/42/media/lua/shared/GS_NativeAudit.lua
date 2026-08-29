@@ -48,19 +48,20 @@ local INTERNAL_OR_DEBUG_TOKENS = {
 }
 local MAX_SAMPLES_INTERNAL_OR_DEBUG = 40
 
--- dev29: unica exclusion interna con frontera estructural confirmada en TEST.
--- Los 94 proxies observados (ZedDmg, stubble, intestinos y huesos de mods)
--- comparten BodyLocation=base:zeddmg. No se usan palabras del nombre: un
--- objeto jugable que contenga "bone"/"debug" no queda oculto por accidente.
-local INTERNAL_EXCLUSION_BODY_LOCATION = "base:zeddmg"
+-- Exclusiones internas con frontera estructural confirmada. Nunca se usan
+-- palabras del nombre: un objeto jugable que contenga "bone"/"debug" no
+-- queda oculto por accidente. `base:wound` son proxies anatómicos del motor,
+-- no objetos obtenibles; el censo DEV32.3 los separa de los ítems visibles
+-- antes de exigir cobertura completa de éstos.
+local INTERNAL_EXCLUSION_BODY_LOCATIONS = {
+	["base:zeddmg"] = "body_location_zeddmg",
+	["base:wound"] = "body_location_wound",
+}
 
 ---@param si table|nil
 ---@return string|nil reason
 local function internalExclusionReason(si)
-	if GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si) == INTERNAL_EXCLUSION_BODY_LOCATION then
-		return "body_location_zeddmg"
-	end
-	return nil
+	return INTERNAL_EXCLUSION_BODY_LOCATIONS[GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si)]
 end
 
 -- Probes controlados pedidos por sistemas (dev13, informe sobre dev12):
@@ -112,6 +113,32 @@ local function addSample(list, value, limit)
 	if #list < (limit or MAX_SAMPLES_PER_BUCKET) then
 		list[#list + 1] = value
 	end
+end
+
+-- Censo completo DEV32.3: una fila por ScriptItem recorrido. Es evidencia de
+-- servidor para decidir cobertura; no alimenta la UI ni altera el resultado
+-- del clasificador. La ruta nativa sigue siendo la unica autoridad.
+---@param report table
+---@param fullType string
+---@param outcome string
+---@param path table|nil
+---@param evidence table|nil
+---@param reason string|nil
+---@param si table|nil
+local function addCensusRecord(report, fullType, outcome, path, evidence, reason, si)
+	local primary = evidence and evidence.primary
+	path = path or {}
+	report.censusInventory[#report.censusInventory + 1] = {
+		fullType = fullType,
+		outcome = outcome,
+		l1 = path.l1 or "",
+		l2 = path.l2 or "",
+		l3 = path.l3 or "",
+		source = (primary and primary.source) or "",
+		confidence = (primary and primary.confidence) or "",
+		reason = reason or "",
+		bodyLocation = GlobalStorageSiK.NativeClassifierUtils.bodyLocation(si),
+	}
 end
 
 --- Ejecuta la auditoria completa. Debe llamarse explicitamente (comando de
@@ -171,6 +198,7 @@ function GlobalStorageSiK.NativeAudit.run()
 		-- red ni se muestra en la UI (ver GS_Server.lua).
 		unclassifiedInventory = {},
 		excludedInternalInventory = {},
+		censusInventory = {},        -- una fila por fullType, solo fichero server-side DEV32.3
 		tokenFrequency = {},
 		moduleFrequency = {},
 		likelyInternalOrDebugCount = 0,
@@ -302,9 +330,11 @@ function GlobalStorageSiK.NativeAudit.run()
 				-- viniendo de getAllItems(), pero se cuenta como error
 				-- estructural si ocurre.
 				report.classifierErrors = report.classifierErrors + 1
+				addCensusRecord(report, fullType, "classifier_error", nil, nil, "missing_result", si)
 			elseif result.pending then
 				report.pending = report.pending + 1
 				addSample(report.samples.pending, fullType)
+				addCensusRecord(report, fullType, "pending", result.primaryPath, result.evidence, "catalog_pending", si)
 			elseif result.classifierError then
 				-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de
 				-- sistemas): antes una excepcion real dentro de un bloque
@@ -316,6 +346,8 @@ function GlobalStorageSiK.NativeAudit.run()
 				local reasons = result.evidence and result.evidence.conflicting
 				addSample(report.samples.classifierErrors,
 					fullType .. (reasons and (" -> " .. table.concat(reasons, " | ")) or ""))
+				addCensusRecord(report, fullType, "classifier_error", result.primaryPath, result.evidence,
+					"classifier_error", si)
 			else
 				local path = result.primaryPath or {}
 				local l1, l2, l3 = path.l1, path.l2, path.l3
@@ -386,6 +418,7 @@ function GlobalStorageSiK.NativeAudit.run()
 							reason = exclusionReason,
 							bodyLocation = GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si),
 						}
+						addCensusRecord(report, fullType, "excluded_internal", path, result.evidence, exclusionReason, si)
 					else
 						report.unclassified = report.unclassified + 1
 						addSample(report.samples.unclassified, fullType)
@@ -420,6 +453,7 @@ function GlobalStorageSiK.NativeAudit.run()
 						ammoType = ammoTypeRaw and tostring(ammoTypeRaw) or "",
 						tokens = table.concat(nameTokens2, " "),
 						}
+						addCensusRecord(report, fullType, "unclassified", path, result.evidence, "no_native_rule", si)
 					end
 				else
 					report.classified = report.classified + 1
@@ -448,6 +482,10 @@ function GlobalStorageSiK.NativeAudit.run()
 					addSample(report.samples.invalidPath,
 						fullType .. " -> " .. tostring(l1) .. "/" .. tostring(l2) .. "/" .. tostring(l3))
 				end
+				if not (l1 == "other" and l2 == "unclassified_modded") then
+					addCensusRecord(report, fullType, pathOk and "classified" or "invalid_path", path,
+						result.evidence, pathOk and nil or "taxonomy_registry_rejected", si)
+				end
 			end
 		end
 	end
@@ -455,6 +493,7 @@ function GlobalStorageSiK.NativeAudit.run()
 		+ report.pending + report.classifierErrors
 	report.reconciliationDelta = report.totalTypes - report.reconciledTotal
 	table.sort(report.excludedInternalInventory, function(a, b) return a.fullType < b.fullType end)
+	table.sort(report.censusInventory, function(a, b) return a.fullType < b.fullType end)
 	-- Diff de mapeos exactos del grupo 14 (pedido explicito): compara la
 	-- tabla EXACT de GS_NativeClassifierOwnItems.lua contra el catalogo REAL
 	-- ya recorrido, y contra los modulos/discos que AddonRegistry dice que
@@ -515,6 +554,7 @@ local REPORT_FILE_NAME = "GlobalStorageSiK_NativeAudit.log"
 -- con ".log" (GlobalStorageSiK_NativeAudit.log). Contenido sigue siendo
 -- tabulado (TSV real), solo cambia la extensión admitida.
 local UNCLASSIFIED_TSV_NAME = "GlobalStorageSiK_NativeAudit_Unclassified.log"
+local CENSUS_TSV_NAME = "GlobalStorageSiK_NativeAudit_Census.log"
 
 ---@param n number|nil
 ---@return string
@@ -647,6 +687,11 @@ function GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 		else
 			writer:write("--- Inventario completo de lo sin clasificar: NO GENERADO (" .. tostring(report.unclassifiedTsvError) .. ") ---\r\n")
 		end
+		if report.censusTsvOk then
+			writer:write("--- Censo completo de catalogo: GENERADO (" .. tostring(report.diagnosticCensusFile or CENSUS_TSV_NAME) .. ") ---\r\n")
+		else
+			writer:write("--- Censo completo de catalogo: NO GENERADO (" .. tostring(report.censusTsvError) .. ") ---\r\n")
+		end
 		writer:write("--- Muestras (maximo " .. tostring(MAX_SAMPLES_PER_BUCKET) .. " por bloque, "
 			.. tostring(MAX_SAMPLES_WEAK_SOURCE) .. " para heuristicas debiles) ---\r\n")
 		for _, bucketName in ipairs({ "pending", "unclassified", "invalidPath", "classifierErrors" }) do
@@ -749,6 +794,39 @@ function GlobalStorageSiK.NativeAudit.writeExcludedInternalTsv(report)
 			local row = inventory[i]
 			writer:write(table.concat({
 				tsvCell(row.fullType), tsvCell(row.reason), tsvCell(row.bodyLocation),
+			}, "\t") .. "\r\n")
+			rowsWritten = rowsWritten + 1
+		end
+	end)
+	pcall(function() writer:close() end)
+	if not okWrite then
+		return false, "row_" .. tostring(rowsWritten + 1) .. "_failed: " .. tostring(errMsg)
+	end
+	return true, nil
+end
+
+--- Censo completo DEV32.3: una fila por ScriptItem que la auditoria recorrio,
+--- incluida cualquier ruta clasificada, pendiente, excluida o invalida. Se
+--- conserva solo en diagnosticos del servidor; el resumen de red no cambia.
+---@param report table
+---@return boolean ok
+---@return string|nil errorMessage
+function GlobalStorageSiK.NativeAudit.writeCensusTsv(report)
+	if not getFileWriter then return false, "getFileWriter_unavailable" end
+	local inventory = report and report.censusInventory
+	if not inventory then return false, "missing_inventory" end
+	local fileName = report.diagnosticCensusFile or CENSUS_TSV_NAME
+	local ok, writer = pcall(getFileWriter, fileName, true, false)
+	if not ok or not writer then return false, "getFileWriter_failed" end
+	local rowsWritten = 0
+	local okWrite, errMsg = pcall(function()
+		writer:write("fullType\toutcome\tl1\tl2\tl3\tsource\tconfidence\treason\tbodyLocation\r\n")
+		for i = 1, #inventory do
+			local row = inventory[i]
+			writer:write(table.concat({
+				tsvCell(row.fullType), tsvCell(row.outcome), tsvCell(row.l1),
+				tsvCell(row.l2), tsvCell(row.l3), tsvCell(row.source),
+				tsvCell(row.confidence), tsvCell(row.reason), tsvCell(row.bodyLocation),
 			}, "\t") .. "\r\n")
 			rowsWritten = rowsWritten + 1
 		end

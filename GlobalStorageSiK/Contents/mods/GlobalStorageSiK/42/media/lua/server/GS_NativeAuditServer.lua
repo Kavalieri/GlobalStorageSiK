@@ -68,12 +68,13 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	-- GENERADO/NO GENERADO con la causa real en vez de anunciar el
 	-- fichero a ciegas.
 	local diagnosticRun = GlobalStorageSiK.DiagnosticsSession.beginRun(
-		"taxonomy", { "audit", "unclassified", "excluded-internal" })
+		"taxonomy", { "audit", "unclassified", "excluded-internal", "census" })
 	report.diagnosticSessionId = diagnosticRun.sessionId
 	report.diagnosticRunId = diagnosticRun.runId
 	report.diagnosticReportFile = diagnosticRun.paths.audit
 	report.diagnosticUnclassifiedFile = diagnosticRun.paths.unclassified
 	report.diagnosticExcludedInternalFile = diagnosticRun.paths["excluded-internal"]
+	report.diagnosticCensusFile = diagnosticRun.paths.census
 	local tsvOk, tsvErr = GlobalStorageSiK.NativeAudit.writeUnclassifiedTsv(report)
 	report.unclassifiedTsvOk = tsvOk
 	report.unclassifiedTsvError = tsvErr
@@ -85,6 +86,12 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	report.excludedInternalTsvError = excludedErr
 	if not excludedOk and GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.warn("NativeAudit", "writeExcludedInternalTsv fallo: " .. tostring(excludedErr))
+	end
+	local censusOk, censusErr = GlobalStorageSiK.NativeAudit.writeCensusTsv(report)
+	report.censusTsvOk = censusOk
+	report.censusTsvError = censusErr
+	if not censusOk and GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.warn("NativeAudit", "writeCensusTsv fallo: " .. tostring(censusErr))
 	end
 	GlobalStorageSiK.NativeAudit.writeReportToFile(report)
 
@@ -135,5 +142,6 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 		fileName = diagnosticRun.paths.audit,
 		unclassifiedFileName = diagnosticRun.paths.unclassified,
 		excludedInternalFileName = diagnosticRun.paths["excluded-internal"],
+		censusFileName = diagnosticRun.paths.census,
 	})
 end

@@ -403,6 +403,42 @@ function GlobalStorageSiK.Zones.rebindNode(sourceId, targetId, networkId)
 	return true
 end
 
+--- Transfiere de forma explícita la configuración lógica a un alta nueva en
+--- la misma posición y compartimento. A diferencia de rebindNode, no exige
+--- la misma firma física: sirve precisamente para sustituir un cofre. Nunca
+--- mueve la zona del destino ni copia identidad, contenido o capacidad.
+---@param sourceId string
+---@param targetId string
+---@param networkId string
+---@return boolean transferred
+function GlobalStorageSiK.Zones.transferConfigurationAtSamePosition(sourceId, targetId, networkId)
+	if not sourceId or not targetId or sourceId == targetId or not networkId then return false end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local source = registry.nodes and registry.nodes[sourceId]
+	local target = registry.nodes and registry.nodes[targetId]
+	local sourceZone = source and registry.zones and registry.zones[source.zoneId]
+	local targetZone = target and registry.zones and registry.zones[target.zoneId]
+	if not source or not target or not sourceZone or not targetZone
+		or sourceZone.networkId ~= networkId or targetZone.networkId ~= networkId
+		or source.offline ~= true or target.offline == true
+		or not GlobalStorageSiK.Zones.isCleanAutomaticNode(target)
+		or source.x ~= target.x or source.y ~= target.y or source.z ~= target.z
+		or source.containerIndex ~= target.containerIndex
+		or not target.discoveredAtMs or not source.lastSeenMs
+		or target.discoveredAtMs <= source.lastSeenMs then return false end
+	-- Preflight completo antes de mutar: una colisión de cobertura conserva los
+	-- dos registros exactamente como estaban.
+	local preparedRules = prepareTargetZoneRules(registry, sourceId, target, source.rules)
+	if not preparedRules then return false end
+	if source.displayName ~= nil then target.displayName = source.displayName end
+	if source.priority ~= nil then target.priority = source.priority end
+	if source.notes ~= nil then target.notes = source.notes end
+	if source.filters ~= nil then target.filters = source.filters end
+	if source.rules ~= nil then target.rules = preparedRules end
+	registry.nodes[sourceId] = nil
+	return true
+end
+
 --- Intenta crear bounds desde la safehouse vanilla (MP).
 ---@param square IsoGridSquare|nil
 ---@param player IsoPlayer|nil

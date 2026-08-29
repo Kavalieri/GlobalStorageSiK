@@ -25,7 +25,8 @@ require "GS_NativeClassifierUtils"
 
 local U = GlobalStorageSiK.NativeClassifierUtils
 
---- fullType exacto -> l2 de materials.
+-- fullType exacto -> ruta Materials. Dataset centralizado: estos objetos
+-- vanilla normales no dependen de traducciones ni de heurísticas nominales.
 local EXACT = {
 	["Base.MetalBar"] = "metal",
 	["Base.SteelBar"] = "metal",
@@ -59,6 +60,13 @@ local EXACT = {
 	["Base.LeatherStrips"] = "leather_hide",
 	["Base.LeatherStripsDirty"] = "leather_hide",
 	["Base.LeatherStripsBundle"] = "leather_hide",
+	["Base.DuctTape"] = { l2 = "component", l3 = "adhesive" },
+	["Base.Nails"] = { l2 = "component", l3 = "fastener" },
+	["Base.NailsCarton"] = { l2 = "component", l3 = "fastener" },
+	["Base.NutsBolts"] = { l2 = "component", l3 = "fastener" },
+	["Base.Screws"] = { l2 = "component", l3 = "fastener" },
+	["Base.ScrewsCarton"] = { l2 = "component", l3 = "fastener" },
+	["Base.WeldingRods"] = { l2 = "component", l3 = "welding_consumable" },
 }
 
 ---@param fullType string
@@ -68,10 +76,12 @@ local EXACT = {
 ---@return table|nil attributes
 ---@return table|nil evidence
 local function classifyMaterialsConfirmed(fullType, si)
-	local l2 = EXACT[fullType]
-	if not l2 then return nil end
+	local exact = EXACT[fullType]
+	if not exact then return nil end
+	local l2 = type(exact) == "table" and exact.l2 or exact
+	local l3 = type(exact) == "table" and exact.l3 or nil
 	return
-		{ l1 = "materials", l2 = l2, l3 = nil },
+		{ l1 = "materials", l2 = l2, l3 = l3 },
 		{},
 		{},
 		U.evidence("exact_fulltype_material", 90)

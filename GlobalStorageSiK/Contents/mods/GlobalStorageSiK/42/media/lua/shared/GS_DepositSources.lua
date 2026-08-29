@@ -309,9 +309,11 @@ local function scanSquare(player, sq, list, seen)
 	if not sq then
 		return
 	end
-	if sq.getVehicleContainer then
-		tryAddNearby(player, sq:getVehicleContainer(), list, seen)
-	end
+	-- B42 devuelve el propio BaseVehicle, no un ItemContainer, en
+	-- getVehicleContainer(). Pasarlo a tryAddNearby abortaba el barrido entero
+	-- dentro del pcall y hacia desaparecer incluso el TruckBed. Los vehículos se
+	-- recorren una sola vez por piezas en tryAddVehicleContainers(), con
+	-- canAccessContainer(partIndex, player) por cada compartimento.
 	local objs = sq.getObjects and sq:getObjects() or nil
 	if objs then
 		for i = 0, objs:size() - 1 do
@@ -574,4 +576,30 @@ function GlobalStorageSiK.DepositSources.resolveContainerKey(player, key)
 	end
 
 	return nil
+end
+
+--- Resuelve un destino físico externo para una extracción. Una clave explícita
+--- nunca puede degradar a inventario principal: si ya no resuelve, quedó fuera
+--- de alcance o apunta a cualquier nodo GS, el servidor debe rechazar el lote.
+---@param player IsoPlayer
+---@param key string|nil
+---@return ItemContainer|nil container
+---@return string|nil reason
+function GlobalStorageSiK.DepositSources.resolveExternalTarget(player, key)
+	if type(key) ~= "string" or key == "" then
+		return nil, "invalid_target"
+	end
+	local container = GlobalStorageSiK.DepositSources.resolveContainerKey(player, key)
+	if not container then
+		return nil, "target_unavailable"
+	end
+	if GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
+		-- Incluye tanto la red abierta como cualquier otra: la transferencia
+		-- entre redes sigue diferida y el agregado GS no es un contenedor físico.
+		return nil, "network_node"
+	end
+	if not GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container) then
+		return nil, "target_unavailable"
+	end
+	return container, nil
 end

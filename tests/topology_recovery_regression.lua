@@ -40,6 +40,7 @@ local required = {
 	"GS_TerminalPlacementIntent", "GS_TerminalRecord", "GS_NetworkResolve", "GS_NetworkManager",
 	"GS_NodeNaming", "GS_TerminalRecipes", "GS_CraftUtils", "GS_PCAcquire", "GS_ReaderAcquire",
 	"GS_DiskProgramming", "GS_AddonRecipes", "GS_ItemSnapshot", "GS_FuelConsumption", "GS_Log",
+	"GS_DisplayCategoryPublisher",
 	"GS_NativeAuditServer", "GS_NativeCorpusServer", "GS_Debug", "GS_NetTrace",
 }
 for i = 1, #required do package.loaded[required[i]] = true end
@@ -127,6 +128,7 @@ end
 local function oldNode()
 	return {
 		id = "old", zoneId = "zone_a", offline = true, lastSeenMs = 10,
+		x = 1, y = 2, z = 0, containerIndex = 0,
 		physicalSignature = signature("crate_a"), displayName = "Nevera cocina",
 		priority = 20, notes = "comida", membership = "active", enabled = true,
 		rules = { { op = "OR", condition = { type = "item", itemType = "Base.Apple" } } },
@@ -136,6 +138,7 @@ end
 local function freshNode(id, zoneId, sprite)
 	return {
 		id = id, zoneId = zoneId or "zone_a", offline = false, discoveredAtMs = 20,
+		x = 1, y = 2, z = 0, containerIndex = 0,
 		lastSeenMs = 20, physicalSignature = signature(sprite or "crate_a"),
 		name = "Armario", membership = "auto", worldObject = {}, storedCapacity = { capacity = 80 },
 	}
@@ -188,6 +191,20 @@ local conflict = dispatch("requestRebindProposal", { networkId = "net_a", nodeId
 assertEqual(conflict.ok, false, "signature mismatch must be rejected")
 assertEqual(conflict.message, "IGUI_GS_NodeRebindConflict", "mismatch reason must be explicit")
 assertTrue(registry.nodes.old ~= nil and registry.nodes.mismatch ~= nil, "mismatch cannot migrate configuration")
+
+-- A replacement in exactly the same position is never rebound by signature,
+-- but can receive a separately confirmed logical configuration transfer.
+local manual = dispatch("requestConfigTransferProposal", { networkId = "net_a", nodeId = "old" })
+assertTrue(manual.ok and manual.configTransferProposal and manual.token,
+	"same-position replacement must receive a manual transfer proposal")
+local manualResult = dispatch("transferNodeConfiguration", {
+	networkId = "net_a", nodeId = "old", transferToken = manual.token,
+})
+assertTrue(manualResult.ok, "confirmed manual transfer must succeed")
+assertEqual(registry.nodes.old, nil, "manual transfer erases old record only after success")
+assertEqual(registry.nodes.mismatch.displayName, "Nevera cocina", "manual transfer copies visible name")
+assertEqual(registry.nodes.mismatch.priority, 20, "manual transfer copies priority")
+assertEqual(registry.nodes.mismatch.rules[1].condition.itemType, "Base.Apple", "manual transfer copies rules")
 
 -- A target in another zone retains that zone; a coverage collision aborts before erase.
 reset({ old = oldNode(), new = freshNode("new", "zone_b") })

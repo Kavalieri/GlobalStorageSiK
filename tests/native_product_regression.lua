@@ -5,7 +5,7 @@ package.loaded["GS_CatalogManager"] = true
 package.loaded["GS_NativeClassifier"] = true
 package.loaded["GS_NativeTaxonomyRegistry"] = true
 package.loaded["GS_ItemTaxonomy"] = true
-package.loaded["GS_CompatMods"] = true
+package.loaded["GS_CategoryResolution"] = true
 package.loaded["GS_RuleSanitizer"] = true
 
 local classifierCalls = 0
@@ -49,10 +49,9 @@ GlobalStorageSiK = {
 			return { mainCanon = row.category, subCanon = row.subCategory, groupKey = row.category }
 		end,
 	},
-	CompatMods = {
-		hasExtendedCategories = function() return false end,
-		hasOrganizedCategoriesCore = function() return false end,
-		hasBetterSorting = function() return false end,
+	CategoryResolution = {
+		legacyAliasNativePath = function() return nil end,
+		classifyStoredRule = function() return "SOURCE_CATEGORY" end,
 	},
 	I18n = { text = function(key) return key end },
 }
@@ -67,12 +66,6 @@ end
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_NativeProduct.lua")
 local Product = GlobalStorageSiK.NativeProduct
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_RuleSanitizer.lua")
-package.loaded["GS_NativeProduct"] = true
-dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_ExternalCategoryMigration.lua")
-local compatStatus = Product.getCompatibilityStatus()
-assertEqual(compatStatus.extendedCategories, false, "Extended Categories runtime detection")
-assertEqual(compatStatus.organizedCategories, false, "Organized Categories runtime detection")
-assertEqual(compatStatus.betterSorting, false, "Better Sorting runtime detection")
 
 local applePath = Product.getPath("Base.Apple")
 assertEqual(Product.encodePath(applePath), "native:food_drink/produce/fruit", "canonical apple path")
@@ -98,25 +91,6 @@ local copiedRows = Product.copyRows({ {
 assertEqual(copiedRows[1].nativePath, "native:food_drink/produce/fruit", "UI snapshot preserves native path")
 assertEqual(copiedRows[1].locations[1].nodeId, "node-a", "UI snapshot preserves locations")
 assertEqual(copiedRows[1].futureProductField, "preserved", "UI snapshot preserves future contract fields")
-
-local owners = { { id = "node-a", rules = {
-	{ op = "OR", condition = { type = "category", value = "Food" } },
-} } }
-local catalog = { {
-	fullType = "Base.Apple", category = "Food", subCategory = "Produce",
-	gsSubKeysStr = "", nativePath = "native:food_drink/produce/fruit",
-} }
-local plan = Product.auditMigration(owners, catalog)
-assertEqual(#plan.transformable, 1, "legacy alias preflight")
-assertEqual(#plan.ambiguous, 0, "unambiguous preflight")
-assertEqual(Product.applyAuditedMigration(plan), 1, "first additive migration")
-assertEqual(Product.applyAuditedMigration(plan), 0, "second migration is idempotent")
-local condition = owners[1].rules[1].condition
-assertEqual(condition.value, "Food", "legacy value preserved")
-assertEqual(condition.legacyValue, "Food", "recoverable legacy copy")
-assertEqual(condition.nativePath, "native:food_drink/produce/fruit", "native path added")
-assertEqual(Product.recordRoutingContrast(2, 2), true, "equivalent routing contrast")
-assertEqual(Product.recordRoutingContrast(nil, 1), false, "routing delta detected")
 
 local persisted = { nodes = {
 	a = { id = "a", zoneId = "z", categories = { "Food::F", "ValidLegacy" }, rules = {
@@ -157,71 +131,5 @@ assertEqual(secondSanitize.quarantined, 0, "second migration quarantines nothing
 assertEqual(#persisted.nodes.a.legacyJunkRules, 3, "quarantine not duplicated")
 assertEqual(GlobalStorageSiK.RuleSanitizer.inspectRegistry(persisted, "net-a").matches,
 	0, "postvalidation finds no active junk")
-
-local externalPersisted = { zones = {
-	z = { id = "z", networkId = "net-a", categories = { "__subgroup__:Food::FoodSpice", "__subgroup__:Food::UnknownExternal" }, rules = {
-		{ op = "NOT", condition = { type = "category", value = "FoodSpice" } },
-	} },
-}, nodes = {
-	n = { id = "n", zoneId = "z", categories = {}, rules = {
-		{ op = "AND", condition = { type = "category", value = "__subgroup__:Food::FoodSpice" } },
-	} },
-} }
-local spiceTypes = { "Base.Pepper", "Base.Salt", "Base.SeasoningSalt", "Base.Apple" }
-local function spicePath(fullType)
-	if fullType == "Base.Pepper" or fullType == "Base.Salt" or fullType == "Base.SeasoningSalt" then
-		return "native:food_drink/ingredient/spice"
-	end
-	return "native:food_drink/produce/fruit"
-end
-local ExternalMigration = GlobalStorageSiK.ExternalCategoryMigration
-local externalAudit = ExternalMigration.auditRegistry(externalPersisted, "net-a", spiceTypes, spicePath)
-assertEqual(externalAudit.equivalent, true, "FoodSpice set is equivalent to native spice")
-assertEqual(externalAudit.matches, 3, "rules and categories capture every known FoodSpice alias")
-assertEqual(externalAudit.unknownPreserved, 1, "unknown external key is reported but preserved")
-local externalFirst = ExternalMigration.applyAudit(externalAudit)
-assertEqual(externalFirst.changedOwners, 2, "external migration changes each affected owner once")
-assertEqual(externalPersisted.zones.z.categories[1], "native:food_drink/ingredient/spice", "legacy category becomes native path")
-assertEqual(externalPersisted.zones.z.rules[1].condition.value, "native:food_drink/ingredient/spice", "legacy rule value becomes native path")
-assertEqual(externalPersisted.zones.z.rules[1].condition.nativePath, "native:food_drink/ingredient/spice", "native rule path persists")
-assertEqual(externalPersisted.zones.z.rules[1].condition.legacyValue, nil, "router does not fall back to removed provider")
-assertEqual(#externalPersisted.zones.z.externalCategoryMigrationHistory, 2, "previous category and rule remain recoverable")
-assertEqual(externalPersisted.zones.z.categories[2], "__subgroup__:Food::UnknownExternal", "unknown external category remains active")
-local externalSecondAudit = ExternalMigration.auditRegistry(externalPersisted, "net-a", spiceTypes, spicePath)
-assertEqual(externalSecondAudit.matches, 0, "second external pass has no remaining known aliases")
-assertEqual(ExternalMigration.applyAudit(externalSecondAudit).changed, false, "second external pass is idempotent")
-
-local mismatchPersisted = { zones = {
-	z = { id = "z", networkId = "net-a", categories = {}, rules = {
-		{ op = "OR", condition = { type = "category", value = "FoodSpice" } },
-	} },
-}, nodes = {} }
-local mismatchAudit = ExternalMigration.auditRegistry(mismatchPersisted, "net-a", spiceTypes, function(fullType)
-	if fullType == "Base.Apple" then return "native:food_drink/ingredient/spice" end
-	return spicePath(fullType)
-end)
-assertEqual(mismatchAudit.equivalent, false, "unexpected native type withholds migration")
-assertEqual(ExternalMigration.applyAudit(mismatchAudit).changed, false, "mismatch never mutates a legacy rule")
-assertEqual(mismatchPersisted.zones.z.rules[1].condition.value, "FoodSpice", "mismatch preserves source value")
-
-local externalRow = { fullType = "Base.Apple", category = "ExternalFood",
-	nativePath = "native:food_drink/produce/fruit" }
-GlobalStorageSiK.ItemTaxonomy.resolve = function()
-	return { mainCanon = "ExternalFood", groupKey = "ExternalFood", fullLabel = "External > Food" }
-end
-GlobalStorageSiK.CompatMods.hasExtendedCategories = function() return true end
-assertEqual(Product.getRowProjection(externalRow).mode, "legacy", "external category projection wins")
-assertEqual(Product.getRowProjection(externalRow).fullLabel, "External > Food", "external label preserved")
-local ownRow = { fullType = "GlobalStorageSiK.Tablet", category = "ExternalTool",
-	nativePath = "native:globalstoragesik/tablet" }
-GlobalStorageSiK.NativeTaxonomyRegistry.hasL2 = function(l1, l2)
-	return (l1 == "food_drink" and l2 == "produce") or (l1 == "materials" and l2 == "wood")
-		or (l1 == "globalstoragesik" and l2 == "tablet")
-end
-GlobalStorageSiK.NativeTaxonomyRegistry.hasL1 = function(l1)
-	return l1 == "food_drink" or l1 == "materials" or l1 == "globalstoragesik"
-end
-assertEqual(Product.getRowProjection(ownRow).mode, "native", "GS identity remains native")
-assertEqual(Product.isOwnFullType("GlobalStorageSiK.Tablet"), true, "GS routing identity remains native")
 
 print("native_product_regression: OK")

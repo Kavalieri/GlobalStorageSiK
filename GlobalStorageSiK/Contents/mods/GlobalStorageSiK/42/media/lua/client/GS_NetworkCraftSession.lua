@@ -899,12 +899,22 @@ local RETURN_STUCK_WARN_MS = 300000
 local function sweepPendingReturns()
 	local nowMs = getTimestampMs and getTimestampMs() or 0
 	local remoteBatches = {}
+	-- Un préstamo no debe reconstruir toda la topología local por cada item y
+	-- tick. La instantánea se comparte solo durante ESTE barrido y por jugador;
+	-- findItemByIdInSnapshot vuelve a leer permisos y contenido para cada ID.
+	local searchSnapshots = {}
 	for itemId, info in pairs(pendingReturns) do
 		local player = getSpecificPlayer and getSpecificPlayer(info.playerNum) or nil
 		if not player then
 			pendingReturns[itemId] = nil
 		else
-			local item, currentContainer = GlobalStorageSiK.Deposit.findItemById(player, itemId)
+			local playerKey = tostring(info.playerNum)
+			local snapshot = searchSnapshots[playerKey]
+			if not snapshot then
+				snapshot = GlobalStorageSiK.Deposit.createSearchSnapshot(player)
+				searchSnapshots[playerKey] = snapshot
+			end
+			local item, currentContainer = GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapshot)
 			if not item or not currentContainer then
 				local operationDone = areItemOperationsComplete(info)
 				-- En cliente MP el item aun no es localizable mientras el servidor

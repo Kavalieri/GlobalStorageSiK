@@ -769,6 +769,16 @@ end
 
 function GS_TerminalUI:refreshNetworkPanel()
 	self:applyCapacityState((self.terminalState or {}).capacity)
+	local nodes = self.terminalState and self.terminalState.nodes or {}
+	local info = GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo
+		and GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo(nodes) or { count = 0 }
+	if info.count and info.count > 0 then
+		info.tooltip = T("IGUI_GS_NetworkIncidentTip", info.count)
+	end
+	self.networkIncident = info
+	if self.tabRail and self.tabRail.syncSelection then
+		self.tabRail:syncSelection()
+	end
 end
 
 function GS_TerminalUI:refreshFromState(state)
@@ -1469,6 +1479,22 @@ function GS_TerminalUI:onRebindNode(nodeId, rebindToken)
 	if not self:canEditNetworkConfig(true) then return end
 	GlobalStorageSiK.NetClient.sendCommand("rebindNode", {
 		nodeId = nodeId, rebindToken = rebindToken,
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
+function GS_TerminalUI:onRequestConfigTransferProposal(nodeId, targetNodeId)
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("requestConfigTransferProposal", {
+		nodeId = nodeId, targetNodeId = targetNodeId,
+		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+	})
+end
+
+function GS_TerminalUI:onTransferNodeConfiguration(nodeId, transferToken)
+	if not self:canEditNetworkConfig(true) then return end
+	GlobalStorageSiK.NetClient.sendCommand("transferNodeConfiguration", {
+		nodeId = nodeId, transferToken = transferToken,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end

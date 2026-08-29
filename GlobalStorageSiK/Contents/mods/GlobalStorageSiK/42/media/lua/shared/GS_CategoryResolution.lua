@@ -57,8 +57,17 @@ local function isTechnicalValue(value)
 		or value:find("::", 1, true) ~= nil
 end
 
+-- DisplayCategory público de GS: sirve a inventario vanilla/otros lectores,
+-- pero nunca vuelve a entrar como una categoría fuente al resolver nuestra
+-- propia ruta. Evita que un valor publicado se recicle si el clasificador se
+-- abstiene en una época posterior.
+local function isPublishedGSKey(value)
+	return type(value) == "string" and value:match("^GSSiK_[a-z0-9_]+$") ~= nil
+end
+
 local function isSafeSourceCategory(value)
 	return cleanVanillaKey(value) ~= nil and not isTechnicalValue(value)
+		and not isPublishedGSKey(value)
 end
 
 local function scriptDisplayCategory(fullType)

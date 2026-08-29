@@ -68,7 +68,10 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- dev27: incrementada a "5" - anade los 3 bloques completos de la ronda
 -- (Combate, Ropa/Proteccion, Contenedores), 76+141+108 casos nuevos (ver
 -- secciones 1ter/1quater/1quinquies mas abajo).
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "7"
+-- DEV32.3: incrementada a "8" al incorporar ocho anclas vanilla exactas
+-- (materiales y soplete). Dos ejecuciones con la misma versión comparan el
+-- mismo contrato, nunca una lista de casos distinta.
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "8"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -2925,6 +2928,16 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v6_materials_mineral", fullType="Base.ClayBrick", block="materials", presence="required", expectedL1="materials", expectedL2="mineral", expectedL3=false, minConfidence=30, expectedSource="name_mineral", expectationSource="product_policy:material_mineral_name" },
 	{ caseId="v6_materials_organic", fullType="Base.SmallAnimalBone", block="materials", presence="required", expectedL1="materials", expectedL2="organic", expectedL3=false, minConfidence=30, expectedSource="name_organic", expectationSource="product_policy:material_organic_name" },
 	{ caseId="v6_materials_exact", fullType="Base.ScrapMetal", block="materials", presence="required", expectedL1="materials", expectedL2="metal", expectedL3=false, minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="product_policy:material_exact_anchor", criticalAnchor=true },
+	-- DEV32.3: anclas exactas del censo vanilla. Son datos curados por
+	-- fullType, no aproximaciones nominales, y fijan las nuevas hojas L3.
+	{ caseId="dev32_materials_duct_tape", fullType="Base.DuctTape", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="adhesive", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
+	{ caseId="dev32_materials_nails", fullType="Base.Nails", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="fastener", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
+	{ caseId="dev32_materials_nails_carton", fullType="Base.NailsCarton", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="fastener", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage" },
+	{ caseId="dev32_materials_nuts_bolts", fullType="Base.NutsBolts", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="fastener", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
+	{ caseId="dev32_materials_screws", fullType="Base.Screws", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="fastener", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
+	{ caseId="dev32_materials_screws_carton", fullType="Base.ScrewsCarton", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="fastener", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage" },
+	{ caseId="dev32_materials_welding_rods", fullType="Base.WeldingRods", block="materials", presence="required", expectedL1="materials", expectedL2="component", expectedL3="welding_consumable", minConfidence=90, expectedSource="exact_fulltype_material", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
+	{ caseId="dev32_tools_blowtorch", fullType="Base.BlowTorch", block="tools", presence="required", expectedL1="tools", expectedL2="construction", expectedL3="metalworking", minConfidence=100, expectedSource="exact_fulltype_tool", expectationSource="systems_contract:vanilla_exact_coverage", criticalAnchor=true },
 
 	{ caseId="v6_food_beverage_collision", fullType="Base.JuiceBox", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="beverage", expectedL3=false, minConfidence=30, expectedSource="name_food_beverage", expectationSource="product_policy:contents_over_container", collisionWith="containers", criticalAnchor=true },
 	{ caseId="v6_food_ingredient", fullType="Base.CakeBatter", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="ingredient", expectedL3=false, minConfidence=30, expectedSource="name_food_ingredient", expectationSource="product_policy:food_ingredient_name" },

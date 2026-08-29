@@ -6,6 +6,7 @@ package.loaded["GS_Log"] = true
 package.loaded["GS_DepositSources"] = true
 package.loaded["GS_InventorySync"] = true
 package.loaded["GS_Config"] = true
+package.loaded["GS_I18n"] = true
 package.loaded["GS_CraftUtils"] = true
 
 local function assertEqual(actual, expected, message)

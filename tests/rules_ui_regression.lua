@@ -2,7 +2,7 @@
 -- Run from repository root: lua51.exe tests/rules_ui_regression.lua
 
 for _, name in ipairs({ "GS_I18n", "GS_ItemTaxonomy", "GS_NativeProduct",
-	"GS_RuleSanitizer", "GS_Subcategories", "GS_NodeFilters" }) do
+	"GS_RuleSanitizer", "GS_Subcategories", "GS_NodeFilters", "GS_CategoryResolution" }) do
 	package.loaded[name] = true
 end
 
@@ -46,6 +46,11 @@ GlobalStorageSiK = {
 		end,
 		getView = function() return { fullLabel = "Food > Perishable" } end,
 		getColor = function() return { 0.45, 0.78, 0.53 } end,
+	},
+	CategoryResolution = {
+		classifyStoredRule = function() return "SOURCE_CATEGORY" end,
+		isVanillaKey = function() return false end,
+		label = function() return "" end,
 	},
 	RuleSanitizer = { isJunkCategoryCondition = function(condition)
 		return condition and condition.type == "category"

@@ -2,10 +2,13 @@
 	GlobalStorageSiK - Proyección de taxonomía en ISInventoryPane
 	Core 1.4.3-dev31
 
-	Solo sustituye el TEXTO dibujado en la columna vanilla Categoría. No toca
-	InventoryItem, DisplayCategory, orden, filtros, selección, drag/drop, menús
-	ni persistencia. La clasificación nunca ocurre dentro de renderdetails():
-	las filas visibles se encolan y se resuelven con presupuesto en OnTick.
+	DisplayCategory ya se publica canónicamente en ScriptItem mediante
+	GS_DisplayCategoryPublisher. Esta capa solo conserva la presentación GS
+	(colores y ruta completa) sobre la misma celda vanilla; no decide ni muta
+	la categoría pública, InventoryItem, orden, filtros, selección, drag/drop,
+	menús ni persistencia. La clasificación nunca ocurre dentro de
+	renderdetails(): las filas visibles se encolan y se resuelven con
+	presupuesto en OnTick.
 ]]
 
 require "ISUI/ISInventoryPane"
@@ -78,7 +81,16 @@ local function safeVanillaKey(item)
 	local function read(method)
 		if not item or not item[method] then return nil end
 		local value = safeCall(function() return item[method](item) end)
-		return GlobalStorageSiK.CategoryResolution.isVanillaKey(value) and value or nil
+		-- Tras DEV32.3 esta clave puede ser la DisplayCategory pública de GS,
+		-- no solo una literal vanilla. La etiqueta sigue viniendo de
+		-- IGUI_ItemCat_<clave>, igual que en el inventario sin overlay.
+		if GlobalStorageSiK.CategoryResolution.isSafeSourceCategory(value) then return value end
+		if GlobalStorageSiK.DisplayCategoryPublisher
+			and GlobalStorageSiK.DisplayCategoryPublisher.isPublishedKey
+			and GlobalStorageSiK.DisplayCategoryPublisher.isPublishedKey(value) then
+			return value
+		end
+		return nil
 	end
 	return read("getDisplayCategory") or read("getCategory") or "Misc"
 end
@@ -207,8 +219,14 @@ local function drawProjection(pane, originalDrawText, text, x, y, r, g, b, a, fo
 	return originalDrawText(pane, label, x, y, r, g, b, a, font)
 end
 
-local function isVanillaCategoryDraw(pane, x, r, g, b, doDragged)
-	return not doDragged and x == pane.column3 + 8 and r == 0.6 and g == 0.6 and b == 0.8
+local function isVanillaCategoryDraw(pane, text, x, y, doDragged)
+	if doDragged or x < pane.column3 or x >= pane.column4 then return false end
+	local row = math.floor((y - pane.headerHgt) / pane.itemHgt) + 1
+	local item = itemForPaneRow(pane, row)
+	-- La celda de categoría es la única de esa fila cuyo texto coincide con la
+	-- DisplayCategory vanilla. No depende de la coordenada de sangría ni del
+	-- RGB del tema, ambos variables entre versiones y proveedores UI.
+	return item ~= nil and text == vanillaLabel(item)
 end
 
 local originalRenderDetails = nil
@@ -225,7 +243,7 @@ function Projection.installHooks()
 		renderingPanes[pane] = true
 		local originalDrawText = pane.drawText
 		pane.drawText = function(self, text, x, y, r, g, b, a, font)
-			if isVanillaCategoryDraw(self, x, r, g, b, doDragged) then
+			if isVanillaCategoryDraw(self, text, x, y, doDragged) then
 				return drawProjection(self, originalDrawText, text, x, y, r, g, b, a, font)
 			end
 			return originalDrawText(self, text, x, y, r, g, b, a, font)

@@ -127,12 +127,32 @@ end
 ---@param itemId number
 ---@return InventoryItem|nil
 ---@return ItemContainer|nil
-function GlobalStorageSiK.Deposit.findItemById(player, itemId)
+function GlobalStorageSiK.Deposit.createSearchSnapshot(player)
+	return {
+		-- La topología se puede reutilizar dentro de una operación corta, pero no
+		-- contiene contenido ni permisos congelados: ambos se vuelven a leer al
+		-- resolver cada ítem.
+		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player),
+	}
+end
+
+--- Busca un ítem dentro de una instantánea topológica ya creada. Permisos y
+--- contenido siguen siendo lecturas frescas: una puerta, distancia o vehículo
+--- pueden cambiar entre dos préstamos del mismo barrido.
+---@param player IsoPlayer
+---@param itemId number
+---@param snapshot table|nil
+---@return InventoryItem|nil
+---@return ItemContainer|nil
+function GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapshot)
 	if not player or not itemId then
 		return nil, nil
 	end
 
-	local containers = GlobalStorageSiK.Deposit.collectSearchContainers(player)
+	local containers = snapshot and snapshot.containers or nil
+	if type(containers) ~= "table" then
+		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player)
+	end
 	for c = 1, #containers do
 		local container = containers[c]
 		if GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container) then
@@ -145,6 +165,18 @@ function GlobalStorageSiK.Deposit.findItemById(player, itemId)
 	end
 
 	return nil, nil
+end
+
+--- Busca un ítem por ID en contenedores accesibles. `snapshot` es opcional y
+--- solo evita reconstruir la topología durante una operación; no cachea el
+--- contenido ni autoriza contenedores sin volver a comprobarlos.
+---@param player IsoPlayer
+---@param itemId number
+---@param snapshot table|nil
+---@return InventoryItem|nil
+---@return ItemContainer|nil
+function GlobalStorageSiK.Deposit.findItemById(player, itemId, snapshot)
+	return GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapshot)
 end
 
 --- Deposita una cantidad parcial de un ítem por ID.

@@ -392,6 +392,38 @@ end
 
 local lastLiveContainerSourceSignature = {}
 
+-- Instrumentación acumulada, sin logs por llamada ni contenido cacheado. Sirve
+-- para demostrar repeticiones antes de introducir una instantánea por
+-- operación; el consumidor puede leer/resetear las métricas en una prueba
+-- dirigida sin afectar a la resolución normal.
+local liveContainerMetrics = {
+	calls = 0,
+	byNetwork = {},
+}
+
+function GlobalStorageSiK.Network.getLiveContainerMetrics(reset)
+	local out = { calls = liveContainerMetrics.calls, byNetwork = {} }
+	for nid, metrics in pairs(liveContainerMetrics.byNetwork) do
+		out.byNetwork[nid] = { calls = metrics.calls }
+	end
+	if reset then
+		liveContainerMetrics.calls = 0
+		liveContainerMetrics.byNetwork = {}
+	end
+	return out
+end
+
+local function recordLiveContainerCall(nid)
+	liveContainerMetrics.calls = liveContainerMetrics.calls + 1
+	local key = tostring(nid or "")
+	local metrics = liveContainerMetrics.byNetwork[key]
+	if not metrics then
+		metrics = { calls = 0 }
+		liveContainerMetrics.byNetwork[key] = metrics
+	end
+	metrics.calls = metrics.calls + 1
+end
+
 --- Prioridad efectiva de la zona sin duplicarla en la entrada persistente del
 --- nodo. En cliente MP puede venir serializada junto al nodo; en autoridad se
 --- resuelve siempre desde la fuente de verdad registry.zones.
@@ -430,6 +462,10 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	if not nid then
 		return live
 	end
+	-- Cuenta también las llamadas que no llegan a resolver contenedores. No
+	-- guarda filas vivas: capacidad, contenido, permisos y accesibilidad deben
+	-- reevaluarse siempre por operación.
+	recordLiveContainerCall(nid)
 
 	if GlobalStorageSiK.ZoneRefresh and GlobalStorageSiK.ZoneRefresh.getActiveNodes then
 		local nodes = GlobalStorageSiK.ZoneRefresh.getActiveNodes(nid)
