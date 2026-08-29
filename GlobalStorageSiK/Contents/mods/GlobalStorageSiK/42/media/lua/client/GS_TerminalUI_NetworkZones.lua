@@ -277,6 +277,8 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, ZONE_TABLE_COLUMNS, nil, true,
 			2, UIFont.Small, ZONE_TABLE_OPTIONS)
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		ui.zoneHeader, ZONE_TABLE_COLUMNS, ZONE_TABLE_OPTIONS)
 	ui.zoneTableHost:addChild(ui.zoneHeader)
 
 	ui.zoneRowPool = {}

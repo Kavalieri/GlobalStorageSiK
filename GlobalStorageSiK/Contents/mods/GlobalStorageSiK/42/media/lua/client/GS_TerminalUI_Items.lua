@@ -1370,6 +1370,8 @@ local function ensureColumnHeader(panel, terminal)
 		end
 		return true
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		panel.columnHeader, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
 	panel:addChild(panel.columnHeader)
 end
 

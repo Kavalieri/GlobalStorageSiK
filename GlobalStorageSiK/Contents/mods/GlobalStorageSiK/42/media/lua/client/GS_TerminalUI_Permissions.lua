@@ -714,6 +714,8 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, MEMBER_TABLE_COLUMNS, nil, true,
 			2, UIFont.Small, MEMBER_TABLE_OPTIONS)
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		ui.permTableHeader, MEMBER_TABLE_COLUMNS, MEMBER_TABLE_OPTIONS)
 	ui.permTableHost:addChild(ui.permTableHeader)
 
 	ui.memberRowPool = {}

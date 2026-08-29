@@ -888,6 +888,8 @@ local function ensureColumnHeader(panel)
 		GlobalStorageSiK.TerminalNodes.updateVirtualRows(host)
 		return true
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		panel.columnHeader, NODE_TABLE_COLUMNS, NODE_TABLE_OPTIONS)
 	panel:addChild(panel.columnHeader)
 end
 

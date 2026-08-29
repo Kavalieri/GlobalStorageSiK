@@ -61,6 +61,12 @@ local function measuredWidth(spec, defaultFont)
 	return math.max(tonumber(spec.minWidth) or 0, math.floor(widest) + (tonumber(spec.measurePad) or 12))
 end
 
+local function columnMinimum(spec, defaultFont)
+	return math.max(tonumber(spec and spec.hardMinWidth) or 24,
+		tonumber(spec and spec.minWidth) or 0,
+		(spec and spec.measureValues) and measuredWidth(spec, defaultFont) or 0)
+end
+
 -- dev36 (debug SiK UI): resolveColumns() se llama cada prerender (cabecera,
 -- filas y deteccion de clic comparten esta funcion) - loguear siempre
 -- inundaria la consola. Se cachea el ultimo ancho ya logueado POR TABLA
@@ -106,7 +112,10 @@ function Table.resolveColumns(width, columns, options)
 		local widths = {}
 		for i = 1, #columns do
 			local spec = columns[i]
-			if spec.flex then
+			local savedWidth = options.columnWidths and tonumber(options.columnWidths[spec.key]) or nil
+			if savedWidth then
+				widths[i] = math.max(columnMinimum(spec, metrics.font), math.floor(savedWidth))
+			elseif spec.flex then
 				flexTotal = flexTotal + math.max(0, tonumber(spec.flex) or 0)
 				flexMinimum = flexMinimum + math.max(0, tonumber(spec.minWidth) or 0)
 				widths[i] = 0
@@ -124,7 +133,7 @@ function Table.resolveColumns(width, columns, options)
 		for i = 1, #columns do
 			local spec = columns[i]
 			local colW = widths[i]
-			if spec.flex then
+			if spec.flex and not (options.columnWidths and tonumber(options.columnWidths[spec.key])) then
 				local minimum = math.max(0, tonumber(spec.minWidth) or 0)
 				colW = math.floor(minimum * shrinkRatio)
 				if flexibleExtra > 0 then
@@ -163,6 +172,61 @@ function Table.resolveColumns(width, columns, options)
 	end
 	logColumnsIfChanged(columns, width, out)
 	return out
+end
+
+--- Conecta el divisor que ya dibuja drawHeader con un ajuste de ancho real.
+--- La geometria sigue saliendo exclusivamente de resolveColumns(): cabecera,
+--- filas, hit-testing y ordenacion leen las mismas columnas. El consumidor
+--- instala este helper DESPUES de su onMouseUp para conservar su sort/clic.
+function Table.attachHeaderResize(panel, columns, options)
+	if not panel or panel._sikHeaderResizeAttached then return end
+	options = options or {}
+	options.columnWidths = options.columnWidths or {}
+	panel._sikHeaderResizeAttached = true
+	local oldDown = panel.onMouseDown
+	local oldMove = panel.onMouseMove
+	local oldUp = panel.onMouseUp
+
+	panel.onMouseDown = function(self, x, y)
+		local layout = Table.resolveColumns(self.width, columns, options)
+		for i = 1, #layout - 1 do
+			local boundary = layout[i].finish
+			if layout[i].spec.resizable ~= false and math.abs((tonumber(x) or 0) - boundary) <= 6 then
+				self._sikColumnResize = { index = i, delta = 0,
+					left = layout[i].width, right = layout[i + 1].width }
+				return true
+			end
+		end
+		if oldDown then return oldDown(self, x, y) end
+		return ISPanel.onMouseDown(self, x, y)
+	end
+
+	panel.onMouseMove = function(self, dx, dy)
+		local drag = self._sikColumnResize
+		if drag then
+			drag.delta = drag.delta + (tonumber(dx) or 0)
+			local leftSpec = columns[drag.index]
+			local rightSpec = columns[drag.index + 1]
+			local leftMin = columnMinimum(leftSpec, options.font)
+			local rightMin = columnMinimum(rightSpec, options.font)
+			local delta = math.max(leftMin - drag.left,
+				math.min(drag.delta, drag.right - rightMin))
+			options.columnWidths[leftSpec.key] = math.floor(drag.left + delta)
+			options.columnWidths[rightSpec.key] = math.floor(drag.right - delta)
+			return true
+		end
+		if oldMove then return oldMove(self, dx, dy) end
+		return ISPanel.onMouseMove(self, dx, dy)
+	end
+
+	panel.onMouseUp = function(self, x, y)
+		if self._sikColumnResize then
+			self._sikColumnResize = nil
+			return true
+		end
+		if oldUp then return oldUp(self, x, y) end
+		return ISPanel.onMouseUp(self, x, y)
+	end
 end
 
 ---@param layout table[]

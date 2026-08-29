@@ -1073,8 +1073,10 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 	header.prerender = function(target)
 		ISPanel.prerender(target)
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(target, ADMIN_MEMBER_TABLE_COLUMNS,
-			nil, true, 2, UIFont.Small, ADMIN_MEMBER_TABLE_OPTIONS)
+			 nil, true, 2, UIFont.Small, ADMIN_MEMBER_TABLE_OPTIONS)
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		header, ADMIN_MEMBER_TABLE_COLUMNS, ADMIN_MEMBER_TABLE_OPTIONS)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, header)
 	local y = headerMetrics.headerHeight + 2
 	local dashboard = self

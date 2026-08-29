@@ -27,17 +27,17 @@ local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
 local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_GAP = 6
 local POOL = 6
--- Nombre es la PRIMERA columna (a peticion del usuario), luego coordenadas/rol/estado.
-local COL_NAME_FRAC   = 0.0   -- empieza en x=4 (absoluto)
-local COL_COORD_FRAC  = 0.30
-local COL_ROLE_FRAC   = 0.58
-local COL_STATUS_FRAC = 0.80
+-- Nombre es la PRIMERA columna (a peticion del usuario), luego
+-- coordenadas/rol/estado. El descriptor flexible permite que el mismo
+-- divisor comun de SiK_UI.Table ajuste cabecera y filas sin una geometria
+-- paralela solo para Administracion.
 local TERMINAL_TABLE_COLUMNS = {
-	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", start = 4, finishFraction = COL_COORD_FRAC, pad = 0 },
-	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", startFraction = COL_COORD_FRAC, finishFraction = COL_ROLE_FRAC, pad = 0 },
-	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", startFraction = COL_ROLE_FRAC, finishFraction = COL_STATUS_FRAC, pad = 0 },
-	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", startFraction = COL_STATUS_FRAC, right = 4, pad = 0 },
+	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", flex = 0.30, minWidth = 90, pad = 0 },
+	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", flex = 0.28, minWidth = 82, pad = 0 },
+	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", flex = 0.22, minWidth = 74, pad = 0 },
+	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", flex = 0.20, minWidth = 84, pad = 0 },
 }
+local TERMINAL_TABLE_OPTIONS = { left = 4, right = 4, gap = 4 }
 
 ---@param row table|nil
 ---@return string
@@ -142,7 +142,8 @@ local function createTerminalRow(host, terminal, ui)
 		if not data then
 			return
 		end
-		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, TERMINAL_TABLE_COLUMNS)
+		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
+			self.width, TERMINAL_TABLE_COLUMNS, TERMINAL_TABLE_OPTIONS)
 		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 		local sr, sg, sb = statusColor(data)
 		local nameMaxW = cols[1].width - 6
@@ -204,8 +205,11 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	ui.termHeader:initialise()
 	ui.termHeader.prerender = function(self)
 		ISPanel.prerender(self)
-		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, TERMINAL_TABLE_COLUMNS, nil, true, 2, UIFont.Small)
+		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, TERMINAL_TABLE_COLUMNS, nil, true,
+			2, UIFont.Small, TERMINAL_TABLE_OPTIONS)
 	end
+	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
+		ui.termHeader, TERMINAL_TABLE_COLUMNS, TERMINAL_TABLE_OPTIONS)
 	ui.termTableHost:addChild(ui.termHeader)
 
 	ui.termRowPool = {}
