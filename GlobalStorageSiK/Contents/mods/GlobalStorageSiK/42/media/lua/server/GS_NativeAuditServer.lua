@@ -22,6 +22,21 @@ GlobalStorageSiK.NativeAuditServer = GlobalStorageSiK.NativeAuditServer or {}
 -- Guarda de concurrencia - vivia como local de modulo en GS_Server.lua,
 -- ahora vive aqui junto al resto del estado de esta herramienta.
 local nativeAuditRunning = false
+local lastSummary = nil
+
+local function sendLastSummary(player, sendCommandFn)
+	if not lastSummary then return end
+	local payload = {}
+	for key, value in pairs(lastSummary) do payload[key] = value end
+	payload.cached = true
+	payload.requestId = nil
+	sendCommandFn(player, "nativeAuditSummary", payload)
+end
+
+function GlobalStorageSiK.NativeAuditServer.sendLast(player, requireServerModFn, sendCommandFn)
+	if not requireServerModFn(player, "getLastNativeAuditSummary", nil) then return end
+	sendLastSummary(player, sendCommandFn)
+end
 
 -- dev23 (pedido explicito de sistemas: "el boton solo debe desbloquearse
 -- por la respuesta correspondiente a su propia ejecucion" - cierra el
@@ -120,7 +135,7 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 	-- para UI (ver GS_CatalogManager.lua) - `catalogFingerprint` completo se
 	-- mantiene en el payload por compatibilidad/depuracion, pero la pestaña
 	-- Taxonomia ya no lo usa para pintar.
-	sendCommandFn(player, "nativeAuditSummary", {
+	local summary = {
 		requestId = requestId,
 		sessionId = diagnosticRun.sessionId,
 		runId = diagnosticRun.runId,
@@ -143,5 +158,7 @@ function GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMo
 		unclassifiedFileName = diagnosticRun.paths.unclassified,
 		excludedInternalFileName = diagnosticRun.paths["excluded-internal"],
 		censusFileName = diagnosticRun.paths.census,
-	})
+	}
+	lastSummary = summary
+	sendCommandFn(player, "nativeAuditSummary", summary)
 end

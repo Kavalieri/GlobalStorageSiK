@@ -150,10 +150,9 @@ local function resolveQueuedItem(pane, state, item)
 	local basePath = cacheBase(state, fullType, item)
 	local contentPath, fluidSignature = dynamicFluidPath(item)
 	local nativePath = contentPath or basePath
-	if contentPath and GlobalStorageSiK.DisplayCategoryPublisher
-		and GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem then
-		GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem(item, contentPath)
-	end
+	-- La proyeccion dinamica es estrictamente visual. Un contenedor lleno
+	-- adopta la ruta de su contenido en esta celda, pero el adaptador nunca
+	-- muta InventoryItem/ScriptItem ni deja esa ruta grabada al vaciarlo.
 	state.byItem[item] = { nativePath = nativePath, facetPath = basePath, fluidSignature = fluidSignature }
 	local previousSignature = state.probeSignatureByItem[item]
 	state.probeSignatureByItem[item] = fluidSignature
@@ -188,14 +187,36 @@ local function drawProjection(pane, originalDrawText, text, x, y, r, g, b, a, fo
 	return originalDrawText(pane, label, x, y, r, g, b, a, font)
 end
 
-local function isVanillaCategoryDraw(pane, text, x, y, doDragged)
-	if doDragged or x < pane.column3 or x >= pane.column4 then return false end
+local function isProjectedCategoryText(item, text)
+	local expected = vanillaLabel(item)
+	if text == expected then return true end
+	local prefix = tostring(text or ""):gsub("%.%.%.$", ""):gsub("…$", "")
+	return #prefix >= 2 and expected:sub(1, #prefix) == prefix
+end
+
+local function isVanillaCategoryDraw(pane, text, x, y, doDragged, rightAligned)
+	if doDragged or x < pane.column3 then return false end
+	if not rightAligned and x >= pane.column4 then return false end
 	local row = math.floor((y - pane.headerHgt) / pane.itemHgt) + 1
 	local item = itemForPaneRow(pane, row)
 	-- La celda de categoría es la única de esa fila cuyo texto coincide con la
 	-- DisplayCategory vanilla. No depende de la coordenada de sangría ni del
 	-- RGB del tema, ambos variables entre versiones y proveedores UI.
-	return item ~= nil and text == vanillaLabel(item)
+	return item ~= nil and isProjectedCategoryText(item, text)
+end
+
+--- API minima para adaptadores visuales opcionales. No clasifica durante el
+--- render: solo lee la cache ya presupuestada y conserva el texto proveedor
+--- mientras el item aun esta en cola.
+function Projection.decorateDraw(pane, originalDrawText, rightAligned, text, x, y, r, g, b, a, font, doDragged)
+	if isVanillaCategoryDraw(pane, text, x, y, doDragged, rightAligned) then
+		return drawProjection(pane, originalDrawText, text, x, y, r, g, b, a, font)
+	end
+	return originalDrawText(pane, text, x, y, r, g, b, a, font)
+end
+
+function Projection.queueVisibleRows(pane)
+	queueVisibleRows(pane)
 end
 
 local originalRenderDetails = nil
@@ -205,20 +226,26 @@ function Projection.installHooks()
 		return Projection._hooksInstalled == true
 	end
 	originalRenderDetails = ISInventoryPane.renderdetails
-	ISInventoryPane.renderdetails = function(pane, doDragged)
+	local renderHook = function(pane, doDragged)
 		-- No encadenar nuestro propio wrapper si otro proveedor rebota de forma
 		-- reentrante sobre el mismo panel durante su render.
 		if renderingPanes[pane] then return originalRenderDetails(pane, doDragged) end
 		renderingPanes[pane] = true
 		local originalDrawText = pane.drawText
+		local originalDrawTextRight = pane.drawTextRight
 		pane.drawText = function(self, text, x, y, r, g, b, a, font)
-			if isVanillaCategoryDraw(self, text, x, y, doDragged) then
-				return drawProjection(self, originalDrawText, text, x, y, r, g, b, a, font)
+			return Projection.decorateDraw(self, originalDrawText, false,
+				text, x, y, r, g, b, a, font, doDragged)
+		end
+		if originalDrawTextRight then
+			pane.drawTextRight = function(self, text, x, y, r, g, b, a, font)
+				return Projection.decorateDraw(self, originalDrawTextRight, true,
+					text, x, y, r, g, b, a, font, doDragged)
 			end
-			return originalDrawText(self, text, x, y, r, g, b, a, font)
 		end
 		local ok, err = pcall(originalRenderDetails, pane, doDragged)
 		pane.drawText = originalDrawText
+		pane.drawTextRight = originalDrawTextRight
 		renderingPanes[pane] = nil
 		if not ok then error(err) end
 		if not doDragged then
@@ -228,9 +255,15 @@ function Projection.installHooks()
 			queueVisibleRows(pane)
 		end
 	end
+	Projection._renderHook = renderHook
+	ISInventoryPane.renderdetails = renderHook
 	Projection._hooksInstalled = true
 	GlobalStorageSiK.Log.debug("VanillaInventoryProjection", "ISInventoryPane.renderdetails envuelto una sola vez")
 	return true
+end
+
+function Projection.isRenderHookActive()
+	return ISInventoryPane and ISInventoryPane.renderdetails == Projection._renderHook
 end
 
 local function onTick()

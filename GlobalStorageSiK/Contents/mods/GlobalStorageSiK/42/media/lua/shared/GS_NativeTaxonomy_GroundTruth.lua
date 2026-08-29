@@ -71,7 +71,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- DEV32.3: incrementada a "8" al incorporar ocho anclas vanilla exactas
 -- (materiales y soplete). Dos ejecuciones con la misma versión comparan el
 -- mismo contrato, nunca una lista de casos distinta.
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "9"
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "10"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -2165,8 +2165,8 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	-- Bag_ProtectiveCaseBulkyAmmo_* en el corpus de Combate).
 	{
 		caseId = "containers_liquid_beerbottle", fullType = "Base.BeerBottle", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "beverage", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_food_beverage",
+		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "beverage",
+		minConfidence = 100, expectedSource = "script_item_type",
 		note = "Recipiente lleno definido por su contenido: cerveza; no exige faceta de recipiente en la clasificacion estatica vigente.",
 	},
 	{
@@ -2228,8 +2228,8 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	},
 	{
 		caseId = "containers_liquid_milkbottle", fullType = "Base.MilkBottle", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "dairy_egg", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_food_dairy_egg",
+		expectedL1 = "food_drink", expectedL2 = "perishable", expectedL3 = "dairy_egg",
+		minConfidence = 100, expectedSource = "script_item_type",
 		note = "Recipiente lleno definido por su contenido: leche; no exige faceta de recipiente en la clasificacion estatica vigente.",
 	},
 	{
@@ -2732,8 +2732,8 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	},
 	{
 		caseId = "containers_portable_cooler_meat", fullType = "Base.Cooler_Meat", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "meat_protein", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_food_meat_protein",
+		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "meat_protein",
+		minConfidence = 100, expectedSource = "script_item_type",
 		note = "Nevera llena definida por su contenido: carne; no exige faceta de recipiente.",
 	},
 	{
@@ -2886,7 +2886,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	},
 	{
 		caseId = "containers_portable_cooler_beer", fullType = "Base.Cooler_Beer", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "beverage", expectedL3 = false,
+		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "beverage",
 		minConfidence = 30, expectedSource = "name_food_beverage",
 		note = "Nevera llena definida por su contenido: cerveza; no exige faceta de recipiente.",
 	},
@@ -2945,6 +2945,8 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v9_food_produce", fullType="Base.CannedTomatoOpen", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v9_food_prepared", fullType="Base.CannedMushroomSoup", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="prepared_meal", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
 	{ caseId="v9_food_produce_canned", fullType="Base.CannedPineapple", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="product_policy:script_food_type" },
+	{ caseId="v10_food_produce_carrot", fullType="Base.Carrot", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_item_type", expectationSource="systems_contract:structural_food_shelf_life", criticalAnchor=true },
+	{ caseId="v10_knowledge_skill_electrician1", fullType="Base.BookElectrician1", block="knowledge_media", presence="required", expectedL1="knowledge_media", expectedL2="skill_book", expectedL3=false, minConfidence=100, expectedSource="script_skill_trained", expectationSource="systems_contract:structural_skill_book", criticalAnchor=true },
 	{ caseId="v9_food_dairy", fullType="Base.CannedMilk_Box", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="dairy_egg", minConfidence=30, expectedSource="name_food_dairy_egg", expectationSource="product_policy:food_dairy_name" },
 	-- Corpus v7 / dev30.4. Anclajes de la señal estructural ScriptItem:isSpice().
 	{ caseId="v9_food_spice_pepper", fullType="Base.Pepper", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="non_perishable", expectedL3="spice", minConfidence=100, expectedSource="script_item_is_spice_confirmed", expectationSource="product_policy:script_item_is_spice_confirmed", criticalAnchor=true },

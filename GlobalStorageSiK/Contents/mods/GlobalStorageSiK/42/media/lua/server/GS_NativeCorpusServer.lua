@@ -18,6 +18,16 @@ require "GS_DiagnosticsSession"
 GlobalStorageSiK.NativeCorpusServer = GlobalStorageSiK.NativeCorpusServer or {}
 
 local nativeCorpusRunning = false
+local lastSummary = nil
+
+function GlobalStorageSiK.NativeCorpusServer.sendLast(player, requireServerModFn, sendCommandFn)
+	if not requireServerModFn(player, "getLastNativeCorpusSummary", nil) or not lastSummary then return end
+	local payload = {}
+	for key, value in pairs(lastSummary) do payload[key] = value end
+	payload.cached = true
+	payload.requestId = nil
+	sendCommandFn(player, "nativeCorpusSummary", payload)
+end
 
 ---@param player table
 ---@param args table|nil
@@ -83,7 +93,7 @@ function GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerM
 	-- Al cliente SOLO el resumen agregado - la lista detallada de
 	-- divergencias se queda en GlobalStorageSiK_NativeCorpus.log (pedido
 	-- explicito: "no enviarlos completos por red").
-	sendCommandFn(player, "nativeCorpusSummary", {
+	local summary = {
 		requestId = requestId,
 		sessionId = diagnosticRun.sessionId,
 		runId = diagnosticRun.runId,
@@ -115,5 +125,7 @@ function GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerM
 		containersBlockReasons = containersBlockReasons,
 		timeMs = report.timeMs,
 		fileName = diagnosticRun.paths.corpus,
-	})
+	}
+	lastSummary = summary
+	sendCommandFn(player, "nativeCorpusSummary", summary)
 end

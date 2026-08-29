@@ -3008,12 +3008,18 @@ local function onClientCommand(module, command, player, args)
 		-- cual en su respuesta, exito o fallo.
 		GlobalStorageSiK.NativeAuditServer.handle(player, args, requireServerMod, gsSendServerCommand)
 
+	elseif command == "getLastNativeAuditSummary" then
+		GlobalStorageSiK.NativeAuditServer.sendLast(player, requireServerMod, gsSendServerCommand)
+
 	elseif command == "runNativeCorpus" then
 		-- Boton "Validar corpus" del panel de staff, pestaña Taxonomia
 		-- (dev24, suite DIFERENCIADA de "Auditar catalogo" - guarda de
 		-- concurrencia y estado propios, ver GS_NativeCorpusServer.lua).
 		-- Mismo patron de extraccion estructural que runNativeAudit.
 		GlobalStorageSiK.NativeCorpusServer.handle(player, args, requireServerMod, gsSendServerCommand)
+
+	elseif command == "getLastNativeCorpusSummary" then
+		GlobalStorageSiK.NativeCorpusServer.sendLast(player, requireServerMod, gsSendServerCommand)
 
 	elseif command == "gsDiagFindBrokenItems" then
 		-- Diagnostico DEV puntual, ver comentario de scanContainerForBrokenItems.
@@ -3732,9 +3738,11 @@ local function onClientCommand(module, command, player, args)
 				local targetReason = nil
 				dest, targetReason = GlobalStorageSiK.DepositSources.resolveExternalTarget(player, args.targetKey)
 				if not dest then
+					local targetMessageKey = targetReason == "network_node"
+						and "IGUI_GS_WithdrawTargetNetworkNode" or "IGUI_GS_WithdrawTargetUnavailable"
 					gsSendServerCommand(player, "actionResult", {
 						ok = false,
-						message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawTargetUnavailable"),
+						message = GlobalStorageSiK.I18n.remote(targetMessageKey),
 						transfer = { op = "withdraw", networkId = networkId, moved = 0,
 							reason = targetReason or "target_unavailable" },
 					})
@@ -3751,15 +3759,31 @@ local function onClientCommand(module, command, player, args)
 			-- ignorando cual enseña de verdad. nil para cualquier otro item.
 			local mediaTitle = type(args.mediaTitle) == "string"
 				and string.sub(args.mediaTitle, 1, 200) or nil
+			local dynamicSignature = type(args.dynamicSignature) == "string"
+				and string.sub(args.dynamicSignature, 1, 200) or nil
 			local requested = math.floor(tonumber(args.amount) or 1)
 			if requested <= 0 then requested = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
 			requested = math.min(requested, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
+			local requestedItemIds = nil
+			if type(args.itemIds) == "table" then
+				local sanitizedItemIds = {}
+				local seenIds = {}
+				for i = 1, math.min(#args.itemIds, requested) do
+					local itemId = tonumber(args.itemIds[i])
+					if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seenIds[itemId] then
+						seenIds[itemId] = true
+						sanitizedItemIds[#sanitizedItemIds + 1] = itemId
+					end
+				end
+				if #sanitizedItemIds > 0 then requestedItemIds = sanitizedItemIds end
+			end
 			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
 			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
 			-- antes de confirmar al cliente, que decide si queda otro.
 			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
-					player, fullType, networkId, requested, dest, mediaTitle
+					player, fullType, networkId, requested, dest, mediaTitle,
+					dynamicSignature, requestedItemIds
 				)
 			end)
 

@@ -156,6 +156,7 @@ local function startNext()
 	current.remaining = current.amount > 0 and math.floor(current.amount) or nil
 	current.all = current.openEnded == true
 	current.sequence = 0
+	current.itemIdOffset = 1
 	nextDispatchMs = nowMs()
 	ensureTickInstalled()
 end
@@ -167,6 +168,11 @@ local function dispatchCurrent()
 		or math.min(current.remaining or 1, SAFE_BATCH_UNITS)
 	current.batchRequested = requested
 	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
+	local exactItemIds = {}
+	local visibleIds = current.rowData.itemIds or {}
+	for i = current.itemIdOffset, math.min(#visibleIds, current.itemIdOffset + requested - 1) do
+		exactItemIds[#exactItemIds + 1] = visibleIds[i]
+	end
 	local expectedRequestId = current.requestId
 	-- Armar ANTES del envío: en SP/host el bypass local puede entregar y
 	-- resolver actionResult de forma síncrona dentro de sendCommand.
@@ -181,6 +187,8 @@ local function dispatchCurrent()
 		-- fullType generico, sino una que enseñe justo esto. nil para
 		-- cualquier otro item (comportamiento identico a siempre).
 		mediaTitle = current.rowData.mediaTitle,
+		dynamicSignature = current.rowData.dynamicSignature,
+		itemIds = exactItemIds,
 		amount = requested,
 		targetKey = current.targetKey,
 		searchQuery = current.searchQuery or "",
@@ -364,6 +372,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	local moved = math.max(0, math.floor(tonumber(transfer.moved) or 0))
 	local reason = transfer.reason and tostring(transfer.reason) or nil
 	current.totalMoved = (current.totalMoved or 0) + moved
+	current.itemIdOffset = (current.itemIdOffset or 1) + moved
 	if operation then
 		operation.totalMoved = (operation.totalMoved or 0) + moved
 		local revision = tonumber(transfer.inventoryRevision)

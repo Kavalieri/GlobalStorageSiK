@@ -21,7 +21,7 @@ require "GS_TerminalUI_Nodes"
 
 GlobalStorageSiK.TerminalNetwork = {}
 
-local NETWORK_UI_VERSION = 25
+local NETWORK_UI_VERSION = 26
 
 --- Comprueba que la UI del scroll único sigue válida (sin widgets huérfanos).
 local function isUiHealthy(ui)

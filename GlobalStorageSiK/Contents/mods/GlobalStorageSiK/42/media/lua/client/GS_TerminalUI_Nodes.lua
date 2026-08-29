@@ -1196,7 +1196,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
 		for _, key in ipairs({ "nodesZoneTitleLbl", "nodesZoneInfoBtn", "nodesEmbedPanel",
 			"nodesRoomZoneBtn", "nodesStructureZoneBtn", "nodesSelectZoneBtn",
-			"nodesDestOrderLbl", "nodesDestOrderBtn" }) do
+			"nodesDestOrderLbl", "nodesDestOrderBtn", "nodesRescanCard" }) do
 			local w = ui[key]
 			if w and host then
 				GlobalStorageSiK.TerminalScroll.disposeChild(host, w)
@@ -1267,6 +1267,33 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		ui.nodesDestOrderBtn._gsNetStatic = true
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesDestOrderBtn)
 		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
+		local cardY = ui.nodesPriorityInfoEndY + 8
+		ui.nodesRescanCard = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardY, innerW - pad * 2, 90)
+		ui.nodesRescanCard._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesRescanCard)
+		ui.nodesRescanTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(10, 8, T("IGUI_GS_RescanAll"))
+		ui.nodesRescanCard:addChild(ui.nodesRescanTitle)
+		local scanTitleW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_RescanAll"))
+		ui.nodesRescanInfo = GlobalStorageSiK.SiK_UI.createInfoHintButton(
+			16 + scanTitleW, 7, FONT_HGT_SMALL, ui.nodesRescanCard, T("IGUI_GS_RescanAllHint"))
+		ui.nodesRescanCard:addChild(ui.nodesRescanInfo)
+		ui.nodesRescanState = ISLabel:new(10, 8 + FONT_HGT_SMALL + 6, FONT_HGT_SMALL, "",
+			0.72, 0.74, 0.78, 1, UIFont.Small, true)
+		ui.nodesRescanState:initialise()
+		ui.nodesRescanCard:addChild(ui.nodesRescanState)
+		local scanBtnY = 8 + FONT_HGT_SMALL * 2 + 12
+		ui.nodesRescanBtn = GlobalStorageSiK.SiK_UI.createButton(
+			10, scanBtnY, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
+			T("IGUI_GS_RescanAll"), ui.nodesRescanCard, function()
+				if terminal.onRescanNetwork then terminal:onRescanNetwork() end
+			end, nil, true)
+		ui.nodesRescanCard:addChild(ui.nodesRescanBtn)
+		ui.nodesCancelScanBtn = GlobalStorageSiK.SiK_UI.createButton(
+			10, scanBtnY + FONT_HGT_SMALL + 12, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
+			T("IGUI_GS_ScanCancel"), ui.nodesRescanCard, function()
+				if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end
+			end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
+		ui.nodesRescanCard:addChild(ui.nodesCancelScanBtn)
 	else
 		if ui.nodesZoneTitleLbl then
 			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesZoneTitleLbl, pad)
@@ -1292,6 +1319,38 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesDestOrderBtn, infoY)
 		end
 		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
+	end
+	local state = terminal and terminal.terminalState or {}
+	local role = state.permissions and state.permissions.playerRole or "member"
+	local canRescanAll = role == "owner" or role == "admin"
+	local scan = state.scan or {}
+	local scanRunning = state.scanRunning == true or scan.state == "RUNNING"
+	local cardY = (ui.nodesPriorityInfoEndY or (y + ui.nodesEmbedHeight + infoH)) + 8
+	local scanBtnH = FONT_HGT_SMALL + 8
+	local cardH = scanRunning and (FONT_HGT_SMALL * 3 + scanBtnH * 2 + 32)
+		or (FONT_HGT_SMALL * 2 + scanBtnH + 26)
+	if ui.nodesRescanCard then
+		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRescanCard, pad)
+		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRescanCard, cardY)
+		ui.nodesRescanCard:setWidth(innerW - pad * 2)
+		ui.nodesRescanCard:setHeight(cardH)
+		ui.nodesRescanCard:setVisible(canRescanAll)
+	end
+	if ui.nodesRescanState then
+		ui.nodesRescanState:setName(scanRunning and T("IGUI_GS_ScanRunningShort")
+			or T("IGUI_GS_ScanSummary", scan.new or 0, scan.updated or 0, scan.offline or 0))
+	end
+	if ui.nodesRescanBtn then
+		ui.nodesRescanBtn:setWidth(innerW - pad * 2 - 20)
+		ui.nodesRescanBtn:setEnable(not scanRunning)
+		ui.nodesRescanBtn._sikUiLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
+		ui.nodesRescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
+	end
+	if ui.nodesCancelScanBtn then
+		ui.nodesCancelScanBtn:setWidth(innerW - pad * 2 - 20)
+		ui.nodesCancelScanBtn:setVisible(scanRunning)
+		ui.nodesCancelScanBtn:setEnable(scanRunning)
+		ui.nodesCancelScanBtn:setTooltip(T("IGUI_GS_ScanCancelHint"))
 	end
 	local configEnabled = not terminal.canEditNetworkConfig
 		or terminal:canEditNetworkConfig(false)
@@ -1321,7 +1380,9 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			terminal.terminalState and terminal.terminalState.nodes or {},
 			terminal.terminalState and terminal.terminalState.categories or {}
 		)
-		return y + embedH + 12 + infoH
+		local endY = y + embedH + 12 + infoH
+		if canRescanAll then endY = cardY + cardH + 8 end
+		return endY
 	end
 	ui.nodesEmbedBuilt = false
 	return titleY + FONT_HGT_SMALL + 12

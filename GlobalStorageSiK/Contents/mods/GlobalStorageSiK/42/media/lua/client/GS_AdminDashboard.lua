@@ -1267,6 +1267,12 @@ function GlobalStorageSiK.AdminDashboard.onActionResult(args)
 	ui:requestMembers(ui._selectedNetworkId)
 end
 
+local function requestLatestTaxonomySummaries()
+	if not GlobalStorageSiK.NetClient or not GlobalStorageSiK.NetClient.sendCommand then return end
+	GlobalStorageSiK.NetClient.sendCommand("getLastNativeAuditSummary", {})
+	GlobalStorageSiK.NetClient.sendCommand("getLastNativeCorpusSummary", {})
+end
+
 --- Abre (o trae al frente) el panel. Solo se llama desde un punto ya gateado
 --- por isServerStaff en el CLIENTE (icono lateral) - la autorizacion real
 --- vuelve a comprobarse en servidor en cada comando, esto es solo UX.
@@ -1275,6 +1281,7 @@ function GlobalStorageSiK.AdminDashboard.show()
 		GlobalStorageSiK.AdminDashboard.instance:setVisible(true)
 		GlobalStorageSiK.AdminDashboard.instance:bringToTop()
 		GlobalStorageSiK.AdminDashboard.instance:requestNetworkList()
+		requestLatestTaxonomySummaries()
 		return
 	end
 	local sw = getCore():getScreenWidth()
@@ -1285,4 +1292,5 @@ function GlobalStorageSiK.AdminDashboard.show()
 	ui:initialise()
 	ui:addToUIManager()
 	GlobalStorageSiK.AdminDashboard.instance = ui
+	requestLatestTaxonomySummaries()
 end

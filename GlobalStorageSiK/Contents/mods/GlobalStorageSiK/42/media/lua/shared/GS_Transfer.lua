@@ -177,7 +177,58 @@ local function matchesMediaTitle(item, mediaTitle)
 	return name ~= nil and name == mediaTitle
 end
 
-local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle)
+local function matchesDynamicSignature(item, dynamicSignature)
+	local _, liveSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
+	return liveSignature == dynamicSignature
+end
+
+local function capacityMetric(container, getter)
+	if not container or not container[getter] then return "?" end
+	local ok, value = pcall(function() return container[getter](container) end)
+	return ok and tostring(value) or "?"
+end
+
+local function captureCapacity(source, dest)
+	return {
+		sourceWeight = capacityMetric(source, "getContentsWeight"),
+		destWeight = capacityMetric(dest, "getContentsWeight"),
+		destCapacity = capacityMetric(dest, "getCapacity"),
+	}
+end
+
+local function containerIdentity(container)
+	if not container then return "?" end
+	for _, getter in ipairs({ "getType", "getContainerType" }) do
+		if container[getter] then
+			local ok, value = pcall(function() return container[getter](container) end)
+			if ok and value and tostring(value) ~= "" then return tostring(value) end
+		end
+	end
+	return tostring(container)
+end
+
+local function logWithdrawCapacity(source, dest, item, sourceNodeId, networkId, before, reason, result)
+	if not GlobalStorageSiK.Log or not GlobalStorageSiK.Log.info then return end
+	local after = captureCapacity(source, dest)
+	before = before or after
+	GlobalStorageSiK.Log.info("TransferQueue", "withdraw capacity",
+		"networkId=" .. tostring(networkId)
+			.. " sourceNodeId=" .. tostring(sourceNodeId or "?")
+			.. " source=" .. containerIdentity(source)
+			.. " destination=" .. containerIdentity(dest)
+			.. " itemId=" .. tostring(item and item.getID and item:getID() or "?")
+			.. " fullType=" .. tostring(item and item.getFullType and item:getFullType() or "?")
+			.. " sourceWeightBefore=" .. tostring(before.sourceWeight)
+			.. " sourceWeightAfter=" .. tostring(after.sourceWeight)
+			.. " destWeightBefore=" .. tostring(before.destWeight)
+			.. " destWeightAfter=" .. tostring(after.destWeight)
+			.. " destCapacityBefore=" .. tostring(before.destCapacity)
+			.. " destCapacityAfter=" .. tostring(after.destCapacity)
+			.. " reason=" .. tostring(reason)
+			.. " result=" .. tostring(result))
+end
+
+local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
 
 	destContainer = destContainer or player:getInventory()
 
@@ -197,6 +248,11 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	local sourceNodeIds = {}
 
 	local lastReason = nil
+	local requestedIds = nil
+	if requestedItemIds ~= nil then
+		requestedIds = {}
+		for i = 1, #requestedItemIds do requestedIds[requestedItemIds[i]] = true end
+	end
 
 	-- Nodos realmente tocados en este micro-lote, para refrescar su
 	-- itemSnapshot UNA sola vez cada uno al final (no por item movido).
@@ -228,6 +284,7 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 
 				local item = items:get(j)
 
+				local itemId = item and item.getID and item:getID() or nil
 				if not item or item.getFullType == nil or item:getFullType() ~= fullType then
 
 					j = j + 1
@@ -237,6 +294,10 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 					-- Mismo fullType generico (ej. VHS Tape) pero contenido
 					-- distinto (otra habilidad) - no es la fila que se pidio,
 					-- seguir buscando en vez de retirar la cinta equivocada.
+					j = j + 1
+				elseif requestedIds and not requestedIds[itemId] then
+					j = j + 1
+				elseif dynamicSignature and not matchesDynamicSignature(item, dynamicSignature) then
 					j = j + 1
 
 				elseif not sourceContains(container, item) then
@@ -250,6 +311,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 					-- Nunca dividir una instancia usando InventoryItem:getCount():
 					-- cada itemId cubre exactamente una unidad física.
 					local toMove = item
+					local sourceContainer = toMove and (toMove:getContainer() or container) or container
+					local capacityBefore = captureCapacity(sourceContainer, destContainer)
 
 					if not toMove then
 
@@ -260,12 +323,16 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 					elseif not GlobalStorageSiK.Router.containerHasSpace(destContainer, toMove, player) then
 
 						lastReason = "no_room"
+						logWithdrawCapacity(sourceContainer, destContainer, toMove,
+							sourceNodeId, networkId, capacityBefore, "no_room", "rejected")
 
 						break
 
-					elseif moveItem(toMove, toMove:getContainer() or container, destContainer, player) then
+					elseif moveItem(toMove, sourceContainer, destContainer, player) then
 
 						moved = moved + 1
+						logWithdrawCapacity(sourceContainer, destContainer, toMove,
+							sourceNodeId, networkId, capacityBefore, "ok", "moved")
 
 						if toMove.getID then
 
@@ -304,7 +371,7 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 
 	if moved > 0 then
 
-		return moved, nil, movedItemIds, sourceNodeIds
+		return moved, lastReason, movedItemIds, sourceNodeIds
 
 	end
 
@@ -471,7 +538,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
 
 	if not player or not fullType or fullType == "" then
 
@@ -503,7 +570,8 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(player, fullType, networkId, target, destContainer, mediaTitle)
+	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(
+		player, fullType, networkId, target, destContainer, mediaTitle, dynamicSignature, requestedItemIds)
 
 	if moved > 0 then
 

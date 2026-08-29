@@ -167,9 +167,6 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 				return
 			end
 			GlobalStorageSiK.NetClient.sendNetworkCommand("setActiveNetwork", nid, {})
-			GlobalStorageSiK.NetClient.sendNetworkCommand("rescanNetwork", nid, {
-				searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or "",
-			})
 		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netUseBtn)
 	ui.netRefreshBtn = GlobalStorageSiK.SiK_UI.createButton(

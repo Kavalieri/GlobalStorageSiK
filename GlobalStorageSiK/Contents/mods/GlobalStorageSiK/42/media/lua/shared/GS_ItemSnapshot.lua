@@ -7,6 +7,7 @@
 
 require "GS_Router"
 require "GS_I18n"
+require "GS_FluidTaxonomy"
 
 GlobalStorageSiK.ItemSnapshot = {}
 
@@ -197,11 +198,15 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- clave compuesta solo decide como se agrupan las filas, nunca que se
 	-- transfiere.
 	local mediaTitle = recordedMediaTitleFromItem(item)
-	local groupKey = mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType
+	local dynamicPath, dynamicSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
+	local groupKey = fullType
+	if mediaTitle then groupKey = groupKey .. "\31media:" .. mediaTitle end
+	if dynamicSignature then groupKey = groupKey .. "\31state:" .. dynamicSignature end
 	local row = byType[groupKey]
 	if not row then
 		local metadata = metadataForItem(item, fullType)
 		row = {
+			rowKey = groupKey,
 			fullType = fullType,
 			-- mediaTitle (getDisplayName() real de ESTA cinta, ej. "Carpentry
 			-- for Beginners") sustituye al nombre generico por fullType ("VHS
@@ -218,8 +223,23 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			numberOfPages = metadata.numberOfPages,
 			literatureTitle = literatureTitleFromItem(item),
 			mediaTitle = mediaTitle,
+			dynamicSignature = dynamicSignature,
+			itemIds = {},
 			count = 0,
 		}
+		-- La ruta del contenido líquido es por instancia y no puede recuperarse
+		-- después desde el ScriptItem estático. Se publica ya resuelta dentro de
+		-- la fila autoritativa para que UI y enrutado describan la misma variante.
+		if dynamicPath and GlobalStorageSiK.CategoryResolution then
+			local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
+			row.nativePath = resolved.nativePath
+			row.nativeStatus = resolved.nativeStatus
+			row.vanillaKey = resolved.vanillaKey
+			row.effective = resolved.effective
+			row.categoryEffective = resolved.effective
+			row.routingIdentity = resolved.routingIdentity
+			row.categorySource = resolved.categorySource
+		end
 		byType[groupKey] = row
 	end
 	-- InventoryItem:getCount() NO es el número de instancias transferibles. En
@@ -228,6 +248,10 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- una sola entrada física. Usarlo aquí inflaba 84 clavos hasta 420 y hacía
 	-- que la retirada eliminase 84 IDs mientras confirmaba 420 unidades.
 	row.count = row.count + 1
+	if item.getID then
+		local okId, itemId = pcall(function() return item:getID() end)
+		if okId and itemId ~= nil then row.itemIds[#row.itemIds + 1] = itemId end
+	end
 	return true
 end
 
@@ -254,6 +278,7 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 		local existing = target[groupKey]
 		if not existing then
 			target[groupKey] = {
+				rowKey = row.rowKey or groupKey,
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -265,10 +290,21 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
 				mediaTitle = row.mediaTitle,
+				dynamicSignature = row.dynamicSignature,
+				itemIds = row.itemIds or {},
+				nativePath = row.nativePath,
+				nativeStatus = row.nativeStatus,
+				vanillaKey = row.vanillaKey,
+				effective = row.effective,
+				categoryEffective = row.categoryEffective,
+				routingIdentity = row.routingIdentity,
+				categorySource = row.categorySource,
 				count = row.count or 0,
 			}
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
+			existing.itemIds = existing.itemIds or {}
+			for i = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[i] end
 		end
 	end
 end

@@ -143,9 +143,9 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, selectionR
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = rowData
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes = {}
 	for i = 1, #rows do
-		local ft = rows[i] and rows[i].fullType
-		if ft then
-			GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes[ft] = true
+		local key = rows[i] and (rows[i].rowKey or rows[i].fullType)
+		if key then
+			GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes[key] = true
 		end
 	end
 	expandInventoryPages()

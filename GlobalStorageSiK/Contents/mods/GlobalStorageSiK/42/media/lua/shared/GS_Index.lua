@@ -54,6 +54,7 @@ local function mergeLiveContainer(byType, container, nodeId)
 		local existing = byType[groupKey]
 		if not existing then
 			byType[groupKey] = {
+				rowKey = row.rowKey or groupKey,
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -65,12 +66,23 @@ local function mergeLiveContainer(byType, container, nodeId)
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
 				mediaTitle = row.mediaTitle,
+				dynamicSignature = row.dynamicSignature,
+				itemIds = row.itemIds or {},
+				nativePath = row.nativePath,
+				nativeStatus = row.nativeStatus,
+				vanillaKey = row.vanillaKey,
+				effective = row.effective,
+				categoryEffective = row.categoryEffective,
+				routingIdentity = row.routingIdentity,
+				categorySource = row.categorySource,
 				count = row.count,
 				nodeId = nodeId,
 			}
 			addLocation(byType[groupKey], nodeId, row.count)
 		else
 			existing.count = existing.count + row.count
+			existing.itemIds = existing.itemIds or {}
+			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
 			addLocation(existing, nodeId, row.count)
 		end
 	end
@@ -87,6 +99,7 @@ local function mergeNodeSnapshot(byType, node)
 		local existing = byType[groupKey]
 		if not existing then
 			byType[groupKey] = {
+				rowKey = row.rowKey or groupKey,
 				fullType = row.fullType,
 				displayName = row.displayName,
 				worldSprite = row.worldSprite,
@@ -98,12 +111,23 @@ local function mergeNodeSnapshot(byType, node)
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
 				mediaTitle = row.mediaTitle,
+				dynamicSignature = row.dynamicSignature,
+				itemIds = row.itemIds or {},
+				nativePath = row.nativePath,
+				nativeStatus = row.nativeStatus,
+				vanillaKey = row.vanillaKey,
+				effective = row.effective,
+				categoryEffective = row.categoryEffective,
+				routingIdentity = row.routingIdentity,
+				categorySource = row.categorySource,
 				count = row.count or 0,
 				nodeId = node.id,
 			}
 			addLocation(byType[groupKey], node.id, row.count or 0)
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
+			existing.itemIds = existing.itemIds or {}
+			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
 			addLocation(existing, node.id, row.count or 0)
 		end
 	end

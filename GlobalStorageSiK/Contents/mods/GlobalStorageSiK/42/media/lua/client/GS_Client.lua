@@ -106,6 +106,7 @@ safeRequire("GS_VanillaInventoryTaxonomy")
 if GlobalStorageSiK.VanillaInventoryTaxonomy and GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks then
 	GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks()
 end
+safeRequire("GS_CleanUIInventoryTaxonomy")
 
 if GlobalStorageSiK.TerminalDrop and GlobalStorageSiK.TerminalDrop.installHooks then
 	GlobalStorageSiK.TerminalDrop.installHooks()
@@ -663,7 +664,7 @@ local function onServerCommand(module, command, args)
 		-- Resultado del boton "Auditar catalogo" (ver GS_NativeAudit.lua) -
 		-- solo el resumen llega aqui, el informe completo con muestras se
 		-- queda en el fichero de diagnostico del servidor.
-		if args then
+		if args and args.cached ~= true then
 			local msg = GlobalStorageSiK.I18n.text("IGUI_GS_NativeAuditSummary",
 				tostring(args.timeMs), tostring(args.totalTypes), tostring(args.pending),
 				tostring(args.unclassified), tostring(args.invalidPath), tostring(args.fileName))
@@ -672,12 +673,11 @@ local function onServerCommand(module, command, args)
 			if player and player.setHaloNote then
 				player:setHaloNote(msg, 220, 220, 220, 600)
 			end
-			-- dev22: ademas del halo/log de siempre, alimenta el resumen
-			-- persistente de la pestaña Taxonomia del panel de staff (antes
-			-- este informe no se guardaba en ningun sitio del cliente).
-			if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeAuditSummary then
-				GlobalStorageSiK.AdminDashboard.onNativeAuditSummary(args)
-			end
+		end
+		-- Tanto una ejecucion nueva como la copia cacheada solicitada al abrir
+		-- alimentan la pestaña; la cache no repite halo ni log.
+		if args and GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeAuditSummary then
+			GlobalStorageSiK.AdminDashboard.onNativeAuditSummary(args)
 		end
 	elseif command == "nativeCorpusSummary" then
 		-- dev24: resultado del boton "Validar corpus" - suite DIFERENCIADA

@@ -527,6 +527,7 @@
 	"IGUI_GS_WithdrawnPartial": "Withdrawn: {1} of {2} requested",
 	"IGUI_GS_WithdrawErrorReason": "Error: {1}",
 	"IGUI_GS_WithdrawTargetUnavailable": "The selected destination is no longer available.",
+	"IGUI_GS_WithdrawTargetNetworkNode": "That container already belongs to a Global Storage network. Choose your inventory or another external container.",
 	"IGUI_GS_ZoneLimitReached": "Zone limit reached",
 	"IGUI_GS_ZoneAlreadyExists": "This exact area is already registered as zone \"{1}\"",
 	"IGUI_GS_InvalidEntry": "Invalid entry",

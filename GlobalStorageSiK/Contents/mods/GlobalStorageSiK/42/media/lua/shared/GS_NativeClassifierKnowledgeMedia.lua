@@ -80,9 +80,25 @@ local function isGsRecipeManual(fullType, si)
 		and (string.find(fullType, "^GlobalStorageSiK%.GS_Manual_")
 			or string.find(fullType, "^GSSiK_Addon_[A-Za-z]+%.GS_Manual_")) ~= nil
 	if not ownManual then return false end
-	if U.displayCategoryLower(si) ~= "reciperesource" then return false end
-	local magazineTag = U.tagByLocation("base", "magazine")
-	return magazineTag ~= nil and U.hasTag(si, magazineTag)
+	-- El namespace y prefijo propios son el marcador versionado que controla
+	-- GS. DisplayCategory y el tag magazine no son estables en todos los
+	-- ScriptItem de TEST; exigirlos degradaba manuales válidos a literatura.
+	return U.itemTypeLower(si) == "base:literature"
+end
+
+local function hasSkillTraining(si)
+	local skill = U.safeCall(function() return si:getSkillTrained() end)
+	if skill == nil then return false end
+	local text = tostring(skill)
+	return text ~= "" and text ~= "None" and text ~= "nil"
+end
+
+local function hasLearnedRecipes(si)
+	local recipes = U.safeCall(function() return si:getLearnedRecipes() end)
+	if recipes == nil then return false end
+	if type(recipes) == "table" then return #recipes > 0 end
+	local size = U.safeCall(function() return recipes:size() end)
+	return type(size) == "number" and size > 0
 end
 
 -- Orden fijo: { l2, tokens, fuente-débil }. Mismo recorrido tanto si la
@@ -123,6 +139,14 @@ local function classifyKnowledgeMedia(fullType, si)
 	end
 
 	local isConfirmedLiterature = U.itemTypeLower(si) == "base:literature"
+	if isConfirmedLiterature and hasSkillTraining(si) then
+		return { l1 = "knowledge_media", l2 = "skill_book", l3 = nil }, {}, {},
+			U.evidence("script_skill_trained", 100)
+	end
+	if isConfirmedLiterature and (hasLearnedRecipes(si) or U.displayCategoryLower(si) == "reciperesource") then
+		return { l1 = "knowledge_media", l2 = "recipe_magazine", l3 = nil }, {}, {},
+			U.evidence("script_recipe_resource", 100)
+	end
 
 	if not isConfirmedLiterature then
 		-- Blindaje generico (hallazgo de sistemas: Base.LetterOpener caia

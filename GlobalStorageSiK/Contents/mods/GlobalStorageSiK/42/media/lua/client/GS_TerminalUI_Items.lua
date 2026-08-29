@@ -52,13 +52,17 @@ local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 4 }
 ---@param panel ISPanel
 ---@param fullType string|nil
 ---@return number|nil
-local function findItemIndex(panel, fullType)
+local function rowIdentity(row)
+	return row and (row.rowKey or row.fullType) or nil
+end
+
+local function findItemIndex(panel, key)
 	local items = panel and panel._lastItems
-	if not items or not fullType then
+	if not items or not key then
 		return nil
 	end
 	for i = 1, #items do
-		if items[i].fullType == fullType then
+		if rowIdentity(items[i]) == key then
 			return i
 		end
 	end
@@ -75,7 +79,8 @@ local function getSelectedRows(panel)
 	end
 	for i = 1, #items do
 		local row = items[i]
-		if row.fullType and panel._selectedKeys[row.fullType] then
+		local key = rowIdentity(row)
+		if key and panel._selectedKeys[key] then
 			out[#out + 1] = row
 		end
 	end
@@ -121,8 +126,9 @@ local function selectRangeTo(panel, toIndex)
 	panel._selectedKeys = panel._selectedKeys or {}
 	for i = lo, hi do
 		local row = items[i]
-		if row and row.fullType then
-			panel._selectedKeys[row.fullType] = true
+		local key = rowIdentity(row)
+		if key then
+			panel._selectedKeys[key] = true
 		end
 	end
 end
@@ -143,16 +149,17 @@ local function handleRowClick(panel, row)
 	-- identidad real (`fullType`) en el dataset actual `panel._lastItems`,
 	-- siempre correcto independientemente del pool - preferirlo siempre,
 	-- `row.rowIndex` queda solo como reserva si la busqueda no encuentra nada.
-	local idx = findItemIndex(panel, data.fullType) or row.rowIndex or 1
+	local key = rowIdentity(data)
+	local idx = findItemIndex(panel, key) or row.rowIndex or 1
 	if isCtrlKeyDown and isCtrlKeyDown() then
-		toggleRowSelection(panel, data.fullType)
+		toggleRowSelection(panel, key)
 	elseif isShiftKeyDown and isShiftKeyDown() then
 		if not panel._selectionAnchor then
 			panel._selectionAnchor = idx
 		end
 		selectRangeTo(panel, idx)
 	else
-		selectSingleRow(panel, data.fullType, idx)
+		selectSingleRow(panel, key, idx)
 	end
 end
 
@@ -878,11 +885,11 @@ end
 ---@param panel ISPanel
 ---@param fullType string|nil
 ---@return boolean
-local function isRowSelected(panel, fullType)
-	if not panel or not fullType or not panel._selectedKeys then
+local function isRowSelected(panel, key)
+	if not panel or not key or not panel._selectedKeys then
 		return false
 	end
-	return panel._selectedKeys[fullType] == true
+	return panel._selectedKeys[key] == true
 end
 
 ---@param panel ISPanel
@@ -1120,14 +1127,14 @@ local function createItemRow(scroll, listPanel, terminal)
 	row.prerender = function(self)
 		ISPanel.prerender(self)
 		local data = self.itemData
-		local selected = data and self.listPanel and isRowSelected(self.listPanel, data.fullType)
+		local selected = data and self.listPanel and isRowSelected(self.listPanel, rowIdentity(data))
 		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), selected)
 		if data and GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			local types = GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes
-			if types and data.fullType and types[data.fullType] then
+			if types and rowIdentity(data) and types[rowIdentity(data)] then
 				self:drawRect(0, 0, self.width, self.height, 0.25, 0.28, 0.28, 0.28)
 			elseif GlobalStorageSiK.TerminalWithdrawDrag.activePreview
-				and GlobalStorageSiK.TerminalWithdrawDrag.activePreview.fullType == data.fullType then
+				and rowIdentity(GlobalStorageSiK.TerminalWithdrawDrag.activePreview) == rowIdentity(data) then
 				self:drawRect(0, 0, self.width, self.height, 0.25, 0.28, 0.28, 0.28)
 			end
 		end
@@ -1237,7 +1244,7 @@ local function createItemRow(scroll, listPanel, terminal)
 		if self._gsDragAccum >= DRAG_THRESHOLD then
 			self._gsDragPending = false
 			local selection = getSelectedRows(self.listPanel)
-			local rowSelected = isRowSelected(self.listPanel, self.itemData.fullType)
+			local rowSelected = isRowSelected(self.listPanel, rowIdentity(self.itemData))
 			local multiDrag = #selection > 1 and self.itemData and rowSelected
 			-- amount=0 = "todo el stock de este fullType" (misma convencion que
 			-- el menu de clic derecho). Antes se mandaba amount=1 a fuego: al
@@ -1277,8 +1284,8 @@ local function createItemRow(scroll, listPanel, terminal)
 
 	row.onRightMouseUp = function(self, x, y)
 		if self.itemData and self.listPanel and self.terminal then
-			if not isRowSelected(self.listPanel, self.itemData.fullType) then
-				selectSingleRow(self.listPanel, self.itemData.fullType, self.rowIndex)
+			if not isRowSelected(self.listPanel, rowIdentity(self.itemData)) then
+				selectSingleRow(self.listPanel, rowIdentity(self.itemData), self.rowIndex)
 			end
 			openItemContextMenu(self.listPanel, self.terminal, self.itemData)
 		end
@@ -1309,7 +1316,7 @@ local function bindItemRowIndex(row, data, panel, dataIndex)
 	end
 	for i = 1, #panel._lastItems do
 		local item = panel._lastItems[i]
-		if item == data or (data.fullType and item.fullType == data.fullType) then
+		if item == data or (rowIdentity(data) and rowIdentity(item) == rowIdentity(data)) then
 			row.rowIndex = i
 			break
 		end

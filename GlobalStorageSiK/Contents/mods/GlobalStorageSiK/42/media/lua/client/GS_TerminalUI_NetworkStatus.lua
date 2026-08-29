@@ -233,18 +233,8 @@ function GlobalStorageSiK.TerminalNetworkStatus.build(scroll, terminal, ui, y, i
 	y = addStat(scroll, ui, "scanUpdated",  leftX, y, "", 0.82, 0.86, 0.92)
 	y = addStat(scroll, ui, "scanOffline",  leftX, y, "", 0.82, 0.86, 0.92)
 	y = addStat(scroll, ui, "scanOutOfRange", leftX, y, "", 0.9, 0.7, 0.3)
-	local btnH = FONT_HGT_SMALL + 8
-	ui.rescanBtn = GlobalStorageSiK.SiK_UI.createButton(leftX, y, contentW, btnH, T("IGUI_GS_RescanAll"), scroll, function()
-		if terminal.onRescanNetwork then terminal:onRescanNetwork() end
-	end, nil, true)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.rescanBtn)
-	y = y + btnH + 4
-	ui.cancelScanBtn = GlobalStorageSiK.SiK_UI.createButton(leftX, y, contentW, btnH, T("IGUI_GS_ScanCancel"), scroll, function()
-		if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end
-	end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
-	ui.cancelScanBtn:setVisible(false)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.cancelScanBtn)
-	y = y + btnH + 4
+	-- El control manual global pertenece a Red/Nodos, junto a las zonas que
+	-- afecta. Estado conserva únicamente el resultado del último escaneo.
 	-- Boton "Auto-ordenar" MOVIDO (2026-08-17, pedido explicito) a la
 	-- pestaña Items/almacén, arriba a la derecha del título
 	-- (GS_TerminalUI.lua:buildItemsToolbar) - ya no vive aquí.
@@ -449,23 +439,6 @@ function GlobalStorageSiK.TerminalNetworkStatus.sync(ui, state)
 			setText(ui.stats.scanOutOfRange, "", 0.9, 0.7, 0.3, ui.contentW)
 		end
 	end
-	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
-		ui.rescanBtn:setEnable(not scanRunning)
-		ui.rescanBtn._sikUiLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
-		if scan.durationMs then
-			ui.rescanBtn:setTooltip(T("IGUI_GS_ScanMetricsTooltip",
-				scan.durationMs or 0, scan.nodesScanned or 0,
-				scan.itemInstances or 0, scan.distinctTypes or 0,
-				scan.snapshotRows or 0))
-		else
-			ui.rescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
-		end
-	end
-	if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.cancelScanBtn) then
-		ui.cancelScanBtn:setVisible(scanRunning)
-		ui.cancelScanBtn:setEnable(scanRunning)
-		ui.cancelScanBtn:setTooltip(T("IGUI_GS_ScanCancelHint"))
-	end
 
 	local name = state.networkName
 	local display = name and name ~= "" and name or T("IGUI_GS_NetworkDefaultName")
@@ -550,14 +523,6 @@ function GlobalStorageSiK.TerminalNetworkStatus.layout(scroll, ui, innerW)
 	if ui.weightBar and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.weightBar) then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.weightBar, leftX)
 		ui.weightBar:setWidth(contentW)
-	end
-	if ui.rescanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.rescanBtn) then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.rescanBtn, leftX)
-		ui.rescanBtn:setWidth(contentW)
-	end
-	if ui.cancelScanBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.cancelScanBtn) then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.cancelScanBtn, leftX)
-		ui.cancelScanBtn:setWidth(contentW)
 	end
 	resizeCard(ui.statsCard, ui.statsY, ui.statsEndY)
 

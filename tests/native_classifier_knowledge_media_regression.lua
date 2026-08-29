@@ -13,11 +13,13 @@ dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_N
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_NativeClassifierKnowledgeMedia.lua")
 assert(classifier, "knowledge classifier must register its block")
 
-local function scriptItem(fullType, displayCategory, magazine)
+local function scriptItem(fullType, displayCategory, magazine, skill, recipes)
 	return {
 		getFullName = function() return fullType end,
 		getDisplayCategory = function() return displayCategory end,
 		getItemType = function() return "base:literature" end,
+		getSkillTrained = function() return skill end,
+		getLearnedRecipes = function() return recipes end,
 		getTags = function()
 			return { contains = function(_, tag) return magazine and tag == "base:magazine" or false end }
 		end,
@@ -32,6 +34,17 @@ assert(evidence.primary.source == "gs_recipe_manual_structural", "structural evi
 
 local missingTag = classifier("GlobalStorageSiK.GS_Manual_TerminalUnit",
 	scriptItem("GlobalStorageSiK.GS_Manual_TerminalUnit", "RecipeResource", false))
-assert(missingTag == nil, "the own marker alone cannot classify an arbitrary manual as a recipe magazine")
+assert(missingTag and missingTag.l2 == "recipe_magazine",
+	"the stable own marker plus recipe metadata must not depend on the runtime magazine tag")
+
+local skillBook, _, _, skillEvidence = classifier("Base.BookElectrician1",
+	scriptItem("Base.BookElectrician1", "SkillBook", false, "Electricity", nil))
+assert(skillBook and skillBook.l2 == "skill_book", "skill training metadata wins over electrician name")
+assert(skillEvidence.primary.source == "script_skill_trained", "skill book structural evidence")
+
+local vanillaRecipe, _, _, recipeEvidence = classifier("Base.MagazineCooking1",
+	scriptItem("Base.MagazineCooking1", "RecipeResource", false, nil, { "Make Soup" }))
+assert(vanillaRecipe and vanillaRecipe.l2 == "recipe_magazine", "recipe data identifies vanilla recipe magazines")
+assert(recipeEvidence.primary.source == "script_recipe_resource", "recipe structural evidence")
 
 print("native_classifier_knowledge_media_regression: OK")

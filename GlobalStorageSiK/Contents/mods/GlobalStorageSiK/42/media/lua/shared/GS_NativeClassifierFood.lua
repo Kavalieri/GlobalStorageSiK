@@ -46,7 +46,10 @@ local MEAT_PROTEIN_TOKENS = toSet({
 })
 local DAIRY_EGG_TOKENS = toSet({ "cheese", "milk", "egg", "yogurt", "butter" })
 local FISH_SEAFOOD_TOKENS = toSet({ "fish", "shrimp", "crab", "lobster" })
-local PRODUCE_TOKENS = toSet({ "apple", "banana", "carrot", "tomato", "lettuce", "onion", "corn", "pepper", "potato" })
+local PRODUCE_TOKENS = toSet({
+	"apple", "banana", "carrot", "tomato", "lettuce", "onion", "corn", "pepper", "potato",
+	"pineapple", "jalapeno", "habanero", "fruit", "vegetable",
+})
 local PANTRY_TOKENS = toSet({ "flour", "sugar", "salt", "rice", "pasta", "cereal" })
 local INGREDIENT_TOKENS = toSet({ "dough", "batter", "stock", "broth" })
 -- "clipping" (RecipeClipping) NO va aqui - es un documento de conocimiento
@@ -70,7 +73,9 @@ local L2_RULES = {
 	{ l2 = "produce", tokens = PRODUCE_TOKENS, weakSource = "name_food_produce" },
 	{ l2 = "pantry", tokens = PANTRY_TOKENS, weakSource = "name_food_pantry" },
 	{ l2 = "ingredient", tokens = INGREDIENT_TOKENS, weakSource = "name_food_ingredient" },
-	{ l2 = "snack", tokens = SNACK_TOKENS, weakSource = "name_food_snack" },
+	-- El registro no publica una hoja `snack`: estos productos pertenecen a
+	-- la hoja operativa y estable `other_food`.
+	{ l2 = "other_food", tokens = SNACK_TOKENS, weakSource = "name_food_other" },
 	{ l2 = "beverage", tokens = BEVERAGE_TOKENS, weakSource = "name_food_beverage" },
 	{ l2 = "animal_feed", tokens = ANIMAL_FEED_TOKENS, weakSource = "name_food_animal_feed" },
 }
@@ -149,6 +154,9 @@ local function foodShelfLife(si)
 	return "non_perishable"
 end
 
+local CONTAINER_FORM_TOKENS = toSet({ "jar", "bucket", "cooler", "bottle", "canteen", "flask", "jug", "keg" })
+local CANNED_TOKENS = toSet({ "canned", "can" })
+
 local function contentFromTags(si)
 	local groups = {
 		{ key = "fish_seafood", tags = { "fish_meat" } },
@@ -225,6 +233,18 @@ local function classifyFood(fullType, si)
 	end
 
 	local tokens = U.tokenize(U.typeName(si))
+	-- Un recipiente sin identidad alimentaria estructural conserva su forma.
+	-- Evita que CookieJar/HalloweenCandyBucket se conviertan en comida por el
+	-- nombre de lo que podrían contener. Las variantes llenas generadas como
+	-- `Cooler_Beer`/`Cooler_Meat` son la excepción estructural: el sufijo tras
+	-- `_` identifica contenido y gana al envase. Un tipo `base:food` también
+	-- representa contenido real y mantiene prioridad sobre la forma.
+	if not isConfirmedFood and U.hasAnyToken(tokens, CONTAINER_FORM_TOKENS) then
+		local localName = tostring(fullType or ""):match("^[^%.]+%.(.+)$") or tostring(fullType or "")
+		local contentSuffix = localName:match("_(.+)$")
+		local suffixL2 = contentSuffix and matchL2(U.tokenize(contentSuffix)) or nil
+		if not suffixL2 then return nil end
+	end
 	if not isConfirmedFood then
 		if #tokens == 0 then return nil end
 		if U.hasAnyToken(tokens, FOOD_EXCLUDE_TOKENS) then return nil end
@@ -233,6 +253,19 @@ local function classifyFood(fullType, si)
 	local l2, weakSource = matchL2(tokens)
 	local taggedContent = contentFromTags(si)
 	local shelfLife = foodShelfLife(si)
+	-- CakeBatter y masas equivalentes son ingredientes preparados perecederos.
+	-- DaysFresh no es fiable para estas variantes generadas, pero ItemType
+	-- confirma alimento y la familia de ingrediente distingue su función.
+	if isConfirmedFood and l2 == "ingredient" and shelfLife == "non_perishable" then
+		shelfLife = "perishable"
+	end
+	-- La leche no enlatada representa contenido fresco aunque la variante de
+	-- ScriptItem no publique un DaysFresh útil. Las conservas mantienen la
+	-- clasificación estructural no perecedera.
+	if isConfirmedFood and l2 == "dairy_egg" and U.hasAnyToken(tokens, { milk = true })
+		and not U.hasAnyToken(tokens, CANNED_TOKENS) then
+		shelfLife = "perishable"
+	end
 	if taggedContent == "pasta" then
 		-- `PASTA` identifica la familia con más precisión que el nombre. La
 		-- caducidad distingue pasta seca de la olla/plato ya preparado.
@@ -240,9 +273,17 @@ local function classifyFood(fullType, si)
 	elseif taggedContent then
 		l2, weakSource = taggedContent, "script_food_tag"
 	end
-	if isConfirmedFood and isConfirmedSpice(si, tokens) then
+	if isConfirmedFood and shelfLife == "non_perishable" and isConfirmedSpice(si, tokens) then
 		return { l1 = "food_drink", l2 = shelfLife, l3 = "spice" }, {}, {},
 			U.evidence("script_item_is_spice_confirmed", 100)
+	end
+	-- El registro solo admite pantry/spice en no perecederos. Si la propiedad
+	-- de caducidad confirma que el producto es fresco, se conserva una hoja
+	-- válida y funcional en vez de emitir una ruta imposible.
+	if shelfLife == "perishable" and l2 == "pantry" then
+		l2, weakSource = "ingredient", "name_food_ingredient"
+	elseif shelfLife == "perishable" and l2 == "spice" then
+		l2, weakSource = "produce", "name_food_produce"
 	end
 
 	if isConfirmedFood then
