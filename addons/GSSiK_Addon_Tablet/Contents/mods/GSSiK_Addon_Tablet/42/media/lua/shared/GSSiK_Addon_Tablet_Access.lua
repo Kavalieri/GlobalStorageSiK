@@ -111,16 +111,30 @@ function GSSiK_Addon_Tablet.getWirelessRangeForNetwork(player, networkId, anchor
 		range = GSSiK_Addon_Tablet.Sandbox.getTier3Range()
 	elseif itemType == "GSSiK_Addon_Tablet.GS_WifiAntenna_T2" then
 		range = GSSiK_Addon_Tablet.Sandbox.getTier2Range()
-	else
-		-- T1, o instalada antes de este cambio (sin itemType guardado) -
-		-- por defecto se asume la mas basica, nunca se regala rango de mas.
+	elseif itemType == "GSSiK_Addon_Tablet.GS_WifiAntenna" then
 		range = GSSiK_Addon_Tablet.Sandbox.getTier1Range()
+	elseif itemType == nil or itemType == "" then
+		-- Instalaciones legacy anteriores a guardar itemType: conservar el
+		-- fallback minimo T1, sin regalar un tier superior.
+		range = GSSiK_Addon_Tablet.Sandbox.getTier1Range()
+	else
+		-- Un tipo desconocido nunca se interpreta como antena valida. Esto
+		-- evita que un registro corrupto o de otro addon obtenga cobertura T1.
+		range = 0
+		GSSiK_Addon_Tablet.Log.debug("getWirelessRangeForNetwork -> itemType desconocido, range=0: "
+			.. tostring(itemType))
 	end
 	GSSiK_Addon_Tablet.Log.debug("getWirelessRangeForNetwork -> itemType=" .. tostring(itemType) .. " range=" .. tostring(range))
 	return range
 end
 
 GlobalStorageSiK.TerminalAccess.registerWirelessProvider({
+	id = "TabletLink",
+	capabilities = {
+		remoteTerminal = true,
+		remoteCraft = true,
+		remoteBuilder = true,
+	},
 	hasAccess = GSSiK_Addon_Tablet.hasAccessTablet,
 	hasCraft = GSSiK_Addon_Tablet.hasCraftTablet,
 	hasBuilder = GSSiK_Addon_Tablet.hasBuilderTablet,
