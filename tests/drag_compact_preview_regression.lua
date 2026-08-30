@@ -59,6 +59,7 @@ local escapeClose = nil
 local player = { getPlayerNum = function() return 1 end }
 GlobalStorageSiK = {
 	NetClient = { getPlayer = function() return player end },
+	Log = { debug = function() end },
 	I18n = { text = function(key, count)
 		if key == "IGUI_GS_DragMoreObjects" then return "+" .. tostring(count) .. " objetos" end
 		return key
@@ -104,9 +105,12 @@ local tooltip = {
 	setVisible = function(self, value) self.visible = value end,
 }
 local capture = nil
-local source = {
-	width = 900, listPanel = {}, terminal = {}, _gsTooltip = tooltip,
+local terminal = {
 	setCapture = function(_, value) capture = value == true end,
+}
+local source = {
+	width = 900, listPanel = {}, terminal = terminal, _gsTooltip = tooltip,
+	setCapture = function() error("row must not own terminal drag capture") end,
 }
 local row = {
 	rowKey = "very-long", fullType = "Base.VHSTape", count = 125,
@@ -201,7 +205,7 @@ expectPosition(200, 295, "right", "up")
 
 assert(type(escapeClose) == "function", "Escape callback missing")
 escapeClose()
-assert(capture == false, "Escape retained source capture")
+assert(capture == false, "Escape retained terminal capture")
 assert(preview.inManager == false, "Escape retained compact preview")
 assert(not GlobalStorageSiK.TerminalWithdrawDrag.isActive(), "Escape retained payload")
 
