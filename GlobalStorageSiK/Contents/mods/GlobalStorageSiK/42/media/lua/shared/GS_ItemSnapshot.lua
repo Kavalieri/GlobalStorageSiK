@@ -117,16 +117,11 @@ end
 --- ver cual tenia, retirar una en concreto, ni aplicar el check verde que si
 --- tienen libros/revistas.
 ---
---- Solucion: NO parsear RecMedia aqui (esa tabla exige pasar el indice como
---- "short" al lado Java, marshalling que Kahlua rompe siempre a Double - ver
---- el rodeo ya documentado en GS_ItemNetworkTooltip.getVHSTrainingLines,
---- mismo motivo por el que el mod retirado "Show VHS skills in tooltip" tenia
---- el mismo problema). En su lugar, exactamente igual que literatureTitle
---- (mismo motivo: valor por-instancia, NO cacheable por fullType): vanilla ya
---- resuelve un getDisplayName() distinto por cada entrada de RecMedia (asi es
---- como el propio GS_ItemNetworkTooltip correlaciona indice->habilidad, vía
---- nombre) - leerlo aqui basta como clave de agrupacion Y como nombre a
---- mostrar, sin tocar RecMedia en absoluto ni depender de su marshalling.
+--- Solucion B42.20: InventoryItem expone getMediaData(), que devuelve la
+--- MediaData exacta de esta instancia sin convertir el indice short desde Lua.
+--- Su ID/indice son identidad estable y getTranslatedItemDisplayName() es el
+--- titulo localizado que usa vanilla. getDisplayName() NO sirve: puede ser el
+--- nombre generico del soporte (p. ej. "Cinta VHS") y fundir ediciones.
 --- Publica (no solo local) a proposito: GS_Transfer.lua (filtrar que cinta
 --- fisica retirar) y GS_ItemNetworkTooltip.lua (contar en red solo cintas
 --- con este mismo contenido) reutilizan EXACTAMENTE esta misma lectura, en
@@ -143,9 +138,24 @@ end
 function GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)
 	local idx = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
 	if not idx then return nil end
-	local okName, name = pcall(function() return item:getDisplayName() end)
+	if not item.getMediaData then return nil end
+	local okData, mediaData = pcall(function() return item:getMediaData() end)
+	if not okData or not mediaData or not mediaData.getTranslatedItemDisplayName then
+		return nil
+	end
+	local okName, name = pcall(function() return mediaData:getTranslatedItemDisplayName() end)
 	if not okName or not name or name == "" then return nil end
 	return name
+end
+
+function GlobalStorageSiK.ItemSnapshot.recordedMediaIdFromItem(item)
+	local idx = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
+	if not idx or not item or not item.getMediaData then return nil end
+	local okData, mediaData = pcall(function() return item:getMediaData() end)
+	if not okData or not mediaData or not mediaData.getId then return nil end
+	local okId, id = pcall(function() return mediaData:getId() end)
+	if not okId or not id or id == "" then return nil end
+	return tostring(id)
 end
 local recordedMediaTitleFromItem = GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem
 
@@ -255,6 +265,31 @@ end
 
 ---@param item InventoryItem|nil
 ---@return table detalle serializable exacto para tooltip remoto
+local function recordedMediaCodes(item)
+	if not item or not item.getMediaData then return nil end
+	local okData, mediaData = pcall(function() return item:getMediaData() end)
+	if not okData or not mediaData or not mediaData.getLineCount or not mediaData.getLine then
+		return nil
+	end
+	local okCount, count = pcall(function() return mediaData:getLineCount() end)
+	if not okCount or type(count) ~= "number" then return nil end
+	local result, seen, totalLength = {}, {}, 0
+	for i = 0, math.min(63, math.max(0, math.floor(count) - 1)) do
+		local okLine, line = pcall(function() return mediaData:getLine(i) end)
+		local okCodes, codes = false, nil
+		if okLine and line and line.getCodes then
+			okCodes, codes = pcall(function() return line:getCodes() end)
+		end
+		codes = okCodes and codes and string.sub(tostring(codes), 1, 160) or nil
+		if codes and codes ~= "" and not seen[codes] and totalLength + #codes <= 512 then
+			seen[codes] = true
+			result[#result + 1] = codes
+			totalLength = totalLength + #codes
+		end
+	end
+	return result
+end
+
 function GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(item)
 	if not item then return {} end
 	local fullType = item.getFullType and item:getFullType() or nil
@@ -273,6 +308,7 @@ function GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(item)
 		conditionMax = conditionMax,
 		mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item),
 		mediaTitle = recordedMediaTitleFromItem(item),
+		mediaCodes = recordedMediaCodes(item),
 		dynamicStateKey = (fluid and fluid.stateKey) or foodStateKey,
 		dynamicPercent = fluid and fluid.fillPercent or nil,
 		fluidType = fluid and fluid.canonicalType or nil,

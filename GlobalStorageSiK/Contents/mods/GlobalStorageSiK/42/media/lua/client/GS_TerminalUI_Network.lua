@@ -18,10 +18,53 @@ require "GS_I18n"
 require "GS_TerminalUI_Scroll"
 require "GS_Log"
 require "GS_TerminalUI_Nodes"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalNetwork = {}
 
-local NETWORK_UI_VERSION = 26
+local NETWORK_UI_VERSION = 27
+
+local function layoutNetworkRescan(scroll, terminal, ui, state, innerW, y)
+	local role = state.permissions and state.permissions.playerRole or "member"
+	local visible = role == "owner" or role == "admin"
+	local scan = state.scan or {}
+	local running = state.scanRunning == true or scan.state == "RUNNING"
+	local h = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
+	local gap = GlobalStorageSiK.SiK_UI.Metrics.spacing(8)
+	if not ui.networkRescanBtn then
+		ui.networkRescanBtn = GlobalStorageSiK.SiK_UI.Controls.button(nil, {
+			x = 8, y = y, w = math.max(80, innerW - 16), h = h,
+			text = GlobalStorageSiK.I18n.text("IGUI_GS_RescanAll"), target = scroll,
+			onClick = function() if terminal.onRescanNetwork then terminal:onRescanNetwork() end end,
+			fullWidth = true,
+		})
+		ui.networkRescanBtn._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.networkRescanBtn)
+		ui.networkCancelScanBtn = GlobalStorageSiK.SiK_UI.Controls.button(nil, {
+			x = 8, y = y, w = math.max(80, innerW - 16), h = h,
+			text = GlobalStorageSiK.I18n.text("IGUI_GS_ScanCancel"), target = scroll,
+			onClick = function() if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end end,
+			fullWidth = true,
+		})
+		ui.networkCancelScanBtn._gsNetStatic = true
+		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.networkCancelScanBtn)
+	end
+	local rowW = math.max(80, innerW - 16)
+	local actionW = running and math.floor((rowW - gap) / 2) or rowW
+	GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.networkRescanBtn, 8)
+	GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.networkRescanBtn, y)
+	ui.networkRescanBtn:setWidth(actionW)
+	ui.networkRescanBtn:setHeight(h)
+	ui.networkRescanBtn:setVisible(visible)
+	ui.networkRescanBtn:setEnable(visible and not running)
+	GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.networkCancelScanBtn, 8 + actionW + gap)
+	GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.networkCancelScanBtn, y)
+	ui.networkCancelScanBtn:setWidth(actionW)
+	ui.networkCancelScanBtn:setHeight(h)
+	ui.networkCancelScanBtn:setVisible(visible and running)
+	ui.networkCancelScanBtn:setEnable(visible and running)
+	return visible and (y + h + gap) or y
+end
 
 --- Comprueba que la UI del scroll único sigue válida (sin widgets huérfanos).
 local function isUiHealthy(ui)
@@ -102,9 +145,12 @@ function GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, state)
 
 	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
+	ui.terminalRef = terminal
+	ui.stateRef = state
 
 	local y = 8
 	local ok, err = pcall(function()
+		y = layoutNetworkRescan(scroll, terminal, ui, state, innerW, y)
 		y = GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
 	end)
 	if not ok then
@@ -123,6 +169,10 @@ end
 ---@param ui table
 function GlobalStorageSiK.TerminalNetwork.layoutUi(scroll, ui)
 	if not ui or not ui.built then return end
+	if ui.terminalRef then
+		layoutNetworkRescan(scroll, ui.terminalRef, ui, ui.stateRef or {},
+			GlobalStorageSiK.TerminalScroll.contentWidth(scroll), 8)
+	end
 	if ui.nodesEmbedPanel and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
 		local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 		local embedH = ui.nodesEmbedHeight or math.max(140, ui.nodesEmbedPanel:getHeight() or 140)

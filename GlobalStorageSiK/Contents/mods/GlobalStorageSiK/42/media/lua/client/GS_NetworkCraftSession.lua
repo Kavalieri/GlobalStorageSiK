@@ -1281,9 +1281,11 @@ end
 
 --- Abre la ventana de crafteo (vanilla, neat o automático).
 ---@param mode string|nil "auto"|"vanilla"|"neat"
+---@param recipe CraftRecipe|nil receta concreta que vanilla debe seleccionar
+---@param itemString string|nil InputName usado por vanilla para filtrar
 ---@return boolean ok
 ---@return string|nil reason "no_player"|"opener_unresolved" si falla
-function GlobalStorageSiK.CraftSession.openHandcraft(mode)
+function GlobalStorageSiK.CraftSession.openHandcraft(mode, recipe, itemString)
 	mode = mode or "auto"
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 	if not player then
@@ -1291,7 +1293,7 @@ function GlobalStorageSiK.CraftSession.openHandcraft(mode)
 		return false, "no_player"
 	end
 	local playerNum = player:getPlayerNum()
-	if isEntityWindowOpen(playerNum, "HandcraftWindow") then
+	if not recipe and not itemString and isEntityWindowOpen(playerNum, "HandcraftWindow") then
 		local win = ISEntityUI.GetWindowInstance and ISEntityUI.GetWindowInstance(playerNum, "HandcraftWindow")
 		if win and win.bringToTop then
 			win:bringToTop()
@@ -1311,15 +1313,20 @@ function GlobalStorageSiK.CraftSession.openHandcraft(mode)
 		return false, "opener_unresolved"
 	end
 	lastOpenErrorReason = nil
-	opener(player, nil)
+	-- Firma vanilla B42: player, isoObject, query, force, recipe, itemString.
+	-- Pasar la selección a ISEntityUI conserva su lógica de filtrado y el clic
+	-- posterior atraviesa los hooks de claim/ACK/return del addon.
+	opener(player, nil, "*", false, recipe, itemString)
 	return true
 end
 
 --- Abre la ventana de construcción (vanilla, neat o automático).
 ---@param mode string|nil "auto"|"vanilla"|"neat"
+---@param recipe CraftRecipe|nil receta concreta que vanilla debe seleccionar
+---@param itemString string|nil InputName usado por vanilla para filtrar
 ---@return boolean ok
 ---@return string|nil reason "no_player"|"opener_unresolved" si falla
-function GlobalStorageSiK.CraftSession.openBuild(mode)
+function GlobalStorageSiK.CraftSession.openBuild(mode, recipe, itemString)
 	mode = mode or "auto"
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 	if not player then
@@ -1327,7 +1334,7 @@ function GlobalStorageSiK.CraftSession.openBuild(mode)
 		return false, "no_player"
 	end
 	local playerNum = player:getPlayerNum()
-	if isEntityWindowOpen(playerNum, "BuildWindow") then
+	if not recipe and not itemString and isEntityWindowOpen(playerNum, "BuildWindow") then
 		local win = ISEntityUI.GetWindowInstance and ISEntityUI.GetWindowInstance(playerNum, "BuildWindow")
 		if win and win.bringToTop then
 			win:bringToTop()
@@ -1344,7 +1351,7 @@ function GlobalStorageSiK.CraftSession.openBuild(mode)
 		return false, "opener_unresolved"
 	end
 	lastOpenErrorReason = nil
-	opener(player, nil, "*")
+	opener(player, nil, "*", false, recipe, itemString)
 	return true
 end
 

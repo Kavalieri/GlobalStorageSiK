@@ -332,8 +332,10 @@ end
 --- Arrastre por cabecera y redimensionado en esquina inferior derecha.
 function GS_TerminalUI:installMouseHandlers()
 	self.onMouseDown = function(me, x, y)
-		if x >= me.width - RESIZE_GRAB and y >= me.height - RESIZE_GRAB then
+		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.resizeEdgeAt(me, x, y, RESIZE_GRAB)
+		if resizeEdge then
 			me.resizing = true
+			me.resizeEdge = resizeEdge
 			me:setCapture(true)
 			return true
 		end
@@ -347,6 +349,7 @@ function GS_TerminalUI:installMouseHandlers()
 	self.onMouseUp = function(me, x, y)
 		if me.resizing then
 			me.resizing = false
+			me.resizeEdge = nil
 			me:setCapture(false)
 			me:rebuildScrollContent()
 			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
@@ -363,6 +366,7 @@ function GS_TerminalUI:installMouseHandlers()
 	self.onMouseUpOutside = function(me, x, y)
 		if me.resizing then
 			me.resizing = false
+			me.resizeEdge = nil
 			me:setCapture(false)
 			me:rebuildScrollContent()
 			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
@@ -378,7 +382,8 @@ function GS_TerminalUI:installMouseHandlers()
 	end
 	self.onMouseMove = function(me, dx, dy)
 		if me.resizing then
-			me:applyResponsiveBounds(me.x, me.y, me.width + dx, me.height + dy)
+			local rect = GlobalStorageSiK.SiK_UI.Window.resizeDelta(me, me.resizeEdge, dx, dy)
+			if rect then me:applyResponsiveBounds(rect.x, rect.y, rect.w, rect.h) end
 			me:syncAfterResponsiveResize()
 			return true
 		end
@@ -390,7 +395,8 @@ function GS_TerminalUI:installMouseHandlers()
 	end
 	self.onMouseMoveOutside = function(me, dx, dy)
 		if me.resizing then
-			me:applyResponsiveBounds(me.x, me.y, me.width + dx, me.height + dy)
+			local rect = GlobalStorageSiK.SiK_UI.Window.resizeDelta(me, me.resizeEdge, dx, dy)
+			if rect then me:applyResponsiveBounds(rect.x, rect.y, rect.w, rect.h) end
 			me:syncAfterResponsiveResize()
 			return true
 		end
@@ -461,8 +467,8 @@ end
 
 function GS_TerminalUI:buildItemsToolbar()
 	local pad = self.padding
-	local rowH = FONT_HGT_SMALL + 8
-	local btnW = GlobalStorageSiK.SiK_UI.measureButtonWidth(T("IGUI_GS_Search"), UIFont.Small, 16, 56, 120)
+	local controls = GlobalStorageSiK.SiK_UI.Controls.metrics()
+	local rowH = controls.inputHeight
 	local gap = GlobalStorageSiK.SiK_UI.Metrics.spacing(8)
 	local y = pad
 
@@ -520,7 +526,7 @@ function GS_TerminalUI:buildItemsToolbar()
 		end
 	end
 
-	self.mainCategoryFilterCombo = ISComboBox:new(0, y - 2, 140, rowH)
+	self.mainCategoryFilterCombo = ISComboBox:new(0, y, 140, rowH)
 	self.mainCategoryFilterCombo:initialise()
 	styleFilterCombo(self.mainCategoryFilterCombo)
 	self.mainCategoryFilterCombo.onChange = function()
@@ -536,7 +542,7 @@ function GS_TerminalUI:buildItemsToolbar()
 	self.itemsPanel:addChild(self.mainCategoryFilterCombo)
 	self._mainCategoryFilterKey = ""
 
-	self.subCategoryFilterCombo = ISComboBox:new(0, y - 2, 140, rowH)
+	self.subCategoryFilterCombo = ISComboBox:new(0, y, 140, rowH)
 	self.subCategoryFilterCombo:initialise()
 	styleFilterCombo(self.subCategoryFilterCombo)
 	self.subCategoryFilterCombo.onChange = function()
@@ -552,7 +558,7 @@ function GS_TerminalUI:buildItemsToolbar()
 	self.itemsPanel:addChild(self.subCategoryFilterCombo)
 	self._subCategoryFilterKey = ""
 
-	self.leafCategoryFilterCombo = ISComboBox:new(0, y - 2, 140, rowH)
+	self.leafCategoryFilterCombo = ISComboBox:new(0, y, 140, rowH)
 	self.leafCategoryFilterCombo:initialise()
 	styleFilterCombo(self.leafCategoryFilterCombo)
 	self.leafCategoryFilterCombo.onChange = function()
@@ -599,24 +605,29 @@ function GS_TerminalUI:calculateLayout()
 	local w = self.width
 	local h = self.height
 	local pad = self.padding
-	local closeSize = math.max(FONT_HGT_MEDIUM, 24)
+	local profileName = self._sikWindowProfile or "standard"
+	local shell = GlobalStorageSiK.SiK_UI.Metrics.shellRects(
+		profileName, w, h, self.accessMode == "blocked")
+	self.headerHeight = shell.header.h
+	self.statusFooterHeight = shell.footer.h
 	self._sikRuntimeVersionText = GlobalStorageSiK.SiK_UI.runtimeVersionText()
+	self._sikHeaderRects = GlobalStorageSiK.SiK_UI.Metrics.headerRects(profileName, w, pad)
 
 	if self.closeBtn then
-		local closeSize = math.max(FONT_HGT_MEDIUM, 24)
-		self.closeBtn:setX(w - closeSize - pad)
-		self.closeBtn:setY(math.floor((self.headerHeight - closeSize) / 2))
-		self.closeBtn:setWidth(closeSize)
-		self.closeBtn:setHeight(closeSize)
+		local closeRect = self._sikHeaderRects.close
+		self.closeBtn:setX(closeRect.x)
+		self.closeBtn:setY(closeRect.y)
+		self.closeBtn:setWidth(closeRect.w)
+		self.closeBtn:setHeight(closeRect.h)
 		self.closeBtn:setVisible(true)
 		self.closeBtn:bringToTop()
 	end
 
-	local tabY = self.headerHeight
-	local bodyH = math.max(0, h - tabY - (self.statusFooterHeight or 0))
-	local railH = math.max(0, h - tabY)
-	local railW = math.min(w, GlobalStorageSiK.TerminalTabs.measureRailWidth(self))
-	local contentW = math.max(0, w - railW)
+	local tabY = shell.content.y
+	local bodyH = shell.content.h
+	local railH = shell.rail.h
+	local railW = shell.rail.w
+	local contentW = shell.content.w
 
 	local blockedMode = self.accessMode == "blocked"
 	if self.tabRail then
@@ -676,7 +687,7 @@ function GS_TerminalUI:calculateLayout()
 	end
 
 	if self.itemsListPanel and self.itemsPanel then
-		local rowH = FONT_HGT_SMALL + 8
+		local rowH = GlobalStorageSiK.SiK_UI.Controls.metrics().inputHeight
 		local gap = GlobalStorageSiK.SiK_UI.Metrics.spacing(8)
 		local hintH = FONT_HGT_SMALL * 2
 		local statusH = FONT_HGT_SMALL + 6
@@ -716,9 +727,9 @@ function GS_TerminalUI:calculateLayout()
 			{ widget = self.searchBtn,               w = btnW },
 		}, { gap = gap })
 		col:row(rowH, {
-			{ widget = self.mainCategoryFilterCombo, weight = 1, min = 90, yoffset = -2 },
-			{ widget = self.subCategoryFilterCombo,  weight = 1, min = 90, yoffset = -2 },
-			{ widget = self.leafCategoryFilterCombo, weight = 1, min = 90, yoffset = -2 },
+			{ widget = self.mainCategoryFilterCombo, weight = 1, min = 90 },
+			{ widget = self.subCategoryFilterCombo,  weight = 1, min = 90 },
+			{ widget = self.leafCategoryFilterCombo, weight = 1, min = 90 },
 		}, { gap = gap })
 		col:fill(self.itemsListPanel, 120)
 
@@ -797,6 +808,7 @@ function GS_TerminalUI:prerender()
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
 	GlobalStorageSiK.SiK_UI.renderStatusFooter(self, self.terminalState)
+	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
 function GS_TerminalUI:applyCapacityState(cap)

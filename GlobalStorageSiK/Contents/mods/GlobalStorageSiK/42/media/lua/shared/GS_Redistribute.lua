@@ -15,6 +15,7 @@ require "GS_Zones"
 require "GS_ZonePriority"
 require "GS_I18n"
 require "GS_CategoryResolution"
+require "GS_OperationPacing"
 
 GlobalStorageSiK.Redistribute = {}
 
@@ -23,19 +24,14 @@ GlobalStorageSiK.Redistribute = {}
 -- una red ya ordenada podía recorrer miles de ítems contra todos los nodos en
 -- un único tick porque moved seguía en cero. Dos movimientos por paso reducen
 -- además los pares remove/add que el servidor debe replicar a los clientes.
-local MAX_INDEX_ITEMS_PER_STEP = 50
-local MAX_MOVE_ITEMS_PER_STEP = 25
-local MAX_MOVES_PER_STEP = 2
-local MAX_STEP_MS = 5
-
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
 end
 
-local function timeBudgetExceeded(startedAt, inspected)
+local function timeBudgetExceeded(startedAt, inspected, pacing)
 	if inspected <= 0 or startedAt <= 0 then return false end
 	local current = nowMs()
-	return current > 0 and current - startedAt >= MAX_STEP_MS
+	return current > 0 and current - startedAt >= (pacing.cpuBudgetMs or 5)
 end
 
 --- Construye tabla zoneId -> zone.priority (1 = zona principal) para la red.
@@ -290,11 +286,11 @@ local function beginSession(player, networkId)
 	}, summary
 end
 
-local function stepIndex(session, startedAt)
+local function stepIndex(session, startedAt, pacing)
 	local inspected = 0
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < MAX_INDEX_ITEMS_PER_STEP
-		and not timeBudgetExceeded(startedAt, inspected) do
+		and inspected < (pacing.indexItemsPerStep or 50)
+		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
 		local live = session.liveNodes[nodeIndex]
 		local container = live and live.container
@@ -323,19 +319,16 @@ local function stepIndex(session, startedAt)
 		session.nodeIndex = 1
 		session.itemIndex = 1
 	end
-	return inspected
+	return inspected, timeBudgetExceeded(startedAt, inspected, pacing)
 end
 
-local function stepMoves(session, player, summary, startedAt)
+local function stepMoves(session, player, summary, startedAt, pacing)
 	local inspected = 0
-	local configured = tonumber(GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()) or MAX_MOVES_PER_STEP
-	-- Una opción dañada o antigua con 0 no puede dejar el cursor vivo para
-	-- siempre. El techo local continúa prevaleciendo aunque Sandbox sea mayor.
-	local maxMoves = math.max(1, math.min(configured, MAX_MOVES_PER_STEP))
+	local maxMoves = pacing.maxMovesPerStep or 2
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < MAX_MOVE_ITEMS_PER_STEP
+		and inspected < (pacing.inspectedPerStep or 25)
 		and summary.moved < maxMoves
-		and not timeBudgetExceeded(startedAt, inspected) do
+		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
 		local refs = session.itemRefsByNode[nodeIndex] or {}
 		if session.itemIndex > #refs then
@@ -377,7 +370,7 @@ local function stepMoves(session, player, summary, startedAt)
 			end
 		end
 	end
-	return inspected
+	return inspected, timeBudgetExceeded(startedAt, inspected, pacing)
 end
 
 --- Redistribuye una porción acotada de la red y conserva el cursor/cachés en
@@ -388,14 +381,18 @@ end
 ---@param session table|nil
 ---@return table summary
 ---@return table|nil session
-function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session)
+function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session, pacing)
 	local summary = { moved = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil }
 	if session and session.networkId ~= networkId then session = nil end
 	if not session then
 		local initial
 		session, initial = beginSession(player, networkId)
 		if not session then return initial, nil end
+		session.pacing = pacing or GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	end
+	local effectivePacing = session.pacing
+		or pacing or GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
+	session.pacing = effectivePacing
 	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
 		summary.reason = "remote_disabled"; return summary, session
 	end
@@ -404,11 +401,14 @@ function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, se
 	end
 
 	local startedAt = nowMs()
+	local inspected, budgetExhausted
 	if session.phase == "index" then
-		stepIndex(session, startedAt)
+		inspected, budgetExhausted = stepIndex(session, startedAt, effectivePacing)
 	else
-		stepMoves(session, player, summary, startedAt)
+		inspected, budgetExhausted = stepMoves(session, player, summary, startedAt, effectivePacing)
 	end
+	summary.inspected = inspected or 0
+	summary.budgetExhaustions = budgetExhausted and 1 or 0
 	summary.phase = session.phase
 	summary.checked = session.phase == "index" and session.indexed or session.processed
 	summary.total = session.total

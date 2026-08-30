@@ -267,6 +267,41 @@ function GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
 	return 10
 end
 
+local function localPerformanceValue(key, fallback)
+	local values = SandboxVars.GlobalStorageSiK
+	local value = values and values[key]
+	if value == nil then return fallback end
+	return value
+end
+
+function GlobalStorageSiK.Sandbox.getLocalPerformanceProfile()
+	return localPerformanceValue("LocalPerformanceProfile", 1)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalBatchUnits()
+	return localPerformanceValue("LocalBatchUnits", 10)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalBatchDelayMs()
+	return localPerformanceValue("LocalBatchDelayMs", 400)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalAutoSortMovesPerStep()
+	return localPerformanceValue("LocalAutoSortMovesPerStep", 2)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalAutoSortMoveDelayMs()
+	return localPerformanceValue("LocalAutoSortMoveDelayMs", 1000)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalInspectedPerStep()
+	return localPerformanceValue("LocalInspectedPerStep", 25)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalCpuBudgetMs()
+	return localPerformanceValue("LocalCpuBudgetMs", 5)
+end
+
 --- Indica si se deben respetar los ítems favoritos.
 ---@return boolean
 function GlobalStorageSiK.Sandbox.respectFavoriteItems()

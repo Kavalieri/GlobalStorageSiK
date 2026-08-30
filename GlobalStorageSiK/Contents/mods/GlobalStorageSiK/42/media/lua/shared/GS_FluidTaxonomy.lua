@@ -5,6 +5,7 @@
 
 GlobalStorageSiK.FluidTaxonomy = GlobalStorageSiK.FluidTaxonomy or {}
 local FluidTaxonomy = GlobalStorageSiK.FluidTaxonomy
+local legacyDrainableAdapters = {}
 
 local function safeCall(fn)
 	local ok, value = pcall(fn)
@@ -13,8 +14,15 @@ local function safeCall(fn)
 end
 
 local function fluidContainer(item)
-	if not item or not item.getFluidContainer then return nil end
-	return safeCall(function() return item:getFluidContainer() end)
+	if not item then return nil end
+	if item.getFluidContainer then
+		local direct = safeCall(function() return item:getFluidContainer() end)
+		if direct then return direct end
+	end
+	if item.getFluidContainerFromSelfOrWorldItem then
+		return safeCall(function() return item:getFluidContainerFromSelfOrWorldItem() end)
+	end
+	return nil
 end
 
 local function hasCategory(fluid, category)
@@ -41,6 +49,45 @@ local function rounded(value, places)
 	local scale = 10 ^ (places or 4)
 	return math.floor(value * scale + 0.5) / scale
 end
+
+local function stringSet(values)
+	local out = {}
+	for i = 1, #(values or {}) do out[string.lower(tostring(values[i]))] = true end
+	return out
+end
+
+--- Registra compatibilidad estructural para un Drainable legacy. El tipo o su
+--- reemplazo solo seleccionan el adaptador; cantidad y estado siempre se leen
+--- de la instancia real, nunca del icono/nombre.
+function FluidTaxonomy.registerLegacyDrainableAdapter(def)
+	if type(def) ~= "table" or type(def.id) ~= "string"
+		or type(def.capacity) ~= "number" or def.capacity <= 0
+		or type(def.canonicalType) ~= "string" then return false end
+	local entry = {
+		id = def.id, capacity = def.capacity, canonicalType = def.canonicalType,
+		shapeFamily = def.shapeFamily or "fluid_container",
+		containerName = def.containerName or def.shapeFamily or "LegacyDrainable",
+		requiredTag = def.requiredTag,
+		fullTypes = stringSet(def.fullTypes),
+		replacements = stringSet(def.replacements),
+	}
+	for i = 1, #legacyDrainableAdapters do
+		if legacyDrainableAdapters[i].id == entry.id then
+			legacyDrainableAdapters[i] = entry
+			return true
+		end
+	end
+	legacyDrainableAdapters[#legacyDrainableAdapters + 1] = entry
+	return true
+end
+
+FluidTaxonomy.registerLegacyDrainableAdapter({
+	id = "vanilla-legacy-jerrycan", canonicalType = "Base:Petrol",
+	capacity = 20, shapeFamily = "fuel_can", containerName = "JerryCan",
+	requiredTag = "PETROL",
+	fullTypes = { "Base.JerryCan" },
+	replacements = { "Base.EmptyJerryCan", "Base.JerryCanEmpty" },
+})
 
 local function fluidShape(item, container, capacity)
 	local fullType = item and item.getFullType
@@ -93,7 +140,7 @@ local function mixtureComposition(container, totalAmount)
 	return table.concat(tuples, ","), true
 end
 
-local function readFluid(item)
+local function readB42Fluid(item)
 	local fluid = fluidContainer(item)
 	if not fluid then return nil end
 	local amount = fluid.getAmount and safeCall(function() return fluid:getAmount() end) or nil
@@ -125,6 +172,84 @@ local function readFluid(item)
 		shapeFamily = shapeFamily, shapeKey = shapeKey, containerName = containerName,
 		productFamilyKey = shapeFamily,
 	}
+end
+
+local function isLegacyDrainable(item)
+	if not item then return false end
+	if item.IsDrainable then
+		local value = safeCall(function() return item:IsDrainable() end)
+		if value == true then return true end
+	end
+	if item.isDrainable then
+		return safeCall(function() return item:isDrainable() end) == true
+	end
+	return false
+end
+
+local function legacyFraction(item)
+	local value = item.getUsedDelta and safeCall(function() return item:getUsedDelta() end) or nil
+	if type(value) ~= "number" and item.getCurrentUsesFloat then
+		value = safeCall(function() return item:getCurrentUsesFloat() end)
+	end
+	if type(value) ~= "number" then return nil end
+	return math.max(0, math.min(1, value))
+end
+
+local function hasSemanticTag(item, token)
+	if not token then return true end
+	local enumValue = rawget(_G, "ItemTag") and ItemTag[token] or nil
+	if item and item.hasTag then
+		local tagged = safeCall(function() return item:hasTag(enumValue or token) end)
+		if tagged == true then return true end
+	end
+	local scriptItem = item and item.getScriptItem
+		and safeCall(function() return item:getScriptItem() end) or nil
+	if scriptItem and scriptItem.hasTag then
+		return safeCall(function() return scriptItem:hasTag(enumValue or token) end) == true
+	end
+	return false
+end
+
+local function readLegacyFluid(item)
+	if not isLegacyDrainable(item) then return nil end
+	local fullType = item.getFullType and safeCall(function() return item:getFullType() end) or ""
+	local replacement = item.getReplaceOnDeplete
+		and safeCall(function() return item:getReplaceOnDeplete() end) or nil
+	if (not replacement or replacement == "") and item.getReplaceOnDepleteFullType then
+		replacement = safeCall(function() return item:getReplaceOnDepleteFullType() end)
+	end
+	local ftKey = string.lower(tostring(fullType or ""))
+	local replacementKey = string.lower(tostring(replacement or ""))
+	local adapter = nil
+	for i = 1, #legacyDrainableAdapters do
+		local candidate = legacyDrainableAdapters[i]
+		if (candidate.fullTypes[ftKey] or candidate.replacements[replacementKey])
+			and hasSemanticTag(item, candidate.requiredTag) then
+			adapter = candidate
+			break
+		end
+	end
+	if not adapter then return nil end
+	local fraction = legacyFraction(item)
+	if fraction == nil then return nil end
+	local amount = rounded(fraction * adapter.capacity, 4)
+	local shapeKey = table.concat({ tostring(fullType or ""), adapter.containerName,
+		tostring(adapter.capacity) }, "\31")
+	return {
+		fluid = nil, amount = amount, capacity = adapter.capacity, empty = amount <= 0,
+		mixture = false, rawType = adapter.canonicalType,
+		canonicalType = normalizeFluidId(adapter.canonicalType),
+		kindToken = kindToken(adapter.canonicalType), primaryAmount = amount,
+		tainted = false, poisonous = false, poisonRatio = nil,
+		composition = nil, compositionExact = true,
+		shapeFamily = adapter.shapeFamily, shapeKey = shapeKey,
+		containerName = adapter.containerName, productFamilyKey = adapter.shapeFamily,
+		legacyAdapter = adapter.id,
+	}
+end
+
+local function readFluid(item)
+	return readB42Fluid(item) or readLegacyFluid(item)
 end
 
 local function typeContains(value, token)

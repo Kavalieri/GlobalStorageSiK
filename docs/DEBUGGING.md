@@ -84,6 +84,36 @@ Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` prim
 
 Las líneas del Core usan componente y evento estables. Operaciones largas deben emitir estados significativos, no una línea por tick. Si un estado no cambió, no se repite.
 
+### Perfiles de rendimiento local
+
+Estas opciones no son categorías de log. Controlan únicamente el ritmo de
+depósitos/retiradas masivas y Auto-Sort en SP real o en un host con un solo
+jugador humano. Dedicado, cliente remoto y pantalla dividida fuerzan `Seguro`.
+
+| Opción visible ES / EN | Efecto y ejemplo |
+|---|---|
+| `Perfil de rendimiento local` / `Local performance profile` | `Seguro` usa 10 objetos/400 ms y 2 movimientos/1000 ms; `Rápido`, 25/75 ms y 5/150 ms; `Personalizado` usa los seis límites siguientes. |
+| `>> Personalizado: unidades por lote` / `>> Custom: units per batch` | 1-100 objetos físicos validados por microlote. Con 25, 100 objetos requieren al menos cuatro lotes. |
+| `>> Personalizado: espera entre lotes (ms)` / `>> Custom: delay between batches (ms)` | 0-1000 ms tras un ACK antes del siguiente lote. `0` elimina la espera, no la regla de una petición en vuelo. |
+| `>> Personalizado: movimientos Auto-Sort por paso` / `>> Custom: Auto-Sort moves per step` | 1-20 pares remove/add por paso acotado. |
+| `>> Personalizado: espera tras mover (ms)` / `>> Custom: delay after a move step (ms)` | 0-2000 ms. `0` continúa en el próximo `OnTick`; nunca crea un bucle interno. |
+| `>> Personalizado: objetos inspeccionados por paso` / `>> Custom: objects inspected per step` | 10-500 evaluaciones de categoría, reglas, afinidad y destino; inspeccionar no implica mover. |
+| `>> Personalizado: presupuesto de CPU por paso (ms)` / `>> Custom: CPU budget per step (ms)` | 1-15 ms y siempre prevalece sobre los máximos de inspección/movimiento. |
+
+Para comparar perfiles activa solo `Modo depuración (debug)` / `Debug mode` y
+`>> Inventario y transferencias` / `>> Inventory & transfers`; en dedicado,
+añade `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server
+logs to clients`. Mantén `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL:
+taxonomy and items` apagado. Las líneas agregadas incluyen `requested`,
+`effective`, lote, esperas, movimientos, inspecciones y presupuesto CPU.
+
+Prueba depósitos, retiradas y Auto-Sort de 10, 100 y un inventario enorme. En
+Personalizado máximo/0 ms, un inventario corriente puede sentirse inmediato;
+uno enorme debe continuar rápidamente sin congelar el juego, duplicar objetos
+ni completar toda la transacción en un tick. Repite en host con un segundo
+humano y en dedicado: `effective=safe` debe prevalecer. Conserva `console.txt`
+de cliente y servidor.
+
 Los reescaneos incrementales de zonas emiten una sola línea `ZoneScanJob complete`. `cookingExcluded` cuenta cámaras de cocción rechazadas durante el barrido y `removedIneligible` las entradas GS antiguas eliminadas del registro; esta limpieza afecta solo a metadata, nunca al contenido físico del aparato:
 
 ```text

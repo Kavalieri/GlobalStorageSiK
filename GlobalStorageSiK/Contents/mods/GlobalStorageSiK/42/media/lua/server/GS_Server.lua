@@ -21,6 +21,7 @@ require "GS_DisplayCategoryPublisher"
 require "GS_Utils"
 
 require "GS_Sandbox"
+require "GS_OperationPacing"
 
 require "GS_Zones"
 
@@ -92,6 +93,12 @@ require "GS_Debug"
 require "GS_NetTrace"
 
 GlobalStorageSiK.Server = GlobalStorageSiK.Server or {}
+
+function GlobalStorageSiK.Server.operationPacingKey(player, operationType, operationId)
+	if type(operationId) ~= "string" or operationId == "" then return nil end
+	local username = player and player.getUsername and player:getUsername() or "?"
+	return tostring(operationType) .. ":" .. tostring(username) .. ":" .. string.sub(operationId, 1, 96)
+end
 
 --- En SP real (no anfitrion), isClient()/isServer() son ambos false - cliente
 --- y "servidor" comparten el mismo proceso y el mismo tick.
@@ -207,7 +214,9 @@ end
 --- Marca una red como modificada sin difundir el Global ModData completo.
 --- Expuesto solo para jobs server (p. ej. auto-ordenar), no es API de addons.
 ---@param networkId string|nil
-function GlobalStorageSiK.Server.markInventoryDirty(networkId, player)
+---@param player IsoPlayer|nil
+---@param options table|nil { scheduleSnapshot=boolean }
+function GlobalStorageSiK.Server.markInventoryDirty(networkId, player, options)
 	if not networkId then
 		return
 	end
@@ -216,7 +225,19 @@ function GlobalStorageSiK.Server.markInventoryDirty(networkId, player)
 		GlobalStorageSiK.Log.error("Server", "inventoryRevision", tostring(revision))
 		revision = 0
 	end
-	scheduleSnapshotSync(networkId, player, revision)
+	-- Transfer ya sincroniza el snapshot del nodo exacto dentro de
+	-- GS_Transfer. No convertir cada deposito/retiro en un scan mundial de
+	-- 12-14 s. Jobs que muten muchos nodos (p.ej. redistribucion) conservan el
+	-- comportamiento por defecto y coalescen una unica captura posterior.
+	if not options or options.scheduleSnapshot ~= false then
+		scheduleSnapshotSync(networkId, player, revision)
+	elseif (GlobalStorageSiK.ZoneScanJob and GlobalStorageSiK.ZoneScanJob.isActive(networkId))
+		or pendingSnapshotSync[networkId] then
+		-- Si ya hay un scan, cada mutación desplaza la recaptura hasta que la red
+		-- lleve el quiet period completo. Fuera de un scan no se crea trabajo
+		-- global: el snapshot dirigido del nodo es suficiente.
+		scheduleSnapshotSync(networkId, player, revision)
+	end
 end
 
 local function terminalWatcherKey(player)
@@ -1692,7 +1713,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	-- contener snapshots de todos los nodos y, al depositar cientos de items,
 	-- se estaba difundiendo una vez por cada lote ademas de los mensajes
 	-- vanilla por objeto. El terminal se actualiza por terminalState, debajo.
-	GlobalStorageSiK.Server.markInventoryDirty(networkId, actor)
+	GlobalStorageSiK.Server.markInventoryDirty(networkId, actor, { scheduleSnapshot = false })
 	if options.suppressUi == true then
 		-- Una linea por microlote solo resulta util al diagnosticar la
 		-- consolidacion interna. El resumen funcional ya llega por actionResult.
@@ -1700,9 +1721,11 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 			"network=" .. tostring(networkId) .. " ui=suppressed")
 		return
 	end
-	-- El catálogo COMPLETO (world rescan) sigue siendo deferred_incremental
-	-- (ZoneScanJob, caro, ~12s en redes grandes) - eso NO cambia. Pero sin
-	-- ningun aviso inmediato, el jugador que acaba de depositar veia su
+	-- La transferencia no inicia un world rescan si no había uno activo.
+	-- GS_Transfer actualiza el snapshot del nodo exacto y la revisión; si cruza
+	-- un scan incremental, se coalesce una única recaptura tras el quiet period.
+	-- Apertura, mantenimiento explícito y jobs masivos conservan su scan. Sin este aviso
+	-- inmediato, el jugador que acaba de depositar veia su
 	-- propia lista desactualizada hasta el siguiente escaneo completo (bug
 	-- real reportado 2026-08-21: "deposito 2 libros y no aparecen ni se
 	-- pueden buscar"). pushTerminalInventorySync ya existe para esto (lo usa
@@ -1739,7 +1762,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	end
 	GlobalStorageSiK.Log.detail("Server", "afterTransferSync",
 		"network=" .. tostring(networkId)
-			.. " refresh=inventory_sync_immediate+deferred_incremental")
+			.. " refresh=directed_node_snapshot+inventory_sync")
 end
 
 --- Envía estado del terminal al cliente.
@@ -2072,22 +2095,13 @@ end
 --- Callback del job: un unico resumen y un terminalState dirigido por cliente.
 --- No hay ModData.transmit; clientes sin esta red abierta no reciben snapshots.
 function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, requestedWatchers)
-	if summary._terminalState == "FAILED" then
-		forEachOnlinePlayer(function(player)
-			if isTerminalWatcher(player, networkId) then
-				summary.networkId = networkId
-				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanPartialFailed", "zone_error", summary))
-				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
-			end
-		end)
-		return
-	end
 	local startRevision = summary._startRevision or 0
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	if currentRevision ~= startRevision then
-		-- El job recorrió la red mientras una transferencia seguía mutándola. Sus
-		-- nodos pueden pertenecer a instantes distintos: no publicar esa mezcla ni
-		-- certificarla como snapshot fresco. Programamos una pasada tras la pausa.
+	if summary._stagedDiscarded == true or currentRevision ~= startRevision then
+		-- El lock se libera entre pasos del job: una transferencia puede desplazar
+		-- índices del contenedor antes del paso siguiente. No publicar esa mezcla.
+		-- La cola quiet/force coalesce una única recaptura posterior y cada nueva
+		-- transferencia desplaza su dueMs, evitando reintentos solapados.
 		local retryPlayer = nil
 		for username in pairs(requestedWatchers or {}) do
 			retryPlayer = GlobalStorageSiK.PlayerUtils.resolveByUsername(username)
@@ -2095,9 +2109,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		end
 		if not retryPlayer then
 			forEachOnlinePlayer(function(player)
-				if not retryPlayer and isTerminalWatcher(player, networkId) then
-					retryPlayer = player
-				end
+				if not retryPlayer and isTerminalWatcher(player, networkId) then retryPlayer = player end
 			end)
 		end
 		scheduleSnapshotSync(networkId, retryPlayer, currentRevision)
@@ -2108,7 +2120,17 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		summary.networkId = networkId
 		forEachOnlinePlayer(function(player)
 			if isTerminalWatcher(player, networkId) then
-				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanFailed", "snapshot_stale", summary))
+				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED",
+					"IGUI_GS_ScanFailed", "snapshot_stale", summary))
+			end
+		end)
+		return
+	end
+	if summary._terminalState == "FAILED" then
+		forEachOnlinePlayer(function(player)
+			if isTerminalWatcher(player, networkId) then
+				summary.networkId = networkId
+				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanPartialFailed", "zone_error", summary))
 				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
 			end
 		end)
@@ -3724,6 +3746,10 @@ local function onClientCommand(module, command, player, args)
 		end
 
 		runLockedTransfer(player, networkId, "depositItems", function()
+			local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "deposit",
+				type(args.queueId) == "string" and args.queueId or args.operationId)
+			local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
+				{ operationType = "deposit" })
 			local allowedOrigins = {
 				player = true,
 				player_queue = true,
@@ -3759,12 +3785,15 @@ local function onClientCommand(module, command, player, args)
 			if requested ~= 1 then preferredNodeId = nil end
 			local summary = GlobalStorageSiK.InventorySync.withBatch(function()
 				if args.mode == "container" and args.referenceItemId then
-					return GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, args.referenceItemId)
+					return GlobalStorageSiK.Deposit.depositFromContainer(player, networkId,
+						args.referenceItemId, { maxItemsPerTick = pacing.batchUnits })
 				elseif args.mode == "partial" and args.referenceItemId and args.count then
-					return GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, args.referenceItemId, args.count)
+					return GlobalStorageSiK.Deposit.depositPartialCount(player, networkId,
+						args.referenceItemId, args.count, { maxItemsPerTick = pacing.batchUnits })
 				end
 				return GlobalStorageSiK.Deposit.depositByIds(player, networkId, args.itemIds or {}, {
 					preferredNodeId = preferredNodeId,
+					maxItemsPerTick = pacing.batchUnits,
 				})
 			end)
 
@@ -3779,7 +3808,11 @@ local function onClientCommand(module, command, player, args)
 				.. " moved=" .. tostring(summary.moved or 0)
 				.. " skipped=" .. tostring(summary.skipped or 0)
 				.. " failed=" .. tostring(summary.failed or 0)
-				.. " reason=" .. tostring(summary.reason))
+				.. " reason=" .. tostring(summary.reason),
+				GlobalStorageSiK.OperationPacing.describe(pacing))
+			if summary.reason ~= "limit" then
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+			end
 			afterTransferSync(player, networkId, searchQuery, {
 				suppressUi = summary.reason == "limit",
 			})
@@ -3849,8 +3882,12 @@ local function onClientCommand(module, command, player, args)
 			local familyFullTypes = GlobalStorageSiK.Index.sanitizeFungibleFamily(
 				fullType, args.fullTypes)
 			local requested = math.floor(tonumber(args.amount) or 1)
-			if requested <= 0 then requested = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
-			requested = math.min(requested, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
+			local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw",
+				type(args.pacingId) == "string" and args.pacingId or args.withdrawId)
+			local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
+				{ operationType = "withdraw" })
+			if requested <= 0 then requested = pacing.batchUnits end
+			requested = math.min(requested, pacing.batchUnits)
 			local requestedItemIds = nil
 			if type(args.itemIds) == "table" then
 				local sanitizedItemIds = {}
@@ -3881,9 +3918,17 @@ local function onClientCommand(module, command, player, args)
 			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
 				return GlobalStorageSiK.Transfer.withdrawType(
 					player, fullType, networkId, requested, dest, mediaTitle,
-					dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes
+					dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes,
+					pacing.batchUnits
 				)
 			end)
+			if args.pacingFinal == true or not ok or (moved or 0) < requested then
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+			end
+			GlobalStorageSiK.Log.debug("Withdraw", "operation batch",
+				"requested=" .. tostring(requested) .. " moved=" .. tostring(moved or 0)
+					.. " reason=" .. tostring(reason) .. " "
+					.. GlobalStorageSiK.OperationPacing.describe(pacing))
 
 			-- Texto vía I18n (nunca literales con acentos incrustados en el
 			-- .lua: se han visto mostrar "?" en vez de la tilde en cliente).

@@ -123,16 +123,16 @@ local function completeZone(job)
 	local state = job.zoneState
 	local zone = job.zones[job.zoneIndex]
 	if not state or not zone then return end
-	if state.anySquareLoaded then zone.everScanLoaded = true end
-	local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
-		GlobalStorageSiK.Zones.getRegistry(), zone, state.results,
-		GlobalStorageSiK.ZonePriority.zoneArea(zone), state.anySquareLoaded,
-		state.excludedEntryIds)
-	job.totals.added = job.totals.added + (summary.added or 0)
-	job.totals.updated = job.totals.updated + (summary.updated or 0)
-	job.totals.offline = job.totals.offline + (summary.offline or 0)
-	job.totals.outOfRange = job.totals.outOfRange + (summary.outOfRange or 0)
-	job.totals.removedIneligible = job.totals.removedIneligible + (summary.removedIneligible or 0)
+	-- El scan cede el lock entre pasos. No fusionar zona a zona: si una
+	-- transferencia cambia inventoryRevision, el registro quedaria compuesto
+	-- por instantes distintos. Se conserva staging acotado y se hace commit
+	-- atomico bajo el lock solo al certificar la revision inicial.
+	job.stagedZones[#job.stagedZones + 1] = {
+		zone = zone, results = state.results,
+		area = GlobalStorageSiK.ZonePriority.zoneArea(zone),
+		loaded = state.anySquareLoaded,
+		excludedEntryIds = state.excludedEntryIds,
+	}
 	job.totals.cookingContainersExcluded = job.totals.cookingContainersExcluded
 		+ (state.metrics.cookingContainersExcluded or 0)
 	job.totals.zones = job.totals.zones + 1
@@ -147,6 +147,30 @@ local function completeZone(job)
 	job.zoneIndex = job.zoneIndex + 1
 end
 
+local function commitStaged(job)
+	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(job.networkId)
+	if currentRevision ~= (job.startRevision or 0) then
+		job.totals._stagedDiscarded = true
+		return false
+	end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	for i = 1, #(job.stagedZones or {}) do
+		local staged = job.stagedZones[i]
+		if staged.loaded then staged.zone.everScanLoaded = true end
+		local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
+			registry, staged.zone, staged.results, staged.area, staged.loaded,
+			staged.excludedEntryIds)
+		job.totals.added = job.totals.added + (summary.added or 0)
+		job.totals.updated = job.totals.updated + (summary.updated or 0)
+		job.totals.offline = job.totals.offline + (summary.offline or 0)
+		job.totals.outOfRange = job.totals.outOfRange + (summary.outOfRange or 0)
+		job.totals.removedIneligible = job.totals.removedIneligible
+			+ (summary.removedIneligible or 0)
+	end
+	job.stagedZones = {}
+	return true
+end
+
 local function discardJobState(job)
 
 	if not job then return end
@@ -154,6 +178,7 @@ local function discardJobState(job)
 	job.zones = {}
 	job.watchers = {}
 	job.distinctTypeSet = {}
+	job.stagedZones = {}
 
 end
 
@@ -188,13 +213,15 @@ end
 local function finishJob(networkId, job)
 	jobs[networkId] = nil
 	job.totals.durationMs = math.max(0, nowMs() - job.startedMs)
-	local state = (job.totals.failedZones or 0) > 0 and "FAILED" or "COMPLETED"
+	local state = ((job.totals.failedZones or 0) > 0 or job.totals._stagedDiscarded)
+		and "FAILED" or "COMPLETED"
 	job.totals._terminalState = state
 	if state == "COMPLETED" then job.totals._freshSnapshotScope = job.zoneId or "network" end
 	job.totals._background = job.background == true
 	job.totals._startRevision = job.startRevision or 0
 	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error" or "complete")
-	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+	if not job.totals._stagedDiscarded and GlobalStorageSiK.RegistryStore
+		and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 	GlobalStorageSiK.Log.info("ZoneScanJob", string.format(
@@ -209,6 +236,10 @@ local function finishJob(networkId, job)
 	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanComplete then
 		GlobalStorageSiK.Server.onNetworkScanComplete(networkId, job.totals, job.watchers)
 	end
+	-- El callback anterior consume totals/watchers de forma sincrona. A partir
+	-- de aqui ningún cierre debe conservar zonas, resultados ni referencias a
+	-- contenedores, tanto si hizo commit como si descartó por revisión cambiante.
+	discardJobState(job)
 end
 
 local function onTick()
@@ -263,6 +294,7 @@ local function onTick()
 		if GlobalStorageSiK.ZoneScanner.stepIncremental(job.zoneState, MAX_UNITS_PER_STEP, MAX_STEP_MS) then
 			completeZone(job)
 		end
+		if job.zoneIndex > #job.zones then commitStaged(job) end
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
 	if not ok then
@@ -326,6 +358,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		nextRunMs = 0,
 		watchers = {},
 		distinctTypeSet = {},
+		stagedZones = {},
 		totals = {
 			added = 0, updated = 0, offline = 0, outOfRange = 0,
 			removedIneligible = 0, cookingContainersExcluded = 0,

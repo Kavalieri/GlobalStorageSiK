@@ -185,7 +185,7 @@ end
 ---@param referenceItemId number
 ---@param count number
 ---@return table summary
-function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referenceItemId, count)
+function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referenceItemId, count, options)
 	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil }
 
 	local item, container = GlobalStorageSiK.Deposit.findItemById(player, referenceItemId)
@@ -227,7 +227,8 @@ function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referen
 		summary.reason = "invalid"
 		return summary
 	end
-	local maxItems = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxItems = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local target = math.min(count, maxItems)
 	local itemIds = {}
 	for i = 0, items:size() - 1 do
@@ -242,7 +243,7 @@ function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referen
 		summary.reason = "not_found"
 		return summary
 	end
-	return GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
+	return GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, options)
 end
 
 --- Deposita ítems por lista de IDs.
@@ -269,7 +270,8 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 		return summary
 	end
 
-	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxPerTick = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local seenIds = {}
 	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 
@@ -358,7 +360,7 @@ end
 ---@param networkId string|nil
 ---@param referenceItemId number
 ---@return table summary
-function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId)
+function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
 		reason = nil, failureReason = nil, remainingIds = {} }
 
@@ -385,7 +387,8 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		return summary
 	end
 
-	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxPerTick = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local candidates = GlobalStorageSiK.BulkFilters.collectCandidates(
 		container, player, GlobalStorageSiK.BulkFilters.SCOPE.SINGLE_BAG
 	)

@@ -9,6 +9,7 @@ require "GS_TerminalUI_Extensions"
 require "GSSiK_Addon_Builder_Register"
 require "GS_NetworkCraftBridge"
 require "GS_NetworkCraftSession"
+require "GS_ItemActions"
 require "GSSiK_Addon_Builder_NetworkBuild"
 require "GSSiK_Addon_Builder_TerminalUI"
 require "GSSiK_Addon_Builder_Sandbox"
@@ -26,9 +27,51 @@ GlobalStorageSiK.TerminalExtensions.registerDefinition("build", {
 	panelField = "buildPanel",
 })
 
+local function providerTerminal(context)
+	local extra = context and context.extra or {}
+	local terminal = extra.terminal or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	if not terminal or not terminal.terminalState then return nil end
+	if not terminal.getIsVisible or terminal:getIsVisible() ~= true then return nil end
+	local installed = terminal.terminalState.installedAddons
+	if not installed or installed["Builder"] == nil then return nil end
+	return terminal
+end
+
+local function buildItemActionRequest(actionId, context)
+	local items = context and context.items or {}
+	local item = context and context.extra and context.extra.row or items[1]
+	local inputFullType = item and item.fullType
+	if not inputFullType and item and item.getFullType then inputFullType = item:getFullType() end
+	return { actionId = actionId, inputFullType = inputFullType,
+		source = context and context.extra and context.extra.source or "inventory" }
+end
+
+-- Builder declara la fabricación contextual y reutiliza la sesión/autoridad
+-- compartida; Core no contiene ninguna rama específica del addon.
+GlobalStorageSiK.ItemActions.registerProvider({
+	id = "builder.item-actions",
+	addonId = "Builder",
+	capabilities = { "craft" },
+	actions = {
+		{ id = "craft", labelKey = "IGUI_GS_CraftOpenBuildVanilla" },
+	},
+	appliesTo = function(context, actionId)
+		return actionId == "craft" and providerTerminal(context) ~= nil
+			and context.items ~= nil and #context.items > 0
+	end,
+	buildRequest = buildItemActionRequest,
+	executeRequest = function(request, context)
+		local terminal = providerTerminal(context)
+		if not terminal then return false end
+		local itemString = request.inputFullType and ("!" .. request.inputFullType) or nil
+		terminal:openNetworkBuild("vanilla", nil, itemString)
+		return true
+	end,
+})
+
 --- Abre construcción con contenedores de red.
 ---@param mode string
-function GS_TerminalUI:openNetworkBuild(mode)
+function GS_TerminalUI:openNetworkBuild(mode, recipe, itemString)
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
 	if not player or not GlobalStorageSiK.CraftSession then
 		return
@@ -56,7 +99,7 @@ function GS_TerminalUI:openNetworkBuild(mode)
 		.. " networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
 		.. " reason=" .. tostring(beginReason))
 	if began then
-		local opened, openReason = GlobalStorageSiK.CraftSession.openBuild(mode)
+		local opened, openReason = GlobalStorageSiK.CraftSession.openBuild(mode, recipe, itemString)
 		GSSiK_Addon_Builder.Log.debug("openBuild opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
 	if self.buildPanel and GlobalStorageSiK.TerminalBuilder then

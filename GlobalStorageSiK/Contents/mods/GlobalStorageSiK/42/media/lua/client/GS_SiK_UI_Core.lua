@@ -1045,23 +1045,20 @@ function GlobalStorageSiK.SiK_UI.renderPanelBackground(panel)
 	panel:drawRect(0, headerH, panel.width, 1, 0.45, pal.accentLine[1], pal.accentLine[2], pal.accentLine[3])
 end
 
-local function headerTextRight(panel, pad)
-	local right = panel.width - pad
-	if panel.closeBtn then
-		local closeX = panel.closeBtn.getX and panel.closeBtn:getX() or panel.closeBtn.x
-		if tonumber(closeX) then right = math.min(right, closeX - 8) end
-	end
-	return math.max(pad, right)
+local function resolveHeaderRects(panel)
+	if panel._sikHeaderRects then return panel._sikHeaderRects end
+	return GlobalStorageSiK.SiK_UI.Metrics.headerRects(
+		panel._sikWindowProfile or "standard", panel.width, panel.padding or 8)
 end
 
 --- Cabecera de la ventana bloqueada (texto blanco, icono GS opcional).
 ---@param panel ISPanel
 function GlobalStorageSiK.SiK_UI.renderBlockedHeader(panel)
-	local iconSize = math.max(20, math.min(28, panel.headerHeight - 10))
-	local textX = GlobalStorageSiK.SiK_UI.drawHeaderLogo(panel, iconSize)
+	local rects = resolveHeaderRects(panel)
+	local textX = rects.title.x
 	local tm = getTextManager()
 	local titleY = math.floor((panel.headerHeight - tm:getFontHeight(UIFont.Medium)) / 2)
-	local maxW = math.max(0, headerTextRight(panel, panel.padding or 8) - textX)
+	local maxW = rects.title.w
 	if maxW > 8 then
 		local title = GlobalStorageSiK.SiK_UI.truncateText(T("IGUI_GS_BlockedTitle"), maxW, UIFont.Medium)
 		panel:drawText(title, textX, titleY, 1, 1, 1, 1, UIFont.Medium)
@@ -1071,51 +1068,68 @@ end
 --- Dibuja la cabecera SiK UI con icono GS y titulo legible.
 ---@param panel GS_TerminalUI
 function GlobalStorageSiK.SiK_UI.renderHeader(panel)
-	local pad = panel.padding or 8
-	local textX = pad + 2
-	local title = T("IGUI_GS_TerminalTitle")
+	local rects = resolveHeaderRects(panel)
+	local textX = rects.title.x
 	local state = panel.terminalState or {}
-	local netName = state.networkName
-	if not netName or netName == "" then
-		netName = T("IGUI_GS_NetworkDefaultName")
+	local title = state.networkName
+	if type(title) ~= "string" or title == "" then
+		-- networkName llega del servidor mediante Network.getDisplayName(). Un
+		-- networkId sin nombre sigue siendo una red vinculada: mostrar su ID
+		-- evita disfrazarla con el fallback de un terminal aun no vinculado.
+		if state.networkId ~= nil and tostring(state.networkId) ~= "" then
+			title = tostring(state.networkId)
+		else
+			title = T("IGUI_GS_TerminalTitle")
+		end
 	end
 	local font = UIFont.Medium
 	local tm = getTextManager()
 	local titleY = math.floor((panel.headerHeight - tm:getFontHeight(font)) / 2)
-	local right = headerTextRight(panel, pad)
-	local availableW = math.max(0, right - textX)
-	local visibleTitle = GlobalStorageSiK.SiK_UI.truncateText(title, availableW, font)
+	local visibleTitle = GlobalStorageSiK.SiK_UI.truncateText(title, rects.title.w, font)
 	panel:drawText(visibleTitle, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
 	panel:drawText(visibleTitle, textX, titleY, 1, 1, 1, 1, font)
-	local titleW = tm:MeasureStringX(font, visibleTitle)
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	local contextFont = UIFont.Small
-	local contextY = math.floor((panel.headerHeight - tm:getFontHeight(contextFont)) / 2)
-	local contextX = textX + titleW + 8
-	local contextW = math.max(0, right - contextX)
-	if contextW > 8 and visibleTitle == title then
-		local visibleContext = GlobalStorageSiK.SiK_UI.truncateText(netName, contextW, contextFont)
-		panel:drawText(visibleContext, contextX, contextY,
-			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, contextFont)
-	end
+end
+
+--- Marco exterior se dibuja al final del prerender para que footer y chrome
+--- no tapen sus cuatro lados durante resize.
+function GlobalStorageSiK.SiK_UI.renderWindowFrame(panel)
+	local border = GlobalStorageSiK.SiK_UI.PALETTE.border
+	panel:drawRectBorder(0, 0, panel.width, panel.height,
+		1, border[1], border[2], border[3])
 end
 
 function GlobalStorageSiK.SiK_UI.runtimeVersionText()
 	local parts = {}
 	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
-	parts[#parts + 1] = "Core " .. tostring(coreVersion or "?")
+	parts[#parts + 1] = coreVersion and ("Core " .. tostring(coreVersion)) or "Core"
 	local addons = {
-		{ "Craft", rawget(_G, "GSSiK_Addon_Craft") },
-		{ "Builder", rawget(_G, "GSSiK_Addon_Builder") },
-		{ "Tablet", rawget(_G, "GSSiK_Addon_Tablet") },
+		{ "Craft", "GSSiK_Addon_Craft", rawget(_G, "GSSiK_Addon_Craft") },
+		{ "Builder", "GSSiK_Addon_Builder", rawget(_G, "GSSiK_Addon_Builder") },
+		{ "Tablet", "GSSiK_Addon_Tablet", rawget(_G, "GSSiK_Addon_Tablet") },
 	}
 	for i = 1, #addons do
-		local runtime = addons[i][2]
-		if type(runtime) == "table" and runtime.VERSION then
-			parts[#parts + 1] = addons[i][1] .. " " .. tostring(runtime.VERSION)
+		local runtime = addons[i][3]
+		local active = type(runtime) == "table"
+		if not active and getActivatedMods then
+			local ok, detected = pcall(function()
+				local mods = getActivatedMods()
+				return mods and mods:contains(addons[i][2]) == true
+			end)
+			active = ok and detected == true
+		end
+		if active then
+			local version = type(runtime) == "table" and (runtime.VERSION or runtime.MOD_VERSION) or nil
+			if not version and getModInfoByID then
+				local ok, detected = pcall(function()
+					local info = getModInfoByID(addons[i][2])
+					return info and info.getModVersion and info:getModVersion() or nil
+				end)
+				if ok then version = detected end
+			end
+			parts[#parts + 1] = addons[i][1] .. (version and (" " .. tostring(version)) or "")
 		end
 	end
-	return table.concat(parts, " · ")
+	return table.concat(parts, " | ")
 end
 
 --- Dibuja barra de estado inferior en pestaña Red.
@@ -1140,28 +1154,25 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local dotSize = 6
 	local dotX = footerX + panel.padding
-	local dotY = y + math.floor((panel.statusFooterHeight - dotSize) / 2)
+	local dotY = y + math.floor((FONT_HGT_SMALL - dotSize) / 2) + 2
 	panel:drawRect(dotX, dotY, dotSize, dotSize, 1,
 		pal.statusOk[1], pal.statusOk[2], pal.statusOk[3])
-	local textY = y + math.floor((panel.statusFooterHeight - FONT_HGT_SMALL) / 2)
-	local tm = getTextManager()
+	local textY = y + 2
 	local connected = T("IGUI_GS_Connected")
-	local leftText = label ~= "" and (connected .. " · " .. label) or connected
+	local leftText = label ~= "" and (connected .. " | " .. label) or connected
 	local versions = panel._sikRuntimeVersionText or GlobalStorageSiK.SiK_UI.runtimeVersionText()
 	local innerRight = footerX + footerW - panel.padding
-	local versionsMaxW = math.max(80, math.floor(footerW * 0.58))
-	local visibleVersions = GlobalStorageSiK.SiK_UI.truncateText(versions, versionsMaxW, UIFont.Small)
-	local versionsW = tm:MeasureStringX(UIFont.Small, visibleVersions)
-	local versionsX = math.max(dotX + dotSize + 8, innerRight - versionsW)
 	local leftX = dotX + dotSize + 8
-	local leftMaxW = math.max(0, versionsX - 8 - leftX)
+	local leftMaxW = math.max(0, innerRight - leftX)
 	if leftMaxW > 8 then
 		leftText = GlobalStorageSiK.SiK_UI.truncateText(leftText, leftMaxW, UIFont.Small)
 		panel:drawText(leftText, leftX, textY,
 			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 	end
-	if versionsW > 0 then
-		panel:drawText(visibleVersions, versionsX, textY,
+	local versionsMaxW = math.max(0, innerRight - (footerX + panel.padding))
+	if versionsMaxW > 8 then
+		local visibleVersions = GlobalStorageSiK.SiK_UI.truncateText(versions, versionsMaxW, UIFont.Small)
+		panel:drawText(visibleVersions, footerX + panel.padding, textY + FONT_HGT_SMALL,
 			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 	end
 end

@@ -41,7 +41,8 @@ local PROFILES = {
 			maxWidth = 900, maxHeight = 700,
 			railWidth = 70, railItemHeight = 50, railIconSize = 36,
 			railPadding = 6, railGap = 4,
-			headerHeight = 40, footerHeight = 24,
+			headerHeight = 48, footerHeight = 32,
+			headerCloseSize = 28, headerGap = 12,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
 	},
@@ -53,7 +54,8 @@ local PROFILES = {
 			maxWidth = 1200, maxHeight = 800,
 			railWidth = 88, railItemHeight = 58, railIconSize = 40,
 			railPadding = 8, railGap = 4,
-			headerHeight = 40, footerHeight = 24,
+			headerHeight = 48, footerHeight = 32,
+			headerCloseSize = 28, headerGap = 12,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
 	},
@@ -65,7 +67,8 @@ local PROFILES = {
 			maxWidth = 1320, maxHeight = 840,
 			railWidth = 96, railItemHeight = 58, railIconSize = 40,
 			railPadding = 8, railGap = 4,
-			headerHeight = 40, footerHeight = 24,
+			headerHeight = 48, footerHeight = 32,
+			headerCloseSize = 28, headerGap = 12,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 8, controlGap = 6 },
 	},
@@ -140,4 +143,44 @@ function Metrics.spacing(index)
 		return value
 	end
 	return TOKENS.space8
+end
+
+--- Fuente unica de rectangulos del shell. Los consumidores reciben estas
+--- cajas resueltas y no vuelven a restar cabecera, rail ni pie localmente.
+function Metrics.shellRects(profileName, width, height, blocked)
+	local profile = Metrics.profile(profileName)
+	local window = profile.window
+	local w = math.max(0, math.floor(tonumber(width) or 0))
+	local h = math.max(0, math.floor(tonumber(height) or 0))
+	local headerH = math.min(h, window.headerHeight or 0)
+	local footerH = math.min(math.max(0, h - headerH), window.footerHeight or 0)
+	local railW = blocked and 0 or math.min(w, window.railWidth or 0)
+	local bodyH = math.max(0, h - headerH - footerH)
+	return {
+		shell = { x = 0, y = 0, w = w, h = h },
+		header = { x = 0, y = 0, w = w, h = headerH },
+		rail = { x = 0, y = headerH, w = railW, h = math.max(0, h - headerH) },
+		content = { x = railW, y = headerH, w = math.max(0, w - railW), h = bodyH },
+		footer = { x = railW, y = math.max(headerH, h - footerH),
+			w = math.max(0, w - railW), h = footerH },
+	}
+end
+
+--- Dos areas independientes de cabecera: titulo y cierre. La X conserva
+--- tamano y margenes; el titulo nunca consume su separacion izquierda.
+function Metrics.headerRects(profileName, width, padding)
+	local profile = Metrics.profile(profileName)
+	local window = profile.window
+	local w = math.max(0, math.floor(tonumber(width) or 0))
+	local pad = math.max(0, math.floor(tonumber(padding) or TOKENS.windowPadding))
+	local gap = math.max(0, math.floor(window.headerGap or TOKENS.space12))
+	local closeW = math.min(window.headerCloseSize or 28, math.max(0, w - pad * 2))
+	local closeX = math.max(pad, w - pad - closeW)
+	return {
+		title = { x = pad, y = 0, w = math.max(0, closeX - gap - pad),
+			h = window.headerHeight },
+		close = { x = closeX, y = math.floor((window.headerHeight - closeW) / 2),
+			w = closeW, h = closeW },
+		gap = gap,
+	}
 end

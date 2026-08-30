@@ -1,5 +1,74 @@
 VERSION = 1,
 
+option GlobalStorageSiK.LocalPerformanceProfile
+{
+	type = enum,
+	numValues = 3,
+	default = 1,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalPerformanceProfile,
+}
+
+option GlobalStorageSiK.LocalBatchUnits
+{
+	type = integer,
+	default = 10,
+	min = 1,
+	max = 100,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalBatchUnits,
+}
+
+option GlobalStorageSiK.LocalBatchDelayMs
+{
+	type = integer,
+	default = 400,
+	min = 0,
+	max = 1000,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalBatchDelayMs,
+}
+
+option GlobalStorageSiK.LocalAutoSortMovesPerStep
+{
+	type = integer,
+	default = 2,
+	min = 1,
+	max = 20,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalAutoSortMovesPerStep,
+}
+
+option GlobalStorageSiK.LocalAutoSortMoveDelayMs
+{
+	type = integer,
+	default = 1000,
+	min = 0,
+	max = 2000,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalAutoSortMoveDelayMs,
+}
+
+option GlobalStorageSiK.LocalInspectedPerStep
+{
+	type = integer,
+	default = 25,
+	min = 10,
+	max = 500,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalInspectedPerStep,
+}
+
+option GlobalStorageSiK.LocalCpuBudgetMs
+{
+	type = integer,
+	default = 5,
+	min = 1,
+	max = 15,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalCpuBudgetMs,
+}
+
 option GlobalStorageSiK.TerminalProximityRange
 {
 	type = integer,

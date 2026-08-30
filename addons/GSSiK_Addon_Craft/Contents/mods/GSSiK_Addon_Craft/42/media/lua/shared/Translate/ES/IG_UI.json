@@ -6,6 +6,8 @@
 	"IGUI_GS_SectionCraftRemote": "Crafteo con inventario de red",
 	"IGUI_GS_CraftRemoteHint": "Abre el crafteo del juego; los contenedores de la red se añaden mientras tengas acceso al terminal.",
 	"IGUI_GS_CraftOpenVanilla": "Abrir crafteo del juego",
+	"IGUI_GS_ItemActionReload": "Recargar con materiales de la red",
+	"IGUI_GS_ItemActionRefill": "Rellenar con materiales de la red",
 	"IGUI_GS_CraftOpenNeat": "Abrir Neat Crafting",
 	"IGUI_GS_CraftOpenCook": "Abrir cocina",
 	"IGUI_GS_CraftInterfaceNeat": "Interfaz detectada: Neat Crafting",

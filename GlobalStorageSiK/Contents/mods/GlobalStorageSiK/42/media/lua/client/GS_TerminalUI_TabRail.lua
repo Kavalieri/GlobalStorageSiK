@@ -241,12 +241,14 @@ end
 
 function GS_TerminalTabRail:layoutSlots()
 	local y = self.padding
+	local slotWidth = math.max(0, self.width - self.padding * 2)
 	for i = 1, #self.tabDefs do
 		local def = self.tabDefs[i]
 		local slot = self.tabSlots[def.key]
 		if slot then
 			slot:setY(y)
-			slot:setWidth(self.itemHeight)
+			slot:setX(self.padding)
+			slot:setWidth(slotWidth)
 			slot:setHeight(self.itemHeight)
 			slot.iconSize = self.iconSize
 			y = y + self.itemHeight + self.itemGap
@@ -263,7 +265,8 @@ function GS_TerminalTabRail:layoutSlots()
 		local slot = self.dynamicSlots[i]
 		if slot then
 			slot:setY(y)
-			slot:setWidth(self.itemHeight)
+			slot:setX(self.padding)
+			slot:setWidth(slotWidth)
 			slot:setHeight(self.itemHeight)
 			slot.iconSize = self.iconSize
 			y = y + self.itemHeight + self.itemGap
@@ -271,8 +274,9 @@ function GS_TerminalTabRail:layoutSlots()
 	end
 	if self.footerSlot then
 		local footerY = math.max(y + 8, self.height - self.padding - self.itemHeight)
+		self.footerSlot:setX(self.padding)
 		self.footerSlot:setY(footerY)
-		self.footerSlot:setWidth(self.itemHeight)
+		self.footerSlot:setWidth(slotWidth)
 		self.footerSlot:setHeight(self.itemHeight)
 		self.footerSlot.iconSize = self.iconSize
 	end

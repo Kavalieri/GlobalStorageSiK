@@ -12,6 +12,7 @@ require "GS_PlayerUtils"
 require "GS_TerminalAccess"
 require "GS_TransferLock"
 require "GS_InventorySync"
+require "GS_OperationPacing"
 
 GlobalStorageSiK.RedistributeJob = {}
 
@@ -128,7 +129,15 @@ local function finishJob(networkId, job, reason)
 	local topTypes = topTypeSummary(job.movedByType, 8)
 	GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. tostring(networkId) .. " reason=" .. tostring(reason)
 		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
-		.. " tiers=" .. tiers .. " topTypes=" .. topTypes)
+		.. " skipped=" .. tostring(job.skipped) .. " inspected=" .. tostring(job.inspected or 0)
+		.. " budgetExhaustions=" .. tostring(job.budgetExhaustions or 0)
+		.. " batches=" .. tostring(job.steps or 0)
+		.. " durationMs=" .. tostring(nowMs() - (job.startedMs or nowMs()))
+		.. " cancelled=" .. tostring(reason == "no_player")
+		.. " timeout=" .. tostring(reason == "network_busy" or reason == "stalled")
+		.. " error=" .. tostring(reason == "error")
+		.. " tiers=" .. tiers .. " topTypes=" .. topTypes .. " "
+		.. GlobalStorageSiK.OperationPacing.describe(job.pacing))
 	jobs[networkId] = nil
 	-- Liberar el tick antes de cualquier notificación/UI potencialmente falible:
 	-- un error al informar no puede dejar polling sin un job que procesar.
@@ -198,10 +207,13 @@ onTick = function()
 		return
 	end
 	-- Presupuesto compartido: aunque haya muchas redes vencidas, todo Auto Sort
-	-- combinado ejecuta como máximo un paso cada 100 ms. El job elegido queda
-	-- aplazado y los demás se atienden en ticks posteriores (round-robin por
-	-- vencimiento, sin sumar N presupuestos pesados en el mismo frame).
-	nextGlobalRunMs = now + GLOBAL_STEP_DELAY_MS
+	-- combinado ejecuta como máximo un paso por OnTick. Seguro/Rápido añaden su
+	-- espera; Personalizado puede usar 0 ms para continuar en el tick siguiente,
+	-- nunca dentro de un bucle en este mismo tick. El job elegido queda aplazado
+	-- y los demás se atienden por vencimiento, sin sumar N presupuestos pesados
+	-- en el mismo frame.
+	nextGlobalRunMs = now + (job.pacing and job.pacing.schedulerDelayMs
+		or GLOBAL_STEP_DELAY_MS)
 
 	local player = resolvePlayer(job.username)
 	if not player then
@@ -228,7 +240,7 @@ onTick = function()
 	job.busyRetries = 0
 	local ok, summary, session = pcall(function()
 		return GlobalStorageSiK.InventorySync.withBatch(function()
-			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session)
+			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing)
 		end)
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
@@ -250,6 +262,9 @@ onTick = function()
 	job.moved   = job.moved   + (summary.moved   or 0)
 	job.failed  = job.failed  + (summary.failed  or 0)
 	job.skipped = job.skipped + (summary.skipped or 0)
+	job.inspected = (job.inspected or 0) + (summary.inspected or 0)
+	job.budgetExhaustions = (job.budgetExhaustions or 0) + (summary.budgetExhaustions or 0)
+	job.steps = (job.steps or 0) + 1
 	mergeCounts(job.movedByTier, summary.movedByTier)
 	mergeCounts(job.movedByType, summary.movedByType)
 	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
@@ -277,7 +292,8 @@ onTick = function()
 		if summary.phase ~= "index" then
 			-- Los remove/add replicados son lo caro y conservan la pausa larga.
 			-- Un barrido que no movió nada puede continuar antes sin generar red.
-			stepDelay = (summary.moved or 0) > 0 and MOVE_DELAY_MS or MOVE_IDLE_DELAY_MS
+			stepDelay = (summary.moved or 0) > 0
+				and (job.pacing and job.pacing.moveDelayMs or MOVE_DELAY_MS) or MOVE_IDLE_DELAY_MS
 		end
 		job.nextRunMs = now + stepDelay
 		local phaseChanged = summary.phase ~= job.lastPhase
@@ -316,6 +332,7 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		return false
 	end
 	ensureTickInstalled()
+	local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	jobs[networkId] = {
 		username  = player:getUsername(),
 		nextRunMs = 0,
@@ -331,8 +348,15 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		busyRetries = 0,
 		movedByTier = {},
 		movedByType = {},
+		pacing = pacing,
+		startedMs = nowMs(),
+		inspected = 0,
+		budgetExhaustions = 0,
+		steps = 0,
 	}
-	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId) .. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled))
+	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId)
+		.. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled),
+		GlobalStorageSiK.OperationPacing.describe(pacing))
 	return true
 end
 

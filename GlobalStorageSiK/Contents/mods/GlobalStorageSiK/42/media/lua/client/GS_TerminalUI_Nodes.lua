@@ -26,7 +26,7 @@ local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
 local ROW_H = TABLE_METRICS.rowHeight
 local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_POOL_SIZE = 24
-local MIN_EMBED_ROWS = 10
+local MIN_EMBED_ROWS = 3
 
 --- True si la zona está colapsada (por defecto colapsada).
 ---@param collapsedZones table|nil
@@ -1174,13 +1174,6 @@ end
 function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
 	local pad = 8
 	local titleY = y
-	local state = terminal and terminal.terminalState or {}
-	local role = state.permissions and state.permissions.playerRole or "member"
-	local canRescanAll = role == "owner" or role == "admin"
-	local scan = state.scan or {}
-	local scanRunning = state.scanRunning == true or scan.state == "RUNNING"
-	local scanBtnH = FONT_HGT_SMALL + 8
-	local cardH = FONT_HGT_SMALL * 2 + scanBtnH + 26
 	-- dev26 ronda 4quater (pedido explicito del usuario): "Contenedores de
 	-- red" (redundante con la pestana ya renombrada "Zonas y nodos") y el
 	-- parrafo de ayuda ("Clic en + de una zona...") se retiran de la vista
@@ -1194,11 +1187,6 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		-- el alto adicional se entrega al viewport virtual de filas; si es
 		-- pequena se conserva el minimo y el scroll exterior cubre el resto.
 		local footerReserve = infoH + 24
-		if canRescanAll then
-			-- Desde el final del viewport de filas hasta el borde inferior:
-			-- separación + título de orden + separación + tarjeta + margen.
-			footerReserve = FONT_HGT_SMALL + cardH + 26
-		end
 		local available = (scroll.height or 0) - currentY - footerReserve
 		return GlobalStorageSiK.TerminalNodes.embedPanelHeight(available)
 	end
@@ -1278,33 +1266,6 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		ui.nodesDestOrderBtn._gsNetStatic = true
 		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesDestOrderBtn)
 		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
-		local cardY = ui.nodesPriorityInfoEndY + 8
-		ui.nodesRescanCard = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardY, innerW - pad * 2, 90)
-		ui.nodesRescanCard._gsNetStatic = true
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.nodesRescanCard)
-		ui.nodesRescanTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(10, 8, T("IGUI_GS_RescanAll"))
-		ui.nodesRescanCard:addChild(ui.nodesRescanTitle)
-		local scanTitleW = getTextManager():MeasureStringX(UIFont.Small, T("IGUI_GS_RescanAll"))
-		ui.nodesRescanInfo = GlobalStorageSiK.SiK_UI.createInfoHintButton(
-			16 + scanTitleW, 7, FONT_HGT_SMALL, ui.nodesRescanCard, T("IGUI_GS_RescanAllHint"))
-		ui.nodesRescanCard:addChild(ui.nodesRescanInfo)
-		ui.nodesRescanState = ISLabel:new(10, 8 + FONT_HGT_SMALL + 6, FONT_HGT_SMALL, "",
-			0.72, 0.74, 0.78, 1, UIFont.Small, true)
-		ui.nodesRescanState:initialise()
-		ui.nodesRescanCard:addChild(ui.nodesRescanState)
-		local scanBtnY = 8 + FONT_HGT_SMALL * 2 + 12
-		ui.nodesRescanBtn = GlobalStorageSiK.SiK_UI.createButton(
-			10, scanBtnY, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
-			T("IGUI_GS_RescanAll"), ui.nodesRescanCard, function()
-				if terminal.onRescanNetwork then terminal:onRescanNetwork() end
-			end, nil, true)
-		ui.nodesRescanCard:addChild(ui.nodesRescanBtn)
-		ui.nodesCancelScanBtn = GlobalStorageSiK.SiK_UI.createButton(
-			10, scanBtnY, innerW - pad * 2 - 20, FONT_HGT_SMALL + 8,
-			T("IGUI_GS_ScanCancel"), ui.nodesRescanCard, function()
-				if terminal.onCancelZoneScan then terminal:onCancelZoneScan() end
-			end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
-		ui.nodesRescanCard:addChild(ui.nodesCancelScanBtn)
 	else
 		if ui.nodesZoneTitleLbl then
 			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesZoneTitleLbl, pad)
@@ -1330,36 +1291,6 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesDestOrderBtn, infoY)
 		end
 		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
-	end
-	local cardY = (ui.nodesPriorityInfoEndY or (y + ui.nodesEmbedHeight + infoH)) + 8
-	if ui.nodesRescanCard then
-		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRescanCard, pad)
-		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRescanCard, cardY)
-		ui.nodesRescanCard:setWidth(innerW - pad * 2)
-		ui.nodesRescanCard:setHeight(cardH)
-		ui.nodesRescanCard:setVisible(canRescanAll)
-	end
-	if ui.nodesRescanState then
-		ui.nodesRescanState:setName(scanRunning and T("IGUI_GS_ScanRunningShort")
-			or T("IGUI_GS_ScanSummary", scan.new or 0, scan.updated or 0, scan.offline or 0))
-	end
-	if ui.nodesRescanBtn then
-		local availableW = innerW - pad * 2 - 20
-		local buttonW = scanRunning and math.floor((availableW - 6) / 2) or availableW
-		ui.nodesRescanBtn:setX(10)
-		ui.nodesRescanBtn:setWidth(buttonW)
-		ui.nodesRescanBtn:setEnable(not scanRunning)
-		ui.nodesRescanBtn._sikUiLabel = scanRunning and T("IGUI_GS_ScanRunningShort") or T("IGUI_GS_RescanAll")
-		ui.nodesRescanBtn:setTooltip(T("IGUI_GS_RescanAllHint"))
-	end
-	if ui.nodesCancelScanBtn then
-		local availableW = innerW - pad * 2 - 20
-		local buttonW = math.floor((availableW - 6) / 2)
-		ui.nodesCancelScanBtn:setX(10 + buttonW + 6)
-		ui.nodesCancelScanBtn:setWidth(buttonW)
-		ui.nodesCancelScanBtn:setVisible(scanRunning)
-		ui.nodesCancelScanBtn:setEnable(scanRunning)
-		ui.nodesCancelScanBtn:setTooltip(T("IGUI_GS_ScanCancelHint"))
 	end
 	local configEnabled = not terminal.canEditNetworkConfig
 		or terminal:canEditNetworkConfig(false)
@@ -1389,9 +1320,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 			terminal.terminalState and terminal.terminalState.nodes or {},
 			terminal.terminalState and terminal.terminalState.categories or {}
 		)
-		local endY = y + embedH + 12 + infoH
-		if canRescanAll then endY = cardY + cardH + 8 end
-		return endY
+		return y + embedH + 12 + infoH
 	end
 	ui.nodesEmbedBuilt = false
 	return titleY + FONT_HGT_SMALL + 12

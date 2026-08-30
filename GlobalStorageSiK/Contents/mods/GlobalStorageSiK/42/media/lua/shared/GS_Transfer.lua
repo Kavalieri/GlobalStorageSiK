@@ -547,7 +547,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, maxUnits)
 
 	if not player or not fullType or fullType == "" then
 
@@ -574,8 +574,10 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 	-- serializa la operación lógica y solicita el siguiente micro-lote solo
 	-- después de recibir la confirmación correlacionada del anterior.
 	target = math.floor(tonumber(target) or 1)
-	if target <= 0 then target = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick() end
-	target = math.min(target, GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick())
+	local effectiveMax = math.max(1, math.floor(tonumber(maxUnits)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
+	if target <= 0 then target = effectiveMax end
+	target = math.min(target, effectiveMax)
 
 
 

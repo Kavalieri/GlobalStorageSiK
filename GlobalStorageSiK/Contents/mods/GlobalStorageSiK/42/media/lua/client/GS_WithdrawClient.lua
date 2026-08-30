@@ -10,11 +10,10 @@ require "GS_I18n"
 require "GS_Log"
 require "GS_PlayerUtils"
 require "GS_Sandbox"
+require "GS_OperationPacing"
 
 GlobalStorageSiK.WithdrawClient = {}
 
-local SAFE_BATCH_UNITS = 10
-local BATCH_DELAY_MS = 400
 local RESPONSE_TIMEOUT_MS = 10000
 local MAX_QUEUED_REQUESTS = 4096
 
@@ -128,8 +127,13 @@ local function ensureOperation(networkId, searchQuery)
 		networkId = networkId,
 		searchQuery = searchQuery,
 		lastRevision = nil,
+		inspected = 0,
+		skipped = 0,
+		batches = 0,
+		pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "withdraw" }),
 	}
-	GlobalStorageSiK.Log.info("WithdrawClient", "operation started")
+	GlobalStorageSiK.Log.info("WithdrawClient", "operation started",
+		GlobalStorageSiK.OperationPacing.describe(operation.pacing))
 	return operation
 end
 
@@ -137,7 +141,7 @@ local function finishCurrent(delayNext)
 	current = nil
 	responseDeadlineMs = 0
 	if #queue > 0 then
-		nextDispatchMs = nowMs() + (delayNext and BATCH_DELAY_MS or 0)
+		nextDispatchMs = nowMs() + (delayNext and operation and operation.pacing.batchDelayMs or 0)
 		ensureTickInstalled()
 		return true
 	else
@@ -164,8 +168,9 @@ end
 local function dispatchCurrent()
 	if not current then return end
 	current.sequence = current.sequence + 1
-	local requested = current.all and SAFE_BATCH_UNITS
-		or math.min(current.remaining or 1, SAFE_BATCH_UNITS)
+	local batchUnits = operation and operation.pacing and operation.pacing.batchUnits or 10
+	local requested = current.all and batchUnits
+		or math.min(current.remaining or 1, batchUnits)
 	current.batchRequested = requested
 	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
 	local exactItemIds = {}
@@ -195,6 +200,8 @@ local function dispatchCurrent()
 		targetKey = current.targetKey,
 		searchQuery = current.searchQuery or "",
 		withdrawId = current.requestId,
+		pacingId = current.logicalId,
+		pacingFinal = not current.all and (current.remaining or 0) <= requested,
 		networkId = current.networkId,
 		returnItemIds = current.returnItemIds == true,
 	})
@@ -237,7 +244,10 @@ function GlobalStorageSiK.WithdrawClient.cancelAll(reason)
 		GlobalStorageSiK.Log.warn("WithdrawClient", "operation cancelled moved="
 			.. tostring(operation.totalMoved or 0)
 			.. " rows=" .. tostring(operation.rowsDone or 0)
-			.. "/" .. tostring(operation.rowsTotal or 0))
+			.. "/" .. tostring(operation.rowsTotal or 0)
+			.. " cancelled=true timeout=" .. tostring(reason == "response_timeout")
+			.. " error=" .. tostring(reason ~= nil and reason ~= "cancelled")
+			.. " " .. GlobalStorageSiK.OperationPacing.describe(operation.pacing))
 	end
 	queue = {}
 	current = nil
@@ -377,6 +387,10 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	current.itemIdOffset = (current.itemIdOffset or 1) + moved
 	if operation then
 		operation.totalMoved = (operation.totalMoved or 0) + moved
+		operation.inspected = (operation.inspected or 0) + (current.batchRequested or 0)
+		operation.skipped = (operation.skipped or 0)
+			+ math.max(0, (current.batchRequested or 0) - moved)
+		operation.batches = (operation.batches or 0) + 1
 		local revision = tonumber(transfer.inventoryRevision)
 		if revision then
 			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
@@ -403,11 +417,11 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		return false
 	end
 	local shouldContinue = args.ok == true and moved > 0 and not exhausted
-		and ((current.all and moved >= (current.batchRequested or SAFE_BATCH_UNITS))
+		and ((current.all)
 			or (not current.all and (current.remaining or 0) > 0))
 	if shouldContinue then
 		showProgress(false)
-		nextDispatchMs = nowMs() + BATCH_DELAY_MS
+		nextDispatchMs = nowMs() + (operation and operation.pacing.batchDelayMs or 400)
 		ensureTickInstalled()
 		return true
 	end
@@ -436,7 +450,13 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	GlobalStorageSiK.Log.info("WithdrawClient", "operation complete moved="
 		.. tostring(totalMoved)
 		.. " rows=" .. tostring(operation and operation.rowsDone or 1)
-		.. " elapsedMs=" .. tostring(elapsed))
+		.. " elapsedMs=" .. tostring(elapsed)
+		.. " inspected=" .. tostring(operation and operation.inspected or 0)
+		.. " skipped=" .. tostring(operation and operation.skipped or 0)
+		.. " batches=" .. tostring(operation and operation.batches or 0)
+		.. " budgetExhaustions=0"
+		.. " cancelled=false timeout=false error=false",
+		GlobalStorageSiK.OperationPacing.describe(operation and operation.pacing))
 	showProgress(true)
 	if operation and GlobalStorageSiK.TerminalSync
 		and GlobalStorageSiK.TerminalSync.finishManagedTransfer then

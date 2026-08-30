@@ -3,7 +3,7 @@
 
 for _, name in ipairs({
 	"GS_Router", "GS_I18n", "GS_FluidTaxonomy", "GS_NativeProduct", "GS_CategoryResolution",
-	"GS_Network", "GS_Zones", "GS_ZoneRefresh", "GS_Permissions",
+	"GS_Network", "GS_Zones", "GS_ZoneRefresh", "GS_Permissions", "GS_SiK_UI_Viewport",
 }) do
 	package.loaded[name] = true
 end
@@ -28,6 +28,9 @@ GlobalStorageSiK = {
 		amountAndCapacity = function() return nil, nil end,
 	},
 	NativeProduct = { tracePathSample = function() end },
+	SiK_UI = { Viewport = { resolve = function()
+		return { x = 0, y = 0, w = 1280, h = 720 }
+	end } },
 	isAuthoritative = function() return true end,
 }
 
@@ -42,6 +45,21 @@ local function media(fullType, itemId, mediaIndex, title)
 	function value:getName() return title end
 	function value:getWorldSprite() return nil end
 	function value:getRecordedMediaIndex() return mediaIndex end
+	function value:getMediaData()
+		if not mediaIndex or mediaIndex < 0 then return nil end
+		local codes = mediaIndex == 214 and { "CRP=1,COO=1" }
+			or mediaIndex == 315 and { "DOC=1" } or {}
+		return {
+			getId = function() return mediaIndex end,
+			getTranslatedItemDisplayName = function() return title end,
+			getLineCount = function() return #codes end,
+			getLine = function(_, index)
+				local value = codes[index + 1]
+				if not value then return nil end
+				return { getCodes = function() return value end }
+			end,
+		}
+	end
 	function value:getActualWeight() return 1 end
 	return value
 end
@@ -132,9 +150,97 @@ for _, row in pairs(devices) do
 		"ordinary CD/DVD-named device was treated as recorded media")
 end
 
+-- RecordedMedia may not be initialized when instanceItem first reconstructs
+-- a tape. The integer setter can then return normally without preserving the
+-- index. That transient probe must not cache its generic name (or a false
+-- miss), so a later surface rebuild can resolve the exact edition.
+local terminalItemsPath =
+	"GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua"
+local terminalItemsHandle = assert(io.open(terminalItemsPath, "rb"))
+local terminalItemsText = terminalItemsHandle:read("*a")
+terminalItemsHandle:close()
+local mediaLocalizerStart = assert(terminalItemsText:find(
+	"local function scriptItem(fullType)", 1, true), "VHS probe adapter start missing")
+local mediaLocalizerEnd = assert(terminalItemsText:find(
+	"--- Textura de inventario resuelta", mediaLocalizerStart, true),
+	"VHS probe adapter boundary missing")
+local mediaLocalizerSource = terminalItemsText:sub(mediaLocalizerStart, mediaLocalizerEnd - 1)
+local mediaLocalizerFactory = assert(loadstring([[
+return function(deps)
+	local GlobalStorageSiK = deps.GlobalStorageSiK
+	local instanceItem = deps.instanceItem
+]] .. mediaLocalizerSource .. [[
+	return localizeRecordedMediaRows
+end
+]], "@recorded_media_localizer"))()
+
+local recordedMediaReady = false
+local probeAttempts, setterCalls = 0, 0
+local function transientMediaProbe()
+	probeAttempts = probeAttempts + 1
+	local probe = { appliedIndex = -1 }
+	function probe:setRecordedMediaIndexInteger(index)
+		setterCalls = setterCalls + 1
+		if recordedMediaReady then self.appliedIndex = index end
+	end
+	function probe:getRecordedMediaIndex() return self.appliedIndex end
+	function probe:getDisplayName()
+		return self.appliedIndex == 214 and "Woodcraft Ep. 3" or "Cinta VHS"
+	end
+	return probe
+end
+local localizeRecordedMediaRows = mediaLocalizerFactory({
+	GlobalStorageSiK = {
+		I18n = {
+			getScriptItem = function(fullType)
+				return fullType == "Base.VHSTape" and {} or nil
+			end,
+			nameFromItemInstance = function(item) return item:getDisplayName() end,
+		},
+	},
+	instanceItem = function(fullType)
+		assert(fullType == "Base.VHSTape", "unexpected media probe type")
+		return transientMediaProbe()
+	end,
+})
+local delayedRow = {
+	fullType = "Base.VHSTape", mediaIndex = 214,
+	displayName = "Cinta VHS", variantSummary = {},
+}
+localizeRecordedMediaRows({ delayedRow })
+assert(probeAttempts == 1 and setterCalls == 1,
+	"transient RecordedMedia fixture did not exercise the integer setter")
+assert(delayedRow.displayName == "Cinta VHS" and delayedRow.mediaTitle == nil,
+	"unapplied media index replaced the generic VHS name")
+recordedMediaReady = true
+localizeRecordedMediaRows({ delayedRow })
+assert(probeAttempts == 2 and setterCalls == 2,
+	"failed RecordedMedia attempt poisoned probe/title cache")
+assert(delayedRow.displayName == "Woodcraft Ep. 3"
+	and delayedRow.mediaTitle == "Woodcraft Ep. 3",
+	"later valid RecordedMedia probe could not locate the exact edition")
+localizeRecordedMediaRows({ delayedRow })
+assert(probeAttempts == 2,
+	"successful RecordedMedia title was not cached after recovery")
+
 local snapshotSource = assert(io.open(shared .. "GS_ItemSnapshot.lua", "rb"))
 local snapshotText = snapshotSource:read("*a")
 snapshotSource:close()
+local titleStart = assert(snapshotText:find(
+	"function GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem(item)", 1, true),
+	"recorded media title resolver missing")
+local titleEnd = assert(snapshotText:find(
+	"local recordedMediaTitleFromItem = GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem",
+	titleStart, true), "recorded media title resolver boundary missing")
+local titleResolver = snapshotText:sub(titleStart, titleEnd - 1)
+assert(not titleResolver:find("item:getDisplayName()", 1, true),
+	"VHS title still accepts the generic InventoryItem display name")
+assert(titleResolver:find("mediaIndex", 1, true) or titleResolver:find("idx", 1, true),
+	"VHS title resolver does not consume mediaIndex")
+assert(titleResolver:find("item:getMediaData()", 1, true),
+	"VHS title does not use the B42 per-instance MediaData adapter")
+assert(titleResolver:find("mediaData:getTranslatedItemDisplayName()", 1, true),
+	"VHS title does not use the translated title carried by MediaData")
 assert(snapshotText:find('variantKey = mediaIndex ~= nil and ("media:" .. tostring(mediaIndex))', 1, true),
 	"snapshot does not use mediaIndex as recorded identity")
 local tooltipPath = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_ItemNetworkTooltip.lua"
@@ -145,6 +251,19 @@ assert(tooltipText:find('"\\31mediaIndex:" .. tostring(mediaIndex)', 1, true),
 	"tooltip cache/count contract does not key recorded media by index")
 assert(tooltipText:find("getVHSTrainingLines", 1, true),
 	"VHS skill presentation has no observable runtime hook")
+local mediaSkillsStart = assert(tooltipText:find("local function mediaSkillNames(item)", 1, true),
+	"per-item MediaData skill adapter missing")
+local mediaSkillsEnd = assert(tooltipText:find("local function getVHSTrainingLines(item)",
+	mediaSkillsStart, true), "per-item MediaData adapter boundary missing")
+local mediaSkills = tooltipText:sub(mediaSkillsStart, mediaSkillsEnd - 1)
+assert(mediaSkills:find("item:getMediaData()", 1, true)
+	and mediaSkills:find("mediaData:getLineCount()", 1, true)
+	and mediaSkills:find("mediaData:getLine(i)", 1, true)
+	and mediaSkills:find("line:getCodes()", 1, true),
+	"VHS skills do not read only the hovered item's B42 MediaData lines")
+assert(not mediaSkills:find("pairs(RecMedia)", 1, true)
+	and not mediaSkills:find("getDisplayName", 1, true),
+	"VHS skills scan global RecMedia or correlate by display name")
 assert(tooltipText:find("TooltipLib", 1, true),
 	"third-party tooltip chain has no observable compatibility contract")
 

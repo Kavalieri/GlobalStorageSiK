@@ -76,7 +76,7 @@ sourceFile:close()
 local tooltipStart = assert(source:find("%-%- Tooltip al pasar", 1))
 local tooltipEnd = assert(source:find("row%.onRemoteItemDetail", tooltipStart))
 local tooltipBlock = source:sub(tooltipStart, tooltipEnd - 1)
-assert(tooltipBlock:find("if data and not data._gsPager and self:isMouseOver()", 1, true) ~= nil,
+assert(tooltipBlock:find("if data and not data._gsPager and not data._gsStale and self:isMouseOver()", 1, true) ~= nil,
 	"aggregated parent is excluded from the tooltip lifecycle")
 assert(tooltipBlock:find("aggregateAllowed", 1, true) == nil,
 	"tooltip lifecycle still gates aggregate parents")

@@ -9,10 +9,10 @@ require "GS_NetClient"
 require "GS_Log"
 require "GS_I18n"
 require "GS_Sandbox"
+require "GS_OperationPacing"
 
 GlobalStorageSiK.TransferQueue = {}
 
-local BATCH_DELAY_MS = 400
 -- Red de seguridad (reportada 2026-08-16, "el log de item not found no
 -- puede estar en bucle sin fallar de forma informada o terminar de algun
 -- modo"): el reintento YA termina solo por diseno (onActionResult solo
@@ -43,6 +43,10 @@ local operation = nil
 
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
+end
+
+local function batchDelayMs()
+	return operation and operation.pacing and operation.pacing.batchDelayMs or 400
 end
 
 local function feedbackEnabled()
@@ -127,7 +131,7 @@ local function activateJob(job, firstRequestInFlight)
 		nextRunMs = math.huge
 	else
 		responseDeadlineMs = 0
-		nextRunMs = (getTimestampMs and getTimestampMs() or 0) + BATCH_DELAY_MS
+		nextRunMs = (getTimestampMs and getTimestampMs() or 0) + batchDelayMs()
 	end
 	ensureTickInstalled()
 end
@@ -153,6 +157,7 @@ function GlobalStorageSiK.TransferQueue.arm(job)
 			and not GlobalStorageSiK.TerminalSync.beginManagedTransfer("deposit", job.networkId, job.searchQuery) then
 			return nil
 		end
+		local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "deposit" })
 		operation = {
 			networkId = job.networkId,
 			searchQuery = job.searchQuery,
@@ -163,10 +168,14 @@ function GlobalStorageSiK.TransferQueue.arm(job)
 			totalSkipped = 0,
 			totalMissing = 0,
 			totalFailed = 0,
+			totalInspected = 0,
 			totalExpected = 0,
 			lastProgressMs = 0,
 			startedMs = nowMs(),
+			pacing = pacing,
 		}
+		GlobalStorageSiK.Log.info("TransferQueue", "operation started",
+			GlobalStorageSiK.OperationPacing.describe(pacing))
 	end
 	initialiseJob(job)
 	operation.jobsTotal = operation.jobsTotal + 1
@@ -187,7 +196,7 @@ end
 local function scheduleRetry(job)
 	pendingJob = job
 	batchCount = batchCount + 1
-	nextRunMs = (getTimestampMs and getTimestampMs() or 0) + BATCH_DELAY_MS
+	nextRunMs = (getTimestampMs and getTimestampMs() or 0) + batchDelayMs()
 	ensureTickInstalled()
 end
 
@@ -280,7 +289,7 @@ function GlobalStorageSiK.TransferQueue.onTick()
 	if now < nextRunMs then
 		return
 	end
-	nextRunMs = now + BATCH_DELAY_MS
+	nextRunMs = now + batchDelayMs()
 	inFlight = true
 	responseDeadlineMs = now + RESPONSE_TIMEOUT_MS
 	local sent = dispatchJob(pendingJob)
@@ -371,6 +380,7 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 	local completedJob = pendingJob
 	local completedBatches = batchCount + 1
 	if operation then
+		operation.totalInspected = (operation.totalInspected or 0) + (summary.processed or 0)
 		operation.jobsDone = operation.jobsDone + 1
 		operation.totalBatches = operation.totalBatches + completedBatches
 		operation.totalMoved = operation.totalMoved + (completedJob.totalMoved or 0)
@@ -399,7 +409,13 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 			.. " batches=" .. tostring(operation and operation.totalBatches or completedBatches)
 			.. " moved=" .. tostring(finalMoved)
 			.. " skipped=" .. tostring(finalSkipped) .. " failed=" .. tostring(finalFailed)
-			.. " reason=" .. tostring(summary.reason))
+			.. " inspected=" .. tostring(operation and operation.totalInspected or summary.processed or 0)
+			.. " budgetExhaustions=0"
+			.. " elapsedMs=" .. tostring(operation and nowMs() - (operation.startedMs or nowMs()) or 0)
+			.. " cancelled=false timeout=false error=" .. tostring(summary.reason ~= nil
+				and summary.reason ~= "not_found")
+			.. " reason=" .. tostring(summary.reason)
+			.. " " .. GlobalStorageSiK.OperationPacing.describe(operation and operation.pacing))
 	summary.moved = finalMoved
 	summary.skipped = finalSkipped
 	summary.failed = finalFailed

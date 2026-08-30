@@ -242,6 +242,9 @@ end
 --- labelKey es la clave de traducción del texto del menú contextual.
 GlobalStorageSiK.ItemActions._tabletItemLabels = GlobalStorageSiK.ItemActions._tabletItemLabels or {}
 GlobalStorageSiK.ItemActions._tabletItemActions = GlobalStorageSiK.ItemActions._tabletItemActions or {}
+GlobalStorageSiK.ItemActions._providers = GlobalStorageSiK.ItemActions._providers or {}
+local MAX_PROVIDERS = 32
+local MAX_PROVIDER_ACTIONS = 16
 
 ---@param fullType string
 ---@param labelKey string
@@ -253,6 +256,81 @@ function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey, onU
 	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = labelKey
 	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] =
 		type(onUse) == "function" and onUse or GlobalStorageSiK.ItemActions.onUseTerminalTablet
+end
+
+--- Registro neutral de acciones propietarias de addons. Core solo valida,
+--- ordena y presenta; cada addon decide aplicabilidad, request y ejecución por
+--- su API autoritativa existente (sin protocolo nuevo ni switches por addon).
+---@param def table
+---@return boolean
+function GlobalStorageSiK.ItemActions.registerProvider(def)
+	if type(def) ~= "table" or type(def.id) ~= "string" or def.id == ""
+		or type(def.addonId) ~= "string" or def.addonId == ""
+		or type(def.capabilities) ~= "table" or type(def.actions) ~= "table"
+		or type(def.appliesTo) ~= "function" or type(def.buildRequest) ~= "function"
+		or (type(def.executeRequest) ~= "function" and type(def.execute) ~= "function")
+		or #def.actions == 0 or #def.actions > MAX_PROVIDER_ACTIONS then return false end
+	local count = 0
+	for _ in pairs(GlobalStorageSiK.ItemActions._providers) do count = count + 1 end
+	if not GlobalStorageSiK.ItemActions._providers[def.id] and count >= MAX_PROVIDERS then return false end
+	for i = 1, #def.actions do
+		local action = def.actions[i]
+		if type(action) ~= "table" or type(action.id) ~= "string" or action.id == ""
+			or type(action.labelKey) ~= "string" or action.labelKey == "" then return false end
+	end
+	GlobalStorageSiK.ItemActions._providers[def.id] = def
+	return true
+end
+
+local function sortedProviders()
+	local providers = {}
+	for _, provider in pairs(GlobalStorageSiK.ItemActions._providers) do
+		providers[#providers + 1] = provider
+	end
+	table.sort(providers, function(a, b) return a.id < b.id end)
+	return providers
+end
+
+local function invokeProvider(context, provider, action)
+	local okRequest, request = pcall(provider.buildRequest, action.id, context)
+	if not okRequest or type(request) ~= "table" then
+		GlobalStorageSiK.Log.error("ItemActions", "provider request " .. tostring(provider.id), request)
+		return
+	end
+	local execute = provider.executeRequest or provider.execute
+	local okExecute, err = pcall(execute, request, context)
+	if not okExecute then
+		GlobalStorageSiK.Log.error("ItemActions", "provider execute " .. tostring(provider.id), err)
+	end
+end
+
+--- Añade acciones declaradas a un menú ya elegido por el consumidor.
+--- `items` puede contener InventoryItem reales o filas serializadas del Almacén;
+--- ningún objeto se conserva después de construir/cerrar el menú.
+function GlobalStorageSiK.ItemActions.addProviderOptions(menu, playerArg, items, extra)
+	if (type(menu) ~= "table" and type(menu) ~= "function")
+		or type(items) ~= "table" or #items == 0 then return 0 end
+	local context = {
+		player = GlobalStorageSiK.PlayerUtils.resolve(playerArg),
+		playerArg = playerArg, items = items, extra = extra or {},
+	}
+	local added = 0
+	local targetMenu = type(menu) == "table" and menu or nil
+	local providers = sortedProviders()
+	for i = 1, #providers do
+		local provider = providers[i]
+		for j = 1, #provider.actions do
+			local action = provider.actions[j]
+			local okApplies, applies = pcall(provider.appliesTo, context, action.id)
+			if okApplies and applies == true then
+				if not targetMenu then targetMenu = menu() end
+				if not targetMenu then return added end
+				targetMenu:addOption(T(action.labelKey), context, invokeProvider, provider, action)
+				added = added + 1
+			end
+		end
+	end
+	return added
 end
 
 --- Deposita un ítem concreto en la red.
@@ -749,6 +827,12 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 				end
 			end
 		end
+
+		-- Los proveedores de addons comparten el submenú raíz, pero se evalúan
+		-- antes de Transferir para no crear una raíz vacía cuando ninguno aplica.
+		GlobalStorageSiK.ItemActions.addProviderOptions(ensureSub, playerArg, resolved, {
+			source = "inventory",
+		})
 
 		if GlobalStorageSiK.ItemActions.canTransfer(playerArg, resolved) then
 			GlobalStorageSiK.ItemActions.addTransferOptions(context, playerArg, resolved, ensureSub())

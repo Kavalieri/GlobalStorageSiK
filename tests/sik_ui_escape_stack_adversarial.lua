@@ -25,7 +25,7 @@ local function panel(name, playerNum)
 		self.visible = false
 	end
 	function value:bringToTop() self.bringCount = self.bringCount + 1 end
-	function value:onKeyRelease()
+	function value:onKeyPress()
 		self.legacyKeyCount = self.legacyKeyCount + 1
 		return false
 	end
@@ -41,7 +41,7 @@ local function install(value, rank)
 end
 
 local function press(value)
-	return value:onKeyRelease(Keyboard.KEY_ESCAPE)
+	return value:onKeyPress(Keyboard.KEY_ESCAPE)
 end
 
 -- Priority is semantic, never push-order. Deliberately push in a hostile order.
@@ -113,7 +113,7 @@ assert(press(modal1) == false, "empty p1 stack consumed Escape instead of return
 
 -- Non-Escape keys keep the exact pre-existing surface callback.
 local ordinary = install(panel("ordinary", 0), priority.MODAL)
-assert(ordinary:onKeyRelease(65) == false and ordinary.legacyKeyCount == 1,
+assert(ordinary:onKeyPress(65) == false and ordinary.legacyKeyCount == 1,
 	"Escape installation replaced the ordinary key callback")
 ordinary:setVisible(false)
 
@@ -133,6 +133,14 @@ local staffSource = read("GS_AdminDashboard.lua")
 local pickerSource = read("GS_ZonePicker.lua")
 local dragSource = read("GS_TerminalWithdrawDrag.lua")
 local quantitySource = read("GS_QuantityPrompt.lua")
+local escapeSource = read("GS_SiK_UI_EscapeStack.lua")
+
+contains(escapeSource, "local previousPress = panel.onKeyPress",
+	"Escape stack does not preserve ordinary key-down callbacks")
+contains(escapeSource, "panel.onKeyPress = function(self, key)",
+	"Escape stack closes too late instead of consuming key-down")
+contains(escapeSource, "_sikEscapeHandledOnPress",
+	"key release cannot distinguish an already-consumed Escape")
 
 -- Exact consumers and callbacks. This guards against installing a stack layer
 -- that closes a different surface or uses the wrong priority.

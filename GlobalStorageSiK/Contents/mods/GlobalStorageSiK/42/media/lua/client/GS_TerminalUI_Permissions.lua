@@ -38,12 +38,11 @@ local MEMBER_TABLE_COLUMNS = {
 	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = 140, align = "right", pad = 6 },
 }
 local MEMBER_TABLE_OPTIONS = { left = 0, right = 0, gap = 8 }
-local ADD_W = 72
 -- v20: fila de miembro simplificada (sin botones "Quitar"/"Roles" inline) -
 -- un clic en la fila abre GS_TerminalUI_MemberEditor.lua, igual patron que
 -- la tabla de "Gestion de terminales" (clic en fila -> ventana modal con
 -- TODAS las acciones validadas por permiso, desplegable de rol incluido).
-local PERM_UI_VERSION = 21
+local PERM_UI_VERSION = 22
 
 local function truncate(text, maxW)
 	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, UIFont.Small)
@@ -630,7 +629,6 @@ local function repositionAddBlock(scroll, ui, y)
 	local pad = 8
 	local titleH = FONT_HGT_SMALL + ROW_GAP
 	local rowW = ui._permRowW or 200
-	local comboW = rowW - ADD_W - ROW_GAP
 	local showAdd = ui.addBlockTitle and ui.addBlockTitle.visible
 
 	if showAdd then
@@ -638,15 +636,22 @@ local function repositionAddBlock(scroll, ui, y)
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.addBlockTitle, y)
 		end
 		y = y + titleH
+		if ui.addMemberBtn then GlobalStorageSiK.SiK_UI.fitButtonToLabel(ui.addMemberBtn) end
+		local buttonW = ui.addMemberBtn and math.min(rowW, math.max(72, ui.addMemberBtn:getWidth())) or 72
+		local comboW = rowW - buttonW - ROW_GAP
+		local stacked = comboW < 160
 		if ui.memberPickCombo then
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.memberPickCombo, y)
-			ui.memberPickCombo:setWidth(comboW)
+			ui.memberPickCombo:setWidth(stacked and rowW or comboW)
 		end
 		if ui.addMemberBtn then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.addMemberBtn, y)
-			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.addMemberBtn, pad + comboW + ROW_GAP)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.addMemberBtn,
+				stacked and (y + ENTRY_H + ROW_GAP) or y)
+			GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.addMemberBtn,
+				stacked and pad or (pad + comboW + ROW_GAP))
+			ui.addMemberBtn:setWidth(stacked and rowW or buttonW)
 		end
-		y = y + ENTRY_H + ROW_GAP
+		y = y + (stacked and (ENTRY_H * 2 + ROW_GAP * 2) or (ENTRY_H + ROW_GAP))
 	end
 	ui.permEndY = y
 	return y
@@ -664,7 +669,7 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local titleH = FONT_HGT_SMALL + ROW_GAP
 	local rowW = innerW - pad * 2
-	local comboW = rowW - ADD_W - ROW_GAP
+	local comboW = rowW
 
 	ui.permsStartY = y
 	ui.permsBuilt = true
@@ -911,7 +916,6 @@ local function layoutPermsBlock(scroll, ui, startY)
 	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local rowW = math.max(80, innerW - pad * 2)
 	ui._permRowW = rowW
-	local comboW = math.max(60, rowW - ADD_W - ROW_GAP)
 
 	local col = GlobalStorageSiK.UILayout.column{
 		x = pad, y = startY + 8, width = rowW, scroll = scroll, gap = 0,
@@ -951,12 +955,23 @@ local function layoutPermsBlock(scroll, ui, startY)
 	if addVisible then
 		col:place(ui.addBlockTitle, titleH)
 		local rowY = col.cursor
+		local buttonW = 0
 		if ui.addMemberBtn then
 			GlobalStorageSiK.SiK_UI.fitButtonToLabel(ui.addMemberBtn)
+			buttonW = math.min(rowW, math.max(72, ui.addMemberBtn:getWidth()))
 		end
-		col:_set(ui.memberPickCombo, pad, rowY, comboW, nil)
-		col:_set(ui.addMemberBtn, pad + comboW + ROW_GAP, rowY, nil, nil)
-		col.cursor = col.cursor + ENTRY_H + ROW_GAP
+		local comboMinW = 160
+		local stacked = rowW < comboMinW + ROW_GAP + buttonW
+		if stacked then
+			col:_set(ui.memberPickCombo, pad, rowY, rowW, ENTRY_H)
+			col:_set(ui.addMemberBtn, pad, rowY + ENTRY_H + ROW_GAP, rowW, ENTRY_H)
+			col.cursor = col.cursor + ENTRY_H * 2 + ROW_GAP * 2
+		else
+			local comboW = rowW - buttonW - ROW_GAP
+			col:_set(ui.memberPickCombo, pad, rowY, comboW, ENTRY_H)
+			col:_set(ui.addMemberBtn, pad + comboW + ROW_GAP, rowY, buttonW, ENTRY_H)
+			col.cursor = col.cursor + ENTRY_H + ROW_GAP
+		end
 		if ui.addMemberWarnLbl then
 			col:_set(ui.addMemberWarnLbl, pad, col.cursor, rowW, nil)
 		end

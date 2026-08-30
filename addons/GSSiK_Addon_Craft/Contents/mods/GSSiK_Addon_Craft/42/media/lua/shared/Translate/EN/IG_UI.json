@@ -6,6 +6,8 @@
 	"IGUI_GS_SectionCraftRemote": "Network inventory crafting",
 	"IGUI_GS_CraftRemoteHint": "Open the game crafting UI; network containers are added while you have terminal access.",
 	"IGUI_GS_CraftOpenVanilla": "Open game crafting",
+	"IGUI_GS_ItemActionReload": "Reload with network materials",
+	"IGUI_GS_ItemActionRefill": "Refill with network materials",
 	"IGUI_GS_CraftOpenNeat": "Open Neat Crafting",
 	"IGUI_GS_CraftOpenCook": "Open cooking",
 	"IGUI_GS_CraftInterfaceNeat": "Interface detected: Neat Crafting",

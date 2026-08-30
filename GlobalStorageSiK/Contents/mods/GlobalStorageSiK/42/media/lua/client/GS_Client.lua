@@ -373,10 +373,18 @@ local function onServerCommand(module, command, args)
 			and (not previousState
 				or previousState.networkId ~= args.networkId
 				or previousState.inventoryRevision ~= args.inventoryRevision) then
-			GlobalStorageSiK.Client.itemDetailsCache = {}
+			-- itemDetails lleva revision y puede conservar su pagina visual stale e
+			-- inerte hasta la reconsulta. nodeContents se indexa solo por nodeId: se
+			-- invalida siempre para no editar capacidad/ruta contra datos antiguos.
 			GlobalStorageSiK.Client.nodeContentsCache = {}
-			itemDetailsOrder = {}
 			nodeContentsOrder = {}
+			-- Conservar la pagina de itemDetails evita colapsar
+			-- grupos mientras llega la nueva y libera solo el pending de los grupos
+			-- expandidos para una unica reconsulta.
+			if GlobalStorageSiK.TerminalItems
+				and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
+				GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(args.networkId)
+			end
 		end
 		local deferVisibleRefresh = false
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onTerminalState then

@@ -103,6 +103,46 @@ function Window.safeRect(playerNum, environment)
 	return resolveViewport(nil, { playerNum = playerNum, environment = environment })
 end
 
+--- Devuelve el borde o esquina interactiva bajo el puntero local.
+function Window.resizeEdgeAt(panel, x, y, grip)
+	if not panel then return nil end
+	grip = math.max(4, tonumber(grip) or SiK_UI.Metrics.tokens().resizeHandle)
+	local left = x >= 0 and x <= grip
+	local right = x >= panel.width - grip and x <= panel.width
+	local top = y >= 0 and y <= grip
+	local bottom = y >= panel.height - grip and y <= panel.height
+	if top and left then return "top-left" end
+	if top and right then return "top-right" end
+	if bottom and left then return "bottom-left" end
+	if bottom and right then return "bottom-right" end
+	if left then return "left" end
+	if right then return "right" end
+	if top then return "top" end
+	if bottom then return "bottom" end
+	return nil
+end
+
+--- Resuelve un delta de resize desde cualquier borde contra el viewport del
+--- jugador. No persiste ni reconstruye contenido; el consumidor aplica rect.
+function Window.resizeDelta(panel, edge, dx, dy, viewport)
+	if not panel or not edge then return nil end
+	dx = tonumber(dx) or 0
+	dy = tonumber(dy) or 0
+	local x, y = panel.x, panel.y
+	local w, h = panel.width, panel.height
+	if string.find(edge, "left", 1, true) then x, w = x + dx, w - dx end
+	if string.find(edge, "right", 1, true) then w = w + dx end
+	if string.find(edge, "top", 1, true) then y, h = y + dy, h - dy end
+	if string.find(edge, "bottom", 1, true) then h = h + dy end
+	viewport = resolveViewport(viewport, { playerNum = panel.playerNum or 0 })
+	return Window.resolveProfile(panel._sikWindowProfile or viewport.profile, viewport, {
+		x = x, y = y, width = w, height = h,
+		playerNum = panel.playerNum or 0,
+		minWidth = panel.minimumWidth, minHeight = panel.minimumHeight,
+		maxWidth = panel.maximumWidth, maxHeight = panel.maximumHeight,
+	})
+end
+
 function Window.clampRect(rect, viewport)
 	viewport = resolveViewport(viewport, { playerNum = rect and rect.playerNum or 0 })
 	rect = rect or {}

@@ -64,7 +64,7 @@ local function doWithdraw(onWithdraw, player, rowData, amount)
 
 	if n < 1 then
 
-		n = 1
+		n = maxCount
 
 	end
 
@@ -74,9 +74,10 @@ local function doWithdraw(onWithdraw, player, rowData, amount)
 
 	end
 
-	local targetKey = GlobalStorageSiK.ContainerTargets.resolveWithdrawTarget(player)
-
-	onWithdraw(rowData, n, targetKey)
+	-- El contextual interno siempre retira al inventario del jugador. Un pane
+	-- concreto solo se elige mediante drag-and-drop; no existe destino oculto o
+	-- persistido en la UI de Almacen.
+	onWithdraw(rowData, n, nil)
 
 end
 
@@ -151,14 +152,6 @@ function GlobalStorageSiK.WithdrawMenu.fillSubMenu(parentMenu, player, rowData, 
 	if not parentMenu or not rowData or not onWithdraw then
 
 		return
-
-	end
-
-
-
-	if not skipDestination then
-
-		GlobalStorageSiK.ContainerTargets.addDestinationSubMenu(parentMenu, player)
 
 	end
 
@@ -259,8 +252,6 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 
 
 
-	GlobalStorageSiK.ContainerTargets.clearSessionTarget(player)
-
 	-- WithdrawMenu is terminal-internal: the caller already owns the exact menu
 	-- root. External inventory actions use TransferMenu/ItemActions instead.
 	local host = context
@@ -276,10 +267,6 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 	local subMenu = ISContextMenu:getNew(host)
 
 	host:addSubMenu(root, subMenu)
-
-
-
-	GlobalStorageSiK.ContainerTargets.addDestinationSubMenu(subMenu, player)
 
 
 

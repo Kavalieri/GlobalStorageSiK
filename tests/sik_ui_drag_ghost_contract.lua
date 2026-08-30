@@ -23,24 +23,70 @@ end
 
 local itemsSource = read(CLIENT .. "GS_TerminalUI_Items.lua")
 local dragSource = read(CLIENT .. "GS_TerminalWithdrawDrag.lua")
+local truncateStart = assert(dragSource:find("local function truncateMeasured", 1, true),
+	"shared preview truncator adapter missing")
+local truncateEnd = assert(dragSource:find("function GSWithdrawDragPreviewRow:prerender", truncateStart, true),
+	"shared preview truncator adapter boundary missing")
+local truncateSource = dragSource:sub(truncateStart, truncateEnd - 1)
+local previewStart = assert(dragSource:find("local function createPreview", 1, true),
+	"compact preview constructor missing")
+local previewEnd = assert(dragSource:find("local function expandInventoryPages", previewStart, true),
+	"compact preview constructor boundary missing")
+local previewSource = dragSource:sub(previewStart, previewEnd - 1)
 
-Support.check(suite, "source row and DragGhost share one descriptor renderer", function()
-	contains(itemsSource, "function GlobalStorageSiK.TerminalItems.describeRow",
-		"shared row descriptor missing")
-	contains(itemsSource, "function GlobalStorageSiK.TerminalItems.drawRowDescriptor",
-		"shared row renderer missing")
-	contains(dragSource, "items.describeRow", "DragGhost bypasses row descriptor")
-	contains(dragSource, "items.drawRowDescriptor", "DragGhost bypasses row renderer")
+Support.check(suite, "DragGhost is a compact row stack rather than a copied table", function()
+	contains(dragSource, "local PREVIEW_MIN_W = 180", "compact minimum width missing")
+	contains(dragSource, "local PREVIEW_MAX_W = 300", "compact maximum width missing")
+	contains(dragSource, "local PREVIEW_MAX_ROWS =", "compact stack has no bounded row count")
+	contains(previewSource, "items.rowHeight", "preview does not consume canonical ROW_H")
+	contains(dragSource, "truncateMeasured", "long preview names are not truncated")
+	contains(dragSource, "local PREVIEW_ALPHA = 0.78", "light preview alpha missing")
+	excludes(previewSource, "drawRowDescriptor", "preview still copies the Warehouse row renderer")
+	excludes(previewSource, "sourceWidget.width", "preview width still depends on its source window")
+	contains(previewSource, "#visualRows * rowH", "preview height does not preserve visual rows")
+	contains(previewSource, "for i = 1, #visualRows do", "preview does not render every visual row")
+	contains(dragSource, "descriptor.texture", "compact row omits the item icon")
+	contains(dragSource, "descriptor.name", "compact row omits the item name")
+	contains(dragSource, "descriptor.count", "compact row omits its own quantity")
+	contains(dragSource, "descriptor.indicator", "compact row omits group/expanded state")
+	contains(dragSource, "IGUI_GS_DragMoreObjects", "overflow has no localized +N objects label")
+	excludes(previewSource, "selectionCount", "stack replaces row quantities with one selection summary")
+	excludes(previewSource, ".category", "preview leaks the Category column")
+	excludes(previewSource, ".zone", "preview leaks the Zone column")
 	return true
 end)
 
-Support.check(suite, "drag integration keeps visual and payload rows separate", function()
+Support.check(suite, "preview truncates through the shared UTF-safe SiK UI helper", function()
+	contains(truncateSource, "GlobalStorageSiK.SiK_UI.truncateText",
+		"preview does not delegate truncation to the shared UTF-safe helper")
+	contains(dragSource, "truncateMeasured(descriptor.name, textW)",
+		"preview name bypasses the shared truncator adapter")
+	excludes(truncateSource, "string.sub", "preview defines a local byte truncator")
+	excludes(truncateSource, ":sub(", "preview defines a local byte truncator")
+	excludes(truncateSource, "while ", "preview defines a local truncation loop")
+	excludes(truncateSource, "for ", "preview defines a local truncation loop")
+	return true
+end)
+
+Support.check(suite, "drag integration keeps compact visuals and exact semantic payload separate", function()
 	contains(itemsSource, "TerminalItems.buildDragState", "semantic drag builder missing")
 	contains(itemsSource, "dragState.payloadRows, dragState.visualRows, self",
 		"begin does not receive the exact semantic and visual sets")
 	contains(dragSource, "payloadRows", "drag state omits semantic payload")
-	contains(dragSource, "visualRows", "drag state omits ghost rows")
+	contains(previewSource, "activeDrag.visualRows", "preview drops expanded or selected visual rows")
+	assert(select(2, previewSource:gsub("GSWithdrawDragPreviewRow:new", "")) == 1,
+		"preview row constructor is duplicated instead of reused in one loop")
 	contains(dragSource, "finishAtPointer", "drop completion is not event-driven")
+	return true
+end)
+
+Support.check(suite, "source captures exactly once and every finalization releases capture", function()
+	contains(dragSource, "sourceWidget:setCapture(true)", "drag origin never captures mouse-up")
+	contains(dragSource, "function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer",
+		"single finalization entry point missing")
+	contains(dragSource, "sourceWidget", "drag state loses capture owner")
+	contains(dragSource, "setCapture(false)", "cancel/drop does not release capture")
+	contains(dragSource, "TerminalWithdrawDrag.cancel()", "finalization does not consume active state")
 	return true
 end)
 
@@ -48,6 +94,14 @@ Support.check(suite, "drag has no polling sync or global monkey patch route", fu
 	excludes(dragSource, "Events.OnTick", "DragGhost installs permanent polling")
 	excludes(dragSource, "requestSync", "preview/drop forces inventory sync")
 	excludes(dragSource, "ISInventoryPane.onMouseUp =", "drag monkey-patches vanilla globally")
+	return true
+end)
+
+Support.check(suite, "preview placement uses the real pointer and never becomes the drop target", function()
+	contains(dragSource, "getMouseX", "preview does not follow the real horizontal pointer")
+	contains(dragSource, "getMouseY", "preview does not follow the real vertical pointer")
+	contains(dragSource, "findPaneAtMouse()", "drop does not resolve the real pointer target")
+	contains(dragSource, "setConsumeMouseEvents(false)", "preview consumes vanilla pane mouse events")
 	return true
 end)
 

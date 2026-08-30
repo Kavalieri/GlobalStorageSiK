@@ -168,13 +168,19 @@ Support.check(suite, "terminal shell inventory declares all responsive variants"
 	return true
 end)
 
-Support.check(suite, "header has no hyphen separator or visible version", function()
+Support.check(suite, "header owns only title and fixed close rects", function()
 	local header = section(core, "function GlobalStorageSiK.SiK_UI.renderHeader(panel)",
 		"function GlobalStorageSiK.SiK_UI.runtimeVersionText()")
 	excludes(header, '" - "', "header must not render hyphen separator")
 	excludes(header, "MOD_VERSION", "header must not render build version")
 	excludes(header, "modversion", "header must not render mod.info version")
-	contains(header, 'T("IGUI_GS_TerminalTitle")', "generic terminal title")
+	contains(header, "state.networkName", "header must consume authoritative network display name")
+	contains(header, "state.networkId ~= nil", "linked network fallback must remain distinct from unlinked terminal")
+	contains(header, 'T("IGUI_GS_TerminalTitle")', "unlinked terminal fallback")
+	contains(header, "truncateText(title, rects.title.w", "dynamic network name must be clipped to title rect")
+	contains(header, "resolveHeaderRects(panel)", "header bypasses its measured title rect")
+	contains(terminal, "self._sikHeaderRects.close", "close button bypasses fixed rect")
+	contains(terminal, "renderWindowFrame(self)", "frame is not restored after footer chrome")
 	return true
 end)
 
@@ -212,8 +218,39 @@ Support.check(suite, "compact standard wide rails and shell chrome are canonical
 		assert(profile.window.railItemHeight == values.item, name .. " item height")
 		assert(profile.window.railIconSize == values.icon, name .. " rail icon size")
 		assert(profile.window.railGap == 4, name .. " rail gap")
-		assert(profile.window.headerHeight == 40, name .. " header height")
-		assert(profile.window.footerHeight == 24, name .. " footer height")
+		assert(profile.window.headerHeight == 48, name .. " header height")
+		assert(profile.window.footerHeight == 32, name .. " footer height")
+	end
+	return true
+end)
+
+Support.check(suite, "shell rectangles and bidirectional resize share one geometry owner", function()
+	local boxes = Metrics.shellRects("standard", 1100, 700, false)
+	assert(boxes.header.h == 48 and boxes.footer.h == 32, "shell chrome rects")
+	assert(boxes.rail.w == 88 and boxes.content.x == 88, "rail/content axis")
+	assert(boxes.content.h == 620 and boxes.footer.y == 668, "body/footer partition")
+	local panel = {
+		x = 100, y = 100, width = 720, height = 480, playerNum = 0,
+		_sikWindowProfile = "standard", minimumWidth = 720, minimumHeight = 480,
+		maximumWidth = 1168, maximumHeight = 868,
+	}
+	assert(Window.resizeEdgeAt(panel, 1, 1, 14) == "top-left", "top-left handle")
+	assert(Window.resizeEdgeAt(panel, 719, 240, 14) == "right", "right handle")
+	local viewport = { x = 16, y = 16, w = 1168, h = 868, profile = "standard", playerNum = 0 }
+	local grown = Window.resizeDelta(panel, "bottom-right", 300, 200, viewport)
+	assert(grown.w == 1020 and grown.h == 680, "resize does not grow")
+	Support.assertWithin(grown, viewport, "bidirectional resize")
+	for _, case in ipairs({
+		{ profile = "compact", width = 720 },
+		{ profile = "standard", width = 1100 },
+		{ profile = "wide", width = 1280 },
+	}) do
+		local header = Metrics.headerRects(case.profile, case.width, 14)
+		assert(header.close.w == 28 and header.close.h == 28, case.profile .. " fixed close")
+		assert(header.close.x + header.close.w == case.width - 14, case.profile .. " right margin")
+		assert(header.title.x + header.title.w + header.gap <= header.close.x,
+			case.profile .. " title overlaps close")
+		assert(header.version == nil, case.profile .. " header owns a version rect")
 	end
 	return true
 end)
@@ -221,6 +258,7 @@ end)
 Support.check(suite, "rail consumes profile icon size without changing slot hitboxes", function()
 	contains(rail, "profile.window.railIconSize", "rail ignores the profile icon size")
 	contains(rail, "profile.window.railItemHeight", "rail slot height left the profile")
+	contains(rail, "self.width - self.padding * 2", "rail slot does not consume useful width")
 	excludes(rail, "itemHeight = profile.window.railIconSize",
 		"visual icon size replaced the validated slot hitbox")
 	return true
@@ -233,6 +271,7 @@ Support.check(suite, "footer reports Core and active addon versions only in runt
 	contains(footer, "MOD_VERSION", "footer omits the Core runtime version")
 	contains(footer, "runtime.VERSION", "footer omits active addon versions")
 	contains(footer, "runtimeVersionText", "footer does not consume runtime versions")
+	excludes(footer, '" · "', "footer uses a renderer-unsafe separator")
 	excludes(terminal, 'drawText("Core ', "version text leaked into a tab body")
 	return true
 end)

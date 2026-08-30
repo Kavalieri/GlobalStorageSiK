@@ -518,6 +518,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_WithdrawErrorReason = "Error: {1}",
 	IGUI_GS_WithdrawExactSelectionRequired = "Expand this row and choose the exact item to withdraw.",
 	IGUI_GS_ItemPage = "Units {1}-{2} of {3}",
+	IGUI_GS_DragMoreObjects = "+{1} objects",
 	IGUI_GS_ZoneLimitReached = "Zone limit reached",
 	IGUI_GS_InvalidEntry = "Invalid entry",
 	IGUI_GS_AlreadyMarked = "Already marked",

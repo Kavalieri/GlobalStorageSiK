@@ -267,6 +267,43 @@ se cierra al enviar. El consumidor cancela descubrimiento y apertura al cerrar,
 registra su limpieza transitoria para muerte/cambio de sesión y no instala
 `OnTick` ni listeners globales.
 
+## Acciones contextuales de ítem
+
+Los addons pueden declarar operaciones sobre ítems del inventario real o filas
+serializadas del Almacén sin añadir conocimiento específico al Core:
+
+```lua
+GlobalStorageSiK.ItemActions.registerProvider({
+    id = "example.item-actions",
+    addonId = "Example",
+    capabilities = { "craft" },
+    actions = {
+        { id = "craft", labelKey = "IGUI_Example_Craft" },
+    },
+    appliesTo = function(context, actionId) return actionId == "craft" end,
+    buildRequest = function(actionId, context)
+        return { actionId = actionId, source = context.extra.source }
+    end,
+    executeRequest = function(request, context) return true end,
+})
+```
+
+Registrar de nuevo el mismo `id` sustituye atómicamente su definición. El Core
+valida, ordena y compone el menú; el addon conserva aplicabilidad, payload y
+ejecución. `context.items` solo vive durante el gesto y puede contener
+`InventoryItem` o snapshots de Almacén, por lo que no debe conservarse ninguna
+referencia Java. `buildRequest` devuelve datos Lua planos y acotados.
+
+`executeRequest` debe reutilizar la API autoritativa existente del addon. Craft
+y Builder usan `GlobalStorageSiK.CraftSession`: esta revalida addon, red,
+alcance, sesión e insumos y conserva el flujo de claim/return. El registro no
+crea comandos cliente-servidor nuevos ni convierte `appliesTo` en autoridad.
+Para dirigir la UI vanilla sin autoejecutar, las firmas públicas son
+`CraftSession.openHandcraft(mode, recipe, itemString)` y
+`CraftSession.openBuild(mode, recipe, itemString)`: se pasa una receta exacta o
+un filtro `!fullType`, nunca ambos. El jugador confirma en vanilla y ese clic
+atraviesa los hooks autoritativos del addon.
+
 ## Compatibilidad y autoridad
 
 - En SP real, `isServer()` e `isClient()` pueden ser ambos `false`. Para mutaciones usa `GlobalStorageSiK.isAuthoritative()`.

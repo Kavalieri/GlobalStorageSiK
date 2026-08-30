@@ -31,7 +31,7 @@ ModData = {
 }
 
 local required = {
-	"GS_Config", "GS_I18n", "GS_Utils", "GS_Sandbox", "GS_Zones", "GS_ZoneScanner", "GS_ZonePriority",
+	"GS_Config", "GS_I18n", "GS_Utils", "GS_Sandbox", "GS_OperationPacing", "GS_Zones", "GS_ZoneScanner", "GS_ZonePriority",
 	"GS_ZoneRefresh", "GS_Network", "GS_Index", "GS_RuleSanitizer", "GS_RuleCoverage",
 	"GS_NetworkCapacity", "GS_Power", "GS_Transfer", "GS_InventorySync", "GS_TransferLock",
 	"GS_Redistribute", "GS_RedistributeJob", "GS_ZoneScanJob", "GS_Bulk", "GS_Deposit",
@@ -81,6 +81,11 @@ GlobalStorageSiK = {
 	Addons = { canShowTerminalCraftTab = function() return false end,
 		canShowTerminalBuildTab = function() return false end },
 	Debug = { log = function() end },
+	OperationPacing = {
+		forOperation = function() return { batchUnits = 10 } end,
+		release = function() end,
+		describe = function() return "mode=multiplayer_safe" end,
+	},
 }
 
 local function assertEqual(actual, expected, message)

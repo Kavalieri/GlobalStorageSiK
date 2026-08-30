@@ -114,7 +114,8 @@ function EscapeStack.install(panel, onClose, priority)
 	end
 	panel._sikEscapeStackInstalled = true
 	panel._sikEscapeInstalled = true
-	local previous = panel.onKeyRelease
+	local previousPress = panel.onKeyPress
+	local previousRelease = panel.onKeyRelease
 	local previousIsKeyConsumed = panel.isKeyConsumed
 	local previousSetVisible = panel.setVisible
 	local previousRemove = panel.removeFromUIManager
@@ -126,18 +127,35 @@ function EscapeStack.install(panel, onClose, priority)
 		if previousIsKeyConsumed then return previousIsKeyConsumed(self, key) end
 		return false
 	end
+	local function consumeEscape(self, key)
+		local escapeKey = Keyboard and Keyboard.KEY_ESCAPE or 1
+		if key ~= escapeKey or not EscapeStack.isTop(self) then return false end
+		local state = stateByPanel[self]
+		local close = state and state.onClose or self._sikEscapeClose
+		self._sikEscapeHandledOnPress = true
+		EscapeStack.remove(self)
+		if self.setWantKeyEvents then self:setWantKeyEvents(false) end
+		if close then close(self) end
+		return true
+	end
+	-- PZ decide la pausa en la fase de pulsacion. Consumir en release llega
+	-- demasiado tarde: la superficie superior cierra aqui y Escape no se
+	-- delega al handler previo. Sin superficie SiK, vanilla queda intacto.
+	panel.onKeyPress = function(self, key)
+		if consumeEscape(self, key) then return true end
+		if previousPress then return previousPress(self, key) end
+		return false
+	end
 	panel.onKeyRelease = function(self, key)
 		local escapeKey = Keyboard and Keyboard.KEY_ESCAPE or 1
-		if key == escapeKey then
-			if not EscapeStack.isTop(self) then return false end
-			local state = stateByPanel[self]
-			local close = state and state.onClose or self._sikEscapeClose
-			EscapeStack.remove(self)
-			if self.setWantKeyEvents then self:setWantKeyEvents(false) end
-			if close then close(self) end
+		if key == escapeKey and self._sikEscapeHandledOnPress then
+			self._sikEscapeHandledOnPress = nil
 			return true
 		end
-		if previous then return previous(self, key) end
+		-- Fallback para superficies/motores que no entreguen onKeyPress; sigue
+		-- sin delegar Escape al handler previo cuando SiK es la superficie top.
+		if consumeEscape(self, key) then return true end
+		if previousRelease then return previousRelease(self, key) end
 		return false
 	end
 	if previousSetVisible then

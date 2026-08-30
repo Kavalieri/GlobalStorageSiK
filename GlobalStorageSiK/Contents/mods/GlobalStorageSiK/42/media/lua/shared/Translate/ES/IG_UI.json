@@ -476,6 +476,7 @@
 	"IGUI_GS_DetailCategory": "Categoría: {1}",
 	"IGUI_GS_MultipleCategories": "Varias categorías",
 	"IGUI_GS_DetailWeight": "Peso unitario: {1} kg",
+	"IGUI_GS_DetailFluid": "Líquido: {1} · {2}/{3} L",
 	"IGUI_GS_DetailCount": "Cantidad en esta red: {1}",
 	"IGUI_GS_NetworkCountLine": "{1}: {2} en tu red",
 	"IGUI_GS_NetworkCountNone": "No está en ninguna de tus redes",
@@ -1432,5 +1433,6 @@
 	"IGUI_ItemCat_GSSiK_containers_liquid_mixture": "Contenedores > Líquidos > Mezcla",
 	"IGUI_ItemCat_GSSiK_containers_liquid_other_fluid": "Contenedores > Líquidos > Otro líquido",
 	"IGUI_GS_WithdrawExactSelectionRequired": "Despliega esta fila y elige el objeto exacto que quieres retirar.",
-	"IGUI_GS_ItemPage": "Unidades {1}-{2} de {3}"
+	"IGUI_GS_ItemPage": "Unidades {1}-{2} de {3}",
+	"IGUI_GS_DragMoreObjects": "+{1} objetos"
 }

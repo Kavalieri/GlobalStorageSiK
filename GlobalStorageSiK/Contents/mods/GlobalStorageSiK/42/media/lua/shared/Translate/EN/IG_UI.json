@@ -476,6 +476,7 @@
 	"IGUI_GS_DetailCategory": "Category: {1}",
 	"IGUI_GS_MultipleCategories": "Multiple categories",
 	"IGUI_GS_DetailWeight": "Unit weight: {1} kg",
+	"IGUI_GS_DetailFluid": "Liquid: {1} · {2}/{3} L",
 	"IGUI_GS_DetailCount": "Quantity in this network: {1}",
 	"IGUI_GS_NetworkCountLine": "{1}: {2} in your network",
 	"IGUI_GS_NetworkCountNone": "Not in any of your networks",
@@ -1432,5 +1433,6 @@
 	"IGUI_ItemCat_GSSiK_containers_liquid_mixture": "Containers > Liquid > Mixture",
 	"IGUI_ItemCat_GSSiK_containers_liquid_other_fluid": "Containers > Liquid > Other fluid",
 	"IGUI_GS_WithdrawExactSelectionRequired": "Expand this row and choose the exact item to withdraw.",
-	"IGUI_GS_ItemPage": "Units {1}-{2} of {3}"
+	"IGUI_GS_ItemPage": "Units {1}-{2} of {3}",
+	"IGUI_GS_DragMoreObjects": "+{1} objects"
 }

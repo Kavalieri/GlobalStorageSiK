@@ -39,6 +39,6 @@ local modVersion = assert(modInfo:match("\nmodversion=([^\r\n]+)"), "modversion 
 local luaVersion = assert(version:match('GSSiK_Addon_Craft.VERSION%s*=%s*"([^"]+)"'),
 	"Lua version mirror missing")
 assert(modVersion == luaVersion, "version mismatch: " .. modVersion .. " vs " .. luaVersion)
-assert(modVersion == "1.0.10-dev1", "unexpected Craft DEV1 version: " .. modVersion)
+assert(modVersion == "1.5.0", "unexpected Craft baseline version: " .. modVersion)
 
 print("PASS terminal_ui_framework_contract")

@@ -70,6 +70,12 @@ Support.check(suite, "Moveable Misc fallback is presentation-only and resolves a
 		"fallback does not expose the resolved Family path")
 	excludes(items, "row.nativePath = resolved.nativePath",
 		"presentation fallback mutates authoritative row taxonomy")
+	contains(es, '"IGUI_ItemCat_GSSiK_home_leisure_collection_furnishing_storage": '
+		.. '"Hogar, ocio y colección > Mobiliario > Almacenamiento"',
+		"Spanish Moveable path is absent or humanized in English")
+	contains(en, '"IGUI_ItemCat_GSSiK_home_leisure_collection_furnishing_storage": '
+		.. '"Home, Leisure & Collection > Furnishing > Storage"',
+		"English Moveable path is absent")
 	return true
 end)
 

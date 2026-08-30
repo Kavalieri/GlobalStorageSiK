@@ -7,6 +7,7 @@ for _, moduleName in ipairs({
 	"GS_Sandbox", "GS_NativeProduct", "GS_RuleCoverage", "GS_CategoryResolution",
 	"GS_RuleSanitizer", "GS_Log", "GS_NodeFilters", "GS_InventorySync",
 	"GS_Network", "GS_Router", "GS_Power", "GS_Zones", "GS_ZonePriority", "GS_I18n",
+	"GS_OperationPacing",
 }) do
 	package.loaded[moduleName] = true
 end
@@ -130,6 +131,11 @@ GlobalStorageSiK = {
 	Zones = { getRegistry = function() return activeRegistry end },
 	ZonePriority = { ensurePriorities = function() end },
 	I18n = { remote = function(key) return key end },
+	OperationPacing = { resolve = function()
+		return { batchUnits = 10, batchDelayMs = 400, maxMovesPerStep = 2,
+			moveDelayMs = 1000, inspectedPerStep = 25, indexItemsPerStep = 50,
+			cpuBudgetMs = 5 }
+	end },
 }
 
 dofile(shared .. "GS_Router.lua")
