@@ -60,6 +60,7 @@ local function item(fullType, id, name, opts)
 				isMixture = function() return f.mixture == true end,
 				isCategory = function(_, key) return key == f.category end,
 				getAmount = function() return f.amount or 0 end,
+				getCapacity = function() return f.capacity or 1 end,
 				getPrimaryFluid = function()
 					if f.empty then return nil end
 					return { getFluidTypeString = function() return f.fluidType end }
@@ -79,7 +80,7 @@ for _, value in ipairs({
 	item("Base.VHSTape", 11, "Woodcraft Ep. 3", { mediaIndex = 214 }),
 	item("Base.VHSTape", 12, "Exposure Survival Ep. 5", { mediaIndex = 315 }),
 	item("Base.VHSTape", 13, "VHS Tape", { mediaIndex = -1 }),
-	item("Base.PetrolCan", 20, "Gas Can", { fluid = { empty = false, category = "fuel", fluidType = "Gasoline", amount = 0.8 } }),
+	item("Base.PetrolCan", 20, "Gas Can", { fluid = { empty = false, category = nil, fluidType = "Petrol", amount = 0.8, capacity = 10 } }),
 	item("Base.PetrolCan", 21, "Empty Gas Can", { fluid = { empty = true } }),
 }) do
 	assert(GlobalStorageSiK.ItemSnapshot.addItem(snapshot, value), value:getFullType())
@@ -130,9 +131,20 @@ assert(woodcraft and woodcraft.count == 2 and #woodcraft.itemIds == 2, "two iden
 
 local petrol = byType["Base.PetrolCan"]
 assert(petrol and petrol.count == 2 and petrol.expandable and not petrol.aggregateAllowed, "fluid parent")
-assert(petrol.nativePath == "native:containers/liquid", "fluid parent keeps container-form category")
+assert(petrol.mixedVariants and petrol.nativePath == nil,
+	"mixed fluid parent must report multiple categories, never invent a representative path")
 local petrolDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, petrol.rowKey, 1, 20)
 assert(petrolDetails.total == 2 and #petrolDetails.items == 2, "fluid physical instances")
+local fluidPaths = {}
+local filledFluidStateKey = nil
+for _, detail in ipairs(petrolDetails.items) do
+	fluidPaths[detail.nativePath] = true
+	if detail.nativePath == "native:vehicles/consumable/fuel" then
+		filledFluidStateKey = detail.dynamicStateKey
+	end
+end
+assert(fluidPaths["native:vehicles/consumable/fuel"] and fluidPaths["native:containers/liquid/empty"],
+	"each fluid child keeps its exact category")
 assert(petrol.itemIds == nil, "ordinary snapshot must not expose all itemIds")
 
 local nails = byType["Base.Nails"]
@@ -146,7 +158,7 @@ counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.VHSTape", nil,
 assert(#counts == 1 and counts[1].count == 2, "tooltip counts the same VHS edition")
 counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, "empty")
 assert(#counts == 1 and counts[1].count == 1, "tooltip separates empty fluid containers")
-counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, "fluid:Gasoline")
+counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, filledFluidStateKey)
 assert(#counts == 1 and counts[1].count == 1, "tooltip counts matching fluid content")
 
 print("item_grouping_detail_regression: OK")

@@ -8,6 +8,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISUIElement"
 require "GS_I18n"
 require "GS_Libs"
+require "GS_SiK_UI_Metrics"
 
 GlobalStorageSiK.TerminalTabRail = {}
 
@@ -188,8 +189,11 @@ function GS_TerminalTabRail:new(x, y, w, h, terminal, tabDefs, footerTabDef)
 	o.terminal = terminal
 	o.tabDefs = tabDefs or {}
 	o.footerTabDef = footerTabDef
-	o.padding = math.floor(FONT_HGT_SMALL * 0.2)
-	o.itemHeight = math.floor(FONT_HGT_MEDIUM * 1.85)
+	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(
+		terminal and terminal._sikWindowProfile or "standard")
+	o.padding = profile.window.railPadding
+	o.itemHeight = profile.window.railItemHeight
+	o.itemGap = profile.window.railGap
 	o.scrollBarWidth = 0
 	o.tabSlots = {}
 	o.flyoutLbl = nil
@@ -200,10 +204,10 @@ end
 --- Ancho mínimo de la columna lateral.
 ---@param tabDefs table[]|nil
 ---@return number
-function GlobalStorageSiK.TerminalTabRail.measureWidth(tabDefs)
-	local pad = math.floor(FONT_HGT_SMALL * 0.2)
-	local itemH = math.floor(FONT_HGT_MEDIUM * 1.85)
-	return itemH + pad * 2
+function GlobalStorageSiK.TerminalTabRail.measureWidth(tabDefs, terminal)
+	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(
+		terminal and terminal._sikWindowProfile or "standard")
+	return profile.window.railWidth
 end
 
 function GS_TerminalTabRail:createChildren()
@@ -216,7 +220,7 @@ function GS_TerminalTabRail:createChildren()
 		slot:initialise()
 		self:addChild(slot)
 		self.tabSlots[def.key] = slot
-		y = y + self.itemHeight + 4
+		y = y + self.itemHeight + self.itemGap
 	end
 
 	if self.footerTabDef then
@@ -243,7 +247,7 @@ function GS_TerminalTabRail:layoutSlots()
 			slot:setY(y)
 			slot:setWidth(self.itemHeight)
 			slot:setHeight(self.itemHeight)
-			y = y + self.itemHeight + 4
+			y = y + self.itemHeight + self.itemGap
 		end
 	end
 	-- BUG REAL encontrado (reportado: "Craft y Builder usan la misma
@@ -257,7 +261,7 @@ function GS_TerminalTabRail:layoutSlots()
 		local slot = self.dynamicSlots[i]
 		if slot then
 			slot:setY(y)
-			y = y + self.itemHeight + 4
+			y = y + self.itemHeight + self.itemGap
 		end
 	end
 	if self.footerSlot then
@@ -359,7 +363,7 @@ end
 ---@param tabDefs table[]
 ---@param footerTabDef table|nil
 function GlobalStorageSiK.TerminalTabRail.build(terminal, tabDefs, footerTabDef)
-	local railW = GlobalStorageSiK.TerminalTabRail.measureWidth(tabDefs)
+	local railW = GlobalStorageSiK.TerminalTabRail.measureWidth(tabDefs, terminal)
 	terminal.tabRail = GS_TerminalTabRail:new(0, 0, railW, 10, terminal, tabDefs, footerTabDef)
 	terminal.tabRail:initialise()
 	terminal.tabRail:createChildren()
@@ -372,6 +376,11 @@ function GlobalStorageSiK.TerminalTabRail.layout(terminal)
 	if not terminal.tabRail then
 		return
 	end
+	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(
+		terminal._sikWindowProfile or "standard")
+	terminal.tabRail.padding = profile.window.railPadding
+	terminal.tabRail.itemHeight = profile.window.railItemHeight
+	terminal.tabRail.itemGap = profile.window.railGap
 	terminal.tabRail:layoutSlots()
 	terminal.tabRail:syncSelection()
 end

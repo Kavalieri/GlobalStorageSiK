@@ -42,9 +42,11 @@ contains(corpus, "ui._activeStaffTab == \"taxonomy\"", "new corpus labels inheri
 local terminals = read("GS_TerminalUI_NetworkTerminals.lua")
 local permissions = read("GS_TerminalUI_Permissions.lua")
 contains(terminals, "align = \"right\"", "terminal status right aligned")
-contains(terminals, "scrollBarWidth() + 4", "terminal table reserves scrollbar")
+contains(terminals, "left = 0, right = 0, gap = 8", "terminal table consumes canonical Block content width")
+excludes(terminals, "scrollBarWidth() + 4", "terminal table has no manual scrollbar compensation")
 contains(permissions, "align = \"right\"", "member connection right aligned")
-contains(permissions, "scrollBarWidth() + 4", "member table reserves scrollbar")
+contains(permissions, "left = 0, right = 0, gap = 8", "member table consumes canonical Block content width")
+excludes(permissions, "scrollBarWidth() + 4", "member table has no manual scrollbar compensation")
 
 local zoneEditor = read("GS_TerminalUI_ZoneEditor.lua")
 contains(zoneEditor, "IGUI_GS_ZoneCtxRescan", "zone editor exposes its local rescan")

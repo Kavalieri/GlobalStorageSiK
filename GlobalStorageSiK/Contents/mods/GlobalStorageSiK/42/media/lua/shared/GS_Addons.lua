@@ -438,7 +438,9 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	if net and net.addonInstalls and net.addonInstalls[key] and net.addonInstalls[key][addonId] then
 		installedType = net.addonInstalls[key][addonId].itemType or def.itemType
 		hadRecord = true
-		net.addonInstalls[key][addonId] = nil
+	end
+	if not hadRecord then
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonNotInstalledHereMsg")
 	end
 	local given = giveModuleItem(player, installedType)
 	GlobalStorageSiK.Log.debug("Addons", "uninstallReturn",
@@ -447,8 +449,12 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	if not given then
 		GlobalStorageSiK.Log.error("Addons", "uninstallReturnFailed",
 			"addonId=" .. tostring(addonId) .. " installedType=" .. tostring(installedType)
-				.. " - giveModuleItem() no genero el item, el jugador no recibio nada")
+				.. " - registro conservado porque giveModuleItem() no confirmo la devolucion")
+		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidInventoryMsg")
 	end
+	-- La desinstalacion es transaccional: el registro solo desaparece despues
+	-- de que la unidad exacta haya sido entregada y sincronizada con exito.
+	net.addonInstalls[key][addonId] = nil
 	if ModData and ModData.transmit then
 		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
 	end

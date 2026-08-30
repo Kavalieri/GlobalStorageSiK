@@ -235,10 +235,11 @@ local function classifyFood(fullType, si)
 	local tokens = U.tokenize(U.typeName(si))
 	-- Un recipiente sin identidad alimentaria estructural conserva su forma.
 	-- Evita que CookieJar/HalloweenCandyBucket se conviertan en comida por el
-	-- nombre de lo que podrían contener. Las variantes llenas generadas como
-	-- `Cooler_Beer`/`Cooler_Meat` son la excepción estructural: el sufijo tras
-	-- `_` identifica contenido y gana al envase. Un tipo `base:food` también
-	-- representa contenido real y mantiene prioridad sobre la forma.
+	-- nombre de lo que podrían contener. Variantes como `Cooler_Beer` y
+	-- `Cooler_Meat` siguen siendo `base:container`: el sufijo describe su origen
+	-- de spawn, no el contenido que conservan después de que el jugador las
+	-- vacíe. Solo una instancia de fluido real (GS_FluidTaxonomy) o un tipo
+	-- `base:food` representa contenido y mantiene prioridad sobre la forma.
 	if not isConfirmedFood and U.hasAnyToken(tokens, CONTAINER_FORM_TOKENS) then
 		-- Cooler_Meat/Cooler_Beer son `base:container` reales en los scripts
 		-- B42. El sufijo forma parte del nombre técnico del objeto, no prueba

@@ -30,6 +30,7 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 require "GS_SiK_UI_Table"
 require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Scroll"
@@ -43,13 +44,14 @@ GlobalStorageSiK.AdminDashboard.instance = nil
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics()
 local PAD = 14
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 8
-local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics({ rowVerticalPadding = 14 })
-local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
+local BTN_H = CONTROL_METRICS.buttonHeight
+local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local ROW_H = TABLE_METRICS.rowHeight
 local ROW_GAP = 4
-local ENTRY_H = FONT_HGT_SMALL + 8
+local ENTRY_H = CONTROL_METRICS.inputHeight
 local WINDOW_W = 860
 local WINDOW_H = 780
 local INFO_LINE_COUNT = 6
@@ -65,7 +67,9 @@ local ADMIN_MEMBER_TABLE_COLUMNS = {
 	{ key = "member", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 100, pad = 6 },
 	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, align = "right", pad = 4 },
 }
-local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 6 }
+-- El ScrollableRegion ya entrega el contentRect útil; la tabla no reserva una
+-- segunda vez el scrollbar a la derecha.
+local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = 0 }
 
 local function staffActionCallback(action, dashboard)
 	return function()
@@ -187,6 +191,8 @@ end
 
 function GS_AdminHistoryUI:initialise()
 	ISPanel.initialise(self)
+	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminHistoryUI.destroy,
+		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.MODAL)
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
@@ -237,6 +243,12 @@ function GS_AdminHistoryUI:initialise()
 	self.scrollTopY = scrollY
 	self.eventScroll = GlobalStorageSiK.TerminalScroll.create(
 		self, PAD, scrollY, self.width - PAD * 2, self.height - scrollY - PAD)
+	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(self.eventScroll, function()
+		if self._historyRelayout then return end
+		self._historyRelayout = true
+		self:refreshEvents()
+		self._historyRelayout = false
+	end)
 	self:refreshEvents()
 	self:installMouseHandlers()
 	GlobalStorageSiK.SiK_UI.centerModal(self)
@@ -350,6 +362,8 @@ GS_AdminMemberEditorUI = ISPanel:derive("GS_AdminMemberEditorUI")
 
 function GS_AdminMemberEditorUI:initialise()
 	ISPanel.initialise(self)
+	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminMemberEditorUI.destroy,
+		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.MODAL)
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
@@ -633,6 +647,8 @@ end
 
 function GS_AdminDashboardUI:initialise()
 	ISPanel.initialise(self)
+	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminDashboardUI.destroy,
+		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.STAFF)
 	self.backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.98 }
 	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
 	self:setAlwaysOnTop(true)
@@ -931,10 +947,9 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		y = y + actionRows * (BTN_H + LINE_GAP) + 6
 	end
 
-	self.membersTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AdminMembersTitle"),
-		0.7, 0.72, 0.76, 1, UIFont.Small, true)
-	self.membersTitle:initialise()
-	self:addChild(self.membersTitle)
+	self.membersTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(self, {
+		x = pad, y = y, text = T("IGUI_GS_AdminMembersTitle"),
+	})
 	trackNetworkTabWidget(self, self.membersTitle)
 	y = y + FONT_HGT_SMALL + LINE_GAP
 
@@ -962,6 +977,12 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
 	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
 	self.memberScroll = GlobalStorageSiK.TerminalScroll.create(self, pad, y, textW, memberH)
+	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(self.memberScroll, function()
+		if self._memberRelayout then return end
+		self._memberRelayout = true
+		self:refreshMemberPanel(self._members)
+		self._memberRelayout = false
+	end)
 	self.memberScrollTopY = y
 	trackNetworkTabWidget(self, self.memberScroll)
 	local actionsY = y + memberH + ROW_GAP

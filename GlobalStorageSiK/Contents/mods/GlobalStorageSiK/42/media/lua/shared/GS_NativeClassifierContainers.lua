@@ -22,6 +22,11 @@
 	puntual `wearable/backpack` (ver más abajo). Objetos EQUIPABLES (que sí
 	resolvieron BodyLocation) se excluyen - ya los reclamó Ropa antes en la
 	cadena.
+
+	DEV32.4.3: B42 confirma `ItemType=base:container` y/o
+	`DisplayCategory=Container` para las formas reales. Esas propiedades pasan a
+	ser evidencia estructural 100; los tokens solo deciden portable/special o
+	degradan compatibilidad si un ScriptItem externo no publica la estructura.
 ]]
 
 require "GS_NativeClassifierApi"
@@ -90,6 +95,9 @@ local function classifyContainers(fullType, si)
 	if U.hasAnyToken(tokens, CONTAINER_EXCLUDE_TOKENS) then return nil end
 
 	if isWearable(si) then return nil end
+	local itemType = U.itemTypeLower(si)
+	local displayCategory = U.displayCategoryLower(si)
+	local confirmedContainer = itemType == "base:container" or displayCategory == "container"
 
 	-- dev14 (probe controlado de sistemas, confirmado via javap): ScriptItem
 	-- hereda `containsComponent(ComponentType)` de GameEntityScript - señal
@@ -113,13 +121,19 @@ local function classifyContainers(fullType, si)
 		return { l1 = "containers", l2 = "liquid", l3 = nil }, { containerForm = "liquid" }, {}, U.evidence("name_containers_liquid", 30)
 	end
 	if U.hasAnyToken(tokens, SPECIAL_TOKENS) then
-		return { l1 = "containers", l2 = "special", l3 = nil }, {}, {}, U.evidence("name_containers_special", 30)
+		return { l1 = "containers", l2 = "special", l3 = nil }, {}, {},
+			U.evidence(confirmedContainer and "script_container_structure" or "name_containers_special",
+				confirmedContainer and 100 or 30)
 	end
 	if U.hasAnyToken(tokens, PORTABLE_TOKENS) then
-		return { l1 = "containers", l2 = "portable", l3 = nil }, { containerForm = "bag_or_box" }, {}, U.evidence("name_containers_portable", 30)
+		return { l1 = "containers", l2 = "portable", l3 = nil }, { containerForm = "bag_or_box" }, {},
+			U.evidence(confirmedContainer and "script_container_structure" or "name_containers_portable",
+				confirmedContainer and 100 or 30)
 	end
 	if U.hasAnyToken(tokens, GENERIC_PORTABLE_TOKENS) then
-		return { l1 = "containers", l2 = "portable", l3 = nil }, { containerForm = "jar_or_bucket" }, {}, U.evidence("name_containers_portable", 30)
+		return { l1 = "containers", l2 = "portable", l3 = nil }, { containerForm = "jar_or_bucket" }, {},
+			U.evidence(confirmedContainer and "script_container_structure" or "name_containers_portable",
+				confirmedContainer and 100 or 30)
 	end
 
 	-- BUG REAL cerrado (2026-08-27, hallazgo de sistemas sobre dev16): "empty
@@ -136,8 +150,20 @@ local function classifyContainers(fullType, si)
 	-- su contenedor" - el pool de este bloque son los REALMENTE
 	-- confirmados como contenedor, no cualquier objeto con "Empty" en el
 	-- nombre.
-	if U.hasAnyToken(tokens, { empty = true }) and U.itemTypeLower(si) == "base:container" then
-		return { l1 = "containers", l2 = "portable", l3 = nil }, { containerForm = "empty_variant" }, {}, U.evidence("name_containers_empty_variant", 30)
+	if U.hasAnyToken(tokens, { empty = true }) and confirmedContainer then
+		return { l1 = "containers", l2 = "portable", l3 = nil },
+			{ containerForm = "empty_variant" }, {}, U.evidence("script_container_structure", 100)
+	end
+
+	-- ItemType/DisplayCategory de contenedor son identidad estructural. Este
+	-- fallback llega después de las identidades específicas y del componente
+	-- de fluido, por lo que no roba semillas, armas, ropa ni líquidos. Cubre
+	-- variantes técnicas como Cooler_Beer sin fingir que el sufijo describe su
+	-- contenido actual: tras retirar lo que traía al aparecer, sigue siendo el
+	-- mismo contenedor portátil.
+	if confirmedContainer then
+		return { l1 = "containers", l2 = "portable", l3 = nil },
+			{ containerForm = "portable" }, {}, U.evidence("script_container_structure", 100)
 	end
 
 	return nil

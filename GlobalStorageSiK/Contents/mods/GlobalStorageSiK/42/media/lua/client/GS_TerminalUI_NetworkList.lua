@@ -12,13 +12,14 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 require "GS_SiK_UI_Window"
 
 GlobalStorageSiK.TerminalNetworkList = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local BTN_H = FONT_HGT_SMALL + 6
+local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
 local ROW_GAP = 6
 local INFO_LINE_COUNT = 2
 
@@ -61,14 +62,14 @@ local function refreshSelectedNetworkInfo(ui, state)
 	local info = {}
 	if row then
 		info[1] = T("IGUI_GS_NetCounts", row.zoneCount or 0, row.nodeCount or 0)
-			.. " · " .. T("IGUI_GS_NetLastLocation", locationText(row))
+			.. " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " .. T("IGUI_GS_NetLastLocation", locationText(row))
 		if ui.netListTitle then
 			ui.netListTitle:setName(row.label or row.name or row.networkId or "?")
 		end
 		if ui.netStatusLbl then
 			local status = row.activeTerminals == 0
 				and T("IGUI_GS_NetStatusSuspended") or T("IGUI_GS_NetStatusActive")
-			ui.netStatusLbl:setName("· " .. status)
+			ui.netStatusLbl:setName(T("IGUI_GS_PunctuationMiddleDot") .. " " .. status)
 			ui.netStatusLbl.r = row.activeTerminals == 0 and 0.9 or 0.35
 			ui.netStatusLbl.g = row.activeTerminals == 0 and 0.7 or 0.75
 			ui.netStatusLbl.b = row.activeTerminals == 0 and 0.3 or 0.45
@@ -129,7 +130,7 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 	y = y + FONT_HGT_SMALL + 6
 
 	local comboW = math.max(160, innerW - pad * 2)
-	ui.netCombo = ISComboBox:new(pad, y, comboW, BTN_H + 2, terminal, nil)
+	ui.netCombo = ISComboBox:new(pad, y, comboW, BTN_H, terminal, nil)
 	ui.netCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(ui.netCombo)
 	ui.netCombo:clear()
@@ -158,7 +159,7 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 
 	local btnW = math.floor((comboW - ROW_GAP) / 2)
 	ui.netUseBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, btnW, BTN_H + 2, T("IGUI_GS_NetUseSelected"), scroll, function()
+		pad, y, btnW, BTN_H, T("IGUI_GS_NetUseSelected"), scroll, function()
 			local state = terminal and terminal.terminalState or {}
 			local nid = selectedNetworkId(ui, state)
 			if not nid then
@@ -168,7 +169,7 @@ function GlobalStorageSiK.TerminalNetworkList.build(scroll, terminal, ui, y, inn
 		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netUseBtn)
 	ui.netRefreshBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + btnW + ROW_GAP, y, btnW, BTN_H + 2, T("IGUI_GS_NetRefreshList"), scroll, function()
+		pad + btnW + ROW_GAP, y, btnW, BTN_H, T("IGUI_GS_NetRefreshList"), scroll, function()
 			GlobalStorageSiK.NetClient.sendCommand("getNetworkList", {})
 		end, nil, true)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.netRefreshBtn)

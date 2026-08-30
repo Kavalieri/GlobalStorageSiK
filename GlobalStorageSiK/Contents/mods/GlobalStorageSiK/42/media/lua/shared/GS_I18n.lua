@@ -27,35 +27,75 @@ local ACCENT_CODEPOINTS = {
 	{ 0x00DA, "u" }, { 0x00D9, "u" }, { 0x00DB, "u" }, { 0x00DC, "u" },
 	{ 0x00D1, "n" }, { 0x00C7, "c" }, { 0x00DD, "y" },
 }
-local ACCENT_UTF8_MAP = {}
-local ACCENT_UNIT_MAP = {}
+local FOLD_CODEPOINTS = {}
 for i = 1, #ACCENT_CODEPOINTS do
 	local pair = ACCENT_CODEPOINTS[i]
-	local cp, base = pair[1], pair[2]
-	local unit = string.char(cp)
-	ACCENT_UNIT_MAP[unit] = base
-	if cp >= 0x80 and cp <= 0x7FF then
-		local utf8 = string.char(0xC0 + math.floor(cp / 0x40), 0x80 + (cp % 0x40))
-		if utf8 ~= unit then ACCENT_UTF8_MAP[utf8] = base end
-	end
+	FOLD_CODEPOINTS[pair[1]] = string.byte(pair[2])
+end
+-- Letras polacas con diacrítico -> base ASCII. Ó/ó ya está en la tabla común.
+FOLD_CODEPOINTS[0x0104], FOLD_CODEPOINTS[0x0105] = 0x61, 0x61
+FOLD_CODEPOINTS[0x0106], FOLD_CODEPOINTS[0x0107] = 0x63, 0x63
+FOLD_CODEPOINTS[0x0118], FOLD_CODEPOINTS[0x0119] = 0x65, 0x65
+FOLD_CODEPOINTS[0x0141], FOLD_CODEPOINTS[0x0142] = 0x6C, 0x6C
+FOLD_CODEPOINTS[0x0143], FOLD_CODEPOINTS[0x0144] = 0x6E, 0x6E
+FOLD_CODEPOINTS[0x015A], FOLD_CODEPOINTS[0x015B] = 0x73, 0x73
+FOLD_CODEPOINTS[0x0179], FOLD_CODEPOINTS[0x017A] = 0x7A, 0x7A
+FOLD_CODEPOINTS[0x017B], FOLD_CODEPOINTS[0x017C] = 0x7A, 0x7A
+
+local function isUtf8Continuation(value)
+	return value ~= nil and value >= 0x80 and value <= 0xBF
+end
+
+local function normalizedCodepoint(codepoint)
+	local folded = FOLD_CODEPOINTS[codepoint]
+	if folded then return folded end
+	if codepoint >= 0x0410 and codepoint <= 0x042F then return codepoint + 0x20 end
+	if codepoint == 0x0401 then return 0x0451 end
+	return codepoint
+end
+
+local function encodeTwoByteCodepoint(codepoint)
+	return string.char(0xC0 + math.floor(codepoint / 0x40), 0x80 + (codepoint % 0x40))
 end
 
 local function foldLatinAccents(value)
 	local folded = {}
 	local i = 1
 	while i <= #value do
-		local consumedUtf8 = false
 		local byte = string.byte(value, i)
 		local nextByte = i < #value and string.byte(value, i + 1) or nil
-		if byte == 0xC3 and nextByte and nextByte >= 0x80 and nextByte <= 0xBF then
+		local thirdByte = i + 1 < #value and string.byte(value, i + 2) or nil
+		local fourthByte = i + 2 < #value and string.byte(value, i + 3) or nil
+		if byte >= 0xC2 and byte <= 0xDF and isUtf8Continuation(nextByte) then
 			local pair = value:sub(i, i + 1)
-			folded[#folded + 1] = ACCENT_UTF8_MAP[pair] or pair
+			local codepoint = (byte - 0xC0) * 0x40 + (nextByte - 0x80)
+			local normalized = normalizedCodepoint(codepoint)
+			if normalized == codepoint then
+				folded[#folded + 1] = pair
+			elseif normalized <= 0x7F then
+				folded[#folded + 1] = string.char(normalized)
+			else
+				folded[#folded + 1] = encodeTwoByteCodepoint(normalized)
+			end
 			i = i + 2
-			consumedUtf8 = true
-		end
-		if not consumedUtf8 then
+		elseif byte >= 0xE0 and byte <= 0xEF
+			and isUtf8Continuation(nextByte) and isUtf8Continuation(thirdByte) then
+			folded[#folded + 1] = value:sub(i, i + 2)
+			i = i + 3
+		elseif byte >= 0xF0 and byte <= 0xF4
+			and isUtf8Continuation(nextByte) and isUtf8Continuation(thirdByte)
+			and isUtf8Continuation(fourthByte) then
+			folded[#folded + 1] = value:sub(i, i + 3)
+			i = i + 4
+		else
 			local unit = value:sub(i, i)
-			folded[#folded + 1] = ACCENT_UNIT_MAP[unit] or unit
+			local normalized = normalizedCodepoint(byte)
+			if normalized ~= byte then
+				local ok, normalizedUnit = pcall(string.char, normalized)
+				folded[#folded + 1] = ok and normalizedUnit or unit
+			else
+				folded[#folded + 1] = unit
+			end
 			i = i + 1
 		end
 	end
@@ -63,8 +103,9 @@ local function foldLatinAccents(value)
 end
 
 --- Normaliza texto de busqueda para comparacion "por mejor aproximacion":
---- minusculas ASCII + tildes/dieresis/cedilla latinas plegadas a su base,
---- CUALQUIER otro byte (chino, cirilico, etc.) intacto. Sustituye a
+--- minusculas ASCII/cirílicas + diacríticos latinos soportados plegados a su
+--- base (incluido polaco); cualquier otra escritura se conserva intacta.
+--- Sustituye a
 --- string.lower estandar, que delega en la tabla tolower() de la libc del
 --- proceso - locale-dependiente byte a byte, sin garantia de que un byte
 --- >=0x80 de una secuencia UTF-8 salga intacto en todos los entornos
@@ -86,9 +127,13 @@ end
 -- por cadena de entrada evita repetir las 47 pasadas de gsub para el MISMO
 -- texto en cada fila que lo comparte, sin tocar la logica de normalizacion
 -- en si. Cache simple por valor de cadena (no debil - el universo de
--- textos de items/categorias es pequeño y estable durante toda la sesion,
--- nunca crece sin limite como pasaria con IDs unicos por fila).
+-- textos de items/categorias suele ser pequeño y estable, pero la consulta
+-- escrita por el jugador también pasa por aquí. El tope evita que una sesión
+-- larga acumule entradas arbitrarias; al alcanzarlo se descarta el lote
+-- completo, una operación rara y O(1) que mantiene el camino frecuente simple.
+local ASCII_LOWER_CACHE_MAX = 4096
 local asciiLowerCache = {}
+local asciiLowerCacheCount = 0
 function GlobalStorageSiK.I18n.asciiLower(s)
 	if not s or s == "" then
 		return s or ""
@@ -97,11 +142,21 @@ function GlobalStorageSiK.I18n.asciiLower(s)
 	if cached ~= nil then
 		return cached
 	end
-	local result = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
+	local lowered = {}
+	for i = 1, #s do
+		local unit = string.byte(s, i)
+		lowered[i] = unit >= 0x41 and unit <= 0x5A and string.char(unit + 0x20) or s:sub(i, i)
+	end
+	local result = table.concat(lowered)
 	-- Una sola lectura distingue una secuencia UTF-8 conocida de una unidad
 	-- Latin-1. Un carácter UTF-8 ajeno al mapa conserva todos sus bytes.
 	result = foldLatinAccents(result)
+	if asciiLowerCacheCount >= ASCII_LOWER_CACHE_MAX then
+		asciiLowerCache = {}
+		asciiLowerCacheCount = 0
+	end
 	asciiLowerCache[s] = result
+	asciiLowerCacheCount = asciiLowerCacheCount + 1
 	return result
 end
 
@@ -1344,6 +1399,34 @@ end
 -- estado dinamico de red, no identidad del tipo.
 local itemSearchHaystackCache = GlobalStorageSiK.CatalogManager
 	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+local ITEM_SEARCH_CACHE_MAX = 4096
+local ITEM_SEARCH_CACHE_TRIM = 2048
+local itemSearchHaystackOrder = {}
+local function clearItemSearchOrder()
+	itemSearchHaystackOrder = {}
+end
+if GlobalStorageSiK.CatalogManager then
+	GlobalStorageSiK.CatalogManager.onEpochChanged(clearItemSearchOrder)
+	GlobalStorageSiK.CatalogManager.onLanguageEpochChanged(clearItemSearchOrder)
+end
+local function storeItemSearchHaystack(key, value)
+	if itemSearchHaystackCache[key] == nil then
+		if #itemSearchHaystackOrder >= ITEM_SEARCH_CACHE_MAX then
+			local kept = {}
+			for i = 1, #itemSearchHaystackOrder do
+				local oldKey = itemSearchHaystackOrder[i]
+				if i <= ITEM_SEARCH_CACHE_TRIM then
+					itemSearchHaystackCache[oldKey] = nil
+				else
+					kept[#kept + 1] = oldKey
+				end
+			end
+			itemSearchHaystackOrder = kept
+		end
+		itemSearchHaystackOrder[#itemSearchHaystackOrder + 1] = key
+	end
+	itemSearchHaystackCache[key] = value
+end
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	if not row then
 		return ""
@@ -1384,6 +1467,20 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		addPart(nativeView.l3Label)
 		addPart(resolved.nativePath)
 	end
+	-- Los padres mixtos no tienen una ruta representativa: cada variante conserva
+	-- la suya. Resolver aquí sus etiquetas en el idioma del cliente hace que la
+	-- búsqueda encuentre también el detalle sin solicitar/abrir filas remotas.
+	if GlobalStorageSiK.NativeProduct then
+		for i = 1, #(row.nativePaths or {}) do
+			local nativePath = row.nativePaths[i]
+			local nativeView = GlobalStorageSiK.NativeProduct.getView(nativePath)
+			addPart(nativeView.fullLabel)
+			addPart(nativeView.l1Label)
+			addPart(nativeView.l2Label)
+			addPart(nativeView.l3Label)
+			addPart(nativePath)
+		end
+	end
 	if resolved then
 		addPart(GlobalStorageSiK.CategoryResolution.label(resolved))
 		addPart(resolved.vanillaKey)
@@ -1394,6 +1491,14 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	addPart(row.displayName)
 	addPart(row.category)
 	addPart(row.subCategory)
+	for i = 1, #(row.variantSummary or {}) do
+		local summary = row.variantSummary[i]
+		addPart(GlobalStorageSiK.I18n.itemDisplayName(
+			summary.fullType or fullType, summary.displayName, row.worldSprite))
+		addPart(summary.displayName)
+		addPart(summary.mediaTitle)
+		addPart(summary.dynamicStateKey)
+	end
 	addPart(row.variantSearchText)
 	addPart(fullType)
 	local shortName = fullType:match("^[^.]+%.(.+)$")
@@ -1402,7 +1507,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	end
 
 	local haystack = GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
-	itemSearchHaystackCache[cacheKey] = haystack
+	storeItemSearchHaystack(cacheKey, haystack)
 	return haystack
 end
 

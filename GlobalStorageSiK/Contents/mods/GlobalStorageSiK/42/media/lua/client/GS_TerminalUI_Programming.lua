@@ -16,6 +16,7 @@ require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 require "GS_DiskProgramming"
 require "GS_CraftUtils"
 require "GS_NetClient"
@@ -26,7 +27,7 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local CONTENT_PAD = 8
 local BLOCK_GAP = 8
-local BTN_H = FONT_HGT_SMALL + 10
+local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics("standard").buttonHeight
 
 -- Orden estable de programas conocidos por el Core; cualquier otro que un
 -- addon registre via DiskProgramming.registerProgram() se añade detrás, en
@@ -85,29 +86,6 @@ local function addProgramIcon(scroll, x, y, iconPath, size)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, icon)
 end
 
--- Icono pequeño de UN ítem concreto por fullType (contador de disquetes en
--- blanco, pedido explicito 2026-08-23: "este último también requiere su
--- icono") - misma fuente que ya usa SiK_UI.addRequirementLine
--- para el resto del terminal, pero enrutado por TerminalScroll.addChild
--- (esta pestaña usa scroll, no un panel modal plano como GS_AddonManageUI,
--- donde addRequirementLine SÍ es seguro llamar tal cual).
-local SMALL_ICON_SIZE = 24
-local function addItemIcon(scroll, x, y, fullType, size)
-	size = size or SMALL_ICON_SIZE
-	local tex = GlobalStorageSiK.CraftUtils and GlobalStorageSiK.CraftUtils.getItemIconTexture
-		and GlobalStorageSiK.CraftUtils.getItemIconTexture(fullType) or nil
-	local icon = ISPanel:new(x, y, size, size)
-	icon:initialise()
-	icon.drawBackground = false
-	icon.prerender = function(panel)
-		ISPanel.prerender(panel)
-		if tex then
-			panel:drawTextureScaledAspect(tex, 0, 0, panel.width, panel.height, 1, 1, 1, 1)
-		end
-	end
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, icon)
-end
-
 --- Cuenta disquetes en blanco accesibles ahora mismo (inventario del
 --- jugador + contenedores de ingredientes cercanos, mismo criterio que
 --- programReadiness/hasDisk) - a diferencia de findItemTypeNearby (solo
@@ -153,53 +131,25 @@ end
 ---@param player IsoPlayer|nil
 ---@return number nextY
 local function addStatusHeader(scroll, x, y, innerW, player)
-	local cardTop = y
-	local cardW = math.max(120, innerW - x * 2)
-	local card = GlobalStorageSiK.SiK_UI.createSectionCard(x, cardTop, cardW, 10)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
-
-	local innerPad = 8
-	local cy = y + innerPad
-	local iconX = x + innerPad
-	addProgramIcon(scroll, iconX, cy, "media/textures/Item_GS_TerminalReader.png")
-	local textX = iconX + ICON_SIZE + 8
-	local textW = math.max(80, cardW - innerPad * 2 - ICON_SIZE - 8)
-	local textY = cy
-	textY = addWrappedLabel(scroll, textX, textY, T("IGUI_GS_ProgrammingReaderInstalled"), textW, 0.5, 0.72, 0.55)
-	textY = addWrappedLabel(scroll, textX, textY, T("IGUI_GS_ProgrammingHint"), textW, 0.62, 0.68, 0.72)
-	local afterHeader = math.max(textY, cy + ICON_SIZE) + 6
-
-	-- Contador de disquetes en blanco CON icono propio (pedido explicito
-	-- 2026-08-23) - fila aparte, alineada con el mismo margen izquierdo que
-	-- el resto de la tarjeta, no bajo el icono de la disquetera.
 	local blankCount = countBlankDisksNearby(player)
-	local cr, cg, cb = 0.5, 0.72, 0.55
-	if blankCount < 1 then cr, cg, cb = 0.85, 0.7, 0.3 end
-	addItemIcon(scroll, iconX, afterHeader, GlobalStorageSiK.DiskProgramming.BLANK_DISK)
-	local counterTextX = iconX + SMALL_ICON_SIZE + 8
-	local counterTextW = math.max(80, cardW - innerPad * 2 - SMALL_ICON_SIZE - 8)
-	local counterBottom = addWrappedLabel(scroll, counterTextX, afterHeader + 4,
-		T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1"), counterTextW, cr, cg, cb)
-	local contentBottom = math.max(counterBottom, afterHeader + SMALL_ICON_SIZE) + innerPad
-
-	GlobalStorageSiK.SiK_UI.resizeSectionCard(card, x, cardTop, cardW, contentBottom - cardTop)
-	return contentBottom
+	local text = T("IGUI_GS_ProgrammingReaderInstalled") .. " · "
+		.. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1")
+	local feedback = GlobalStorageSiK.SiK_UI.Controls.feedback(nil, {
+		x = x, y = y, w = math.max(80, innerW - x * 2), text = text,
+		kind = blankCount > 0 and "success" or "warning",
+	})
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, feedback)
+	return y + feedback.height
 end
 
 local function addSectionTitle(scroll, x, y, titleKey, innerW)
 	local title = T(titleKey)
-	local titleH = FONT_HGT_SMALL + 8
-	local hdrW = math.max(120, innerW - x * 2)
-	local hdr = ISPanel:new(x, y, hdrW, titleH)
-	hdr:initialise()
-	hdr.drawBackground = false
-	hdr.prerender = function(panel)
-		ISPanel.prerender(panel)
-		panel:drawRect(0, 0, panel.width, panel.height, 0.85, 0.12, 0.12, 0.12)
-		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
-	end
+	local titleH = GlobalStorageSiK.SiK_UI.Controls.metrics("standard").sectionHeight
+	local hdr = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = x, y = y, text = title,
+	})
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)
-	return y + titleH + 6
+	return y + titleH
 end
 
 ---@param panel ISPanel
@@ -211,7 +161,7 @@ function GlobalStorageSiK.TerminalProgramming.buildPanel(panel, terminal)
 	panel.programmingBuilt = true
 	panel.drawBackground = false
 	panel.terminalRef = terminal
-	panel.programmingScroll = GlobalStorageSiK.TerminalScroll.create(panel, terminal.padding or 8, 0, 280, 120)
+	panel.programmingScroll = GlobalStorageSiK.TerminalScroll.create(panel, 0, 0, 280, 120)
 end
 
 ---@param panel ISPanel
@@ -221,13 +171,9 @@ function GlobalStorageSiK.TerminalProgramming.layout(panel, innerW, innerH)
 	if not panel or not panel.programmingScroll then
 		return
 	end
-	local pad = panel.padding or 8
-	local y = pad
-	local bottomPad = GlobalStorageSiK.TerminalScroll.listBottomGap()
-	local scrollH = math.max(120, innerH - y - pad - bottomPad)
-	panel.programmingScroll:setX(pad)
-	panel.programmingScroll:setY(y)
-	GlobalStorageSiK.TerminalScroll.resize(panel.programmingScroll, innerW - pad * 2, scrollH)
+	panel.programmingScroll:setX(0)
+	panel.programmingScroll:setY(0)
+	GlobalStorageSiK.TerminalScroll.resize(panel.programmingScroll, innerW, math.max(120, innerH))
 end
 
 ---@param player IsoPlayer|nil
@@ -247,12 +193,21 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 		return
 	end
 	local scroll = panel.programmingScroll
+	if not scroll._gsProgrammingContentRectBound then
+		scroll._gsProgrammingContentRectBound = true
+		GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(scroll, function()
+			if panel._gsProgrammingRelayout then return end
+			panel._gsProgrammingRelayout = true
+			GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal or panel.terminalRef)
+			panel._gsProgrammingRelayout = false
+		end)
+	end
 	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	GlobalStorageSiK.TerminalScroll.clear(scroll, true)
 
 	local pad = CONTENT_PAD
 	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	local cardW = math.max(260, innerW - pad * 2)
+	local cardW = math.max(80, innerW - pad * 2)
 	local y = pad
 
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
@@ -311,10 +266,12 @@ function GlobalStorageSiK.TerminalProgramming.refresh(panel, terminal)
 		-- "bloqueado" (atenuado, sin click) mientras falte receta o disco -
 		-- reserva siempre el mismo hueco, sin saltos de layout.
 		local ready = known and hasDisk
-		local btn = GlobalStorageSiK.SiK_UI.createButton(pad + innerPad, blockY, cardW - innerPad * 2, BTN_H,
-			T("IGUI_GS_ProgrammingButton"), scroll, function()
+		local btn = GlobalStorageSiK.SiK_UI.Controls.button(nil, {
+			x = pad + innerPad, y = blockY, w = cardW - innerPad * 2, h = BTN_H,
+			text = T("IGUI_GS_ProgrammingButton"), target = scroll, onClick = function()
 				GlobalStorageSiK.NetClient.sendCommand("programDisk", { programId = id })
-			end, nil, true, not ready)
+			end, fullWidth = true, locked = not ready,
+		})
 		if not ready then
 			btn:setTooltip(T(statusKey))
 		end

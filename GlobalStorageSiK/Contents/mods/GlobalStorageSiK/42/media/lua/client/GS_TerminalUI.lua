@@ -21,8 +21,16 @@ require "GS_NetClient"
 require "GS_Permissions"
 require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Palette"
+require "GS_SiK_UI_Metrics"
+require "GS_SiK_UI_Viewport"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_Block"
+require "GS_SiK_UI_State"
 require "GS_TerminalUI_Scroll"
+require "GS_SiK_UI_List"
 require "GS_SiK_UI_Table"
+require "GS_SiK_UI_Window"
+require "GS_SiK_UI_Modal"
 require "GS_TerminalUI_Sections"
 require "GS_TerminalUI_Items"
 require "GS_TerminalUI_Config"
@@ -41,7 +49,43 @@ require "GS_UIDebug"
 require "GS_UILayout"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
-GlobalStorageSiK.TerminalUI.instance = nil
+GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or {}
+if not GlobalStorageSiK.SiK_UI.SurfaceInventory.get("terminal-shell") then
+	GlobalStorageSiK.SiK_UI.SurfaceInventory.register({
+		id = "terminal-shell",
+		pack = "terminal-contenedor",
+		owner = "GS_TerminalUI",
+		parent = "UIManager",
+		variants = { "compact", "standard", "wide" },
+	})
+end
+
+-- Inventario contractual del paquete visual validado `terminal-tabs`.
+-- Registrar una superficie no la hace visible ni concede autoridad: permite
+-- a QA resolver cada surfaceId contra su owner real incluso cuando el addon
+-- opcional que aporta la pestaña no está cargado en esta sesión.
+local TERMINAL_TAB_SURFACES = {
+	{ id = "terminal-tabs", owner = "GS_TerminalUI_Tabs", parent = "terminal-shell" },
+	{ id = "terminal-remote", owner = "GS_TerminalUI_Api", parent = "terminal-shell", variants = { "tablet" } },
+	{ id = "tab-warehouse", owner = "GS_TerminalUI_Items", parent = "terminal-tabs" },
+	{ id = "warehouse-drop-overlay", owner = "GS_TerminalUI_Items", parent = "tab-warehouse" },
+	{ id = "tab-red", owner = "GS_TerminalUI_Network", parent = "terminal-tabs" },
+	{ id = "tab-options", owner = "GS_TerminalUI_Options", parent = "terminal-tabs" },
+	{ id = "tab-options-state", owner = "GS_TerminalUI_NetworkStatus", parent = "tab-options" },
+	{ id = "tab-options-admin", owner = "GS_TerminalUI_Options", parent = "tab-options" },
+	{ id = "tab-addons", owner = "GS_TerminalUI_Addons", parent = "terminal-tabs" },
+	{ id = "tab-programming", owner = "GS_TerminalUI_Programming", parent = "terminal-tabs" },
+	{ id = "tab-craft", owner = "GSSiK_Addon_Craft_TerminalUI", parent = "terminal-tabs", optional = true },
+	{ id = "tab-builder", owner = "GSSiK_Addon_Builder_TerminalUI", parent = "terminal-tabs", optional = true },
+	{ id = "terminal-blocked", owner = "GS_TerminalUI_BlockedPanel", parent = "terminal-shell" },
+}
+for i = 1, #TERMINAL_TAB_SURFACES do
+	local surface = TERMINAL_TAB_SURFACES[i]
+	if not GlobalStorageSiK.SiK_UI.SurfaceInventory.get(surface.id) then
+		surface.pack = "terminal-tabs"
+		GlobalStorageSiK.SiK_UI.SurfaceInventory.register(surface)
+	end
+end
 
 -- ===========================================================================
 -- DIAGNÓSTICO doble-interfaz (v0.10.18.83) — temporal
@@ -135,8 +179,10 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
 local RESIZE_GRAB = 14
 
-local function bottomInset()
-	return GlobalStorageSiK.TerminalScroll.contentBottomInset()
+local function clamp(value, low, high)
+	if value < low then return low end
+	if value > high then return high end
+	return value
 end
 
 --- Refresca contenido de la pestaña activa (carga diferida).
@@ -144,6 +190,7 @@ end
 function GS_TerminalUI:refreshActiveTabContent()
 	local state = self.terminalState or {}
 	local tab = self.activeTabKey or "items"
+	if self.ensureTabBuilt then self:ensureTabBuilt(tab) end
 	if tab == "items" then
 		GlobalStorageSiK.TerminalItems.refresh(self.itemsListPanel, self, state.items or {})
 	elseif tab == "network" then
@@ -157,6 +204,30 @@ function GS_TerminalUI:refreshActiveTabContent()
 	elseif GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.refreshActive(self, tab)
 	end
+end
+
+-- Construye solo el cuerpo que el jugador va a ver. Los paneles vacíos existen
+-- desde el Shell para conservar contratos/geometry, pero no crean controles,
+-- scrolls, tooltips ni listeners hasta su primera activación.
+function GS_TerminalUI:ensureTabBuilt(tabKey)
+	self._gsBuiltTabs = self._gsBuiltTabs or {}
+	if self._gsBuiltTabs[tabKey] then return end
+	if tabKey == "items" then
+		self:buildItemsToolbar()
+	elseif tabKey == "network" then
+		GlobalStorageSiK.TerminalNetwork.buildZonesSection(self, self.networkPanel)
+	elseif tabKey == "config" then
+		GlobalStorageSiK.TerminalOptions.buildSection(self, self.configPanel)
+	elseif tabKey == "addons" then
+		GlobalStorageSiK.TerminalAddons.buildPanel(self.addonsPanel, self)
+	elseif tabKey == "blocked" then
+		GlobalStorageSiK.TerminalBlockedPanel.build(self)
+	else
+		-- Las pestañas de addons conservan su propio lifecycle.
+		self._gsBuiltTabs[tabKey] = true
+		return
+	end
+	self._gsBuiltTabs[tabKey] = true
 end
 
 local function createButton(x, y, w, h, title, target, onClick)
@@ -177,24 +248,33 @@ local function createTabPanel()
 	return panel
 end
 
-function GS_TerminalUI:new(x, y, width, height)
+function GS_TerminalUI:new(x, y, width, height, playerNum)
+	playerNum = tonumber(playerNum) or 0
 	local palettePlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
-		and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+		and GlobalStorageSiK.NetClient.getPlayer(playerNum)
+		or (playerNum == 0 and getPlayer and getPlayer() or nil)
 	GlobalStorageSiK.SiK_UI.Palette.load(palettePlayer)
         local o = ISPanel:new(x, y, width, height)
 	setmetatable(o, self)
 	self.__index = self
 	o.moveWithMouse = false
-	o.padding = math.floor(FONT_HGT_SMALL * 0.55)
-	o.headerHeight = math.floor(FONT_HGT_MEDIUM * 1.55)
-	o.sideTabItemHeight = math.floor(FONT_HGT_MEDIUM * 1.45)
-	o.sideTabGap = 4
+	playerNum = palettePlayer and palettePlayer.getPlayerNum and palettePlayer:getPlayerNum() or playerNum
+	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
+	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(viewport.profile)
+	local tokens = GlobalStorageSiK.SiK_UI.Metrics.tokens()
+	o.playerNum = playerNum
+	o._sikWindowProfile = viewport.profile
+	o.padding = tokens.windowPadding
+	o.headerHeight = profile.window.headerHeight
+	o.statusFooterHeight = profile.window.footerHeight
 	local uiBg = GlobalStorageSiK.SiK_UI.PALETTE.bgHeader
 	o.backgroundColor = { r = uiBg[1], g = uiBg[2], b = uiBg[3], a = 0.98 }
 	o.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	o.terminalState = nil
-	o.minimumWidth = 900
-	o.minimumHeight = 720
+	o.minimumWidth = math.min(profile.window.minWidth, viewport.w)
+	o.minimumHeight = math.min(profile.window.minHeight, viewport.h)
+	o.maximumWidth = math.min(profile.window.maxWidth, viewport.w)
+	o.maximumHeight = math.min(profile.window.maxHeight, viewport.h)
 	o.resizable = true
 	o.drawBackground = false
 	o.resizing = false
@@ -204,6 +284,47 @@ function GS_TerminalUI:new(x, y, width, height)
 	o._gsIsTerminalUI = true
 	GlobalStorageSiK.TerminalUI._liveInstances[o] = true
 	return o
+end
+
+function GS_TerminalUI:applyResponsiveBounds(nextX, nextY, nextW, nextH)
+	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(self.playerNum or 0)
+	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(viewport.profile)
+	self._sikWindowProfile = viewport.profile
+	self.minimumWidth = math.min(profile.window.minWidth, viewport.w)
+	self.minimumHeight = math.min(profile.window.minHeight, viewport.h)
+	self.maximumWidth = math.min(profile.window.maxWidth, viewport.w)
+	self.maximumHeight = math.min(profile.window.maxHeight, viewport.h)
+	self.headerHeight = profile.window.headerHeight
+	self.statusFooterHeight = profile.window.footerHeight
+	local width = clamp(math.floor(tonumber(nextW) or self.width), self.minimumWidth, self.maximumWidth)
+	local height = clamp(math.floor(tonumber(nextH) or self.height), self.minimumHeight, self.maximumHeight)
+	local x = clamp(math.floor(tonumber(nextX) or self.x), viewport.x, viewport.x + viewport.w - width)
+	local y = clamp(math.floor(tonumber(nextY) or self.y), viewport.y, viewport.y + viewport.h - height)
+	self:setWidth(width)
+	self:setHeight(height)
+	self:setX(x)
+	self:setY(y)
+end
+
+function GS_TerminalUI:syncAfterResponsiveResize()
+	self:calculateLayout()
+	if self.activeTabKey == "network" then
+		if self._gsBuiltTabs and self._gsBuiltTabs.network then
+			GlobalStorageSiK.TerminalNetwork.syncScrollLayout(self)
+		end
+	elseif self.activeTabKey == "config" then
+		if self._gsBuiltTabs and self._gsBuiltTabs.config then
+			GlobalStorageSiK.TerminalOptions.syncScrollLayout(self)
+		end
+	elseif self.activeTabKey == "addons" and self.addonsPanel then
+		if self._gsBuiltTabs and self._gsBuiltTabs.addons then
+			GlobalStorageSiK.TerminalAddons.syncScrollLayout(self.addonsPanel, self)
+		end
+	end
+	GlobalStorageSiK.TerminalScroll.stripTerminalTree(self)
+	if self.activeTabKey == "items" and self.itemsListPanel and GlobalStorageSiK.TerminalItems.syncLayout then
+		GlobalStorageSiK.TerminalItems.syncLayout(self.itemsListPanel, self)
+	end
 end
 
 --- Arrastre por cabecera y redimensionado en esquina inferior derecha.
@@ -226,11 +347,13 @@ function GS_TerminalUI:installMouseHandlers()
 			me.resizing = false
 			me:setCapture(false)
 			me:rebuildScrollContent()
+			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
 			return true
 		end
 		if me.moving then
 			me.moving = false
 			me:setCapture(false)
+			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
 			return true
 		end
 		return ISPanel.onMouseUp(me, x, y)
@@ -240,58 +363,37 @@ function GS_TerminalUI:installMouseHandlers()
 			me.resizing = false
 			me:setCapture(false)
 			me:rebuildScrollContent()
+			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
 			return true
 		end
 		if me.moving then
 			me.moving = false
 			me:setCapture(false)
+			GlobalStorageSiK.SiK_UI.Window.remember(me, "terminal-shell", me.playerNum)
 			return true
 		end
 		return ISPanel.onMouseUpOutside(me, x, y)
 	end
 	self.onMouseMove = function(me, dx, dy)
 		if me.resizing then
-			me:setWidth(math.max(me.minimumWidth, me.width + dx))
-			me:setHeight(math.max(me.minimumHeight, me.height + dy))
-			me:calculateLayout()
-			if me.activeTabKey == "network" then
-				GlobalStorageSiK.TerminalNetwork.syncScrollLayout(me)
-			elseif me.activeTabKey == "config" then
-				GlobalStorageSiK.TerminalOptions.syncScrollLayout(me)
-			elseif me.activeTabKey == "addons" and me.addonsPanel then
-				GlobalStorageSiK.TerminalAddons.syncScrollLayout(me.addonsPanel, me)
-			end
-			GlobalStorageSiK.TerminalScroll.stripTerminalTree(me)
-			if me.activeTabKey == "items" and me.itemsListPanel and GlobalStorageSiK.TerminalItems.syncLayout then
-				GlobalStorageSiK.TerminalItems.syncLayout(me.itemsListPanel, me)
-			end
+			me:applyResponsiveBounds(me.x, me.y, me.width + dx, me.height + dy)
+			me:syncAfterResponsiveResize()
 			return true
 		end
 		if me.moving then
-			me:setX(me.x + dx)
-			me:setY(me.y + dy)
+			me:applyResponsiveBounds(me.x + dx, me.y + dy, me.width, me.height)
 			return true
 		end
 		return ISPanel.onMouseMove(me, dx, dy)
 	end
 	self.onMouseMoveOutside = function(me, dx, dy)
 		if me.resizing then
-			me:setWidth(math.max(me.minimumWidth, me.width + dx))
-			me:setHeight(math.max(me.minimumHeight, me.height + dy))
-			me:calculateLayout()
-			if me.activeTabKey == "network" then
-				GlobalStorageSiK.TerminalNetwork.syncScrollLayout(me)
-			elseif me.activeTabKey == "config" then
-				GlobalStorageSiK.TerminalOptions.syncScrollLayout(me)
-			elseif me.activeTabKey == "addons" and me.addonsPanel then
-				GlobalStorageSiK.TerminalAddons.syncScrollLayout(me.addonsPanel, me)
-			end
-			GlobalStorageSiK.TerminalScroll.stripTerminalTree(me)
+			me:applyResponsiveBounds(me.x, me.y, me.width + dx, me.height + dy)
+			me:syncAfterResponsiveResize()
 			return true
 		end
 		if me.moving then
-			me:setX(me.x + dx)
-			me:setY(me.y + dy)
+			me:applyResponsiveBounds(me.x + dx, me.y + dy, me.width, me.height)
 			return true
 		end
 		return ISPanel.onMouseMoveOutside(me, dx, dy)
@@ -299,12 +401,14 @@ function GS_TerminalUI:installMouseHandlers()
 end
 
 function GS_TerminalUI:initialise()
-	ISPanel.initialise(self)
-	self.clipChildren = true
-	self:installMouseHandlers()
-	self:setVisible(true)
-	self:createChildren()
-	self:calculateLayout()
+        ISPanel.initialise(self)
+        self.clipChildren = true
+        self:installMouseHandlers()
+        self:setVisible(true)
+	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_TerminalUI.onClose,
+		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TERMINAL)
+        self:createChildren()
+        self:calculateLayout()
 end
 
 function GS_TerminalUI:createChildren()
@@ -317,19 +421,12 @@ function GS_TerminalUI:createChildren()
 	end
 	self._gsChildrenBuilt = true
 	self.networkPanel = createTabPanel()
-	GlobalStorageSiK.TerminalNetwork.buildZonesSection(self, self.networkPanel)
-
 	self.configPanel = createTabPanel()
-	GlobalStorageSiK.TerminalOptions.buildSection(self, self.configPanel)
-
 	self.itemsPanel = createTabPanel()
-	self:buildItemsToolbar()
-
 	self.addonsPanel = createTabPanel()
-	GlobalStorageSiK.TerminalAddons.buildPanel(self.addonsPanel, self)
-
 	self.blockedPanel = createTabPanel()
-	GlobalStorageSiK.TerminalBlockedPanel.build(self)
+	self._gsBuiltTabs = {}
+	self:ensureTabBuilt("items")
 
 	-- "Configuración" (dev41) va justo despues de Red en el riel principal -
 	-- "Addons" sigue como pestaña fija de PIE (footerTabDef, mas abajo), sin
@@ -513,11 +610,10 @@ function GS_TerminalUI:calculateLayout()
 	end
 
 	local tabY = self.headerHeight
-	local bodyH = math.max(160, h - tabY - pad - bottomInset())
+	local bodyH = math.max(160, h - tabY - (self.statusFooterHeight or 0))
+	local railH = math.max(160, h - tabY)
 	local railW = GlobalStorageSiK.TerminalTabs.measureRailWidth(self)
-	local railGap = 4
-	local contentPad = pad
-	local contentW = math.max(240, w - contentPad - railW - railGap)
+	local contentW = math.max(240, w - railW)
 
 	local blockedMode = self.accessMode == "blocked"
 	if self.tabRail then
@@ -525,26 +621,26 @@ function GS_TerminalUI:calculateLayout()
 		self.tabRail:setX(0)
 		self.tabRail:setY(tabY)
 		self.tabRail:setWidth(railW)
-		self.tabRail:setHeight(bodyH)
+		self.tabRail:setHeight(railH)
 		if not blockedMode then
 			GlobalStorageSiK.TerminalTabs.layoutRail(self)
 		end
 	end
 	if self.contentHost then
 		if blockedMode then
-			self.contentHost:setX(contentPad)
+			self.contentHost:setX(0)
 			self.contentHost:setY(tabY)
-			self.contentHost:setWidth(math.max(240, w - contentPad * 2))
+			self.contentHost:setWidth(math.max(240, w))
 			self.contentHost:setHeight(bodyH)
 		else
-			self.contentHost:setX(railW + railGap)
+			self.contentHost:setX(railW)
 			self.contentHost:setY(tabY)
 			self.contentHost:setWidth(contentW)
 			self.contentHost:setHeight(bodyH)
 		end
 	end
 
-	local innerW = blockedMode and math.max(240, w - contentPad * 2) or contentW
+	local innerW = blockedMode and math.max(240, w) or contentW
 	local innerH = bodyH
 
 	local tabPanels = { self.networkPanel, self.configPanel, self.itemsPanel, self.addonsPanel, self.blockedPanel }
@@ -564,12 +660,17 @@ function GS_TerminalUI:calculateLayout()
 		end
 	end
 
-	if self.blockedPanel and GlobalStorageSiK.TerminalBlockedPanel then
+	if self.blockedPanel and self._gsBuiltTabs and self._gsBuiltTabs.blocked
+		and GlobalStorageSiK.TerminalBlockedPanel then
 		GlobalStorageSiK.TerminalBlockedPanel.layout(self, innerW, innerH)
 	end
 
-	GlobalStorageSiK.TerminalNetwork.layout(self, innerW, innerH)
-	GlobalStorageSiK.TerminalOptions.layout(self, innerW, innerH)
+	if self._gsBuiltTabs and self._gsBuiltTabs.network then
+		GlobalStorageSiK.TerminalNetwork.layout(self, innerW, innerH)
+	end
+	if self._gsBuiltTabs and self._gsBuiltTabs.config then
+		GlobalStorageSiK.TerminalOptions.layout(self, innerW, innerH)
+	end
 
 	if self.itemsListPanel and self.itemsPanel then
 		local rowH = FONT_HGT_SMALL + 8
@@ -585,10 +686,9 @@ function GS_TerminalUI:calculateLayout()
 			self.searchBtn:setWidth(btnW)
 			self.searchBtn:setHeight(rowH)
 		end
-		-- 3 desplegables (Categoria/Subcategoria/Sub-subcategoria) en vez de
-		-- 2: cada uno mas estrecho para que quepan los 3 + buscador + boton.
-		local filterW = math.max(90, math.floor(contentW * 0.15))
-		local searchW = math.max(80, contentW - btnW - gap * 4 - filterW * 3)
+		-- El HTML validado separa búsqueda y filtros en dos filas: la caja no
+		-- compite con tres combos y cada nivel conserva un ancho útil estable.
+		local searchW = math.max(80, contentW - btnW - gap)
 		if self.searchBox then
 			GlobalStorageSiK.SiK_UI.layoutSearchBox(self.searchBox, searchW, rowH)
 		end
@@ -610,10 +710,12 @@ function GS_TerminalUI:calculateLayout()
 		col:label(self.depositDropHint, hintH)          -- hint (x/y/width)
 		col:row(rowH, {
 			{ widget = searchWidget,                w = searchW },
-			{ widget = self.mainCategoryFilterCombo, w = filterW, yoffset = -2 },
-			{ widget = self.subCategoryFilterCombo,  w = filterW, yoffset = -2 },
-			{ widget = self.leafCategoryFilterCombo, w = filterW, yoffset = -2 },
 			{ widget = self.searchBtn,               w = btnW },
+		}, { gap = gap })
+		col:row(rowH, {
+			{ widget = self.mainCategoryFilterCombo, weight = 1, min = 90, yoffset = -2 },
+			{ widget = self.subCategoryFilterCombo,  weight = 1, min = 90, yoffset = -2 },
+			{ widget = self.leafCategoryFilterCombo, weight = 1, min = 90, yoffset = -2 },
 		}, { gap = gap })
 		col:fill(self.itemsListPanel, 120)
 
@@ -630,11 +732,15 @@ function GS_TerminalUI:calculateLayout()
 			end
 		end
 		if self.itemsListPanel.columnHeader then
-			self.itemsListPanel.columnHeader:setWidth(self.itemsListPanel.width)
+			local rect = self.itemsListPanel.itemScroll
+				and GlobalStorageSiK.TerminalScroll.contentRect(self.itemsListPanel.itemScroll)
+				or { x = 0, w = self.itemsListPanel.width }
+			self.itemsListPanel.columnHeader:setX(rect.x)
+			self.itemsListPanel.columnHeader:setWidth(rect.w)
 		end
 	end
 
-	if self.addonsPanel then
+	if self.addonsPanel and self._gsBuiltTabs and self._gsBuiltTabs.addons then
 		GlobalStorageSiK.TerminalAddons.layout(self.addonsPanel, innerW, innerH)
 	end
 	if GlobalStorageSiK.TerminalExtensions then
@@ -687,6 +793,7 @@ function GS_TerminalUI:prerender()
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedFrame then
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
+	GlobalStorageSiK.SiK_UI.renderStatusFooter(self, self.terminalState)
 end
 
 function GS_TerminalUI:applyCapacityState(cap)
@@ -881,7 +988,7 @@ function GS_TerminalUI:refreshFromState(state)
 	if cap and not self._capacityHaloShown then
 		local st = cap.status
 		if st == "warning" or st == "critical" or st == "full" then
-			local player = GlobalStorageSiK.NetClient.getPlayer()
+			local player = GlobalStorageSiK.NetClient.getPlayer(self.playerNum)
 			if player and player.setHaloNote then
 				local msg
 				if st == "full" then
@@ -962,9 +1069,14 @@ end
 function GS_TerminalUI:onClose()
 	if self._closing then return end
 	self._closing = true
+	GlobalStorageSiK.SiK_UI.Window.remember(self, "terminal-shell", self.playerNum)
 	if GlobalStorageSiK.UIDebug then GlobalStorageSiK.UIDebug.log("OPEN", "onClose()") end
 	if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == self then
 		GlobalStorageSiK.TerminalBlockedUI.instance = nil
+	end
+	if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instances
+		and GlobalStorageSiK.TerminalBlockedUI.instances[self.playerNum] == self then
+		GlobalStorageSiK.TerminalBlockedUI.instances[self.playerNum] = nil
 	end
 	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
 		GlobalStorageSiK.NodeHighlight.clear()
@@ -982,17 +1094,24 @@ function GS_TerminalUI:onClose()
 			GlobalStorageSiK.WorldHighlight.clearAll()
 		end
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer(self.playerNum)
 	-- El servidor mantiene una lista explicita de clientes que estan mirando
 	-- cada terminal para no difundirles indices completos solo por tener acceso
 	-- a la red. Notificar el cierre antes de borrar la sesion local.
 	if player and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		GlobalStorageSiK.NetClient.sendCommand("closeTerminal", {
 			networkId = self.terminalState and self.terminalState.networkId or nil,
-		})
+		}, player)
 	end
 	if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
+	end
+	if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
+		GlobalStorageSiK.WithdrawClient.cancelAll()
+	end
+	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.clearTransientCaches then
+		GlobalStorageSiK.Client.clearTransientCaches(self.playerNum)
 	end
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
 		GlobalStorageSiK.TransferQueue.clear()
@@ -1000,25 +1119,33 @@ function GS_TerminalUI:onClose()
 	self:setVisible(false)
 	self:removeFromUIManager()
 	self._capacityHaloShown = nil
-	GlobalStorageSiK.TerminalUI.instance = nil
+	if GlobalStorageSiK.TerminalUI.removeInstanceForPlayer then
+		GlobalStorageSiK.TerminalUI.removeInstanceForPlayer(self.playerNum, self)
+	elseif GlobalStorageSiK.TerminalUI.instance == self then
+		GlobalStorageSiK.TerminalUI.instance = nil
+	end
 	if GlobalStorageSiK.TerminalUI._liveInstances then
 		GlobalStorageSiK.TerminalUI._liveInstances[self] = nil
 	end
 end
 
+function GS_TerminalUI:sendCommand(command, payload)
+	return GlobalStorageSiK.NetClient.sendCommand(command, payload or {}, self.playerNum)
+end
+
 function GS_TerminalUI:onCreateStructureZone()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("createZoneStructure", {})
+	self:sendCommand("createZoneStructure", {})
 end
 
 function GS_TerminalUI:onCreateRoomZone()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("createZoneRoom", {})
+	self:sendCommand("createZoneRoom", {})
 end
 
 function GS_TerminalUI:onCreateSafehouseZone()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("createZoneSafehouse", {})
+	self:sendCommand("createZoneSafehouse", {})
 end
 
 function GS_TerminalUI:onCreateSelectionZone()
@@ -1030,12 +1157,12 @@ end
 
 function GS_TerminalUI:onCreateBuildingZone()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("createZoneBuilding", {})
+	self:sendCommand("createZoneBuilding", {})
 end
 
 function GS_TerminalUI:onRescanZone(zoneId)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("rescanZone", {
+	self:sendCommand("rescanZone", {
 		zoneId = zoneId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1043,24 +1170,27 @@ end
 
 function GS_TerminalUI:onRescanNetwork()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("rescanNetwork", {
+	self:sendCommand("rescanNetwork", {
 		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onCancelZoneScan()
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("cancelZoneScan", {
+	self:sendCommand("cancelZoneScan", {
 		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onRequestOpen()
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(self.playerNum)
+		or (self.playerNum == 0 and getPlayer and getPlayer() or nil)
 	local payload = GlobalStorageSiK.TerminalAccess.enrichCommandPayload(player, {
 		searchQuery = self:getSearchQuery(),
-	}, GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
-	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
+	}, self.terminalState and self.terminalState.networkId
+		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkIdByPlayer
+			and GlobalStorageSiK.Client.activeNetworkIdByPlayer[self.playerNum]))
+	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload, player)
 end
 
 --- El payload de permisos lo calcula el servidor con la identidad persistente
@@ -1116,7 +1246,7 @@ function GS_TerminalUI:canEditNetworkConfig(showWarning)
 		or (self.terminalState and self.terminalState.redistributeActive == true)
 	if locked and showWarning then
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
-			and GlobalStorageSiK.NetClient.getPlayer() or nil
+			and GlobalStorageSiK.NetClient.getPlayer(self.playerNum) or nil
 		if player and player.setHaloNote then
 			player:setHaloNote(T("IGUI_GS_RedistributeConfigLocked"), 255, 190, 70, 420)
 		end
@@ -1128,14 +1258,14 @@ function GS_TerminalUI:onRedistributeNetwork()
 	if self._autoSortRunning then return end
 	if not self:canUseAutoSort() then
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
-			and GlobalStorageSiK.NetClient.getPlayer() or nil
+			and GlobalStorageSiK.NetClient.getPlayer(self.playerNum) or nil
 		if player and player.setHaloNote then
 			player:setHaloNote(T("IGUI_GS_RedistributeAdminOnly"), 255, 190, 70, 420)
 		end
 		return
 	end
 	self:setRedistributeState(true, T("IGUI_GS_RedistributingNetwork"), "warn")
-	GlobalStorageSiK.NetClient.sendCommand("redistributeNetwork", {
+	self:sendCommand("redistributeNetwork", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
@@ -1171,7 +1301,10 @@ function GS_TerminalUI:applyItemsFilter(rows)
 	if q == "" then
 		return rows
 	end
-	if isClient and isClient() and GlobalStorageSiK.I18n.filterItemRows then
+	-- El filtro localizado es puro y opera sobre el snapshot ya disponible;
+	-- debe ser idéntico en SP, host y cliente MP. Index.filterRows queda solo
+	-- como fallback defensivo si la capa i18n no llegó a cargar.
+	if GlobalStorageSiK.I18n.filterItemRows then
 		return GlobalStorageSiK.I18n.filterItemRows(rows, q)
 	end
 	return GlobalStorageSiK.Index.filterRows(rows, q)
@@ -1426,7 +1559,7 @@ end
 
 function GS_TerminalUI:onMoveZonePriority(zoneId, direction)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("moveZonePriority", {
+	self:sendCommand("moveZonePriority", {
 		zoneId = zoneId,
 		direction = direction,
 		searchQuery = self:getSearchQuery(),
@@ -1435,7 +1568,7 @@ end
 
 function GS_TerminalUI:onSetZonePriority(zoneId, priority)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("setZonePriority", {
+	self:sendCommand("setZonePriority", {
 		zoneId = zoneId,
 		priority = priority,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
@@ -1444,7 +1577,7 @@ end
 
 function GS_TerminalUI:onRenameZone(zoneId, name)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("renameZone", {
+	self:sendCommand("renameZone", {
 		zoneId = zoneId,
 		name = name,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
@@ -1453,7 +1586,7 @@ end
 
 function GS_TerminalUI:onDeleteZone(zoneId)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("deleteZone", {
+	self:sendCommand("deleteZone", {
 		zoneId = zoneId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1461,7 +1594,7 @@ end
 
 function GS_TerminalUI:onRemoveNode(nodeId)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("removeNode", {
+	self:sendCommand("removeNode", {
 		nodeId = nodeId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1469,7 +1602,7 @@ end
 
 function GS_TerminalUI:onRequestRebindProposal(nodeId, targetNodeId)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("requestRebindProposal", {
+	self:sendCommand("requestRebindProposal", {
 		nodeId = nodeId, targetNodeId = targetNodeId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1477,7 +1610,7 @@ end
 
 function GS_TerminalUI:onRebindNode(nodeId, rebindToken)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("rebindNode", {
+	self:sendCommand("rebindNode", {
 		nodeId = nodeId, rebindToken = rebindToken,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1485,7 +1618,7 @@ end
 
 function GS_TerminalUI:onRequestConfigTransferProposal(nodeId, targetNodeId)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("requestConfigTransferProposal", {
+	self:sendCommand("requestConfigTransferProposal", {
 		nodeId = nodeId, targetNodeId = targetNodeId,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1493,7 +1626,7 @@ end
 
 function GS_TerminalUI:onTransferNodeConfiguration(nodeId, transferToken)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("transferNodeConfiguration", {
+	self:sendCommand("transferNodeConfiguration", {
 		nodeId = nodeId, transferToken = transferToken,
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
@@ -1513,15 +1646,15 @@ function GS_TerminalUI:onUpdateNode(nodeId, displayName, category, enabled, memb
 	if membership ~= nil then
 		payload.membership = membership
 	end
-	GlobalStorageSiK.NetClient.sendCommand("updateNode", payload)
+	self:sendCommand("updateNode", payload)
 end
 
 function GS_TerminalUI:onRequestNodeContents(nodeId)
-	GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { nodeId = nodeId })
+	self:sendCommand("getNodeContents", { nodeId = nodeId })
 end
 
 function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer, characterId, username)
-	GlobalStorageSiK.NetClient.sendCommand("transferOwnership", {
+	self:sendCommand("transferOwnership", {
 		newOwner = newOwner,
 		characterId = characterId or "",
 		username = username or "",
@@ -1532,7 +1665,7 @@ end
 
 --- Refresca estado de recetas del mod en cliente.
 function GS_TerminalUI:refreshCraftRecipesState()
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(self.playerNum) or nil
 	if not player or not GlobalStorageSiK.TerminalRecipes then
 		return
 	end
@@ -1544,7 +1677,7 @@ end
 
 --- Refresca recetas de módulos addon para tarjetas craft en pestaña Addons.
 function GS_TerminalUI:refreshAddonRecipesState()
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(self.playerNum) or nil
 	if not player or not GlobalStorageSiK.AddonRecipes then
 		return
 	end
@@ -1564,7 +1697,8 @@ end
 --- Craftea receta del mod (terminal / módulo addon).
 ---@param recipeId string
 function GS_TerminalUI:onCraftModRecipe(recipeId)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(self.playerNum)
+		or (self.playerNum == 0 and getPlayer and getPlayer() or nil)
 	if not player or not recipeId then
 		return
 	end
@@ -1623,14 +1757,14 @@ end
 
 function GS_TerminalUI:onAddCategory(name)
 	if not self:canEditNetworkConfig(true) then return end
-	GlobalStorageSiK.NetClient.sendCommand("addCategory", {
+	self:sendCommand("addCategory", {
 		name = name or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onAddPermissionUser(characterName, characterId, factionUsername)
-	GlobalStorageSiK.NetClient.sendCommand("addPermissionUser", {
+	self:sendCommand("addPermissionUser", {
 		characterName = characterName or "",
 		username = characterName or "",
 		characterId = characterId or "",
@@ -1647,7 +1781,7 @@ end
 --- networkId explicito, igual que onAddPermissionUser - el servidor
 --- resuelve la red desde la sesion activa del terminal ya abierto.
 function GS_TerminalUI:onClaimAsAdmin()
-	GlobalStorageSiK.NetClient.sendCommand("adminClaimOwnership", {
+	self:sendCommand("adminClaimOwnership", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
@@ -1655,7 +1789,8 @@ end
 function GS_TerminalUI:onAddMyFaction()
 	local fname = ""
 	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer then
-		local fac = GlobalStorageSiK.Permissions.getPlayerFaction(GlobalStorageSiK.NetClient.getPlayer())
+		local fac = GlobalStorageSiK.Permissions.getPlayerFaction(
+			GlobalStorageSiK.NetClient.getPlayer(self.playerNum))
 		if fac and fac.getName then
 			fname = fac:getName() or ""
 		end
@@ -1666,40 +1801,40 @@ function GS_TerminalUI:onAddMyFaction()
 end
 
 function GS_TerminalUI:onAddFactionMembers()
-	GlobalStorageSiK.NetClient.sendCommand("addFactionMembers", {
+	self:sendCommand("addFactionMembers", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onAddPermissionFaction(factionName)
-	GlobalStorageSiK.NetClient.sendCommand("addPermissionFaction", {
+	self:sendCommand("addPermissionFaction", {
 		factionName = factionName or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onRemovePermissionFaction(factionName)
-	GlobalStorageSiK.NetClient.sendCommand("removePermissionFaction", {
+	self:sendCommand("removePermissionFaction", {
 		factionName = factionName or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onRenameNetwork(name)
-	GlobalStorageSiK.NetClient.sendCommand("renameNetwork", {
+	self:sendCommand("renameNetwork", {
 		name = name or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onLeaveNetwork()
-	GlobalStorageSiK.NetClient.sendCommand("leaveNetwork", {
+	self:sendCommand("leaveNetwork", {
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
 end
 
 function GS_TerminalUI:onRemovePermissionUser(username, characterId)
-	GlobalStorageSiK.NetClient.sendCommand("removePermissionUser", {
+	self:sendCommand("removePermissionUser", {
 		username = username or "",
 		characterId = characterId or "",
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
@@ -1707,7 +1842,7 @@ function GS_TerminalUI:onRemovePermissionUser(username, characterId)
 end
 
 function GS_TerminalUI:onSetMemberRole(username, role, characterId)
-	GlobalStorageSiK.NetClient.sendCommand("setMemberRole", {
+	self:sendCommand("setMemberRole", {
 		username = username or "",
 		characterId = characterId or "",
 		role = role or "member",
@@ -1716,7 +1851,7 @@ function GS_TerminalUI:onSetMemberRole(username, role, characterId)
 end
 
 function GS_TerminalUI:onSetMemberZoneAccess(username, characterId, deniedZoneIds)
-	GlobalStorageSiK.NetClient.sendCommand("setMemberZoneAccess", {
+	self:sendCommand("setMemberZoneAccess", {
 		username = username or "",
 		characterId = characterId or "",
 		deniedZoneIds = deniedZoneIds or {},
@@ -1726,80 +1861,8 @@ end
 
 function GlobalStorageSiK.TerminalUI:onToggleFactionOnly()
 	local perms = self.terminalState and self.terminalState.permissions or {}
-	GlobalStorageSiK.NetClient.sendCommand("setFactionOnly", {
+	self:sendCommand("setFactionOnly", {
 		enabled = not (perms.factionOnly == true),
 		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
 	})
-end
-
--- ===========================================================================
--- Escape cierra nuestro terminal cuando cierra la ventana de crafteo/
--- construccion (vanilla o Neat) delante de el (pedido explicito en UX: "al
--- cerrar el panel de crafteo/construccion con Escape, nuestro terminal se
--- queda abierto por detras"). Nuestro terminal NO se oculta mientras esas
--- ventanas estan abiertas (por diseno, ver GS_NetworkCraftSession.onTick -
--- la sesion de red sigue viva independientemente de si la ventana esta
--- tecnicamente abierta), asi que Escape solo actuaba sobre la ventana de
--- crafteo/construccion, dejando la nuestra visible detras.
---
--- Implementacion deliberadamente NO invasiva: no se sobreescribe el manejo
--- de Escape de ISHandcraftWindow/ISBuildWindow (vanilla o Neat, desconocido
--- desde aqui) - solo se observa. Al pulsar Escape con nuestro terminal
--- visible y una de esas ventanas abierta, se vigila un margen corto de
--- ticks; si esa ventana se cierra de verdad en ese margen (la cerro Escape,
--- no otra cosa), se cierra tambien nuestro terminal. Si no se cierra
--- (Escape lo consumio un dialogo anidado, o no era esa ventana), no pasa
--- nada - falla seguro, no interfiere con ningun otro flujo.
--- ===========================================================================
-local _escCloseWatchPlayerNum = nil
-local _escCloseWatchTicks = 0
-local ESC_CLOSE_WATCH_MAX_TICKS = 15
-
-local function craftOrBuildWindowOpen(playerNum)
-	if not ISEntityUI or not ISEntityUI.IsWindowOpen then
-		return false
-	end
-	return ISEntityUI.IsWindowOpen(playerNum, "HandcraftWindow") ~= nil
-		or ISEntityUI.IsWindowOpen(playerNum, "BuildWindow") ~= nil
-end
-
-if Events and Events.OnKeyStartPressed then
-	Events.OnKeyStartPressed.Add(function(key)
-		if key ~= Keyboard.KEY_ESCAPE then
-			return
-		end
-		local ui = GlobalStorageSiK.TerminalUI.instance
-		if not ui or not ui.getIsVisible or not ui:isVisible() then
-			return
-		end
-		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
-		if not player or not player.getPlayerNum then
-			return
-		end
-		local playerNum = player:getPlayerNum()
-		if craftOrBuildWindowOpen(playerNum) then
-			_escCloseWatchPlayerNum = playerNum
-			_escCloseWatchTicks = 0
-		end
-	end)
-end
-
-if Events and Events.OnTick then
-	Events.OnTick.Add(function()
-		if not _escCloseWatchPlayerNum then
-			return
-		end
-		_escCloseWatchTicks = _escCloseWatchTicks + 1
-		if not craftOrBuildWindowOpen(_escCloseWatchPlayerNum) then
-			local ui = GlobalStorageSiK.TerminalUI.instance
-			if ui and ui.onClose then
-				ui:onClose()
-			end
-			_escCloseWatchPlayerNum = nil
-			return
-		end
-		if _escCloseWatchTicks > ESC_CLOSE_WATCH_MAX_TICKS then
-			_escCloseWatchPlayerNum = nil
-		end
-	end)
 end

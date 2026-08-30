@@ -92,7 +92,10 @@ GlobalStorageSiK.Config = {
 	-- Unificada con modversion de mod.info (antes llevaba un esquema interno
 	-- 0.10.x-preprod aparte, lo que dificultaba saber que build produjo un
 	-- error en el log). A partir de aqui suben siempre juntas.
-	MOD_VERSION = "1.4.3-dev32.4.2",
+	MOD_VERSION = "1.4.3-dev32.4.3",
+	-- Esquema de la cache persistida por nodo. Se incrementa cuando cambia la
+	-- identidad/estado serializado de filas y obliga a reconstruir snapshots.
+	ITEM_SNAPSHOT_SCHEMA = "2",
 	ADDON_ID_TABLET = "TabletLink",
 	ADDON_ID_CRAFT = "Craft",
 	WEIGHT_WARN_PERCENT = 80,

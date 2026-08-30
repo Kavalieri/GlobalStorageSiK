@@ -178,6 +178,22 @@ function GlobalStorageSiK.NativeClassifierUtils.displayCategoryLower(si)
 	return category and string.lower(tostring(category)) or ""
 end
 
+---@param si table|nil
+---@return string sprite estático del objeto movible, o cadena vacía
+function GlobalStorageSiK.NativeClassifierUtils.worldObjectSprite(si)
+	if not si or not si.getWorldObjectSprite then return "" end
+	local sprite = safeCall(function() return si:getWorldObjectSprite() end)
+	return sprite and tostring(sprite) or ""
+end
+
+---@param si table|nil
+---@return string hueco CanBeEquipped estructural, normalizado, o vacío
+function GlobalStorageSiK.NativeClassifierUtils.canBeEquippedLower(si)
+	if not si or not si.getCanBeEquipped then return "" end
+	local slot = safeCall(function() return si:getCanBeEquipped() end)
+	return slot and string.lower(tostring(slot)) or ""
+end
+
 -- dev14 (probe controlado de sistemas, confirmado via javap): ScriptItem
 -- hereda de GameEntityScript, que expone `containsComponent(ComponentType)`
 -- - señal ESTATICA real de "tiene un FluidContainer" (Base.Bucket/Canteen

@@ -138,6 +138,8 @@ function Column:row(h, items, opts)
 	end
 	local gapsTotal = gap * math.max(0, n - 1)
 	local flexSpace = math.max(0, self.width - fixedTotal - gapsTotal)
+	local flexRemaining = flexSpace
+	local weightRemaining = weightTotal
 
 	-- 2) Colocar de izquierda a derecha.
 	local x = self.x
@@ -147,8 +149,12 @@ function Column:row(h, items, opts)
 		if it.w then
 			w = it.w
 		else
-			local share = (weightTotal > 0) and (flexSpace * (it.weight or 1) / weightTotal) or 0
-			w = math.max(it.min or 0, math.floor(share))
+			local weight = it.weight or 1
+			local share = (weightRemaining > 0)
+				and math.floor(flexRemaining * weight / weightRemaining) or 0
+			w = math.min(flexRemaining, math.max(it.min or 0, share))
+			flexRemaining = math.max(0, flexRemaining - w)
+			weightRemaining = math.max(0, weightRemaining - weight)
 		end
 		local yoff = it.yoffset or 0
 		self:_set(it.widget, x, self.cursor + yoff, w, it.h or h)

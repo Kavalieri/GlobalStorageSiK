@@ -25,6 +25,8 @@ require "GS_AddonRecipes"
 require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_Modal"
 require "GS_TerminalUI_Scroll"
 require "GS_Sandbox"
 require "TimedActions/GS_AddonInstallAction"
@@ -37,8 +39,8 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
-local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 640
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("task")
+local PANEL_W = math.max(GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W, 640)
 
 GS_AddonManageUI = ISPanel:derive("GS_AddonManageUI")
 
@@ -131,9 +133,9 @@ function GS_AddonManageUI:initialise()
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
 		self:destroy()
-	end, PAD)
+	end, { kind = "task", padding = PAD })
 	self:buildLayout()
 end
 
@@ -201,7 +203,8 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	-- refrescos, igual que ya se acepto en Programacion/PC/disquetera al
 	-- migrar a este mismo patron.
 	local locked = isInstalled and (canUninstall ~= true) or (not isInstalled and canInstall ~= true)
-	local actionBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, btnLabel, self, function()
+	local actionBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW,
+		CONTROL_METRICS.buttonHeight, btnLabel, self, function()
 		-- BUG REAL encontrado (reportado: "si no tenemos antena en el
 		-- inventario no da feedback, falla en silencio aunque el boton
 		-- reacciona"): antes esto enviaba el comando y cerraba la ventana
@@ -253,7 +256,7 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	end
 	self:addChild(actionBtn)
 	self._actionBtn = actionBtn
-	return y + BTN_H + pad
+	return y + CONTROL_METRICS.buttonHeight + pad
 end
 
 --- (Re)construye todo el contenido a partir del estado actual.
@@ -484,10 +487,16 @@ function GS_AddonManageUI:buildLayout()
 	end
 
 	self._lastSig = statusSignature(self.player, def, self.networkId, self.anchor, self.installed)
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	if not self._positioned then
-		self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
+	local previousX = self:getX()
+	local previousY = self:getY()
+	local wasPositioned = self._positioned == true
+	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
+		kind = "task", bottomPadding = 0,
+	})
+	if wasPositioned then
+		self:setX(previousX)
+		self:setY(previousY)
+	else
 		self._positioned = true
 	end
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
@@ -569,7 +578,6 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.installed = installed or {}
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.centerModal(ui)
 	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
 end

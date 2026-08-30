@@ -237,6 +237,11 @@ function GlobalStorageSiK.NativeProduct.getRowProjection(row)
 			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
 			color = GlobalStorageSiK.CategoryResolution.color(resolved), nativePath = resolved.nativePath }
 	end
+	if resolved and resolved.effective == "variants" then
+		return { mode = "variants", key = resolved.routingIdentity,
+			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
+			color = nil, nativePath = nil, nativePaths = resolved.nativePaths }
+	end
 	local vanillaKey = resolved and resolved.vanillaKey or "Misc"
 	return { mode = "vanilla", key = vanillaKey,
 		fullLabel = resolved and GlobalStorageSiK.CategoryResolution.label(resolved) or vanillaKey,
@@ -269,15 +274,23 @@ function GlobalStorageSiK.NativeProduct.buildIndex(rows)
 	local index = { rows = rows or {}, byPath = {}, byL1 = {}, byL2 = {}, byL3 = {}, byFullType = {} }
 	for i = 1, #(rows or {}) do
 		local row = rows[i]
-		local path = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
-		if path then
+		local sourcePaths = row.nativePaths or { row.nativePath }
+		local seenPath, seenL1, seenL2, seenL3 = {}, {}, {}, {}
+		for p = 1, #sourcePaths do
+			local path = GlobalStorageSiK.NativeProduct.decodePath(sourcePaths[p])
+			if path then
 			local encoded = GlobalStorageSiK.NativeProduct.encodePath(path)
-			row.nativePath = encoded
-			index.byFullType[row.fullType] = path
-			addIndex(index.byPath, encoded, row)
-			addIndex(index.byL1, path.l1, row)
-			if path.l2 then addIndex(index.byL2, path.l1 .. "/" .. path.l2, row) end
-			if path.l3 then addIndex(index.byL3, path.l1 .. "/" .. path.l2 .. "/" .. path.l3, row) end
+			if not seenPath[encoded] then addIndex(index.byPath, encoded, row); seenPath[encoded] = true end
+			if not seenL1[path.l1] then addIndex(index.byL1, path.l1, row); seenL1[path.l1] = true end
+			local l2 = path.l2 and (path.l1 .. "/" .. path.l2) or nil
+			if l2 and not seenL2[l2] then addIndex(index.byL2, l2, row); seenL2[l2] = true end
+			local l3 = path.l3 and (path.l1 .. "/" .. path.l2 .. "/" .. path.l3) or nil
+			if l3 and not seenL3[l3] then addIndex(index.byL3, l3, row); seenL3[l3] = true end
+			if not row.mixedVariants then
+				row.nativePath = encoded
+				index.byFullType[row.fullType] = path
+			end
+			end
 		end
 		metrics.indexRows = metrics.indexRows + 1
 	end

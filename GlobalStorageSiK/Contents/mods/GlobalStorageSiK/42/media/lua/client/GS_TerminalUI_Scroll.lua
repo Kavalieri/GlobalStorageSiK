@@ -11,16 +11,66 @@
 
 require "ISUI/ISPanel"
 require "GS_SiK_UI_Core"
+if not GlobalStorageSiK.SiK_UI.Metrics then require "GS_SiK_UI_Metrics" end
+if not GlobalStorageSiK.SiK_UI.Block then require "GS_SiK_UI_Block" end
 
-GlobalStorageSiK.TerminalScroll = {}
+GlobalStorageSiK.TerminalScroll = GlobalStorageSiK.TerminalScroll or {}
 
-local SCROLLBAR_W = 14
-local SCROLLBAR_LIST_GAP = 10
+local BLOCK = GlobalStorageSiK.SiK_UI.Block
+local TOKENS = GlobalStorageSiK.SiK_UI.Metrics.tokens()
+local SCROLLBAR_W = TOKENS.scrollBarWidth
 local WHEEL_STEP = 40
 local TAB_BOTTOM_INSET = 32
 local LIST_BOTTOM_GAP = 12
 local CONTENT_BOTTOM_PAD = 24
 local THUMB_MIN_H = 22
+
+local function blockContentRect(scroll, contentHeight)
+	return BLOCK.resolveContentRect({
+		x = 0, y = 0, w = scroll and scroll.width or 0, h = scroll and scroll.height or 0,
+	}, { scrollable = true, contentHeight = contentHeight or (scroll and scroll._gsContentHeight) or 0 })
+end
+
+local function scrollBarRect(scroll)
+	return BLOCK.resolveScrollBarRect({
+		x = 0, y = 0, w = scroll and scroll.width or 0, h = scroll and scroll.height or 0,
+	}, { scrollable = true, contentHeight = (scroll and scroll._gsContentHeight) or 0 })
+end
+
+local function notifyContentRectChanged(scroll, previous, current, reason)
+	if not scroll or not current then
+		return
+	end
+	if scroll.contentPanel then
+		scroll.contentPanel:setX(current.x)
+		scroll.contentPanel:setWidth(current.w)
+		scroll.contentPanel:setHeight(math.max(current.h, scroll._gsContentHeight or current.h))
+	end
+	if type(scroll._gsOnContentRectChanged) == "function" and not scroll._gsNotifyingContentRect then
+		scroll._gsNotifyingContentRect = true
+		local ok, err = pcall(scroll._gsOnContentRectChanged, scroll, current, previous, reason)
+		scroll._gsNotifyingContentRect = false
+		if not ok and GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.error("SiKUIScroll", "content rect callback failed", tostring(err))
+		end
+	end
+end
+
+local function bindBlockGeometry(scroll, reason)
+	local previous = scroll and scroll._sikBlockContentRect or nil
+	local current, changed = BLOCK.bindScrollable(scroll, {
+		contentHeight = scroll and scroll._gsContentHeight or 0,
+	})
+	if scroll and current then
+		scroll._gsScrollBarsHidden = not current.overflow
+	end
+	if changed then
+		notifyContentRectChanged(scroll, previous, current, reason)
+	elseif scroll and scroll.contentPanel and current then
+		scroll.contentPanel:setHeight(math.max(current.h, scroll._gsContentHeight or current.h))
+	end
+	return current, changed
+end
 
 local function applyScrollStyle(scroll)
 	scroll.drawBackground = false
@@ -30,7 +80,7 @@ end
 
 ---@param scroll ISPanel
 local function maxScrollOffset(scroll)
-	local viewH = scroll.height or 0
+	local viewH = blockContentRect(scroll).h
 	local contentH = scroll._gsContentHeight or viewH
 	return math.max(0, contentH - viewH)
 end
@@ -50,7 +100,8 @@ local function installViewportClip(scroll)
 			ISPanel.prerender(self)
 		end
 		if self.setStencilRect then
-			self:setStencilRect(0, 0, self.width, self.height)
+			local rect = blockContentRect(self)
+			self:setStencilRect(rect.x, rect.y, rect.w, rect.h)
 		end
 	end
 	local baseRender = scroll.render
@@ -73,32 +124,34 @@ function GlobalStorageSiK.TerminalScroll.drawScrollBar(scroll)
 	if not scroll or scroll._gsScrollBarsHidden then
 		return
 	end
-	local viewH = scroll.height or 0
+	local content = blockContentRect(scroll)
+	if not content.overflow then
+		return
+	end
+	local bar = scrollBarRect(scroll)
+	local viewH = bar.h
 	local contentH = scroll._gsContentHeight or viewH
 	if scroll._gsScrollMode == "sik_virtual" and scroll.dataSource then
 		local ih = scroll.itemHeight or 40
 		local pad = scroll.padding or 0
 		contentH = math.max(viewH, #scroll.dataSource * ih + pad * 2)
 	end
-	if contentH <= viewH + 2 then
-		return
-	end
-	local trackX = math.max(0, (scroll.width or 0) - SCROLLBAR_W - (scroll._gsBarRightPad or 0))
-	scroll:drawRect(trackX, 0, SCROLLBAR_W, viewH, 0.25, 0.06, 0.06, 0.06)
+	local trackX = bar.x
+	scroll:drawRect(trackX, bar.y, SCROLLBAR_W, viewH, 0.25, 0.06, 0.06, 0.06)
 	local ratio = viewH / contentH
 	local thumbH = math.max(THUMB_MIN_H, math.floor(viewH * ratio))
 	local maxOff = maxScrollOffset(scroll)
 	local offset = scroll._gsScrollOffset or 0
-	local thumbY = 0
+	local thumbY = bar.y
 	if maxOff > 0 then
-		thumbY = math.floor((offset / maxOff) * (viewH - thumbH))
+		thumbY = bar.y + math.floor((offset / maxOff) * (viewH - thumbH))
 	end
 	local thumbW = math.max(6, SCROLLBAR_W - 6)
 	local thumbX = trackX + math.floor((SCROLLBAR_W - thumbW) / 2)
 	local active = scroll._gsDraggingScroll == true
 	local mouseX = scroll.getMouseX and scroll:getMouseX() or -1
 	local hover = scroll.isMouseOver and scroll:isMouseOver()
-		and mouseX >= (scroll.width or 0) - SCROLLBAR_W - (scroll._gsBarRightPad or 0)
+		and mouseX >= bar.x and mouseX < bar.x + bar.w
 	local alpha = active and 1 or (hover and 0.92 or 0.76)
 	scroll:drawRect(thumbX, thumbY, thumbW, thumbH, alpha, 0.42, 0.46, 0.52)
 	scroll:drawRectBorder(thumbX, thumbY, thumbW, thumbH, 0.9, 0.58, 0.62, 0.68)
@@ -111,19 +164,24 @@ local function isOnScrollTrack(scroll, x)
 	if not scroll then
 		return false
 	end
-	return x >= (scroll.width or 0) - SCROLLBAR_W - (scroll._gsBarRightPad or 0)
+	if scroll._gsScrollBarsHidden or not blockContentRect(scroll).overflow then
+		return false
+	end
+	local bar = scrollBarRect(scroll)
+	return x >= bar.x and x < bar.x + bar.w
 end
 
 ---@param scroll ISPanel
 ---@param localY number
 local function offsetFromTrackY(scroll, localY)
-	local viewH = scroll.height or 0
+	local bar = scrollBarRect(scroll)
+	local viewH = bar.h
 	local contentH = scroll._gsContentHeight or viewH
 	local maxOff = maxScrollOffset(scroll)
 	if maxOff <= 0 then
 		return 0
 	end
-	local ratio = math.max(0, math.min(1, localY / viewH))
+	local ratio = math.max(0, math.min(1, (localY - bar.y) / math.max(1, viewH)))
 	return math.floor(ratio * maxOff + 0.5)
 end
 
@@ -284,7 +342,9 @@ function GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)
 	if scroll._gsScrollMode ~= "panel" or not scroll.contentPanel then
 		return
 	end
-	scroll.contentPanel:setY(-(scroll._gsScrollOffset or 0))
+	local rect = blockContentRect(scroll)
+	scroll.contentPanel:setX(rect.x)
+	scroll.contentPanel:setY(rect.y - (scroll._gsScrollOffset or 0))
 end
 
 ---@param scroll ISPanel|nil
@@ -358,10 +418,11 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 	scroll.visibleStartIndex = 0
 	scroll.visibleEndIndex = 0
 
-        function scroll:setConfig(nextItemHeight, nextPadding)
+	function scroll:setConfig(nextItemHeight, nextPadding)
                 self.itemHeight = math.max(1, nextItemHeight or self.itemHeight or 40)
                 self.padding = math.max(0, nextPadding or 0)
                 self._gsContentHeight = #self.dataSource * self.itemHeight + self.padding * 2
+		bindBlockGeometry(self, "config")
                 GlobalStorageSiK.TerminalScroll.setScrollOffset(
                         self, GlobalStorageSiK.TerminalScroll.getScrollOffset(self))
 	end
@@ -381,7 +442,7 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 			return
 		end
 		local needed = GlobalStorageSiK.TerminalScroll.rowPoolSizeForViewport(
-			self.height or self.itemHeight, self.itemHeight, 2)
+			blockContentRect(self).h, self.itemHeight, 2)
 		local before = #self.itemPool
 		while #self.itemPool < needed do
 			local row = self.onCreateItem()
@@ -413,8 +474,9 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 		local offset = GlobalStorageSiK.TerminalScroll.getScrollOffset(self)
 		local contentOffset = math.max(0, offset - (self.padding or 0))
 		local firstIndex = math.floor(contentOffset / rowH) + 1
-		local rowY = (self.padding or 0) + (firstIndex - 1) * rowH - offset
-		local rowW = GlobalStorageSiK.TerminalScroll.contentWidth(self)
+		local rect = blockContentRect(self)
+		local rowY = rect.y + (self.padding or 0) + (firstIndex - 1) * rowH - offset
+		local rowW = rect.w
 		local lastIndex = math.min(#data, firstIndex + #self.itemPool - 1)
 		self.visibleStartIndex = #data > 0 and firstIndex or 0
 		self.visibleEndIndex = #data > 0 and lastIndex or 0
@@ -423,7 +485,7 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 			local dataIndex = firstIndex + i - 1
 			local value = data[dataIndex]
 			if value then
-				row:setX(4)
+				row:setX(rect.x)
 				row:setY(rowY + (i - 1) * rowH)
 				row:setWidth(rowW)
 				row:setHeight(rowH)
@@ -439,10 +501,11 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 		end
 	end
 
-        function scroll:setDataSource(data, preserveOffset)
+	function scroll:setDataSource(data, preserveOffset)
                 local saved = preserveOffset and GlobalStorageSiK.TerminalScroll.getScrollOffset(self) or 0
                 self.dataSource = type(data) == "table" and data or {}
                 self._gsContentHeight = #self.dataSource * self.itemHeight + self.padding * 2
+		bindBlockGeometry(self, "content")
                 self._gsScrollOffset = math.max(0, math.min(saved, maxScrollOffset(self)))
                 GlobalStorageSiK.Log.debug("SiKUIScroll", "setDataSource",
                         string.format("items=%d preserveOffset=%s offset=%d->%d", #self.dataSource,
@@ -494,12 +557,15 @@ function GlobalStorageSiK.TerminalScroll.createLegacy(parent, x, y, w, h, mode)
 	scroll.gsTerminalScroll = true
 	scroll._gsScrollMode = mode
 	scroll._gsScrollOffset = 0
+	scroll._gsContentHeight = 0
+	bindBlockGeometry(scroll, "create")
 	if mode == "rows" then
 		scroll._gsVirtualItems = true
 	end
 
 	if mode == "panel" then
-		scroll.contentPanel = ISPanel:new(0, 0, w, h)
+		local rect = blockContentRect(scroll, h)
+		scroll.contentPanel = ISPanel:new(rect.x, rect.y, rect.w, rect.h)
 		scroll.contentPanel:initialise()
 		scroll.contentPanel.drawBackground = false
 		scroll.contentPanel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
@@ -653,13 +719,11 @@ function GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentHeight)
 	if scroll._gsScrollMode == "sik_virtual" then
 		scroll._gsContentHeight = #(scroll.dataSource or {}) * (scroll.itemHeight or 1)
 			+ (scroll.padding or 0) * 2
+		bindBlockGeometry(scroll, "content")
 		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 		return
 	end
-	if scroll.contentPanel then
-		scroll.contentPanel:setWidth(GlobalStorageSiK.TerminalScroll.contentWidth(scroll))
-		scroll.contentPanel:setHeight(math.max(scroll.height or 0, scroll._gsContentHeight))
-	end
+	bindBlockGeometry(scroll, "content")
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 end
 
@@ -669,16 +733,28 @@ function GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	if not scroll then
 		return 0
 	end
-	local w = scroll.width or 0
-	local pad = 8
-	local contentH = scroll._gsContentHeight or 0
-	local viewH = scroll.height or 0
-	local needsBar = contentH > viewH + 2
-	local gap = scroll._gsScrollBarGap or SCROLLBAR_LIST_GAP
-	if needsBar then
-		return math.max(120, w - pad * 2 - SCROLLBAR_W - gap - (scroll._gsBarRightPad or 0))
+	return blockContentRect(scroll).w
+end
+
+--- Rectangulo canonico que consumen lista, tabla, formulario y tarjeta.
+---@param scroll ISPanel|nil
+---@return table
+function GlobalStorageSiK.TerminalScroll.contentRect(scroll)
+	if not scroll then
+		return { x = 0, y = 0, w = 0, h = 0, scrollGutter = 0, overflow = false }
 	end
-	return math.max(120, w - pad * 2)
+	return blockContentRect(scroll)
+end
+
+--- Notifica al consumidor solo cuando cambia el contentRect (resize u overflow).
+--- El callback debe relayout, nunca reconstruir por frame.
+---@param scroll ISPanel|nil
+---@param callback function|nil fn(scroll, currentRect, previousRect, reason)
+function GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(scroll, callback)
+	if not scroll then
+		return
+	end
+	scroll._gsOnContentRectChanged = type(callback) == "function" and callback or nil
 end
 
 ---@param scroll ISPanel
@@ -691,17 +767,13 @@ function GlobalStorageSiK.TerminalScroll.resize(scroll, w, h)
 	local saved = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	scroll:setWidth(w)
 	scroll:setHeight(h)
+	bindBlockGeometry(scroll, "resize")
 	if scroll._gsScrollMode == "sik_virtual" then
 		if scroll.ensureItemPool then
 			scroll:ensureItemPool()
 		end
 		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 		return
-	end
-	if scroll.contentPanel then
-		scroll.contentPanel:setWidth(GlobalStorageSiK.TerminalScroll.contentWidth(scroll))
-		local contentH = scroll._gsContentHeight or h
-		scroll.contentPanel:setHeight(math.max(h, contentH))
 	end
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, saved)
 end
@@ -819,11 +891,14 @@ end
 
 ---@param scroll ISPanel
 ---@param visible boolean|nil
-function GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, visible)
+function GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, _visible)
 	if not scroll then
 		return
 	end
-	scroll._gsScrollBarsHidden = visible == false
+	-- Alias legacy: la geometria real prevalece sobre estimaciones del consumidor.
+	-- Solo overflow puede mostrar la barra; no existe reserva manual ni umbral +2.
+	local overflow = blockContentRect(scroll).overflow
+	scroll._gsScrollBarsHidden = not overflow
 end
 
 ---@param terminal GS_TerminalUI|nil
@@ -851,14 +926,14 @@ function GlobalStorageSiK.TerminalScroll.applyTabScrollVisibility(terminal)
 	end
 	for _, scroll in pairs(tabScrolls) do
 		if scroll then
-			local viewH = scroll.height or 0
+			local viewH = blockContentRect(scroll).h
 			local contentH = scroll._gsContentHeight or viewH
 			if scroll._gsScrollMode == "sik_virtual" and scroll.dataSource then
 				local ih = scroll.itemHeight or 40
 				local pad = scroll.padding or 0
 				contentH = math.max(viewH, #scroll.dataSource * ih + pad * 2)
 			end
-			GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, contentH > viewH + 2)
+			GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(scroll, contentH > viewH)
 		end
 	end
 end

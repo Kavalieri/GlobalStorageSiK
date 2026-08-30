@@ -15,15 +15,14 @@ require "GS_SiK_UI_Core"
 require "GS_TerminalCatalog"
 require "GS_TerminalUI_TerminalEditor"
 require "GS_SiK_UI_Table"
-require "GS_PCAcquireUI"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalNetworkTerminals = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local BTN_H = FONT_HGT_SMALL + 6
 local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
-local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
+local ROW_H = TABLE_METRICS.rowHeight
 local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_GAP = 6
 local POOL = 6
@@ -32,18 +31,18 @@ local POOL = 6
 -- divisor comun de SiK_UI.Table ajuste cabecera y filas sin una geometria
 -- paralela solo para Administracion.
 local TERMINAL_TABLE_COLUMNS = {
-	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", flex = 0.30, minWidth = 90, pad = 0 },
-	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", flex = 0.28, minWidth = 82, pad = 0 },
-	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", flex = 0.22, minWidth = 74, pad = 0 },
-	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", flex = 0.20, minWidth = 84, align = "right", pad = 4 },
+	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", flex = 1, minWidth = 130, pad = 6 },
+	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", flex = 1, minWidth = 130, pad = 6 },
+	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", width = 110, pad = 6 },
+	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", width = 100, align = "right", pad = 6 },
 }
-local TERMINAL_TABLE_OPTIONS = { left = 4, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 4 }
+local TERMINAL_TABLE_OPTIONS = { left = 0, right = 0, gap = 8 }
 
 ---@param row table|nil
 ---@return string
 local function coordsLabel(row)
 	if not row then
-		return "—"
+		return T("IGUI_GS_PunctuationEmDash")
 	end
 	return string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0)
 end
@@ -52,7 +51,7 @@ end
 ---@return string
 local function nameLabel(row)
 	if not row or not row.label or row.label == "" then
-		return "—"
+		return T("IGUI_GS_PunctuationEmDash")
 	end
 	return row.label
 end
@@ -61,7 +60,7 @@ end
 ---@return string
 local function statusLabel(row)
 	if not row then
-		return "—"
+		return T("IGUI_GS_PunctuationEmDash")
 	end
 	if row.unknown then
 		return T("IGUI_GS_TerminalUnverified")
@@ -146,11 +145,13 @@ local function createTerminalRow(host, terminal, ui)
 			self.width, TERMINAL_TABLE_COLUMNS, TERMINAL_TABLE_OPTIONS)
 		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 		local sr, sg, sb = statusColor(data)
-		local nameMaxW = cols[1].width - 6
+		local nameMaxW = cols[1].width - cols[1].pad * 2
 		self:drawText(GlobalStorageSiK.SiK_UI.truncateText(nameLabel(data), nameMaxW, UIFont.Small),
-			cols[1].x, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		self:drawText(coordsLabel(data), cols[2].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(roleLabel(data), cols[3].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+			cols[1].x + cols[1].pad, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+		self:drawText(GlobalStorageSiK.SiK_UI.truncateText(coordsLabel(data), cols[2].width - cols[2].pad * 2, UIFont.Small),
+			cols[2].x + cols[2].pad, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+		self:drawText(GlobalStorageSiK.SiK_UI.truncateText(roleLabel(data), cols[3].width - cols[3].pad * 2, UIFont.Small),
+			cols[3].x + cols[3].pad, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		self:drawTextRight(statusLabel(data), cols[4].finish - cols[4].pad, 2, sr, sg, sb, 1, UIFont.Small)
 	end
 -- Un clic en la fila abre SIEMPRE el editor completo (renombrar, marcar
@@ -184,15 +185,17 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	local pad = 8
 	ui.termBlockY = y
 
-	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
+	local card = GlobalStorageSiK.SiK_UI.createSectionCard(0, y, innerW, 10)
 	card._gsNetStatic = true
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
 	ui.termBlockCard = card
 
-	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_NetBlockTerminals"))
+	local title = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y + pad, text = T("IGUI_GS_NetBlockTerminals"),
+	})
 	ui.termBlockTitle = title
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
-	y = y + FONT_HGT_SMALL + 8
+	y = y + pad + FONT_HGT_SMALL + 8
 
 	ui.termTableHost = ISPanel:new(pad, y, innerW - pad * 2, HEADER_H + ROW_H + 10)
 	ui.termTableHost:initialise()
@@ -227,42 +230,10 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termEmptyLbl)
 
 	ui.termTableY = y
-	y = y + ui.termTableHost:getHeight() + 4
-
-	ui.termPurgeBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, math.min(240, innerW - pad * 2), BTN_H + 2, T("IGUI_GS_TerminalPurgeMissing"), scroll, function()
-			local rows = ui.terminalRows or {}
-			for i = 1, #rows do
-				local r = rows[i]
-				if r.missing or r.suspended or r.present == false then
-					purgeTerminal(terminal, r)
-				end
-			end
-		end)
-	ui.termPurgeBtn._gsNetStatic = true
-	ui.termPurgeBtn:setVisible(false)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termPurgeBtn)
-	y = y + BTN_H + 10
-
-	-- "Conseguir PC" mudado aqui desde la sub-pestaña Estado (2026-08-26,
-	-- pedido explicito del usuario: "tiene mas sentido en la pestaña de
-	-- admin, bajo el bloque de terminales, que es donde lo podemos
-	-- necesitar") - misma accion, mismo GS_PCAcquireUI.lua, nueva ubicacion.
-	-- Siempre visible (a diferencia de termPurgeBtn, que solo aparece si hay
-	-- terminales ausentes/suspendidos) - su Y real se fija en layoutRows,
-	-- justo debajo de la tabla o de termPurgeBtn si este esta visible.
-	ui.getPCBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, innerW - pad * 2, BTN_H + 2, T("IGUI_GS_PCAcquireOpenBtn"), scroll, function()
-			GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-		end, nil, true)
-	ui.getPCBtn._gsNetStatic = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.getPCBtn)
-
-	y = y + BTN_H + 10
+	y = y + ui.termTableHost:getHeight() + pad
 	ui.termBlockEndY = y
 	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
-		pad - 4, ui.termBlockY - 2,
-		innerW - (pad - 4) * 2, y - ui.termBlockY + 4)
+		0, ui.termBlockY, innerW, y - ui.termBlockY)
 	ui.lastTermFp = ""
 	ui.terminalRef = terminal
 	return y
@@ -285,7 +256,6 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 		host:addChild(row)
 		ui.termRowPool[#ui.termRowPool + 1] = row
 	end
-	local hasMissing = false
 	for i = 1, #ui.termRowPool do
 		local row = ui.termRowPool[i]
 		if i <= needed then
@@ -296,10 +266,6 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 			row:setWidth(tableW)
 			row:setHeight(ROW_H)
 			row:setVisible(true)
-			local r = rows[i]
-			if r.missing or r.suspended or r.present == false then
-				hasMissing = true
-			end
 		else
 			row.terminalData = nil
 			row:setVisible(false)
@@ -314,21 +280,8 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 			ui.termEmptyLbl:setY(ui.termTableY + HEADER_H + 4)
 		end
 	end
-	if ui.termPurgeBtn then
-		ui.termPurgeBtn:setVisible(hasMissing)
-		if ui.termTableY then
-			ui.termPurgeBtn:setY(ui.termTableY + host:getHeight() + 4)
-		end
-	end
-	-- "Conseguir PC" siempre visible, justo debajo de la tabla - o de
-	-- termPurgeBtn si esta visible, para no solapar (mismo hueco que antes
-	-- reservaba termBlockEndY, ahora con un boton mas debajo).
 	if ui.termTableY then
-		local afterTableY = ui.termTableY + host:getHeight() + (hasMissing and (BTN_H + 14) or 8)
-		if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
-			ui.getPCBtn:setY(afterTableY)
-		end
-		ui.termBlockEndY = afterTableY + BTN_H + 10
+		ui.termBlockEndY = ui.termTableY + host:getHeight() + 8
 		if ui.termBlockCard and ui.termBlockY then
 			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
 		end
@@ -390,10 +343,10 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
 		ui.termTableY = (ui.termTableY or newBlockY) + delta
 		ui.termBlockEndY = (ui.termBlockEndY or newBlockY) + delta
 		if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockCard, newBlockY - 2)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockCard, newBlockY)
 		end
 		if ui.termBlockTitle and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockTitle) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockTitle, newBlockY + 2)
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockTitle, newBlockY + pad)
 		end
 		if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termTableHost) then
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termTableHost, ui.termTableY)
@@ -409,18 +362,12 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
 		ui.termHeader:setWidth(tableW)
 	end
 	if ui.termBlockTitle then
-		ui.termBlockTitle:setX(pad + 6)
-	end
-	if ui.termPurgeBtn then
-		ui.termPurgeBtn:setWidth(math.min(240, tableW))
-	end
-	if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
-		ui.getPCBtn:setWidth(tableW)
+		ui.termBlockTitle:setX(pad)
 	end
 	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
 	if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
-		ui.termBlockCard:setX(pad - 4)
-		ui.termBlockCard:setWidth(innerW - (pad - 4) * 2)
+		ui.termBlockCard:setX(0)
+		ui.termBlockCard:setWidth(innerW)
 		if ui.termBlockEndY and ui.termBlockY then
 			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
 		end

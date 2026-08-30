@@ -25,8 +25,26 @@ local jobs = {}
 -- Último cierre por red: el terminal debe poder distinguir un trabajo acabado
 -- de la ausencia histórica de trabajo, incluso después de liberar el job.
 local terminalStates = {}
+local terminalStateOrder = {}
+local MAX_TERMINAL_STATES = 128
 local tickInstalled = false
 local nextGlobalRunMs = 0
+
+local function removeTerminalStateOrder(networkId)
+	for i = #terminalStateOrder, 1, -1 do
+		if terminalStateOrder[i] == networkId then table.remove(terminalStateOrder, i) end
+	end
+end
+
+local function setTerminalState(networkId, state)
+	removeTerminalStateOrder(networkId)
+	terminalStates[networkId] = state
+	terminalStateOrder[#terminalStateOrder + 1] = networkId
+	if #terminalStateOrder > MAX_TERMINAL_STATES then
+		local oldest = table.remove(terminalStateOrder, 1)
+		if oldest then terminalStates[oldest] = nil end
+	end
+end
 
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
@@ -141,7 +159,7 @@ end
 
 local function recordTerminalState(networkId, job, state, reason)
 	local zone = currentZone(job)
-	terminalStates[networkId] = {
+	setTerminalState(networkId, {
 		state = state, reason = reason, phase = job.phase or "finalizing",
 		reasonCode = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.scanReasonCode
 			and GlobalStorageSiK.I18n.scanReasonCode(reason) or "UNKN",
@@ -149,7 +167,7 @@ local function recordTerminalState(networkId, job, state, reason)
 		zonesDone = math.max(0, (job.zoneIndex or 1) - 1), zonesTotal = #(job.zones or {}),
 		startedMs = job.startedMs or 0, lastProgressMs = job.lastProgressMs or 0,
 		finishedMs = nowMs(), failedZones = job.totals and job.totals.failedZones or 0,
-	}
+	})
 end
 
 local function finishCancelled(networkId, job, reason)
@@ -318,6 +336,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		},
 	}
 	terminalStates[networkId] = nil
+	removeTerminalStateOrder(networkId)
 	if opts.background ~= true then addWatcher(job, player, opts.searchQuery) end
 	jobs[networkId] = job
 	ensureTickInstalled()
@@ -373,7 +392,7 @@ function GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, state, re
 	status.reasonCode = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.scanReasonCode
 		and GlobalStorageSiK.I18n.scanReasonCode(reason) or "UNKN"
 	status.finishedMs = nowMs()
-	terminalStates[networkId] = status
+	setTerminalState(networkId, status)
 	return true
 end
 
@@ -387,4 +406,15 @@ function GlobalStorageSiK.ZoneScanJob.cancel(networkId, reason)
 	finishCancelled(networkId, job, reason or "manual")
 	return true
 
+end
+
+--- Limpia trabajo y cierre historico al eliminar una red.
+---@param networkId string|nil
+function GlobalStorageSiK.ZoneScanJob.clearNetwork(networkId)
+	if not networkId then return end
+	local job = jobs[networkId]
+	if job then discardJobState(job) end
+	jobs[networkId] = nil
+	terminalStates[networkId] = nil
+	removeTerminalStateOrder(networkId)
 end

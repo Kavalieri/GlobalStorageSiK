@@ -241,14 +241,18 @@ end
 ---   GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey)
 --- labelKey es la clave de traducción del texto del menú contextual.
 GlobalStorageSiK.ItemActions._tabletItemLabels = GlobalStorageSiK.ItemActions._tabletItemLabels or {}
+GlobalStorageSiK.ItemActions._tabletItemActions = GlobalStorageSiK.ItemActions._tabletItemActions or {}
 
 ---@param fullType string
 ---@param labelKey string
-function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey)
+---@param onUse function|nil
+function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey, onUse)
 	if not fullType or not labelKey then
 		return
 	end
 	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = labelKey
+	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] =
+		type(onUse) == "function" and onUse or GlobalStorageSiK.ItemActions.onUseTerminalTablet
 end
 
 --- Deposita un ítem concreto en la red.
@@ -739,7 +743,9 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 			if tabletLabelKey then
 				local sub = ensureSub()
 				if sub then
-					sub:addOption(T(tabletLabelKey), player, GlobalStorageSiK.ItemActions.onUseTerminalTablet, first)
+					local onUse = GlobalStorageSiK.ItemActions._tabletItemActions[fullType]
+						or GlobalStorageSiK.ItemActions.onUseTerminalTablet
+					sub:addOption(T(tabletLabelKey), player, onUse, first)
 				end
 			end
 		end

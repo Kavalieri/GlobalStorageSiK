@@ -70,6 +70,7 @@ local GENERIC_MAGAZINE_TOKENS = toSet({ "magazine", "mag" })
 local LITERATURE_TOKENS = toSet({ "book", "novel", "comic" })
 local DOCUMENT_TOKENS = toSet({ "document", "note", "letter" })
 local RECORDED_MEDIA_TOKENS = toSet({ "vhs", "cd", "dvd", "cassette" })
+local RECORDED_MEDIA_DEVICE_TOKENS = toSet({ "player", "radio", "television", "tv", "stereo" })
 
 --- Los manuales propios son revistas de receta por contrato del producto, no
 --- literatura genérica. La identidad estable combina el namespace/marcador
@@ -137,6 +138,12 @@ local function classifyKnowledgeMedia(fullType, si)
 		return { l1 = "knowledge_media", l2 = "recipe_magazine", l3 = nil }, {}, {},
 			U.evidence("gs_recipe_manual_structural", 100)
 	end
+	local recordedMediaCat = si.getRecordedMediaCat
+		and U.safeCall(function() return si:getRecordedMediaCat() end) or nil
+	if recordedMediaCat and tostring(recordedMediaCat) ~= "" then
+		return { l1 = "knowledge_media", l2 = "recorded_media", l3 = nil }, {}, {},
+			U.evidence("script_recorded_media_category", 100)
+	end
 
 	local isConfirmedLiterature = U.itemTypeLower(si) == "base:literature"
 	local tokens = U.tokenize(U.typeName(si))
@@ -172,6 +179,9 @@ local function classifyKnowledgeMedia(fullType, si)
 	if not isConfirmedLiterature and #tokens == 0 then return nil end
 
 	local l2, weakSource = matchL2(tokens)
+	if l2 == "recorded_media" and U.hasAnyToken(tokens, RECORDED_MEDIA_DEVICE_TOKENS) then
+		return nil
+	end
 
 	-- dev15: SIN palabra real, un base:literature confirmado ya NO se
 	-- clasifica aqui - se cede el turno (ver cabecera del fichero).

@@ -27,7 +27,6 @@ local ROW_H = TABLE_METRICS.rowHeight
 local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_POOL_SIZE = 24
 local MIN_EMBED_ROWS = 10
-local SCROLLBAR_RESERVE = 14
 
 --- True si la zona está colapsada (por defecto colapsada).
 ---@param collapsedZones table|nil
@@ -48,19 +47,12 @@ local function toggleZoneCollapsed(collapsedZones, zoneId)
 	end
 end
 
---- Ancho útil de filas reservando barra de scroll si hay desborde.
+--- Ancho útil canónico de filas. Block reserva siempre el gutter, exista o no
+--- overflow; tabla y filas no vuelven a calcular una barra local.
 ---@param scroll ISPanel|nil
 ---@return number
 local function rowAreaWidth(scroll)
-	local reserve = 0
-	if scroll then
-		local viewH = scroll.height or 0
-		local contentH = scroll._gsContentHeight or viewH
-		if contentH > viewH + 2 then
-			reserve = SCROLLBAR_RESERVE + 4
-		end
-	end
-	return math.max(120, (scroll and scroll.width or 0) - 8 - reserve)
+	return math.max(120, GlobalStorageSiK.TerminalScroll.contentWidth(scroll))
 end
 
 --- Altura del viewport de scroll de la tabla de contenedores.
@@ -96,7 +88,7 @@ local function truncateText(text, maxW, font)
 	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, font or UIFont.Small)
 end
 
-local COL_GAP = 16
+local COL_GAP = 8
 
 -- "Estado"/"Prioridad"/"% Ocupación" seguian solapandose con "Protocolo"
 -- pese al tope matematico por DOS motivos
@@ -178,21 +170,15 @@ local PROTOCOL_DOTS_RESERVED_W = PROTOCOL_DOTS_COUNT * (PROTOCOL_DOT_SIZE + PROT
 -- el resto del framework; desde dev33 su geometría deja de ser una excepción
 -- local y pasa por el mismo descriptor que usan cabecera, filas y clics.
 local NODE_TABLE_COLUMNS = {
-	{ key = "name", titleKey = "IGUI_GS_ColName", widthFraction = 0.15, minWidth = 80, pad = 0 },
-	{ key = "protocol", titleKey = "IGUI_GS_ColProtocol", flex = 1, minWidth = 60,
-		hardMinWidth = 60, pad = 0, contentLeading = PROTOCOL_DOTS_RESERVED_W,
+	{ key = "name", titleKey = "IGUI_GS_ColName", flex = 1, minWidth = 120, pad = 6 },
+	{ key = "protocol", titleKey = "IGUI_GS_ColProtocol", flex = 1.7, minWidth = 180,
+		hardMinWidth = 180, pad = 6, contentLeading = PROTOCOL_DOTS_RESERVED_W,
 		contentTrailing = 4 },
-	{ key = "priority", titleKey = "IGUI_GS_ColPriority", align = "center",
-		measureValues = { "100" }, measurePad = 12 },
-	{ key = "status", titleKey = "IGUI_GS_ColStatus", align = "center",
-		measureValues = { T("IGUI_GS_NodeStatusOk"), T("IGUI_GS_NodeStatusOffShort"),
-			T("IGUI_GS_NodeStatusErrorShort"), T("IGUI_GS_NodeStatusOffline"),
-			T("IGUI_GS_NodeStatusExcluded"), T("IGUI_GS_NodeStatusDisabled"),
-			T("IGUI_GS_NodeStatusNew"), T("IGUI_GS_NodeStatusConflict") }, measurePad = 12 },
-	{ key = "occupancy", titleKey = "IGUI_GS_ColOccupancy", align = "center",
-		measureValues = { "100%" }, measurePad = 12 },
+	{ key = "priority", titleKey = "IGUI_GS_ColPriority", width = 60, align = "center", pad = 6 },
+	{ key = "status", titleKey = "IGUI_GS_ColStatus", width = 76, align = "center", pad = 6 },
+	{ key = "occupancy", titleKey = "IGUI_GS_ColOccupancy", width = 60, align = "right", pad = 6 },
 }
-local NODE_TABLE_OPTIONS = { left = 8, right = 8, gap = COL_GAP }
+local NODE_TABLE_OPTIONS = { left = 0, right = 0, gap = COL_GAP }
 
 --- Dibuja los 3 puntos de composicion (OR/AND/NOT - relleno si ese operador
 --- tiene al menos una regla propia, hueco si no) antes del texto de
@@ -368,7 +354,7 @@ end
 ---@return string text, number r, number g, number b
 local function occupancyDisplay(pct)
 	if not pct then
-		return "—", 0.45, 0.48, 0.52
+		return T("IGUI_GS_PunctuationEmDash"), 0.45, 0.48, 0.52
 	end
 	local warnPct = GlobalStorageSiK.Config.WEIGHT_WARN_PERCENT or 80
 	local critPct = GlobalStorageSiK.Config.WEIGHT_CRITICAL_PERCENT or 95
@@ -556,7 +542,7 @@ end
 ---@param terminal GS_TerminalUI
 ---@return ISPanel
 local function createNodeRow(scroll, listPanel, terminal)
-	local row = ISPanel:new(0, 0, scroll.width - 8, ROW_H)
+	local row = ISPanel:new(0, 0, rowAreaWidth(scroll), ROW_H)
 	row:initialise()
 	row.listPanel = listPanel
 	row.terminal = terminal
@@ -579,7 +565,7 @@ local function createNodeRow(scroll, listPanel, terminal)
 			local hover = self:isMouseOver()
 			GlobalStorageSiK.SiK_UI.drawZoneHeaderBackground(self, hover)
 			local arrow = data.collapsed and "+ " or "- "
-			local title = arrow .. T("IGUI_GS_ZoneGroupHeader", data.zoneName or "—", data.count or 0)
+			local title = arrow .. T("IGUI_GS_ZoneGroupHeader", data.zoneName or T("IGUI_GS_PunctuationEmDash"), data.count or 0)
 			local zoneExcluded = data.zoneEnabled == false
 			local columns = nodeColumnLayout(w)
 			local nameCol, protocolCol, priorityCol, statusCol, occupancyCol =
@@ -816,12 +802,13 @@ function GlobalStorageSiK.TerminalNodes.updateVirtualRows(listPanel)
 	local yScroll = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	local firstIdx = math.floor(yScroll / ROW_H) + 1
 	local rowW = rowAreaWidth(scroll)
+	local contentRect = GlobalStorageSiK.TerminalScroll.contentRect(scroll)
 
 	for i = 1, #listPanel.nodeRowPool do
 		local row = listPanel.nodeRowPool[i]
 		local dataIdx = firstIdx + i - 1
 		if dataIdx <= #displayRows then
-			row:setX(4)
+			row:setX(contentRect.x)
 			row:setY((i - 1) * ROW_H)
 			row:setWidth(rowW)
 			row.rowIndex = dataIdx
@@ -853,8 +840,15 @@ local function ensureColumnHeader(panel)
 		-- se quedaba con el ancho antiguo — desalineando "Estado"/"Prioridad"
 		-- frente a las columnas reales de las filas. Ahora se resincroniza el
 		-- ancho con el panel padre en cada prerender.
-		if self.parentPanel and self.parentPanel.width and self.parentPanel.width ~= self.width then
-			self:setWidth(self.parentPanel.width)
+		local targetW = self.parentPanel and self.parentPanel.nodeScroll
+			and rowAreaWidth(self.parentPanel.nodeScroll)
+			or (self.parentPanel and self.parentPanel.width or self.width)
+		if targetW ~= self.width then
+			self:setWidth(targetW)
+		end
+		if self.parentPanel and self.parentPanel.nodeScroll then
+			self:setX(GlobalStorageSiK.TerminalScroll.contentRect(
+				self.parentPanel.nodeScroll).x)
 		end
 		ISPanel.prerender(self)
 		local host = self.parentPanel
@@ -1002,7 +996,9 @@ function GlobalStorageSiK.TerminalNodes.refresh(nodesPanel, terminal, nodes, cat
 
 	ensureNodeScroll(panel, terminal)
 	if panel.columnHeader then
-		panel.columnHeader:setWidth(panel.width)
+		local rect = GlobalStorageSiK.TerminalScroll.contentRect(panel.nodeScroll)
+		panel.columnHeader:setX(rect.x)
+		panel.columnHeader:setWidth(rect.w)
 	end
 
 	local hasRows = #(panel._displayRows or {}) > 0
@@ -1068,7 +1064,9 @@ function GlobalStorageSiK.TerminalNodes.layout(nodesPanel, innerW, innerH, pad, 
 
 	local panel = nodesPanel.nodesListPanel
 	if panel.columnHeader then
-		panel.columnHeader:setWidth(panel.width)
+		local rect = GlobalStorageSiK.TerminalScroll.contentRect(panel.nodeScroll)
+		panel.columnHeader:setX(rect.x)
+		panel.columnHeader:setWidth(rect.w)
 	end
 	if panel.nodeScroll and panel._displayRows and #panel._displayRows > 0 then
 		local scrollH = nodeScrollViewportHeight(panel)
@@ -1176,6 +1174,13 @@ end
 function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
 	local pad = 8
 	local titleY = y
+	local state = terminal and terminal.terminalState or {}
+	local role = state.permissions and state.permissions.playerRole or "member"
+	local canRescanAll = role == "owner" or role == "admin"
+	local scan = state.scan or {}
+	local scanRunning = state.scanRunning == true or scan.state == "RUNNING"
+	local scanBtnH = FONT_HGT_SMALL + 8
+	local cardH = FONT_HGT_SMALL * 2 + scanBtnH + 26
 	-- dev26 ronda 4quater (pedido explicito del usuario): "Contenedores de
 	-- red" (redundante con la pestana ya renombrada "Zonas y nodos") y el
 	-- parrafo de ayuda ("Clic en + de una zona...") se retiran de la vista
@@ -1188,7 +1193,13 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		-- La ayuda queda visible debajo de la tabla. Si la ventana crece, todo
 		-- el alto adicional se entrega al viewport virtual de filas; si es
 		-- pequena se conserva el minimo y el scroll exterior cubre el resto.
-		local available = (scroll.height or 0) - currentY - infoH - 24
+		local footerReserve = infoH + 24
+		if canRescanAll then
+			-- Desde el final del viewport de filas hasta el borde inferior:
+			-- separación + título de orden + separación + tarjeta + margen.
+			footerReserve = FONT_HGT_SMALL + cardH + 26
+		end
+		local available = (scroll.height or 0) - currentY - footerReserve
 		return GlobalStorageSiK.TerminalNodes.embedPanelHeight(available)
 	end
 	if not ui.nodesEmbedBuilt or not GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
@@ -1320,14 +1331,7 @@ function GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, u
 		end
 		ui.nodesPriorityInfoEndY = infoY + FONT_HGT_SMALL + 2
 	end
-	local state = terminal and terminal.terminalState or {}
-	local role = state.permissions and state.permissions.playerRole or "member"
-	local canRescanAll = role == "owner" or role == "admin"
-	local scan = state.scan or {}
-	local scanRunning = state.scanRunning == true or scan.state == "RUNNING"
 	local cardY = (ui.nodesPriorityInfoEndY or (y + ui.nodesEmbedHeight + infoH)) + 8
-	local scanBtnH = FONT_HGT_SMALL + 8
-	local cardH = FONT_HGT_SMALL * 2 + scanBtnH + 26
 	if ui.nodesRescanCard then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRescanCard, pad)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRescanCard, cardY)

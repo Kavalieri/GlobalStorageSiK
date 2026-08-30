@@ -16,6 +16,8 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Window"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_Modal"
 require "GS_TerminalUI_BlockedPanel"
 
 GlobalStorageSiK.TerminalTerminalEditor = {}
@@ -26,9 +28,8 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local LINE_GAP = 6
-local ENTRY_H = FONT_HGT_SMALL + 8
-local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 420
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("compact")
+local PANEL_W = GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W
 
 GS_TerminalEditorUI = ISPanel:derive("GS_TerminalEditorUI")
 
@@ -48,9 +49,9 @@ function GS_TerminalEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
 		self:destroy()
-	end, PAD)
+	end, { kind = "compact", padding = PAD, resizable = false })
 	self:buildLayout()
 end
 
@@ -171,59 +172,64 @@ function GS_TerminalEditorUI:buildLayout()
 	y = y + FONT_HGT_SMALL + 4
 
 	local renameW = 110
-	self.nameEntry = ISTextEntryBox:new(row.label or "", pad, y, textW - renameW - 6, ENTRY_H)
+	self.nameEntry = ISTextEntryBox:new(row.label or "", pad, y, textW - renameW - 6,
+		CONTROL_METRICS.inputHeight)
 	self.nameEntry:initialise()
 	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
 	self.nameEntry:instantiate()
 	self:addChild(self.nameEntry)
 
 	self.renameBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + textW - renameW, y, renameW, ENTRY_H, T("IGUI_GS_TerminalEditorRenameBtn"), self, function()
+		pad + textW - renameW, y, renameW, CONTROL_METRICS.inputHeight,
+		T("IGUI_GS_TerminalEditorRenameBtn"), self, function()
 			self:onRename()
 		end)
 	self:addChild(self.renameBtn)
-	y = y + ENTRY_H + LINE_GAP + 8
+	y = y + CONTROL_METRICS.inputHeight + LINE_GAP + 8
 
 	-- ── Acciones ─────────────────────────────────────────────────────────
 	local isActive = not row.missing and row.present ~= false and not row.suspended and not row.unknown
 	if isActive and not row.controller then
 		self.controllerBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorMakeControllerBtn"), self, function()
+			pad, y, textW, CONTROL_METRICS.buttonHeight,
+			T("IGUI_GS_TerminalEditorMakeControllerBtn"), self, function()
 				self:onSetController()
 			end)
 		self:addChild(self.controllerBtn)
-		y = y + BTN_H + LINE_GAP
+		y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 	end
 
 	if isActive then
 		self.suspendBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorSuspendBtn"), self, function()
+			pad, y, textW, CONTROL_METRICS.buttonHeight,
+			T("IGUI_GS_TerminalEditorSuspendBtn"), self, function()
 				self:onSuspend()
 			end)
 		self:addChild(self.suspendBtn)
-		y = y + BTN_H + LINE_GAP
+		y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 	end
 
 	local coverageLabel = GlobalStorageSiK.TerminalBlockedPanel._singleMarking
 		and GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow == row
 		and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
 	self.coverageBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, coverageLabel, self, function()
+		pad, y, textW, CONTROL_METRICS.buttonHeight, coverageLabel, self, function()
 			self:onToggleCoverage()
 		end)
 	self:addChild(self.coverageBtn)
-	y = y + BTN_H + LINE_GAP
+	y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 
 	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorDeleteBtn"), self, function()
+		pad, y, textW, CONTROL_METRICS.buttonHeight,
+		T("IGUI_GS_TerminalEditorDeleteBtn"), self, function()
 			self:onDeleteClicked()
 		end)
 	self:addChild(self.deleteBtn)
-	y = y + BTN_H + pad
+	y = y + CONTROL_METRICS.buttonHeight + pad
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	GlobalStorageSiK.SiK_UI.centerModal(self)
+	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
+		kind = "compact", bottomPadding = 0,
+	})
 end
 
 --- Abre (o reemplaza) el editor de un terminal concreto.

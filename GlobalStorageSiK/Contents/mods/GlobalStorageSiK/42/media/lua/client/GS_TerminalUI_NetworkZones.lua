@@ -13,13 +13,14 @@ require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Table"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalNetworkZones = {}
 
 local T = GlobalStorageSiK.I18n.text
 local ACTION_BTN_MAX_W = 220
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local BTN_H = FONT_HGT_SMALL + 6
+local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
 local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
 local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
 local HEADER_H = TABLE_METRICS.headerHeight
@@ -195,7 +196,7 @@ local function createZoneRow(host, terminal, ui)
 		local pal = GlobalStorageSiK.SiK_UI.PALETTE
 		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ZONE_TABLE_COLUMNS, ZONE_TABLE_OPTIONS)
 		local nameMaxW = self._nameMaxW or math.max(48, cols[3].width - 8)
-		self:drawText(tostring(data.priority or "—"), cols[1].x + cols[1].pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+		self:drawText(tostring(data.priority or T("IGUI_GS_PunctuationEmDash")), cols[1].x + cols[1].pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
 		self:drawText(truncate(zoneTypeLabel(data.source), cols[2].width), cols[2].x, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		self:drawText(truncate(data.name or "?", nameMaxW), cols[3].x, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
 		if (data.nodeCount or 0) == 0 and data.neverLoaded then
@@ -237,7 +238,7 @@ function GlobalStorageSiK.TerminalNetworkZones.build(scroll, terminal, ui, y, in
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, hint)
 	y = y + FONT_HGT_SMALL + 8
 
-	local btnH = FONT_HGT_SMALL + 8
+	local btnH = BTN_H
 	local roomTitle = T("IGUI_GS_CreateRoomZone")
 	local structTitle = T("IGUI_GS_CreateStructureZone")
 	local selectTitle = T("IGUI_GS_CreateSelectionZone")

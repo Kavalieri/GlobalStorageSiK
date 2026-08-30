@@ -16,6 +16,22 @@ local _lastAppliedRevision = {}
 local _requiredSnapshotRevision = {}
 local _tickInstalled = false
 local _managedTransfer = nil
+local _revisionOrder = {}
+local MAX_REVISION_NETWORKS = 64
+
+local function touchRevisionNetwork(networkId)
+	for i = #_revisionOrder, 1, -1 do
+		if _revisionOrder[i] == networkId then table.remove(_revisionOrder, i) end
+	end
+	_revisionOrder[#_revisionOrder + 1] = networkId
+	if #_revisionOrder > MAX_REVISION_NETWORKS then
+		local oldest = table.remove(_revisionOrder, 1)
+		if oldest then
+			_lastAppliedRevision[oldest] = nil
+			_requiredSnapshotRevision[oldest] = nil
+		end
+	end
+end
 
 ---@param networkId string|nil
 ---@return number
@@ -33,6 +49,27 @@ local function markRevision(networkId, revision)
 		return
 	end
 	_lastAppliedRevision[networkId] = math.max(getAppliedRevision(networkId), revision)
+	touchRevisionNetwork(networkId)
+end
+
+function GlobalStorageSiK.TerminalSync.clearRevisionState(networkId)
+	if networkId then
+		_lastAppliedRevision[networkId] = nil
+		_requiredSnapshotRevision[networkId] = nil
+		for i = #_revisionOrder, 1, -1 do
+			if _revisionOrder[i] == networkId then table.remove(_revisionOrder, i) end
+		end
+		return
+	end
+	_lastAppliedRevision = {}
+	_requiredSnapshotRevision = {}
+	_revisionOrder = {}
+	_managedTransfer = nil
+	_pullDueTick = 0
+	if _tickInstalled and Events and Events.OnTick then
+		Events.OnTick.Remove(GlobalStorageSiK.TerminalSync.onTick)
+		_tickInstalled = false
+	end
 end
 
 ---@return string
@@ -127,6 +164,7 @@ function GlobalStorageSiK.TerminalSync.finishManagedTransfer(owner, searchQuery,
 	if managed.networkId and expectedRevision and uiVisible and sameNetwork then
 		_requiredSnapshotRevision[managed.networkId] = math.max(
 			_requiredSnapshotRevision[managed.networkId] or 0, expectedRevision)
+		touchRevisionNetwork(managed.networkId)
 	end
 	-- BUG REAL (2026-08-21): expectedRevision viene de operation.lastRevision,
 	-- que se rellena con inventoryRevision (sube en CADA transferencia). Antes

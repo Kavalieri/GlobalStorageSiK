@@ -10,6 +10,7 @@ require "GS_DepositSources"
 require "GS_WithdrawClient"
 require "GS_ContainerTargets"
 require "GS_I18n"
+require "GS_SiK_UI_EscapeStack"
 require "ISUI/ISPanel"
 
 GlobalStorageSiK.TerminalWithdrawDrag = {}
@@ -83,6 +84,11 @@ local function createPreview()
 	dragPreviewPanel = GSWithdrawDragPreview:new((getMouseX and getMouseX() or 0) + 14,
 		(getMouseY and getMouseY() or 0) + 14, 54, 54)
 	dragPreviewPanel:initialise()
+	local player = GlobalStorageSiK.NetClient.getPlayer()
+	dragPreviewPanel.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	GlobalStorageSiK.SiK_UI.EscapeStack.install(dragPreviewPanel, function()
+		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
+	end, GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TRANSIENT)
 	if dragPreviewPanel.javaObject and dragPreviewPanel.javaObject.setConsumeMouseEvents then
 		dragPreviewPanel.javaObject:setConsumeMouseEvents(false)
 	end

@@ -1,4 +1,6 @@
 {
+	"IGUI_GS_PunctuationEmDash": "—",
+	"IGUI_GS_PunctuationMiddleDot": "·",
 	"IGUI_GS_OpenTerminal": "Abrir Global Storage",
 	"IGUI_GS_TerminalTitle": "Global Storage SiK",
 	"IGUI_GS_TabHome": "Inicio",
@@ -472,6 +474,7 @@
 	"IGUI_GS_ReadReturnFailed": "No se pudo devolver el objeto a la red; permanece en tu inventario.",
 	"IGUI_GS_DetailType": "Tipo: {1}",
 	"IGUI_GS_DetailCategory": "Categoría: {1}",
+	"IGUI_GS_MultipleCategories": "Varias categorías",
 	"IGUI_GS_DetailWeight": "Peso unitario: {1} kg",
 	"IGUI_GS_DetailCount": "Cantidad en esta red: {1}",
 	"IGUI_GS_NetworkCountLine": "{1}: {2} en tu red",
@@ -759,6 +762,7 @@
 	"IGUI_GS_NetworkDefaultName": "Almacén global",
 	"IGUI_GS_NetworkFooter": "Red: {1}",
 	"IGUI_GS_NetworkDisplay": "{1} (id: {2})",
+	"IGUI_GS_Connected": "Conectado",
 	"IGUI_GS_RescanAll": "Reescanear todas las zonas",
 	"IGUI_GS_ScanProgress": "Escaneando zona {1}/{2}: {3}",
 	"IGUI_GS_ScanCancel": "Cancelar escaneo",

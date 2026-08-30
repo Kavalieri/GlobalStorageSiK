@@ -52,6 +52,13 @@ local function ensureScroll(networkPanel)
 		local h = math.max(160, networkPanel:getHeight())
 		local scroll = GlobalStorageSiK.TerminalScroll.createInteractive(networkPanel, 0, 0, w, h)
 		scroll:setVisible(true)
+		GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(scroll, function(changedScroll)
+			local currentUi = changedScroll._gsNetUi
+			if currentUi and GlobalStorageSiK.TerminalNetwork.layoutUi then
+				GlobalStorageSiK.TerminalNetwork.layoutUi(changedScroll, currentUi)
+				currentUi._lastInnerW = GlobalStorageSiK.TerminalScroll.contentWidth(changedScroll)
+			end
+		end)
 		networkPanel.tabScroll = scroll
 	end
 	local scroll = networkPanel.tabScroll

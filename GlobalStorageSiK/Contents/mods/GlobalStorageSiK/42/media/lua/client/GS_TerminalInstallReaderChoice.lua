@@ -28,6 +28,7 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalAccess"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 require "GS_Config"
 require "GS_Sandbox"
 
@@ -37,10 +38,11 @@ GlobalStorageSiK.TerminalInstallReaderChoice.instance = nil
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics()
 local PAD = 14
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 10
-local ENTRY_H = FONT_HGT_SMALL + 8
+local BTN_H = CONTROL_METRICS.buttonHeight
+local ENTRY_H = CONTROL_METRICS.inputHeight
 local PANEL_W = 480
 local SECTION_GAP = 16
 local NETWORK_INFO_LINE_COUNT = 8

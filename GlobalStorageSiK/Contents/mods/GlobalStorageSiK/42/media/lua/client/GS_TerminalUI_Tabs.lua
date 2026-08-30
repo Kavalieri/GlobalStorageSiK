@@ -17,6 +17,7 @@ require "GS_I18n"
 require "GS_Sandbox"
 
 require "GS_TerminalUI_TabRail"
+require "GS_SiK_UI_Metrics"
 
 
 
@@ -216,7 +217,7 @@ end
 
 function GlobalStorageSiK.TerminalTabs.measureRailWidth(terminal)
 
-	return GlobalStorageSiK.TerminalTabRail.measureWidth(terminal.tabDefs)
+	return GlobalStorageSiK.TerminalTabRail.measureWidth(terminal.tabDefs, terminal)
 
 end
 
@@ -330,14 +331,15 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	-- tenga energia. Diseño pendiente de remodelar mas adelante (ver
 	-- comentario del usuario) - por ahora reutiliza el resumen ya
 	-- existente, no crea una pantalla nueva.
+	local forceStatusTab = false
 	if (tabKey == "items" or tabKey == "addons")
 		and GlobalStorageSiK.Sandbox.requiresPower()
 		and terminal.terminalState and terminal.terminalState.powered == false then
 		tabKey = "config"
-		if terminal.configPanel then
-			terminal.configPanel.activeSubTab = "estado"
-		end
+		forceStatusTab = true
 	end
+	if terminal.ensureTabBuilt then terminal:ensureTabBuilt(tabKey) end
+	if forceStatusTab and terminal.configPanel then terminal.configPanel.activeSubTab = "estado" end
 
 	if not terminal.tabViews or not terminal.tabViews[tabKey] or not terminal.contentHost then
 
@@ -478,32 +480,11 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 
 	else
 
-		-- BUG REAL cerrado (2026-08-26, reportado con capturas: "la ventana
-		-- se pinta pequeña y hay texto que sobresale... creo que hereda
-		-- tamaños de la de bloqueo"): la ventana es un singleton compartido
-		-- entre modo bloqueo y modo completo (GS_TerminalUI_Blocked.lua/
-		-- GS_TerminalUI_Api.lua reutilizan la MISMA instancia) - el modo
-		-- bloqueo la crea mas pequeña a proposito (820-960px de ancho) que el
-		-- modo completo (900-1200px). Si la instancia se creo primero en modo
-		-- bloqueo (jugador sin terminal/red cerca) y luego pasa a modo
-		-- completo (ya con acceso real), esta funcion nunca habia
-		-- redimensionado la ventana - se quedaba con el tamaño pequeño del
-		-- bloqueo para siempre, con la interfaz completa (mas columnas,
-		-- riel de pestañas, cabeceras) intentando caber ahi y desbordando
-		-- texto - justo la norma de diseño prohibida de "texto que sobresale".
-		-- Se fuerza aqui el minimo ya usado por el redimensionado manual
-		-- (installMouseHandlers: minimumWidth/minimumHeight=900/720) antes de
-		-- activar ninguna pestaña, recentrada en pantalla igual que hace la
-		-- apertura inicial en modo completo (GS_TerminalUI_Api.lua).
-		if terminal.width < terminal.minimumWidth or terminal.height < terminal.minimumHeight then
-			local sw = getCore():getScreenWidth()
-			local sh = getCore():getScreenHeight()
-			local w = math.max(terminal.minimumWidth, math.min(1200, math.floor(sw * 0.85)))
-			local h = math.max(terminal.minimumHeight, math.min(1000, math.floor(sh * 0.90)))
-			terminal:setWidth(w)
-			terminal:setHeight(h)
-			terminal:setX(math.floor((sw - w) / 2))
-			terminal:setY(math.floor((sh - h) / 2))
+		-- Blocked y full son estados del mismo Shell. La transición solo limita
+		-- su geometría al viewport/perfil del jugador; nunca aplica otro tamaño
+		-- de ventana ni consulta la pantalla global.
+		if terminal.applyResponsiveBounds then
+			terminal:applyResponsiveBounds(terminal.x, terminal.y, terminal.width, terminal.height)
 		end
 
 		local tab = terminal.activeTabKey or "items"

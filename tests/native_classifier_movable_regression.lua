@@ -11,14 +11,19 @@ dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_N
 assert(classifier, "home classifier must register its block")
 
 local function movable(fullType)
-	return { getFullName = function() return fullType end }
+	return {
+		getFullName = function() return fullType end,
+		getItemType = function() return "base:moveable" end,
+		getWorldObjectSprite = function() return "fixtures_movable_01_0" end,
+	}
 end
 
 local function assertPath(fullType, expected)
 	local path, _, _, evidence = classifier(fullType, movable(fullType))
 	assert(path and path.l2 == "furnishing" and path.l3 == expected,
 		fullType .. " must expose an actionable furnishing route")
-	assert(evidence.primary.source == "name_movable_" .. expected, fullType .. " evidence")
+	local source = expected == "storage" and "script_movable_storage" or ("name_movable_" .. expected)
+	assert(evidence.primary.source == source, fullType .. " evidence")
 end
 
 assertPath("Base.Mov_BirchDrawers", "storage")

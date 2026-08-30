@@ -130,7 +130,13 @@ local function classifySurvival(fullType, si)
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
 	end
 	local displayCategory = U.displayCategoryLower(si)
-	if itemType == "base:literature" and U.hasAnyToken(tokens, { seed = true })
+	-- DEV32.4.3: en runtime Kahlua algunos ScriptItem generados no devolvieron
+	-- `base:literature` por getItemType aunque sus propiedades B42 sí eran
+	-- inequívocas: DisplayCategory Gardening/RecipeResource, nombre de bolsa de
+	-- semillas y receta de apertura. El ItemType no aporta discriminación extra
+	-- aquí; las tres señales restantes son estructurales y cubren también los
+	-- paquetes vacíos sin convertir una revista ordinaria en agricultura.
+	if U.hasAnyToken(tokens, { seed = true })
 		and U.hasAnyToken(tokens, { bag = true, packet = true })
 		and (displayCategory == "gardening" or displayCategory == "reciperesource") then
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {},

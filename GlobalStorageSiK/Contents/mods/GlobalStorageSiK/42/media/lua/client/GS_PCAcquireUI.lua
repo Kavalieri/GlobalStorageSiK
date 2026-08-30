@@ -13,6 +13,8 @@ require "GS_NetClient"
 require "GS_Sandbox"
 require "GS_PCAcquire"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_Modal"
 require "TimedActions/GS_AcquirePCAction"
 
 GlobalStorageSiK.PCAcquireUI = {}
@@ -23,8 +25,8 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 640
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("task")
+local PANEL_W = math.max(GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W, 640)
 
 GS_PCAcquireUI = ISPanel:derive("GS_PCAcquireUI")
 
@@ -96,9 +98,9 @@ function GS_PCAcquireUI:initialise()
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
 		self:destroy()
-	end, PAD)
+	end, { kind = "task", padding = PAD })
 	self:buildLayout()
 end
 
@@ -175,7 +177,8 @@ function GS_PCAcquireUI:buildLayout()
 	-- bloqueado de verdad mientras falte cualquier requisito, con el motivo
 	-- en el tooltip - la revalidacion en el momento del clic deja de hacer
 	-- falta porque un boton bloqueado no puede pulsarse.
-	self.craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, T("IGUI_GS_PCAcquireCraftBtn"), self, function()
+	self.craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW,
+		CONTROL_METRICS.buttonHeight, T("IGUI_GS_PCAcquireCraftBtn"), self, function()
 		if not self.player then return end
 		ISTimedActionQueue.add(GS_AcquirePCAction:new(self.player))
 		self:destroy()
@@ -184,17 +187,20 @@ function GS_PCAcquireUI:buildLayout()
 		self.craftBtn:setTooltip(T("IGUI_GS_CraftMissing"))
 	end
 	self:addChild(self.craftBtn)
-	y = y + BTN_H + pad
+	y = y + CONTROL_METRICS.buttonHeight + pad
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	-- Centrar verticalmente SOLO la primera vez (apertura inicial): refresh()
-	-- llama a buildLayout() cada vez que cambia el inventario (ej. al
-	-- terminar de craftear una pieza), y sin esta guarda la ventana volvia
-	-- a saltar al centro de la pantalla en cada refresco, perdiendo
-	-- cualquier posicion a la que el jugador la hubiera arrastrado.
-	if not self._positioned then
-		self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
+	-- fitContent resuelve el viewport una vez; los refrescos conservan la
+	-- posicion a la que el jugador haya arrastrado la ventana.
+	local previousX = self:getX()
+	local previousY = self:getY()
+	local wasPositioned = self._positioned == true
+	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
+		kind = "task", bottomPadding = 0,
+	})
+	if wasPositioned then
+		self:setX(previousX)
+		self:setY(previousY)
+	else
 		self._positioned = true
 	end
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
@@ -247,7 +253,6 @@ function GlobalStorageSiK.PCAcquireUI.show(player)
 	ui.player = player
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.centerModal(ui)
 	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
 	GlobalStorageSiK.PCAcquireUI.instance = ui
 end

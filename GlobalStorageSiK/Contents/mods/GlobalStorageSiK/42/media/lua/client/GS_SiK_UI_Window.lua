@@ -1,116 +1,202 @@
 --[[
-	GlobalStorageSiK - Modelos reutilizables de ventana SiK UI
-	Unifica modal de tarea, confirmacion y editor grande redimensionable.
+	GlobalStorageSiK - Responsive top-level SiK UI windows.
+	Geometry is resolved against the local player's safe viewport.
 ]]
 
-require "ISUI/ISModalDialog"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_EscapeStack"
+
+if not GlobalStorageSiK.SiK_UI.Metrics then require "GS_SiK_UI_Metrics" end
+if not GlobalStorageSiK.SiK_UI.Viewport then pcall(require, "GS_SiK_UI_Viewport") end
 
 local SiK_UI = GlobalStorageSiK.SiK_UI
-SiK_UI.Modal = SiK_UI.Modal or {}
 SiK_UI.Window = SiK_UI.Window or {}
+SiK_UI.Modal = SiK_UI.Modal or {}
 
-local Modal = SiK_UI.Modal
 local Window = SiK_UI.Window
 local rememberedGeometry = {}
 
-local function installEscape(panel, onClose)
-	if not panel or panel._sikEscapeInstalled then return end
-	panel._sikEscapeInstalled = true
-	local previous = panel.onKeyRelease
-	panel.onKeyRelease = function(self, key)
-		local escapeKey = Keyboard and Keyboard.KEY_ESCAPE or 1
-		if key == escapeKey then
-			onClose(self)
-			return true
-		end
-		if previous then return previous(self, key) end
-		return false
+local function clamp(value, low, high)
+	if value < low then return low end
+	if value > high then return high end
+	return value
+end
+
+local function copyRect(rect)
+	return { x = rect.x, y = rect.y, w = rect.w, h = rect.h,
+		profile = rect.profile, playerNum = rect.playerNum }
+end
+
+local function resolveViewport(viewport, options)
+	if type(viewport) == "table" then return viewport end
+	local playerNum = options and options.playerNum or 0
+	if SiK_UI.Viewport and SiK_UI.Viewport.resolve then
+		return SiK_UI.Viewport.resolve(playerNum, options and options.environment)
 	end
-end
-Window.installEscape = installEscape
-
---- Aplica el modelo de modal mediano de una sola tarea.
-function Modal.apply(panel, onClose, options)
-	if not panel then return panel end
-	options = options or {}
-	local close = onClose or function(target)
-		if target.destroy then target:destroy()
-		elseif target.setVisible then target:setVisible(false) end
-	end
-	panel.headerHeight = options.headerHeight or panel.headerHeight
-	SiK_UI.setupModalPanel(panel, function() close(panel) end, options.padding)
-	installEscape(panel, close)
-	return panel
+	local width = getCore and getCore():getScreenWidth() or 1280
+	local height = getCore and getCore():getScreenHeight() or 720
+	return { x = 0, y = 0, w = width, h = height, playerNum = playerNum,
+		profile = "standard" }
 end
 
---- Fija el alto desde el último Y real y centra solo después de dimensionar.
-function Modal.fitContent(panel, contentBottomY, options)
-	if not panel then return panel end
-	options = options or {}
-	local bottomPadding = tonumber(options.bottomPadding) or panel.padding or 14
-	panel:setHeight(math.max(tonumber(options.minHeight) or 80,
-		math.floor((tonumber(contentBottomY) or 0) + bottomPadding)))
-	SiK_UI.layoutModalFrame(panel, panel.padding)
-	if options.center ~= false then SiK_UI.centerModal(panel) end
-	return panel
-end
-
---- Confirmacion Si/No coherente, dimensionada a partir del texto envuelto.
-function Modal.confirm(message, onYes, options)
-	options = options or {}
-	local width = tonumber(options.width) or SiK_UI.STANDARD_MODAL_W
-	local pad = tonumber(options.padding) or 18
-	local font = options.font or UIFont.Small
-	local lines = SiK_UI.wrapTextLines(tostring(message or ""), width - pad * 2, font)
-	local lineH = getTextManager():getFontHeight(font) + 2
-	local height = math.max(tonumber(options.minHeight) or 140, 104 + #lines * lineH)
-	local function onResult(_, button)
-		if button and button.internal == "YES" then
-			if onYes then onYes() end
-		elseif options.onNo then
-			options.onNo()
-		end
-	end
-	local modal = ISModalDialog:new(0, 0, width, height, message, true, nil, onResult, nil)
-	modal:initialise()
-	modal:addToUIManager()
-	SiK_UI.centerModal(modal)
-	if modal.setAlwaysOnTop then modal:setAlwaysOnTop(true) end
-	if modal.bringToTop then modal:bringToTop() end
-	return modal
-end
-
---- Geometria del modelo grande redimensionable. `key` activa memoria local
---- opcional; nunca se transmite al servidor ni se mezcla entre ventanas.
-function Window.editorGeometry(terminal, key, options)
-	options = options or {}
-	local saved = key and rememberedGeometry[key] or nil
-	if saved then return saved.x, saved.y, saved.w, saved.h end
-	local w, h = SiK_UI.resolveEditorWindowSize()
-	w = tonumber(options.width) or w
-	h = tonumber(options.height) or h
-	local x, y = SiK_UI.resolveEditorWindowPos(terminal, w, h)
-	return x, y, w, h
-end
-
-function Window.remember(panel, key)
-	if not panel or not key then return end
-	rememberedGeometry[key] = {
-		x = panel:getX(), y = panel:getY(), w = panel:getWidth(), h = panel:getHeight(),
+local function profileSpec(profileName)
+	local profile = SiK_UI.Metrics.profile(profileName)
+	local window = profile.window
+	return {
+		preferredW = window.preferredWidth, preferredH = window.preferredHeight,
+		minW = window.minWidth, minH = window.minHeight,
+		maxW = window.maxWidth, maxH = window.maxHeight,
 	}
 end
 
-function Window.applyEditor(panel, onClose, key, options)
+--- Pure responsive geometry. Content minima degrade inside small viewports.
+function Window.resolveProfile(profileName, viewport, options)
 	options = options or {}
-	Modal.apply(panel, function(target)
-		Window.remember(target, key)
-		if onClose then onClose(target)
-		elseif target.destroy then target:destroy()
-		else target:setVisible(false) end
-	end, options)
-	panel.resizable = true
-	panel.minimumWidth = tonumber(options.minWidth) or SiK_UI.EDITOR_MIN_W
-	panel.minimumHeight = tonumber(options.minHeight) or SiK_UI.EDITOR_MIN_H
+	viewport = resolveViewport(viewport, options)
+	profileName = profileName or viewport.profile or "standard"
+	local spec = profileSpec(profileName)
+	local availableW = math.max(0, math.floor(tonumber(viewport.w) or 0))
+	local availableH = math.max(0, math.floor(tonumber(viewport.h) or 0))
+	local minW = tonumber(options.minWidth or options.contentMinW) or spec.minW
+	local minH = tonumber(options.minHeight or options.contentMinH) or spec.minH
+	local maxW = math.min(tonumber(options.maxWidth) or spec.maxW, availableW)
+	local maxH = math.min(tonumber(options.maxHeight) or spec.maxH, availableH)
+	local wantedW = tonumber(options.width) or math.max(spec.preferredW, minW)
+	local wantedH = tonumber(options.height) or math.max(spec.preferredH, minH)
+	local effectiveMinW = math.min(minW, maxW)
+	local effectiveMinH = math.min(minH, maxH)
+	local width = clamp(math.floor(wantedW), effectiveMinW, maxW)
+	local height = clamp(math.floor(wantedH), effectiveMinH, maxH)
+	local left = math.floor(tonumber(viewport.x) or 0)
+	local top = math.floor(tonumber(viewport.y) or 0)
+	local x = tonumber(options.x)
+	local y = tonumber(options.y)
+	if x == nil then x = left + math.floor((availableW - width) / 2) end
+	if y == nil then y = top + math.floor((availableH - height) / 2) end
+	x = clamp(math.floor(x), left, left + availableW - width)
+	y = clamp(math.floor(y), top, top + availableH - height)
+	return { x = x, y = y, w = width, h = height, profile = profileName,
+		playerNum = viewport.playerNum or options.playerNum or 0 }
+end
+
+function Window.safeRect(playerNum, environment)
+	return resolveViewport(nil, { playerNum = playerNum, environment = environment })
+end
+
+function Window.clampRect(rect, viewport)
+	viewport = resolveViewport(viewport, { playerNum = rect and rect.playerNum or 0 })
+	rect = rect or {}
+	return Window.resolveProfile(rect.profile or viewport.profile, viewport, {
+		x = rect.x, y = rect.y, width = rect.w, height = rect.h,
+		playerNum = rect.playerNum, minWidth = 0, minHeight = 0,
+	})
+end
+
+local function geometryKey(key, playerNum)
+	if not key then return nil end
+	return tostring(playerNum or 0) .. ":" .. tostring(key)
+end
+
+function Window.remember(panel, key, playerNum)
+	if not panel or not key then return end
+	local memoryKey = geometryKey(key, playerNum or panel.playerNum)
+	rememberedGeometry[memoryKey] = {
+		x = panel:getX(), y = panel:getY(), w = panel:getWidth(),
+		h = panel:getHeight(), profile = panel._sikWindowProfile or "standard",
+		playerNum = playerNum or panel.playerNum or 0,
+	}
+end
+
+function Window.recall(key, playerNum, viewport)
+	local saved = rememberedGeometry[geometryKey(key, playerNum)]
+	if not saved then return nil end
+	return Window.clampRect(copyRect(saved), viewport)
+end
+
+function Window.forget(key, playerNum)
+	if key then rememberedGeometry[geometryKey(key, playerNum)] = nil end
+end
+
+function Window.installEscape(panel, onClose, priority)
+	if not panel then return end
+	SiK_UI.EscapeStack.install(panel, onClose, priority)
+end
+
+function Window.layoutHeader(panel, options)
+	if not panel then return end
+	options = options or {}
+	panel.padding = tonumber(options.padding) or panel.padding or 14
+	panel.headerHeight = tonumber(options.headerHeight) or panel.headerHeight
+	SiK_UI.layoutModalFrame(panel, panel.padding)
+end
+
+local function defaultClose(target)
+	if target.destroy then target:destroy()
+	elseif target.setVisible then target:setVisible(false) end
+end
+
+--- Shared header, close, drag, resize, viewport and geometry-memory path.
+function Window.apply(panel, onClose, key, options)
+	if not panel then return panel end
+	options = options or {}
+	local playerNum = options.playerNum or panel.playerNum or 0
+	local close = function(target)
+		Window.remember(target, key, playerNum)
+		if onClose then onClose(target) else defaultClose(target) end
+	end
+	panel._sikWindowProfile = options.profile or panel._sikWindowProfile or "standard"
+	panel.playerNum = playerNum
+	panel.padding = tonumber(options.padding) or panel.padding or 14
+	SiK_UI.setupModalPanel(panel, function() close(panel) end, panel.padding)
+	Window.installEscape(panel, close, options.escapePriority)
+	panel.resizable = options.resizable ~= false
+	local spec = profileSpec(panel._sikWindowProfile)
+	panel.minimumWidth = tonumber(options.minWidth) or spec.minW
+	panel.minimumHeight = tonumber(options.minHeight) or spec.minH
+	panel.maximumWidth = tonumber(options.maxWidth) or spec.maxW
+	panel.maximumHeight = tonumber(options.maxHeight) or spec.maxH
+	local priorResize = panel.onResize
+	panel.onResize = function(self, ...)
+		Window.layoutHeader(self, options)
+		if priorResize then priorResize(self, ...) end
+		if options.onResize then options.onResize(self, ...) end
+	end
+	Window.layoutHeader(panel, options)
 	return panel
 end
+
+--- Legacy editor geometry remains stable until each consumer is migrated.
+function Window.editorGeometry(terminal, key, options)
+	options = options or {}
+	local playerNum = options.playerNum or 0
+	local saved = Window.recall(key, playerNum)
+	if saved then return saved.x, saved.y, saved.w, saved.h end
+	local width, height = SiK_UI.resolveEditorWindowSize()
+	width = tonumber(options.width) or width
+	height = tonumber(options.height) or height
+	local x, y = SiK_UI.resolveEditorWindowPos(terminal, width, height)
+	return x, y, width, height
+end
+
+--- Compatibility name; delegates to the real shared Window path.
+function Window.applyEditor(panel, onClose, key, options)
+	options = options or {}
+	options.profile = options.profile or "editor"
+	if options.minWidth == nil then options.minWidth = SiK_UI.EDITOR_MIN_W end
+	if options.minHeight == nil then options.minHeight = SiK_UI.EDITOR_MIN_H end
+	return Window.apply(panel, onClose, key, options)
+end
+
+-- Existing consumers require Window and call Modal directly. Load the new
+-- module lazily when that compatibility route is exercised.
+local function modalProxy(name)
+	return function(...)
+		require "GS_SiK_UI_Modal"
+		return SiK_UI.Modal[name](...)
+	end
+end
+if not SiK_UI.Modal.apply then SiK_UI.Modal.apply = modalProxy("apply") end
+if not SiK_UI.Modal.fitContent then SiK_UI.Modal.fitContent = modalProxy("fitContent") end
+if not SiK_UI.Modal.confirm then SiK_UI.Modal.confirm = modalProxy("confirm") end
+
+return Window

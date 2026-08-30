@@ -71,7 +71,9 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- DEV32.3: incrementada a "8" al incorporar ocho anclas vanilla exactas
 -- (materiales y soplete). Dos ejecuciones con la misma versión comparan el
 -- mismo contrato, nunca una lista de casos distinta.
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "11"
+-- DEV32.4.3: v13 alinea mochilas equipables sin BodyLocation con la señal
+-- estructural CanBeEquipped de B42. No reutilizar v12 con otro contenido.
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "13"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 
@@ -2086,28 +2088,28 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{
 		caseId = "clothing_backpack_bag_alicepack", fullType = "Base.Bag_ALICEpack", block = "clothing_protection", presence = "required",
 		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
-		minConfidence = 30, expectedSource = "name_clothing_backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
 		expectFacets = { containerCapacity = true },
 		note = "CRITICO dev27 (decision de sistemas, hallazgo original dev12): BodyLocation NO resuelve sobre el ScriptItem estatico para este ALICEpack - reclamado por nombre (confianza 30), identidad primaria movida de Contenedores a Ropa/Equipamiento.",
 	},
 	{
 		caseId = "clothing_backpack_bag_alicepack_army", fullType = "Base.Bag_ALICEpack_Army", block = "clothing_protection", presence = "required",
 		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
-		minConfidence = 30, expectedSource = "name_clothing_backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
 		expectFacets = { containerCapacity = true },
 		note = "CRITICO dev27 (decision de sistemas, hallazgo original dev12): BodyLocation NO resuelve sobre el ScriptItem estatico para este ALICEpack - reclamado por nombre (confianza 30), identidad primaria movida de Contenedores a Ropa/Equipamiento.",
 	},
 	{
 		caseId = "clothing_backpack_bag_alicepack_desertcamo", fullType = "Base.Bag_ALICEpack_DesertCamo", block = "clothing_protection", presence = "required",
 		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
-		minConfidence = 30, expectedSource = "name_clothing_backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
 		expectFacets = { containerCapacity = true },
 		note = "CRITICO dev27 (decision de sistemas, hallazgo original dev12): BodyLocation NO resuelve sobre el ScriptItem estatico para este ALICEpack - reclamado por nombre (confianza 30), identidad primaria movida de Contenedores a Ropa/Equipamiento.",
 	},
 	{
 		caseId = "clothing_backpack_bag_duffelbag", fullType = "Base.Bag_DuffelBag", block = "clothing_protection", presence = "required",
 		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
-		minConfidence = 30, expectedSource = "name_clothing_backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
 		expectFacets = { containerCapacity = true },
 		note = "Mochila/bolsa vestible por nombre - identidad primaria Ropa/Equipamiento (dev27), capacidad conservada como faceta.",
 	},
@@ -2270,6 +2272,13 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "component FluidContainer confirmado real (media/scripts/generated/items/normal.txt) - señal estructural oficial, no heuristica de nombre.",
 	},
 	{
+		caseId = "containers_liquid_jerrycan", fullType = "Base.JerryCan", block = "containers", presence = "required",
+		expectedL1 = "containers", expectedL2 = "liquid", expectedL3 = false,
+		minConfidence = 100, expectedSource = "script_fluid_container_component",
+		expectFacets = { containerForm = "liquid" },
+		note = "Bidón de 20 L B42. Vacío conserva forma de recipiente; lleno adopta dinámicamente la ruta del fluido sin perder familia ni shape exacto.",
+	},
+	{
 		caseId = "containers_generic_cookiejar", fullType = "Base.CookieJar", block = "containers", presence = "required",
 		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
 		minConfidence = 30, expectedSource = "name_containers_portable",
@@ -2321,11 +2330,25 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "Token especial (wallet/purse) confirmado en container.txt, sin BodyLocation (no vestible), ItemType=base:container.",
 	},
 	{
-		caseId = "containers_portable_bag_bighikingbag", fullType = "Base.Bag_BigHikingBag", block = "containers", presence = "required",
-		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_containers_portable",
-		expectFacets = { containerForm = "bag_or_box" },
-		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
+		caseId = "clothing_equipment_bag_bighikingbag", fullType = "Base.Bag_BigHikingBag", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "B42: ItemType=base:container, DisplayCategory=Bag y CanBeEquipped=base:back. Es equipamiento vestible aunque BodyLocation esté vacío.",
+	},
+	{
+		caseId = "clothing_equipment_hydration_backpack", fullType = "Base.Bag_HydrationBackpack", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "Mochila de hidratación B42: Bag equipable a la espalda; su depósito de 2 L es faceta dinámica, no la convierte en botella.",
+	},
+	{
+		caseId = "clothing_equipment_hydration_backpack_camo", fullType = "Base.Bag_HydrationBackpack_Camo", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "Variante camuflada B42: Bag equipable con depósito de 3 L; misma familia vestible, shape/capacidad exactos por instancia.",
 	},
 	{
 		caseId = "containers_portable_bag_birthdaybasket", fullType = "Base.Bag_BirthdayBasket", block = "containers", presence = "required",
@@ -2607,25 +2630,25 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
 	},
 	{
-		caseId = "containers_portable_bag_schoolbag", fullType = "Base.Bag_Schoolbag", block = "containers", presence = "required",
-		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_containers_portable",
-		expectFacets = { containerForm = "bag_or_box" },
-		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
+		caseId = "clothing_equipment_bag_schoolbag", fullType = "Base.Bag_Schoolbag", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "B42: contenedor Bag con CanBeEquipped=base:back; la capacidad queda como faceta, no identidad primaria de contenedor portátil.",
 	},
 	{
-		caseId = "containers_portable_bag_schoolbag_medical", fullType = "Base.Bag_Schoolbag_Medical", block = "containers", presence = "required",
-		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_containers_portable",
-		expectFacets = { containerForm = "bag_or_box" },
-		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
+		caseId = "clothing_equipment_bag_schoolbag_medical", fullType = "Base.Bag_Schoolbag_Medical", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "Variante vestible de Schoolbag: estructura de equipamiento gana; el sufijo de contenido no cambia su forma.",
 	},
 	{
-		caseId = "containers_portable_bag_schoolbag_travel", fullType = "Base.Bag_Schoolbag_Travel", block = "containers", presence = "required",
-		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
-		minConfidence = 30, expectedSource = "name_containers_portable",
-		expectFacets = { containerForm = "bag_or_box" },
-		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation, sin tag AMMO_CASE ni WeaponCategory - descartado colisiones con Combate/Ropa.",
+		caseId = "clothing_equipment_bag_schoolbag_travel", fullType = "Base.Bag_Schoolbag_Travel", block = "clothing_protection", presence = "required",
+		expectedL1 = "clothing_protection", expectedL2 = "equipment", expectedL3 = "backpack",
+		minConfidence = 100, expectedSource = "script_equippable_container",
+		expectFacets = { containerCapacity = true },
+		note = "Variante vestible de Schoolbag: estructura de equipamiento gana; el sufijo de contenido no cambia su forma.",
 	},
 	{
 		caseId = "containers_portable_bag_sheriff", fullType = "Base.Bag_Sheriff", block = "containers", presence = "required",
@@ -2888,10 +2911,11 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		note = "Token portable (bag/box/case/...) confirmado en container.txt, sin BodyLocation ni tag AMMO_CASE/firearmloot que sugiera identidad de Combate.",
 	},
 	{
-		caseId = "containers_portable_cooler_beer", fullType = "Base.Cooler_Beer", block = "food_drink", presence = "required",
-		expectedL1 = "food_drink", expectedL2 = "non_perishable", expectedL3 = "beverage",
-		minConfidence = 30, expectedSource = "name_food_beverage",
-		note = "Nevera llena definida por su contenido: cerveza; no exige faceta de recipiente.",
+		caseId = "containers_portable_cooler_beer", fullType = "Base.Cooler_Beer", block = "containers", presence = "required",
+		expectedL1 = "containers", expectedL2 = "portable", expectedL3 = false,
+		minConfidence = 100, expectedSource = "script_container_structure",
+		expectFacets = { containerForm = "bag_or_box" },
+		note = "B42 declara ItemType=base:container, DisplayCategory=Container y Capacity=12. El sufijo técnico no prueba contenido actual; la forma estructural permanece tras vaciarlo.",
 	},
 	{
 		caseId = "containers_portable_dicebag", fullType = "Base.DiceBag", block = "home_leisure_collection", presence = "required",

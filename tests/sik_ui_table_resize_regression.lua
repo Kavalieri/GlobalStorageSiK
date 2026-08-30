@@ -2,7 +2,9 @@
 -- Run from GlobalStorageSiK-Repo: lua51.exe tests/sik_ui_table_resize_regression.lua
 
 package.loaded["GS_SiK_UI_Core"] = true
+package.loaded["GS_SiK_UI_Metrics"] = true
 package.loaded["GS_TerminalUI_Scroll"] = true
+package.loaded["GS_SiK_UI_List"] = true
 
 UIFont = { Small = "Small" }
 function getTextManager()
@@ -16,7 +18,12 @@ ISPanel = {
 	onMouseUp = function() return false end,
 }
 GlobalStorageSiK = {
-	SiK_UI = { Table = {} },
+	SiK_UI = { Metrics = {
+		tokens = function()
+			return { controlVerticalPadding = 10, tableHeaderVerticalPadding = 10,
+				tableColumnGap = 8, tableCellPadding = 6 }
+		end,
+	}, List = {}, Table = {} },
 	I18n = { text = function(key) return key end },
 }
 

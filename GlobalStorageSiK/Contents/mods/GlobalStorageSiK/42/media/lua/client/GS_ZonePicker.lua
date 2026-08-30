@@ -10,6 +10,7 @@
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_WorldHighlight"
+require "GS_SiK_UI_EscapeStack"
 
 GlobalStorageSiK.ZonePicker = GlobalStorageSiK.ZonePicker or {}
 
@@ -310,6 +311,13 @@ local function createOverlay()
 	end
 
 	overlay:initialise()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer() or nil
+	overlay.playerNum = terminalRef and terminalRef.playerNum
+		or (player and player.getPlayerNum and player:getPlayerNum()) or 0
+	GlobalStorageSiK.SiK_UI.EscapeStack.install(overlay, function()
+		GlobalStorageSiK.ZonePicker.cancel()
+	end, GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TRANSIENT)
 	overlay:addToUIManager()
 	overlay:bringToTop()
 end

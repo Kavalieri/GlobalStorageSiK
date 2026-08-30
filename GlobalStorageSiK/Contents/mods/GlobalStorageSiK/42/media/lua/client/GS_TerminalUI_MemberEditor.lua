@@ -29,6 +29,8 @@ require "GS_NetClient"
 require "GS_Permissions"
 require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Window"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_Modal"
 
 GlobalStorageSiK.TerminalMemberEditor = {}
 GlobalStorageSiK.TerminalMemberEditor.instance = nil
@@ -38,8 +40,7 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local LINE_GAP = 6
-local BTN_H = FONT_HGT_SMALL + 10
-local ENTRY_H = FONT_HGT_SMALL + 8
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("compact")
 local PANEL_W = GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W
 
 GS_MemberEditorUI = ISPanel:derive("GS_MemberEditorUI")
@@ -81,9 +82,9 @@ function GS_MemberEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
+	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
 		self:destroy()
-	end, PAD)
+	end, { kind = "compact", padding = PAD, resizable = false })
 	self:buildLayout()
 end
 
@@ -283,23 +284,25 @@ function GS_MemberEditorUI:buildLayout()
 
 			local halfW = math.floor((textW - 6) / 2)
 			self.selectAllZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad, y, halfW, BTN_H, T("IGUI_GS_MemberZoneSelectAll"), self, function()
+				pad, y, halfW, CONTROL_METRICS.buttonHeight,
+				T("IGUI_GS_MemberZoneSelectAll"), self, function()
 					self:setAllZonesAllowed(true)
 				end)
 			self:addChild(self.selectAllZonesBtn)
 			self.deselectAllZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad + halfW + 6, y, textW - halfW - 6, BTN_H,
+				pad + halfW + 6, y, textW - halfW - 6, CONTROL_METRICS.buttonHeight,
 				T("IGUI_GS_MemberZoneDeselectAll"), self, function()
 					self:setAllZonesAllowed(false)
 				end)
 			self:addChild(self.deselectAllZonesBtn)
-			y = y + BTN_H + 5
+			y = y + CONTROL_METRICS.buttonHeight + 5
 			self.saveZonesBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad, y, textW, BTN_H, T("IGUI_GS_MemberZoneSave"), self, function()
+				pad, y, textW, CONTROL_METRICS.buttonHeight,
+				T("IGUI_GS_MemberZoneSave"), self, function()
 					self:onSaveZoneAccess()
 				end)
 			self:addChild(self.saveZonesBtn)
-			y = y + BTN_H + LINE_GAP + 8
+			y = y + CONTROL_METRICS.buttonHeight + LINE_GAP + 8
 		end
 	end
 
@@ -314,7 +317,8 @@ function GS_MemberEditorUI:buildLayout()
 		y = y + FONT_HGT_SMALL + 4
 
 		local applyW = 110
-		self.roleCombo = ISComboBox:new(pad, y, textW - applyW - 6, ENTRY_H, self, nil)
+		self.roleCombo = ISComboBox:new(pad, y, textW - applyW - 6,
+			CONTROL_METRICS.inputHeight, self, nil)
 		self.roleCombo:initialise()
 		GlobalStorageSiK.SiK_UI.styleComboBox(self.roleCombo)
 		self._roleOptions = { "member", "admin" }
@@ -324,11 +328,12 @@ function GS_MemberEditorUI:buildLayout()
 		self:addChild(self.roleCombo)
 
 		self.applyRoleBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad + textW - applyW, y, applyW, ENTRY_H, T("IGUI_GS_MemberEditorApplyRoleBtn"), self, function()
+			pad + textW - applyW, y, applyW, CONTROL_METRICS.inputHeight,
+			T("IGUI_GS_MemberEditorApplyRoleBtn"), self, function()
 				self:onApplyRole()
 			end)
 		self:addChild(self.applyRoleBtn)
-		y = y + ENTRY_H + LINE_GAP + 8
+		y = y + CONTROL_METRICS.inputHeight + LINE_GAP + 8
 	end
 
 	-- ── Transferencia de propiedad (solo owner, sobre un usuario que no
@@ -336,11 +341,12 @@ function GS_MemberEditorUI:buildLayout()
 	local canTransfer = isOwnerViewer and not self.isSelf and data.kind == "user"
 	if canTransfer then
 		self.transferBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorTransferBtn", data.displayName or data.name or "?"), self, function()
+			pad, y, textW, CONTROL_METRICS.buttonHeight,
+			T("IGUI_GS_MemberEditorTransferBtn", data.displayName or data.name or "?"), self, function()
 				self:onTransferOwnership(true)
 			end)
 		self:addChild(self.transferBtn)
-		y = y + BTN_H + LINE_GAP
+		y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 	end
 
 	-- ── Quitar acceso (owner sobre cualquiera menos si mismo/dueño; admin
@@ -355,11 +361,12 @@ function GS_MemberEditorUI:buildLayout()
 	end
 	if canRemove then
 		self.removeBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorRemoveBtn"), self, function()
+			pad, y, textW, CONTROL_METRICS.buttonHeight,
+			T("IGUI_GS_MemberEditorRemoveBtn"), self, function()
 				self:onRemoveAccess()
 			end)
 		self:addChild(self.removeBtn)
-		y = y + BTN_H + LINE_GAP
+		y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 	end
 
 	-- ── Abandonar red (solo en la propia fila, cualquier rol - el owner
@@ -367,12 +374,13 @@ function GS_MemberEditorUI:buildLayout()
 	local canLeave = self.isSelf and data.kind ~= "faction"
 	if canLeave then
 		self.leaveBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_MemberEditorLeaveBtn"), self, function()
+			pad, y, textW, CONTROL_METRICS.buttonHeight,
+			T("IGUI_GS_MemberEditorLeaveBtn"), self, function()
 				self:onLeaveNetwork()
 			end)
 		self.leaveBtn.textColor = { r = pal.statusDanger[1], g = pal.statusDanger[2], b = pal.statusDanger[3] }
 		self:addChild(self.leaveBtn)
-		y = y + BTN_H + LINE_GAP
+		y = y + CONTROL_METRICS.buttonHeight + LINE_GAP
 	end
 
 	if not canManageZones and not canChangeRole and not canTransfer and not canRemove and not canLeave then
@@ -381,9 +389,9 @@ function GS_MemberEditorUI:buildLayout()
 	end
 
 	y = y + pad
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	GlobalStorageSiK.SiK_UI.centerModal(self)
+	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
+		kind = "compact", bottomPadding = 0,
+	})
 end
 
 --- Abre (o reemplaza) el editor de un miembro concreto.
@@ -426,7 +434,7 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 
 	-- Posicion/alto provisionales - buildLayout() recalcula el alto real
 	-- segun el contenido (numero de lineas envueltas, botones visibles) y
-	-- se re-centra el mismo con SiK_UI.centerModal al final.
+	-- Modal.fitContent lo ajusta al viewport despues del ultimo control.
 	local ui = GS_MemberEditorUI:new(0, 0, PANEL_W, 100)
 	ui.terminal = terminal
 	ui.data = data

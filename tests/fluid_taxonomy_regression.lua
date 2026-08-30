@@ -9,23 +9,28 @@ FluidCategory = { Fuel = "fuel", Beverage = "beverage", Water = "water" }
 GlobalStorageSiK = {}
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_FluidTaxonomy.lua")
 
-local function item(empty, category, fluidType)
+local function item(amount, capacity, category, fluidType)
 	local fluid = {
-		isEmpty = function() return empty end,
+		isEmpty = function() return amount <= 0 end,
 		isCategory = function(_, value) return value == category end,
-		getAmount = function() return empty and 0 or 1 end,
+		getAmount = function() return amount end,
+		getCapacity = function() return capacity end,
 		getPrimaryFluid = function()
-			return empty and nil or { getFluidTypeString = function() return fluidType end }
+			return amount <= 0 and nil or { getFluidTypeString = function() return fluidType end }
 		end,
 		isMixture = function() return false end,
 	}
 	return { getFluidContainer = function() return fluid end }
 end
 
-local path = GlobalStorageSiK.FluidTaxonomy.resolve(item(true, nil, nil))
+local path, signature = GlobalStorageSiK.FluidTaxonomy.resolve(item(0, 10, nil, nil))
 assertPath(path, "containers", "liquid", "empty", "empty")
-path = GlobalStorageSiK.FluidTaxonomy.resolve(item(false, FluidCategory.Fuel, "Gasoline"))
+path, signature = GlobalStorageSiK.FluidTaxonomy.resolve(item(0.1, 10, nil, "Petrol"))
 assertPath(path, "vehicles", "consumable", "fuel", "fuel")
-path = GlobalStorageSiK.FluidTaxonomy.resolve(item(false, FluidCategory.Water, "Water"))
+assert(signature and signature:find("fluid:petrol;", 1, true) == 1,
+	"real fluidType classifies without FluidCategory")
+local _, sameSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item(19, 20, FluidCategory.Fuel, "Petrol"))
+assert(sameSignature == signature, "amount and capacity do not alter aggregate identity")
+path = GlobalStorageSiK.FluidTaxonomy.resolve(item(0.01, 8, nil, "Water"))
 assertPath(path, "food_drink", "non_perishable", "water", "water")
 print("fluid_taxonomy_regression: OK")

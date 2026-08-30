@@ -115,7 +115,9 @@ end
 --- Ancho comun de la barra de desplazamiento vertical.
 ---@return number
 function GlobalStorageSiK.SiK_UI.scrollBarWidth()
-	return math.floor(FONT_HGT_SMALL * 0.6)
+	local metrics = GlobalStorageSiK.SiK_UI.Metrics
+	if metrics and metrics.tokens then return metrics.tokens().scrollBarWidth end
+	return 14
 end
 
 --- Ancho recomendado para boton SiK UI segun texto.
@@ -1067,24 +1069,11 @@ function GlobalStorageSiK.SiK_UI.renderHeader(panel)
 	panel:drawText(title, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
 	panel:drawText(title, textX, titleY, 1, 1, 1, 1, font)
 	local titleW = tm:MeasureStringX(font, title)
-	local sep = " - "
-	local sepX = textX + titleW
-	panel:drawText(sep, sepX, titleY, 0.5, 0.55, 0.6, 1, font)
-	panel:drawText(netName, sepX + tm:MeasureStringX(font, sep), titleY, 0.72, 0.82, 0.92, 1, font)
-
-	-- Version del Core, discreta, junto al boton cerrar - casi inapreciable
-	-- a proposito (pedido explicito: no debe destacar, ocultar nada ni
-	-- desplazar el resto de la cabecera). Una sola fuente de verdad
-	-- (GS_Config.MOD_VERSION, ya sincronizada a mano con mod.info en cada
-	-- release, ver CLAUDE.md), no un numero duplicado aparte.
-	local verText = "v" .. tostring(GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION or "?")
-	local verFont = UIFont.Small
-	local verW = tm:MeasureStringX(verFont, verText)
-	local closeW = (panel.closeBtn and panel.closeBtn.width) or 24
-	local verX = panel.width - pad - closeW - 10 - verW
-	local verY = math.floor((panel.headerHeight - tm:getFontHeight(verFont)) / 2)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	panel:drawText(verText, verX, verY, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.55, verFont)
+	local contextFont = UIFont.Small
+	local contextY = math.floor((panel.headerHeight - tm:getFontHeight(contextFont)) / 2)
+	panel:drawText(netName, textX + titleW + 8, contextY,
+		pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, contextFont)
 end
 
 --- Dibuja barra de estado inferior en pestaña Red.
@@ -1095,17 +1084,32 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 		return
 	end
 	local y = panel.height - panel.statusFooterHeight
-	panel:drawRect(0, y, panel.width, panel.statusFooterHeight, 0.85, 0.08, 0.08, 0.08)
-	panel:drawRect(0, y, panel.width, 1, 0.7, 0.28, 0.28, 0.28)
-	local networkId = state and state.networkId or "—"
-	local netName = state and state.networkName or ""
-	local text
-	if netName ~= "" and networkId ~= "—" then
-		text = T("IGUI_GS_NetworkDisplay", netName, networkId)
-	else
-		text = T("IGUI_GS_NetworkIdInternal", networkId)
+	local footerX = 0
+	if panel.accessMode ~= "blocked" and panel.tabRail and panel.tabRail.isVisible
+		and panel.tabRail:isVisible() then
+		footerX = panel.tabRail.width or 0
 	end
-	panel:drawText(text, panel.padding + 4, y + 5, 0.55, 0.6, 0.65, 1, UIFont.Small)
+	local footerW = math.max(0, panel.width - footerX)
+	panel:drawRect(footerX, y, footerW, panel.statusFooterHeight, 0.85, 0.08, 0.08, 0.08)
+	panel:drawRect(footerX, y, footerW, 1, 0.7, 0.28, 0.28, 0.28)
+	local networkId = state and state.networkId or ""
+	local netName = state and state.networkName or ""
+	local label = netName ~= "" and netName or networkId
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local dotSize = 6
+	local dotX = footerX + panel.padding
+	local dotY = y + math.floor((panel.statusFooterHeight - dotSize) / 2)
+	panel:drawRect(dotX, dotY, dotSize, dotSize, 1,
+		pal.statusOk[1], pal.statusOk[2], pal.statusOk[3])
+	local textY = y + math.floor((panel.statusFooterHeight - FONT_HGT_SMALL) / 2)
+	local connected = T("IGUI_GS_Connected")
+	panel:drawText(connected, dotX + dotSize + 8, textY,
+		pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+	local connectedW = getTextManager():MeasureStringX(UIFont.Small, connected)
+	if label ~= "" then
+		panel:drawText(label, dotX + dotSize + 16 + connectedW, textY,
+			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+	end
 end
 
 --- Configura arrastre solo desde la cabecera.
@@ -1186,29 +1190,27 @@ end
 ---@return boolean wide
 local function unicodeCharLengthAndWidth(str)
 	local wide = false
-	for i = 1, #str do
-		if string.byte(str, i) >= 0x0800 then
+	local codepoints = GlobalStorageSiK.Libs.unicodeCodepoints(str, 100000)
+	for i = 1, #codepoints do
+		if codepoints[i] >= 0x0800 then
 			wide = true
 			break
 		end
 	end
-	return GlobalStorageSiK.Libs.unicodeLength(str), wide
+	return #codepoints, wide
 end
 
 function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
-	if not searchEntry then
+	if not panel or not searchEntry then
 		return
 	end
+	if panel._sikSearchUnbind then panel._sikSearchUnbind() end
 	if searchEntry.setPlaceholderText then
 		searchEntry:setPlaceholderText(T("IGUI_GS_SearchPlaceholder"))
 	end
 
-	-- Se mantiene en 3, pero medido en CARACTERES UNICODE REALES (unicodeCharLengthAndWidth),
-	-- no en bytes como antes - ese es el bug real que se corrige aqui, no el
-	-- numero en si. Con el bug (#text = bytes), un solo caracter chino (3
-	-- bytes) ya colaba el umbral de "3" por accidente; con el fix, "3" es
-	-- ahora 3 caracteres de verdad en CUALQUIER alfabeto (chino incluido),
-	-- igual de estricto para todos los idiomas en vez de una coincidencia.
+	-- Latín usa 3 caracteres Unicode reales; CJK conserva el umbral acordado de
+	-- 2. Nunca medir bytes: Kahlua expone unidades UTF-16 de java.lang.String.
 	local SEARCH_MIN_CHARS = 3
 	local DEBOUNCE_MS = 180
 	local pendingTick = nil
@@ -1242,14 +1244,48 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 			end
 		end
 	end
+	panel._sikSearchUnbind = cancelPending
+	if not panel._sikSearchLifecycleWrapped then
+		panel._sikSearchLifecycleWrapped = true
+		local previousSetVisible = panel.setVisible
+		local previousRemove = panel.removeFromUIManager
+		if previousSetVisible then
+			panel.setVisible = function(self, visible)
+				if not visible and self._sikSearchUnbind then self._sikSearchUnbind() end
+				return previousSetVisible(self, visible)
+			end
+		end
+		if previousRemove then
+			panel.removeFromUIManager = function(self)
+				if self._sikSearchUnbind then self._sikSearchUnbind() end
+				return previousRemove(self)
+			end
+		end
+	end
 
-	searchEntry.onPressEnter = function()
-		cancelPending()
+	local function evaluateCurrentText(force)
 		local text = searchEntry:getText() or ""
 		local charCount, wide = unicodeCharLengthAndWidth(text)
 		local minChars = wide and 2 or SEARCH_MIN_CHARS
-		lastEffectiveActive = text ~= "" and charCount >= minChars
-		runSearch(true)
+		if force == true and text ~= "" then
+			lastEffectiveActive = true
+			runSearch(true)
+			return
+		end
+		if text == "" or charCount < minChars then
+			if lastEffectiveActive then
+				lastEffectiveActive = false
+				runSearch(false)
+			end
+			return
+		end
+		lastEffectiveActive = true
+		runSearch(force == true)
+	end
+
+	searchEntry.onPressEnter = function()
+		cancelPending()
+		evaluateCurrentText(true)
 	end
 
 	searchEntry.onTextChange = function()
@@ -1272,29 +1308,21 @@ function GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, searchEntry)
 		-- siendo demasiado exigente pese al fix de bytes->caracteres de
 		-- arriba. "wide" (algun caracter de 3+ bytes UTF-8) distingue CJK de
 		-- acentos latinos (siempre 2 bytes) sin depender del idioma de la UI.
-		local minChars = wide and 2 or SEARCH_MIN_CHARS
-		-- Se evalúa el texto actual entregado por el control. El antiguo -1 era
-		-- una compensación empírica que hacía divergir el gate del valor real.
-		if text == "" or charCount < minChars then
-			if lastEffectiveActive then
-				-- Transicion real: habia un filtro activo y acaba de caer por
-				-- debajo del umbral (o se borro del todo) - una sola
-				-- aplicacion para restaurar el catalogo completo.
-				lastEffectiveActive = false
-				runSearch(false)
-			end
-			-- Ya estabamos por debajo del umbral (1º/2º caracter, o ya vacio):
-			-- el resultado efectivo no cambia, no hay nada que refrescar.
-			return
-		end
-		lastEffectiveActive = true
+		-- Algunos controles B42 disparan onTextChange antes de actualizar el
+		-- valor observable. Nunca decidir aquí con ese snapshot: el callback
+		-- diferido relee texto, longitud y umbral actuales. Así 2->3 aplica en el
+		-- tercer carácter efectivo incluso durante escritura rápida/borrado.
 		local deadline = (getTimestampMs and getTimestampMs() or 0) + DEBOUNCE_MS
 		pendingTick = function()
+			if panel.getIsVisible and not panel:getIsVisible() then
+				cancelPending()
+				return
+			end
 			if getTimestampMs and getTimestampMs() < deadline then
 				return
 			end
 			cancelPending()
-			runSearch(false)
+			evaluateCurrentText(false)
 		end
 		if Events and Events.OnTick then
 			Events.OnTick.Add(pendingTick)
@@ -1434,6 +1462,7 @@ end
 function GlobalStorageSiK.SiK_UI.renderWrappedLinePool(host, pool, text, x, y, width, addFn)
 	local fontH = getTextManager():getFontHeight(UIFont.Small)
 	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text or "", width, UIFont.Small)
+	local hostVisible = not host or not host.isVisible or host:isVisible()
 	for i = 1, #lines do
 		local lbl = pool[i]
 		if not lbl then
@@ -1444,8 +1473,8 @@ function GlobalStorageSiK.SiK_UI.renderWrappedLinePool(host, pool, text, x, y, w
 		else
 			lbl:setX(x)
 			lbl:setY(y)
-			lbl:setVisible(true)
 		end
+		lbl:setVisible(hostVisible)
 		lbl:setName(lines[i])
 		y = y + fontH + 2
 	end
@@ -1590,10 +1619,12 @@ function GlobalStorageSiK.SiK_UI.setupModalPanel(panel, onClose, pad)
 	GlobalStorageSiK.SiK_UI.setupHeaderDrag(panel)
 	GlobalStorageSiK.SiK_UI.createCloseButton(panel, panel, onClose)
 	GlobalStorageSiK.SiK_UI.layoutModalFrame(panel, pad)
-	-- Contrato común: Escape cierra cualquier modal SiK UI sin que cada
-	-- ventana tenga que registrar su propia variante. Se conserva un handler
-	-- previo para no interferir con controles especializados.
-	if not panel._sikEscapeInstalled then
+	-- Contrato común: pila por jugador y superficie. Se carga perezosamente
+	-- para que Core no dependa del orden de carga de Window/Modal.
+	if not GlobalStorageSiK.SiK_UI.EscapeStack then pcall(require, "GS_SiK_UI_EscapeStack") end
+	if GlobalStorageSiK.SiK_UI.EscapeStack then
+		GlobalStorageSiK.SiK_UI.EscapeStack.install(panel, onClose)
+	elseif not panel._sikEscapeInstalled then
 		panel._sikEscapeInstalled = true
 		local previous = panel.onKeyRelease
 		panel.onKeyRelease = function(self, key)

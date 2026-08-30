@@ -7,6 +7,7 @@
 
 require "GS_I18n"
 require "GS_Log"
+require "GS_SiK_UI_EscapeStack"
 
 require "ISUI/ISTextBox"
 
@@ -93,7 +94,16 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 
 	local ok, err = pcall(function()
 		local box = ISTextBox:new(0, 0, 300, 180, title, defaultText, nil, onClick, playerNum)
+		box.playerNum = playerNum
 		box:initialise()
+		GlobalStorageSiK.SiK_UI.EscapeStack.install(box, function(panel)
+			if panel.destroy then
+				panel:destroy()
+			elseif panel.removeFromUIManager then
+				panel:removeFromUIManager()
+			end
+			if options.onClose then options.onClose() end
+		end, GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TRANSIENT)
 		box:addToUIManager()
 		if box.setOnlyNumbers then
 			box:setOnlyNumbers(true)

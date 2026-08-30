@@ -17,6 +17,8 @@ require "GS_UIDebug"
 require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Permissions"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Metrics"
+require "GS_SiK_UI_Controls"
 require "GS_Log"
 require "GS_TerminalUI_NetworkStatus"
 require "GS_TerminalUI_NetworkList"
@@ -26,16 +28,15 @@ GlobalStorageSiK.TerminalOptions = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local SECTION_GAP = 10
-local OPTIONS_UI_VERSION = 1
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("standard")
+local SECTION_GAP = CONTROL_METRICS.rowGap
+local OPTIONS_UI_VERSION = 2
 
 -- Altura de la barra de sub-pestañas
-local TAB_BAR_H = FONT_HGT_SMALL + 14
--- Orden visual de la barra: Admin primero (gestión activa), Estado despues
--- (indicadores/resumen). Por defecto se abre en "Estado" - es lo primero que
--- se quiere ver al entrar en Configuración, igual que antes se abria "Red" en
--- resumen antes de que existiera esta pestaña propia.
-local TAB_KEYS = { "admin", "estado" }
+local TAB_BAR_H = CONTROL_METRICS.buttonHeight
+local OPTIONS_TITLE_H = CONTROL_METRICS.sectionHeight + 16
+-- Orden visual validado: Estado primero y activo; Admin despues.
+local TAB_KEYS = { "estado", "admin" }
 local DEFAULT_TAB = "estado"
 
 -- ---------------------------------------------------------------------------
@@ -107,6 +108,13 @@ local function ensureTabScroll(tabPanel, terminal, key)
 		local w = math.max(180, tabPanel:getWidth())
 		local h = math.max(160, tabPanel:getHeight())
 		local scroll = GlobalStorageSiK.TerminalScroll.createInteractive(tabPanel, 0, 0, w, h)
+		GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(scroll, function(changedScroll)
+			local currentUi = changedScroll._gsTabUi
+			if currentUi and GlobalStorageSiK.TerminalOptions.layoutUi then
+				GlobalStorageSiK.TerminalOptions.layoutUi(changedScroll, currentUi)
+				currentUi._lastInnerW = GlobalStorageSiK.TerminalScroll.contentWidth(changedScroll)
+			end
+		end)
 		scroll:setVisible(true)
 		tabPanel.tabScroll = scroll
 	end
@@ -192,7 +200,7 @@ local function buildTabBar(optionsPanel, terminal)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local barW = math.max(80, optionsPanel:getWidth())
 
-	local bar = ISPanel:new(0, 0, barW, TAB_BAR_H)
+	local bar = ISPanel:new(0, OPTIONS_TITLE_H, barW, TAB_BAR_H)
 	bar:initialise()
 	bar.drawBackground = true
 	bar.borderColor = { r = 0, g = 0, b = 0, a = 0 }
@@ -267,9 +275,12 @@ function GlobalStorageSiK.TerminalOptions.buildSection(terminal, optionsPanel)
 	optionsPanel.activeSubTab = DEFAULT_TAB
 	optionsPanel.tabPanels = {}
 
+	optionsPanel.optionsTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(optionsPanel, {
+		x = 8, y = 8, text = T("IGUI_GS_TabConfig"),
+	})
 	buildTabBar(optionsPanel, terminal)
 
-	local contentY = TAB_BAR_H
+	local contentY = OPTIONS_TITLE_H + TAB_BAR_H
 	local w = math.max(80, optionsPanel:getWidth())
 	local h = optionsPanel:getHeight()
 	for _, key in ipairs(TAB_KEYS) do
@@ -430,6 +441,7 @@ function GlobalStorageSiK.TerminalOptions.layout(terminal, innerW, innerH)
 	if not op then return end
 
 	if op.tabBar then
+		op.tabBar:setY(OPTIONS_TITLE_H)
 		op.tabBar:setWidth(innerW)
 		local count = #TAB_KEYS
 		local btnW = math.floor(innerW / count)
@@ -444,7 +456,11 @@ function GlobalStorageSiK.TerminalOptions.layout(terminal, innerW, innerH)
 		end
 	end
 
-	local contentY = TAB_BAR_H
+	if op.optionsTitle then
+		op.optionsTitle:setX(8)
+		op.optionsTitle:setY(8)
+	end
+	local contentY = OPTIONS_TITLE_H + TAB_BAR_H
 	local contentH = math.max(160, innerH - contentY)
 	local activeKey = op.activeSubTab or DEFAULT_TAB
 	for _, key in ipairs(TAB_KEYS) do

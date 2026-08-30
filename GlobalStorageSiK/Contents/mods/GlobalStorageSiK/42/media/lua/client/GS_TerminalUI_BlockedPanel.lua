@@ -12,6 +12,7 @@ require "GS_NetClient"
 require "GS_TerminalRecipes"
 require "GS_CraftUtils"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_State"
 require "GS_TerminalUI_Scroll"
 require "GS_WorldHighlight"
 require "GS_TerminalAccess"
@@ -42,6 +43,21 @@ local REQ_ICON_GAP = 6
 -- captura la variable (upvalue) y ve el valor real en cuanto se ejecuta,
 -- no en cuanto se define.
 local installReaderStatus
+
+local function captureScrollState(scroll)
+	return GlobalStorageSiK.SiK_UI.State.capture({
+		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+		selectedKey = scroll._sikSelectedKey,
+		focusedKey = scroll._sikFocusedKey,
+	})
+end
+
+local function restoreScrollState(scroll, snapshot)
+	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	scroll._sikSelectedKey = state.selectedKey
+	scroll._sikFocusedKey = state.focusedKey
+	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+end
 
 --- Firma del estado bloqueado para decidir si hace falta reconstruir el
 --- panel. ANTES solo miraba `state.recipes` (el catálogo de recetas
@@ -554,8 +570,9 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	if not terminal or not terminal.blockedScroll then
 		return
 	end
-	GlobalStorageSiK.TerminalScroll.clear(terminal.blockedScroll)
 	local scroll = terminal.blockedScroll
+	local preservedState = captureScrollState(scroll)
+	GlobalStorageSiK.TerminalScroll.clear(scroll)
 	local cardW = math.max(260, scroll.width - CONTENT_PAD * 2)
 	local y = CONTENT_PAD
 
@@ -706,6 +723,7 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
 	GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
 		scroll, (scroll._gsContentHeight or 0) > (scroll.height or 0) + 2)
+	restoreScrollState(scroll, preservedState)
 	terminal.lastBlockedLayoutWidth = terminal.width
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.syncBlockedFrame then
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)

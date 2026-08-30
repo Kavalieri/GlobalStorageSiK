@@ -123,7 +123,9 @@ local function classifyClothing(fullType, si)
 	-- identidad contradictoria con Contenedores, que ya no reclama esto).
 	local nameTokens = U.tokenize(U.typeName(si))
 	local isAlicePack = U.fullTypeLower(si):find("alicepack", 1, true) ~= nil
-	if U.hasAnyToken(nameTokens, BACKPACK_TOKENS) or isAlicePack then
+	local isEquippableContainer = U.itemTypeLower(si) == "base:container"
+		and U.displayCategoryLower(si) == "bag" and U.canBeEquippedLower(si) ~= ""
+	if U.hasAnyToken(nameTokens, BACKPACK_TOKENS) or isAlicePack or isEquippableContainer then
 		local bodyLoc = U.bodyLocationLower(si)
 		if bodyLoc ~= "" then
 			return
@@ -136,7 +138,8 @@ local function classifyClothing(fullType, si)
 			{ l1 = "clothing_protection", l2 = "equipment", l3 = "backpack" },
 			{ containerCapacity = true },
 			{},
-			U.evidence("name_clothing_backpack", 30)
+			U.evidence(isEquippableContainer and "script_equippable_container" or "name_clothing_backpack",
+				isEquippableContainer and 100 or 30)
 	end
 
 	-- dev27 (§5, decision explicita de sistemas: "elementos de municion

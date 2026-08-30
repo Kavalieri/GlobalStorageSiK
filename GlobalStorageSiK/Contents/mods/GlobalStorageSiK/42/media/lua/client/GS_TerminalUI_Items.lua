@@ -28,10 +28,14 @@ require "GS_SiK_UI_Core"
 require "GS_ItemNetworkTooltip"
 require "GS_NetworkReadAction"
 require "GS_NetClient"
+require "GS_RemoteItemDetail"
 
 GlobalStorageSiK.TerminalItems = {}
 
-local detailPagesByRowKey = {}
+local function detailPagesByRowKey()
+	local client = GlobalStorageSiK.Client
+	return client and client.itemDetailsCache or nil
+end
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -45,12 +49,12 @@ local ITEM_TEXTURE_CACHE = {}
 -- Table.resolveColumns las coloca desde right hacia la izquierda. Así Cant.
 -- queda anclada al borde y Zona a su lado en cabecera, filas y hitboxes.
 local ITEM_TABLE_COLUMNS = {
-	{ key = "displayName", titleKey = "IGUI_GS_ColName", flex = 1.0, minWidth = 100, pad = 6 },
-	{ key = "category", titleKey = "IGUI_GS_ColCategory", flex = 1.35, minWidth = 145, pad = 6 },
-	{ key = "zone", titleKey = "IGUI_GS_ColZone", flex = 0, minWidth = 72, pad = 6 },
-	{ key = "count", titleKey = "IGUI_GS_ColCount", align = "right", measureValues = { "999999" }, pad = 8 },
+	{ key = "name", titleKey = "IGUI_GS_ColName", flex = 1, minWidth = 130, pad = 6 },
+	{ key = "category", titleKey = "IGUI_GS_ColCategory", flex = 1.4, minWidth = 180, pad = 6 },
+	{ key = "zone", titleKey = "IGUI_GS_ColZone", width = 110, pad = 6 },
+	{ key = "count", titleKey = "IGUI_GS_ColCount", width = 70, align = "right", pad = 6 },
 }
-local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 4 }
+local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 8 }
 
 function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
 	if not terminal or not row or not row.rowKey or not row.expandable then return false end
@@ -66,7 +70,6 @@ end
 
 function GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
 	if not args or not args.rowKey then return end
-	detailPagesByRowKey[args.rowKey] = args
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
 		local panel = terminal.itemsListPanel
@@ -77,7 +80,8 @@ function GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
 end
 
 function GlobalStorageSiK.TerminalItems.getDetails(rowKey)
-	return rowKey and detailPagesByRowKey[rowKey] or nil
+	local pages = detailPagesByRowKey()
+	return rowKey and pages and pages[rowKey] or nil
 end
 
 ---@param panel ISPanel
@@ -639,7 +643,7 @@ local zoneLabelCache = setmetatable({}, { __mode = "k" })
 local function resolveZoneLabel(terminal, data)
 	local locations = data and data.locations
 	if not terminal or not locations or #locations == 0 then
-		return "—"
+		return T("IGUI_GS_PunctuationEmDash")
 	end
 	local nodes = terminal.terminalState and terminal.terminalState.nodes or {}
 	local cached = zoneLabelCache[data]
@@ -655,7 +659,7 @@ local function resolveZoneLabel(terminal, data)
 			multiple = true
 		end
 	end
-	local label = multiple and T("IGUI_GS_ColZoneMultiple") or (zoneName or "—")
+	local label = multiple and T("IGUI_GS_ColZoneMultiple") or (zoneName or T("IGUI_GS_PunctuationEmDash"))
 	zoneLabelCache[data] = { nodes = nodes, label = label }
 	return label
 end
@@ -778,7 +782,8 @@ local function buildDisplayRows(panel, terminal, parents)
 		out[#out + 1] = parent
 		if parent.expandable and panel._expandedKeys[key] then
 			local wantedPage = panel._detailPageByKey[key] or 1
-			local detailPage = detailPagesByRowKey[key]
+			local pages = detailPagesByRowKey()
+			local detailPage = pages and pages[key] or nil
 			local stale = not detailPage or detailPage.page ~= wantedPage
 				or detailPage.networkId ~= networkId
 				or tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
@@ -823,6 +828,12 @@ function GlobalStorageSiK.TerminalItems.rowTaxonomy(row)
 			groupKey = "", subGroupKey = nil, groupLabel = "", subGroupLabel = nil, leafLabel = nil }
 	end
 	local resolution = GlobalStorageSiK.CategoryResolution.resolve(row.fullType, row, nil)
+	if resolution.effective == "variants" then
+		local label = GlobalStorageSiK.CategoryResolution.label(resolution)
+		return { mainKey = "variants", subKey = nil, mainLabel = label,
+			fullLabel = label, groupKey = "variants", groupLabel = label,
+			nativePaths = resolution.nativePaths }
+	end
 	local path = resolution.effective == "native" and resolution.nativePath or nil
 	if path then
 		local view = GlobalStorageSiK.NativeProduct.getView(path)
@@ -884,7 +895,11 @@ local function filterByNativePath(rows, key)
 	if not GlobalStorageSiK.NativeProduct.decodePath(key) then return nil end
 	local filtered = {}
 	for i = 1, #rows do
-		if GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePath) then
+		local matches = GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePath)
+		for p = 1, #(rows[i].nativePaths or {}) do
+			if GlobalStorageSiK.NativeProduct.pathMatches(key, rows[i].nativePaths[p]) then matches = true break end
+		end
+		if matches then
 			filtered[#filtered + 1] = rows[i]
 		end
 	end
@@ -1214,10 +1229,9 @@ end
 ---@param terminal GS_TerminalUI
 ---@return ISPanel
 local function createItemRow(scroll, listPanel, terminal)
-	local rowW = scroll.width or 200
-	if scroll.getWidth then
-		rowW = math.max(120, scroll:getWidth() - 8)
-	end
+	-- Block/TerminalScroll ya reserva padding + gutter. La fila consume el
+	-- contentW canónico sin volver a restar barra ni márgenes locales.
+	local rowW = math.max(120, GlobalStorageSiK.TerminalScroll.contentWidth(scroll))
 	local row = ISPanel:new(0, 0, rowW, ROW_H)
 	row:initialise()
 	row.listPanel = listPanel
@@ -1295,7 +1309,7 @@ local function createItemRow(scroll, listPanel, terminal)
 			local cat = projection.fullLabel ~= "" and projection.fullLabel
 				or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
 			local catColor = projection.color or pal.textMuted
-			local zoneLabel = self._gsZoneLabel or "—"
+			local zoneLabel = self._gsZoneLabel or T("IGUI_GS_PunctuationEmDash")
 			local count = tostring(data.count or 0)
 			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
 			local catX = catCol.x + catCol.pad
@@ -1323,11 +1337,11 @@ local function createItemRow(scroll, listPanel, terminal)
 		-- si el texto no cabe en la columna, se trunca con "..." (ver
 		-- drawText de arriba) y el detalle completo se lee en este tooltip.
 		-- Se oculta mientras hay un arrastre activo (no tapar el preview de drop).
-		if data and not data._gsPager and not (data._gsRowKind == "parent" and (data.count or 0) > 1)
-			and not (data._gsRowKind == "child" and data.detailKind ~= "cosmetic_variant")
-			and self:isMouseOver() and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
-			local tooltipKey = tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or "")
+		if data and not data._gsPager and self:isMouseOver()
+			and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			local tooltipKey = rowIdentity(data) or (tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or ""))
 			if not self._gsTooltip or self._gsTooltip._gsItemKey ~= tooltipKey then
+				GlobalStorageSiK.RemoteItemDetail.deactivate(self)
 				local probe = itemProbe(data)
 				if probe then
 					if self._gsTooltip then
@@ -1340,6 +1354,11 @@ local function createItemRow(scroll, listPanel, terminal)
 						self._gsTooltip:setCharacter(ttPlayer)
 					end
 					self._gsTooltip._gsItemKey = tooltipKey
+					local detail, loading = nil, false
+					if data._gsRowKind == "child" then
+						detail, loading = GlobalStorageSiK.RemoteItemDetail.activate(self, data, self.terminal)
+					end
+					GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, data, detail, loading)
 				elseif self._gsTooltip then
 					self._gsTooltip:removeFromUIManager()
 					self._gsTooltip:setVisible(false)
@@ -1352,10 +1371,20 @@ local function createItemRow(scroll, listPanel, terminal)
 				self._gsTooltip:bringToTop()
 			end
 		else
+			GlobalStorageSiK.RemoteItemDetail.deactivate(self)
 			if self._gsTooltip and self._gsTooltip:isVisible() then
 				self._gsTooltip:removeFromUIManager()
 				self._gsTooltip:setVisible(false)
 			end
+		end
+	end
+
+	row.onRemoteItemDetail = function(self, detail)
+		if not self._gsTooltip or not self.itemData or not self:isMouseOver() then return end
+		if tostring(detail and detail.itemId) ~= tostring(self.itemData.itemId) then return end
+		local probe = self._gsTooltip.item
+		if probe then
+			GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, self.itemData, detail, false)
 		end
 	end
 
@@ -1502,9 +1531,14 @@ local function ensureColumnHeader(panel, terminal)
 	panel.columnHeader.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.columnHeader.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	panel.columnHeader.prerender = function(self)
-		ISPanel.prerender(self)
 		local parent = self.parentPanel
-		local sortKey = parent and parent.itemsSortKey or "displayName"
+		if parent and parent.itemScroll then
+			local rect = GlobalStorageSiK.TerminalScroll.contentRect(parent.itemScroll)
+			self:setX(rect.x)
+			self:setWidth(rect.w)
+		end
+		ISPanel.prerender(self)
+		local sortKey = parent and parent.itemsSortKey or "name"
 		local asc = parent and parent.itemsSortAsc ~= false
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(
 			self, ITEM_TABLE_COLUMNS, sortKey, asc, 2, UIFont.Small, ITEM_TABLE_OPTIONS)
@@ -1519,7 +1553,7 @@ local function ensureColumnHeader(panel, terminal)
 		local layout = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
 			self.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
 		local column = GlobalStorageSiK.SiK_UI.Table.columnAtX(layout, x)
-		parent.itemsSortKey = column and column.key or "displayName"
+		parent.itemsSortKey = column and column.key or "name"
 		if parent.itemsSortKey == (parent._lastSortKey or "") then
 			parent.itemsSortAsc = not parent.itemsSortAsc
 		else
@@ -1564,18 +1598,14 @@ local function ensureItemScroll(panel, terminal)
 
 	local listGap = GlobalStorageSiK.TerminalScroll.listBottomGap()
 	local scrollH = math.max(120, (panel.height or 200) - HEADER_H - listGap - 4)
-	local scrollBarW = GlobalStorageSiK.SiK_UI.scrollBarWidth()
-	local itemW = math.max(120, (panel.width or 200) - scrollBarW - 8)
 
 	local scroll = GlobalStorageSiK.SiK_UI.Table.createVirtual(
 		panel, 0, HEADER_H + 2, panel.width, scrollH, ROW_H, 0,
 		ITEM_TABLE_COLUMNS, nil, nil, ITEM_TABLE_OPTIONS)
-	scroll._gsScrollBarGap = 12
-	scroll._gsBarRightPad = 6
 	panel.itemScroll = scroll
 	scroll:setOnCreateItem(function()
 		local row = createItemRow(scroll, panel, terminal)
-		row:setWidth(itemW)
+		row:setWidth(math.max(120, GlobalStorageSiK.TerminalScroll.contentWidth(scroll)))
 		return row
 	end)
 	scroll:setOnUpdateItem(function(row, data, dataIndex)
@@ -1640,7 +1670,7 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 
 	items = items or {}
 	panel._itemsCatalog = items
-	panel.itemsSortKey = panel.itemsSortKey or "displayName"
+	panel.itemsSortKey = panel.itemsSortKey or "name"
 	panel.itemsSortAsc = panel.itemsSortAsc ~= false
 	panel._selectedKeys = panel._selectedKeys or {}
 	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc, terminal)
@@ -1662,7 +1692,9 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 	ensureItemScroll(panel, terminal)
 
 	if panel.columnHeader then
-		panel.columnHeader:setWidth(panel.width)
+		local rect = GlobalStorageSiK.TerminalScroll.contentRect(panel.itemScroll)
+		panel.columnHeader:setX(rect.x)
+		panel.columnHeader:setWidth(rect.w)
 	end
 
         if #items == 0 then
@@ -1714,14 +1746,16 @@ function GlobalStorageSiK.TerminalItems.syncLayout(panel, terminal)
 		return
 	end
 	ensureColumnHeader(panel, terminal)
-	if panel.columnHeader then
-		panel.columnHeader:setWidth(panel.width)
-	end
 	if not panel.itemScroll then
 		ensureItemScroll(panel, terminal)
 	end
 	if not panel.itemScroll then
 		return
+	end
+	if panel.columnHeader then
+		local rect = GlobalStorageSiK.TerminalScroll.contentRect(panel.itemScroll)
+		panel.columnHeader:setX(rect.x)
+		panel.columnHeader:setWidth(rect.w)
 	end
 	local items = panel._lastItems or {}
 	local listGap = GlobalStorageSiK.TerminalScroll.listBottomGap()
@@ -1733,8 +1767,7 @@ function GlobalStorageSiK.TerminalItems.syncLayout(panel, terminal)
 	panel.itemScroll:setWidth(panel.width)
 	panel.itemScroll:setHeight(scrollH)
 	panel.itemScroll:setVisible(#items > 0)
-	local scrollBarW = GlobalStorageSiK.SiK_UI.scrollBarWidth()
-	local itemW = math.max(120, panel.width - scrollBarW - 8)
+	local itemW = math.max(120, GlobalStorageSiK.TerminalScroll.contentWidth(panel.itemScroll))
 	panel.itemScroll:setConfig(ROW_H, 0)
 	if panel.itemScroll.itemPool then
 		for _, row in ipairs(panel.itemScroll.itemPool) do

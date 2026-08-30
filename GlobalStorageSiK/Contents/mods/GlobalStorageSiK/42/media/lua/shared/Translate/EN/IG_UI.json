@@ -1,4 +1,6 @@
 {
+	"IGUI_GS_PunctuationEmDash": "—",
+	"IGUI_GS_PunctuationMiddleDot": "·",
 	"IGUI_GS_OpenTerminal": "Open Global Storage",
 	"IGUI_GS_TerminalTitle": "Global Storage SiK",
 	"IGUI_GS_TabHome": "Home",
@@ -472,6 +474,7 @@
 	"IGUI_GS_ReadReturnFailed": "Could not return the item to the network; it remains in your inventory.",
 	"IGUI_GS_DetailType": "Type: {1}",
 	"IGUI_GS_DetailCategory": "Category: {1}",
+	"IGUI_GS_MultipleCategories": "Multiple categories",
 	"IGUI_GS_DetailWeight": "Unit weight: {1} kg",
 	"IGUI_GS_DetailCount": "Quantity in this network: {1}",
 	"IGUI_GS_NetworkCountLine": "{1}: {2} in your network",
@@ -759,6 +762,7 @@
 	"IGUI_GS_NetworkDefaultName": "Global storage",
 	"IGUI_GS_NetworkFooter": "Network: {1}",
 	"IGUI_GS_NetworkDisplay": "{1} (id: {2})",
+	"IGUI_GS_Connected": "Connected",
 	"IGUI_GS_RescanAll": "Rescan all zones",
 	"IGUI_GS_ScanProgress": "Scanning zone {1}/{2}: {3}",
 	"IGUI_GS_ScanCancel": "Cancel scan",

@@ -14,13 +14,15 @@ require "GS_NativeProduct"
 require "GS_CategoryResolution"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalConfig = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics()
 local BLOCK_GAP = 10
-local ENTRY_H = FONT_HGT_SMALL + 6
+local ENTRY_H = CONTROL_METRICS.inputHeight
 
 --- Etiqueta de membresía del nodo.
 ---@param node table
@@ -72,8 +74,8 @@ end
 ---@param onClick function
 ---@return ISButton
 local function createFullButton(x, y, w, title, target, onClick)
-	local h = FONT_HGT_SMALL + 10
-	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.createButton(
+		x, y, w, CONTROL_METRICS.buttonHeight, title, target, onClick)
 end
 
 --- Crea botón compacto SiK UI.

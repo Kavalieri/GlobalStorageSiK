@@ -223,6 +223,50 @@ La ausencia de una excepción significa acceso permitido. Por ello los miembros
 existentes y las zonas creadas en el futuro empiezan habilitados. Owner, admins
 de red y staff del servidor tienen acceso total.
 
+## Acceso remoto inalámbrico y selector de red
+
+Un addon registra un proveedor inalámbrico neutral desde código `shared`:
+
+```lua
+GlobalStorageSiK.TerminalAccess.registerWirelessProvider({
+    id = "ExampleWireless",
+    capabilities = { remoteTerminal = true },
+    hasAccess = function(player) return true end,
+    getRange = function(player) return 24 end,
+    getRangeForNetwork = function(player, networkId, anchor) return 12 end,
+})
+```
+
+`id` y `hasAccess` son obligatorios. Registrar de nuevo el mismo `id` sustituye
+la definición anterior sin duplicarla. `getRange` es solo el techo de búsqueda;
+`getRangeForNetwork` decide el alcance real para la red/ancla concreta. El Core
+recorre únicamente terminales activos registrados, permisos y proveedores; el
+addon conserva la política de ítems, tiers y capacidades.
+
+En cliente, los ítems remotos se conectan sin crear comandos propios:
+
+```lua
+GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey, onUse)
+local requestId = GlobalStorageSiK.TerminalUI.requestRemoteNetworks(callback, player)
+GlobalStorageSiK.TerminalUI.cancelRemoteNetworkRequest(requestId, player)
+local openId = GlobalStorageSiK.TerminalUI.requestOpenNetwork(networkId, player, callback)
+GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(openId, player)
+GlobalStorageSiK.Client.registerTransientCleanup("MyAddonUi", cleanupCallback)
+```
+
+Solo hay una solicitud pendiente por `playerNum`; una nueva reemplaza la
+anterior y las respuestas tardías se descartan por `requestId`. El servidor
+limita frecuencia y cardinalidad. El callback recibe `(networks, reason)`: cada
+fila contiene `networkId` opaco, nombre, `selectable`, razón, distancia, alcance,
+`providerId` y capacidades acotadas cuando existen. Las redes del jugador que
+no están disponibles pueden mostrarse deshabilitadas para explicar el motivo,
+pero `requestOpenNetwork` vuelve a validar permiso, terminal, proveedor, antena
+y alcance antes de abrir. Su callback recibe `(accepted, reason, payload)` solo
+para la respuesta exacta correlacionada por `playerNum + requestId`; el modal no
+se cierra al enviar. El consumidor cancela descubrimiento y apertura al cerrar,
+registra su limpieza transitoria para muerte/cambio de sesión y no instala
+`OnTick` ni listeners globales.
+
 ## Compatibilidad y autoridad
 
 - En SP real, `isServer()` e `isClient()` pueden ser ambos `false`. Para mutaciones usa `GlobalStorageSiK.isAuthoritative()`.

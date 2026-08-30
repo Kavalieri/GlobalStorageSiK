@@ -16,6 +16,7 @@ require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Config"
 require "GS_RulesUI"
 require "GS_RuleCoverage"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.FilterEditor = {}
 GlobalStorageSiK.FilterEditor.instance = nil
@@ -23,9 +24,10 @@ GlobalStorageSiK.FilterEditor.instance = nil
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics()
 local PAD = 14
-local ENTRY_H = FONT_HGT_SMALL + 8
-local BTN_H = FONT_HGT_SMALL + 10
+local ENTRY_H = CONTROL_METRICS.inputHeight
+local BTN_H = CONTROL_METRICS.buttonHeight
 local RESULT_ROW_H = FONT_HGT_SMALL + 6
 local MAX_RESULTS = 12
 

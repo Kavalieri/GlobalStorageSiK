@@ -46,6 +46,17 @@ function GlobalStorageSiK.Network.ensureRegistry(registry)
 		if not registry._migrateV1080 and GlobalStorageSiK.NetworkMigrate.runV1080 then
 			GlobalStorageSiK.NetworkMigrate.runV1080(registry)
 		end
+		local wantedSnapshotSchema = GlobalStorageSiK.Config.ITEM_SNAPSHOT_SCHEMA
+		if wantedSnapshotSchema and registry._itemSnapshotSchema ~= wantedSnapshotSchema then
+			-- itemSnapshot es cache derivada, no inventario autoritativo. Una cache
+			-- de esquema anterior puede conservar rutas fluidas incompatibles; se
+			-- invalida una sola vez y el siguiente acceso/scan la reconstruye.
+			for _, node in pairs(registry.nodes) do node.itemSnapshot = nil end
+			registry._itemSnapshotSchema = wantedSnapshotSchema
+			if isServer and isServer() and ModData and ModData.transmit then
+				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			end
+		end
 	end
 end
 

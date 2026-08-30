@@ -78,6 +78,7 @@ require "GS_DiskProgramming"
 require "GS_AddonRecipes"
 
 require "GS_ItemSnapshot"
+require "GS_ItemTooltipDetailServer"
 
 require "GS_FuelConsumption"
 
@@ -1114,7 +1115,7 @@ local ACCESS_MESSAGES = {
 --- (diseño "recuperacion de rol propio", 2026-08-23). La eligibilidad
 --- SIEMPRE se calcula aqui, en servidor - el cliente solo pinta el boton
 --- segun lo que se le diga, nunca decide por su cuenta si puede actuar.
-local function sendTerminalBlocked(player, reason, networkId)
+local function sendTerminalBlocked(player, reason, networkId, meta)
 	clearTerminalWatcher(player)
 	GlobalStorageSiK.TerminalAccess.clearSession(player)
 	if GlobalStorageSiK.Server.pushTerminalManifest then
@@ -1147,7 +1148,8 @@ local function sendTerminalBlocked(player, reason, networkId)
 	if networkId and GlobalStorageSiK.Permissions.canRecoverOwnRole then
 		canRecover, recoverableRole = GlobalStorageSiK.Permissions.canRecoverOwnRole(player, networkId)
 	end
-	gsSendServerCommand(player, "terminalBlocked", {
+	local payload = {
+		playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
 		reason = reason,
 		wirelessRange = GlobalStorageSiK.Sandbox.getWirelessRange(),
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
@@ -1157,7 +1159,9 @@ local function sendTerminalBlocked(player, reason, networkId)
 		claimTier = claimTier,
 		canRecoverRole = canRecover,
 		recoverableRole = recoverableRole,
-	})
+	}
+	if meta and meta.openSeq then payload.openSeq = meta.openSeq end
+	gsSendServerCommand(player, "terminalBlocked", payload)
 end
 
 --- Si el jugador esta cerca de un terminal CONOCIDO por el registro
@@ -1771,6 +1775,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		terminalAnchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
 	end
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player)
+	payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
 	payload.openUi = openUi == true
 	if meta and meta.openSeq then
 		payload.openSeq = meta.openSeq
@@ -2109,6 +2114,10 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		end)
 		return
 	end
+	-- Un scan estable también puede descubrir mutaciones físicas externas que
+	-- no pasaron por Transfer. Publicar una revisión nueva invalida detalle
+	-- exacto y catálogos cacheados aunque el itemId siga siendo el mismo.
+	currentRevision = GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
 	if summary._freshSnapshotScope == "network" then
 		GlobalStorageSiK.Index.setSnapshotRevision(networkId, currentRevision)
 	end
@@ -2170,6 +2179,13 @@ end
 
 local function clearDeletedNetworkReferences(networkId)
 	pendingSnapshotSync[networkId] = nil
+	if GlobalStorageSiK.ItemTooltipDetailServer
+		and GlobalStorageSiK.ItemTooltipDetailServer.invalidateNetwork then
+		GlobalStorageSiK.ItemTooltipDetailServer.invalidateNetwork(networkId)
+	end
+	if GlobalStorageSiK.ZoneScanJob and GlobalStorageSiK.ZoneScanJob.clearNetwork then
+		GlobalStorageSiK.ZoneScanJob.clearNetwork(networkId)
+	end
 	local watcherKeys = {}
 	for key, watchedId in pairs(terminalWatchNetworkByPlayer) do
 		if watchedId == networkId then watcherKeys[#watcherKeys + 1] = key end
@@ -2292,22 +2308,27 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 	applyAccessHints(player, args)
 	GlobalStorageSiK.Server.pushTerminalManifest(player)
 
-	local resolvedNet, nearbyProbe, blockReason = GlobalStorageSiK.NetworkResolve.resolveOpenTerminal(player, args)
-	if blockReason == "terminal_unlinked" then
-		GlobalStorageSiK.Log.warn("Server", "openTerminal blocked", "terminal_unlinked")
-		sendTerminalBlocked(player, "terminal_unlinked")
-		return
+	local remoteAccess = args.remoteAccess == true
+	local accessOk, accessMode, terminal, accessReason
+	local blockReason = nil
+	if remoteAccess then
+		networkId = GlobalStorageSiK.Network.resolveNetworkId(args.networkId)
+		accessOk, accessMode, terminal, accessReason =
+			GlobalStorageSiK.TerminalAccess.evaluateWireless(player, networkId)
+	else
+		local resolvedNet, nearbyProbe
+		resolvedNet, nearbyProbe, blockReason = GlobalStorageSiK.NetworkResolve.resolveOpenTerminal(player, args)
+		if blockReason == "terminal_unlinked" then
+			GlobalStorageSiK.Log.warn("Server", "openTerminal blocked", "terminal_unlinked")
+			sendTerminalBlocked(player, "terminal_unlinked", nil, { openSeq = openSeq })
+			return
+		end
+		networkId = resolvedNet
+		local hintAnchor = args.terminalHint or nearbyProbe
+		accessOk, accessMode, terminal, accessReason = GlobalStorageSiK.TerminalAccess.evaluate(
+			player, networkId, hintAnchor, { ignoreSession = true, strictDistance = true }
+		)
 	end
-	networkId = resolvedNet
-
-	local hintAnchor = args.terminalHint or nearbyProbe
-	if not hintAnchor and nearbyProbe then
-		hintAnchor = nearbyProbe
-	end
-
-	local accessOk, accessMode, terminal, accessReason = GlobalStorageSiK.TerminalAccess.evaluate(
-		player, networkId, hintAnchor, { ignoreSession = true, strictDistance = true }
-	)
 	if terminal and terminal.networkId then
 		networkId = terminal.networkId
 	elseif terminal and terminal.x then
@@ -2318,12 +2339,19 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 			networkId = at
 		end
 	end
+	if remoteAccess and not accessOk then
+		GlobalStorageSiK.TerminalAccess.clearSession(player)
+		sendTerminalBlocked(player, accessReason or "wireless_provider_unavailable", networkId,
+			{ openSeq = openSeq })
+		return
+	end
 	if not networkId then
 		networkId = GlobalStorageSiK.Network.getDefaultNetworkId()
 		local registry = GlobalStorageSiK.Network.getRegistry()
 		local net = registry and registry.networks and networkId and registry.networks[networkId]
 		if not net or not GlobalStorageSiK.TerminalRecord.getPrimaryAnchor(net) then
-			sendTerminalBlocked(player, checkMissingTerminalHere(player) or blockReason or "no_terminal")
+			sendTerminalBlocked(player, checkMissingTerminalHere(player) or blockReason or "no_terminal",
+				nil, { openSeq = openSeq })
 			return
 		end
 	end
@@ -2340,7 +2368,7 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 		-- apertura (proximidad/hardware, resuelta antes de llegar aqui) queda
 		-- separada de esta - la decision de que ventana mostrar dentro de
 		-- "hay terminal y estas cerca" es siempre nuestra logica de permisos.
-		sendTerminalBlocked(player, reason or "no_permission", networkId)
+		sendTerminalBlocked(player, reason or "no_permission", networkId, { openSeq = openSeq })
 		return
 	end
 
@@ -2357,12 +2385,13 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 	)
 	if not accessOk then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
-		sendTerminalBlocked(player, accessReason)
+		sendTerminalBlocked(player, accessReason, networkId, { openSeq = openSeq })
 		return
 	end
 	if GlobalStorageSiK.Sandbox.requireTerminalAccess() and accessMode ~= "bypass" and not terminal then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
-		sendTerminalBlocked(player, checkMissingTerminalHere(player) or "no_terminal")
+		sendTerminalBlocked(player, checkMissingTerminalHere(player) or "no_terminal", networkId,
+			{ openSeq = openSeq })
 		return
 	end
 
@@ -2385,6 +2414,103 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 	end
 
 	pushTerminalState(player, networkId, scanSummary, searchQuery, nil, true, accessMode, terminal, { openSeq = openSeq })
+end
+
+local remoteNetworkCandidateLastMs = {}
+local REMOTE_NETWORK_CANDIDATE_COOLDOWN_MS = 500
+local MAX_REMOTE_NETWORK_CANDIDATES = 64
+local MAX_REMOTE_NETWORK_RATE_KEYS = 256
+local REMOTE_NETWORK_RATE_TTL_MS = 60000
+local remoteNetworkCandidateSeq = 0
+
+local function pruneRemoteNetworkCandidateRates(now)
+	local count = 0
+	local oldestKey, oldestSeq = nil, math.huge
+	local expired = {}
+	for key, entry in pairs(remoteNetworkCandidateLastMs) do
+		count = count + 1
+		if now > 0 and entry.at > 0 and now - entry.at > REMOTE_NETWORK_RATE_TTL_MS then
+			expired[#expired + 1] = key
+		elseif entry.seq < oldestSeq then
+			oldestKey, oldestSeq = key, entry.seq
+		end
+	end
+	for i = 1, #expired do
+		remoteNetworkCandidateLastMs[expired[i]] = nil
+		count = count - 1
+	end
+	if count >= MAX_REMOTE_NETWORK_RATE_KEYS and oldestKey then
+		remoteNetworkCandidateLastMs[oldestKey] = nil
+	end
+end
+
+local function serializeWirelessCapabilities(source)
+	local out = {}
+	local count = 0
+	for name, enabled in pairs(source or {}) do
+		if count >= 16 then break end
+		if type(name) == "string" and #name <= 64 and type(enabled) == "boolean" then
+			out[name] = enabled
+			count = count + 1
+		end
+	end
+	return out
+end
+
+---@param player IsoPlayer
+---@param args table
+local function handleGetRemoteNetworkCandidates(player, args)
+	local requestId = tonumber(args.requestId)
+	if not requestId or requestId < 1 or requestId > 2147483647 then
+		return
+	end
+	local key = GlobalStorageSiK.TerminalAccess.getPlayerKey(player)
+	local now = getTimestampMs and getTimestampMs() or 0
+	local last = key and remoteNetworkCandidateLastMs[key] or nil
+	if last and now > 0 and now - last.at < REMOTE_NETWORK_CANDIDATE_COOLDOWN_MS then
+		gsSendServerCommand(player, "remoteNetworkCandidates", {
+			requestId = requestId,
+			playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
+			networks = {},
+			reason = "rate_limited",
+		})
+		return
+	end
+	if key then
+		pruneRemoteNetworkCandidateRates(now)
+		remoteNetworkCandidateSeq = remoteNetworkCandidateSeq + 1
+		remoteNetworkCandidateLastMs[key] = { at = now, seq = remoteNetworkCandidateSeq }
+	end
+
+	local summaries = GlobalStorageSiK.NetworkManager
+		and GlobalStorageSiK.NetworkManager.listForPlayer(player) or {}
+	local candidates = {}
+	for i = 1, #summaries do
+		if #candidates >= MAX_REMOTE_NETWORK_CANDIDATES then
+			break
+		end
+		local summary = summaries[i]
+		local ok, mode, terminal, reason = GlobalStorageSiK.TerminalAccess.evaluateWireless(
+			player, summary.networkId
+		)
+		candidates[#candidates + 1] = {
+			networkId = summary.networkId,
+			name = summary.name,
+			label = summary.label,
+			selectable = ok == true and terminal ~= nil,
+			reason = ok and nil or reason,
+			accessMode = mode,
+			distance = terminal and terminal.distance or nil,
+			wirelessRange = terminal and terminal.wirelessRange or 0,
+			providerId = terminal and terminal.providerId or nil,
+			capabilities = serializeWirelessCapabilities(terminal and terminal.capabilities),
+		}
+	end
+	gsSendServerCommand(player, "remoteNetworkCandidates", {
+		requestId = requestId,
+		playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
+		networks = candidates,
+	})
 end
 
 ---@param player IsoPlayer
@@ -2805,6 +2931,9 @@ local function onClientCommand(module, command, player, args)
 	if command == "openTerminal" then
 		handleOpenTerminal(player, args, networkId, searchQuery)
 
+	elseif command == "getRemoteNetworkCandidates" then
+		handleGetRemoteNetworkCandidates(player, args)
+
 	elseif command == "closeTerminal" then
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
@@ -3177,6 +3306,10 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "getItemDetails" then
 		handleGetItemDetails(player, args, networkId)
 
+	elseif command == "getItemTooltipDetail" then
+		GlobalStorageSiK.ItemTooltipDetailServer.handle(
+			player, args, networkId, requireTerminalAccess, gsSendServerCommand)
+
 	elseif command == "getNodeContents" then
 		if not requireTerminalAccess(player, networkId) then
 			return
@@ -3202,6 +3335,8 @@ local function onClientCommand(module, command, player, args)
 		end
 		local rows, source, liveContainer = resolveNodeContents(node, networkId)
 		gsSendServerCommand(player, "nodeContents", {
+			networkId = networkId,
+			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 			nodeId = args.nodeId,
 			rows = rows,
 			source = source,
@@ -5108,6 +5243,7 @@ local function onClientCommand(module, command, player, args)
 				player, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 		end
 		gsSendServerCommand(player, "itemNetworkCounts", {
+			playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
 			fullType = fullType,
 			mediaTitle = mediaTitle,
 			mediaIndex = mediaIndex,

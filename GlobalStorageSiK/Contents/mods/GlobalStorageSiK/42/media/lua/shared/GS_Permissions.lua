@@ -147,7 +147,11 @@ local function buildPermNetFromLegacy(legacyNet)
 		factionOnly = legacyNet.factionOnly == true,
 		owner = legacyNet.owner or "",
 		ownerCharacterId = legacyNet.ownerCharacterId,
-		ownerAccountLogin = legacyNet.ownerAccountLogin,
+		-- DEV anterior persistía `ownerAccount`; la ModData separada usa
+		-- `ownerAccountLogin`. Conservar ese ancla durante la migración es
+		-- imprescindible para verificar al propietario sin confiar en nombre o
+		-- descriptor numérico, que pueden colisionar entre personajes.
+		ownerAccountLogin = legacyNet.ownerAccountLogin or legacyNet.ownerAccount,
 		ownerSteamId = legacyNet.ownerSteamId,
 	}
 end

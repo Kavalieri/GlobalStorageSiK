@@ -22,6 +22,8 @@
 require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_State"
 require "GS_TerminalUI_Scroll"
 
 GlobalStorageSiK.AdminDashboardCorpus = GlobalStorageSiK.AdminDashboardCorpus or {}
@@ -29,10 +31,25 @@ GlobalStorageSiK.AdminDashboardCorpus = GlobalStorageSiK.AdminDashboardCorpus or
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 8
+local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
 local MIN_SUMMARY_SCROLL_H = FONT_HGT_SMALL * 4
 
 local renderWrappedLines = GlobalStorageSiK.SiK_UI.renderWrappedLinePool
+
+local function captureSummaryState(scroll)
+	return GlobalStorageSiK.SiK_UI.State.capture({
+		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+		selectedKey = scroll._sikSelectedKey,
+		focusedKey = scroll._sikFocusedKey,
+	})
+end
+
+local function restoreSummaryState(scroll, snapshot)
+	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	scroll._sikSelectedKey = state.selectedKey
+	scroll._sikFocusedKey = state.focusedKey
+	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+end
 
 --- Construye la seccion "Validar corpus" dentro de la pestaña Taxonomia -
 --- todos los widgets creados aqui se añaden como hijos de `ui` y se
@@ -73,6 +90,12 @@ function GlobalStorageSiK.AdminDashboardCorpus.build(ui, pad, y, textW, bottomLi
 
 	ui.nativeCorpusSummaryScroll = GlobalStorageSiK.TerminalScroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
 	track(ui.nativeCorpusSummaryScroll)
+	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(ui.nativeCorpusSummaryScroll, function()
+		if ui._corpusRelayout then return end
+		ui._corpusRelayout = true
+		GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
+		ui._corpusRelayout = false
+	end)
 
 	GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 end
@@ -123,6 +146,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	scroll:setY(scrollY)
 	GlobalStorageSiK.TerminalScroll.resize(scroll, textW, scrollH)
 
+	local preservedState = captureSummaryState(scroll)
 	GlobalStorageSiK.TerminalScroll.clear(scroll)
 	local contentW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local sy = 2
@@ -132,6 +156,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 		sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyNoRunYet"), 4, sy, contentW - 8,
 			GlobalStorageSiK.TerminalScroll.addChild)
 		GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+		restoreSummaryState(scroll, preservedState)
 		return
 	end
 
@@ -197,6 +222,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	end
 
 	GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+	restoreSummaryState(scroll, preservedState)
 end
 
 --- Envia el comando runNativeCorpus - guarda de un solo vuelo en CLIENTE

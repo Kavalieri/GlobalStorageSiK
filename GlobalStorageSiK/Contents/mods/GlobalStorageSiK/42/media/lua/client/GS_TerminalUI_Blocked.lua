@@ -7,6 +7,7 @@
 
 require "GS_TerminalUI_BlockedPanel"
 require "GS_Log"
+require "GS_SiK_UI_Window"
 
 GlobalStorageSiK.TerminalBlockedUI = {}
 GlobalStorageSiK.TerminalBlockedUI.instance = nil
@@ -35,7 +36,14 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		GlobalStorageSiK.TerminalBlockedPanel.ensureEvents()
 	end
 
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local playerNum = tonumber(state and state.playerNum) or 0
+	GlobalStorageSiK.TerminalBlockedUI.instances = GlobalStorageSiK.TerminalBlockedUI.instances or {}
+	local ui = nil
+	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.getInstanceForPlayer then
+		ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	elseif GlobalStorageSiK.TerminalUI then
+		ui = GlobalStorageSiK.TerminalUI.instance
+	end
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (nunca crear segunda ventana).
 	if ui then
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
@@ -44,6 +52,7 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		ui:setVisible(true)
 		ui:bringToTop()
 		GlobalStorageSiK.TerminalBlockedUI.instance = ui
+		GlobalStorageSiK.TerminalBlockedUI.instances[playerNum] = ui
 		return
 	end
 
@@ -52,21 +61,35 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		return
 	end
 
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	local w = keepW or math.min(960, math.max(820, math.floor(sw * 0.78)))
-	local h = keepH or math.min(900, math.max(680, math.floor(sh * 0.86)))
-	local x = keepX or ((sw - w) / 2)
-	local y = keepY or ((sh - h) / 2)
-	ui = GS_TerminalUI:new(x, y, w, h)
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer(playerNum) or (playerNum == 0 and getPlayer and getPlayer() or nil)
+	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
+	local rect
+	if keepX or keepY or keepW or keepH then
+		rect = GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
+			playerNum = playerNum, x = keepX, y = keepY, width = keepW, height = keepH,
+		})
+	else
+		rect = GlobalStorageSiK.SiK_UI.Window.recall("terminal-shell", playerNum, viewport)
+			or GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
+				playerNum = playerNum,
+			})
+	end
+	ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, playerNum)
+	ui._sikWindowProfile = rect.profile
 	ui.terminalState = {}
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalUI.instance = ui
+	if GlobalStorageSiK.TerminalUI.setInstanceForPlayer then
+		GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
+	else
+		GlobalStorageSiK.TerminalUI.instance = ui
+	end
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 		GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", state or {})
 	end
 	GlobalStorageSiK.TerminalBlockedUI.instance = ui
+	GlobalStorageSiK.TerminalBlockedUI.instances[playerNum] = ui
 end
 
 ---@param state table|string|nil
@@ -76,8 +99,14 @@ end
 
 ---@param state table|nil
 function GlobalStorageSiK.TerminalBlockedUI.refresh(state)
-	local ui = GlobalStorageSiK.TerminalBlockedUI.instance
-		or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	local playerNum = tonumber(state and state.playerNum) or 0
+	local ui = nil
+	if GlobalStorageSiK.TerminalBlockedUI.instances then
+		ui = GlobalStorageSiK.TerminalBlockedUI.instances[playerNum]
+	elseif playerNum == 0 then
+		ui = GlobalStorageSiK.TerminalBlockedUI.instance
+			or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	end
 	if not ui or ui.accessMode ~= "blocked" then
 		return
 	end

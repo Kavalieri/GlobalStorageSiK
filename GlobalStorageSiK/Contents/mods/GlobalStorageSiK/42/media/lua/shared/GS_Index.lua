@@ -45,6 +45,18 @@ local function addLocation(row, nodeId, count)
 	row.locations[#row.locations + 1] = { nodeId = nodeId, count = count }
 end
 
+local function copyArray(values)
+	local out = {}
+	for i = 1, #(values or {}) do out[i] = values[i] end
+	return out
+end
+
+local function copyMap(values)
+	local out = {}
+	for key, value in pairs(values or {}) do out[key] = value end
+	return out
+end
+
 local function mergeLiveContainer(byType, container, nodeId)
 	if not container then
 		return
@@ -70,12 +82,21 @@ local function mergeLiveContainer(byType, container, nodeId)
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,
+				fluidState = row.fluidState,
+				foodState = row.foodState,
+				shapeFamily = row.shapeFamily,
+				productFamilyKey = row.productFamilyKey,
+				shapeKey = row.shapeKey,
 				conditionSignature = row.conditionSignature,
 				condition = row.condition,
 				conditionMax = row.conditionMax,
 				detailKind = row.detailKind,
 				variantKey = row.variantKey,
-				itemIds = row.itemIds or {},
+				itemIds = copyArray(row.itemIds),
+				unitDetails = copyMap(row.unitDetails),
+				totalWeight = row.totalWeight or 0,
+				totalFluidAmount = row.totalFluidAmount or 0,
+				totalFluidCapacity = row.totalFluidCapacity or 0,
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,
 				vanillaKey = row.vanillaKey,
@@ -91,6 +112,11 @@ local function mergeLiveContainer(byType, container, nodeId)
 			existing.count = existing.count + row.count
 			existing.itemIds = existing.itemIds or {}
 			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
+			existing.unitDetails = existing.unitDetails or {}
+			for itemId, detail in pairs(row.unitDetails or {}) do existing.unitDetails[itemId] = detail end
+			existing.totalWeight = (existing.totalWeight or 0) + (row.totalWeight or 0)
+			existing.totalFluidAmount = (existing.totalFluidAmount or 0) + (row.totalFluidAmount or 0)
+			existing.totalFluidCapacity = (existing.totalFluidCapacity or 0) + (row.totalFluidCapacity or 0)
 			addLocation(existing, nodeId, row.count)
 		end
 	end
@@ -123,12 +149,21 @@ local function mergeNodeSnapshot(byType, node)
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,
+				fluidState = row.fluidState,
+				foodState = row.foodState,
+				shapeFamily = row.shapeFamily,
+				productFamilyKey = row.productFamilyKey,
+				shapeKey = row.shapeKey,
 				conditionSignature = row.conditionSignature,
 				condition = row.condition,
 				conditionMax = row.conditionMax,
 				detailKind = row.detailKind,
 				variantKey = row.variantKey,
-				itemIds = row.itemIds or {},
+				itemIds = copyArray(row.itemIds),
+				unitDetails = copyMap(row.unitDetails),
+				totalWeight = row.totalWeight or 0,
+				totalFluidAmount = row.totalFluidAmount or 0,
+				totalFluidCapacity = row.totalFluidCapacity or 0,
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,
 				vanillaKey = row.vanillaKey,
@@ -144,6 +179,11 @@ local function mergeNodeSnapshot(byType, node)
 			existing.count = (existing.count or 0) + (row.count or 0)
 			existing.itemIds = existing.itemIds or {}
 			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
+			existing.unitDetails = existing.unitDetails or {}
+			for itemId, detail in pairs(row.unitDetails or {}) do existing.unitDetails[itemId] = detail end
+			existing.totalWeight = (existing.totalWeight or 0) + (row.totalWeight or 0)
+			existing.totalFluidAmount = (existing.totalFluidAmount or 0) + (row.totalFluidAmount or 0)
+			existing.totalFluidCapacity = (existing.totalFluidCapacity or 0) + (row.totalFluidCapacity or 0)
 			addLocation(existing, node.id, row.count or 0)
 		end
 	end
@@ -194,12 +234,16 @@ local function compactParentRows(detailRows)
 				gsSubKeys = detail.gsSubKeys or {}, gsSubKeysStr = detail.gsSubKeysStr or "",
 				learnedRecipeNames = detail.learnedRecipeNames,
 				numberOfPages = detail.numberOfPages,
-				count = 0, locations = {}, variantSummary = {},
+				count = 0, locations = {}, variantSummary = {}, totalWeight = 0,
+				totalFluidAmount = 0, totalFluidCapacity = 0,
 				_variantSeen = {}, _pathSeen = {}, _detailKinds = {}, _fullTypeSeen = {},
 			}
 			byParent[parentKey] = parent
 		end
 		parent.count = parent.count + (detail.count or 0)
+		parent.totalWeight = parent.totalWeight + (detail.totalWeight or 0)
+		parent.totalFluidAmount = parent.totalFluidAmount + (detail.totalFluidAmount or 0)
+		parent.totalFluidCapacity = parent.totalFluidCapacity + (detail.totalFluidCapacity or 0)
 		parent._fullTypeSeen[detail.fullType] = true
 		for j = 1, #(detail.locations or {}) do
 			addLocation(parent, detail.locations[j].nodeId, detail.locations[j].count)
@@ -213,10 +257,16 @@ local function compactParentRows(detailRows)
 		if not summary then
 			summary = {
 				key = variantKey, count = 0, detailKind = detailKind,
+				fullType = detail.fullType, displayName = detail.displayName,
 				mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
 				dynamicSignature = detail.dynamicSignature,
 				dynamicStateKey = detail.dynamicStateKey,
 				dynamicPercent = detail.dynamicPercent,
+				fluidState = detail.fluidState,
+				foodState = detail.foodState,
+				shapeFamily = detail.shapeFamily,
+				productFamilyKey = detail.productFamilyKey,
+				shapeKey = detail.shapeKey,
 				condition = detail.condition, conditionMax = detail.conditionMax,
 				nativePath = detail.nativePath,
 			}
@@ -236,12 +286,21 @@ local function compactParentRows(detailRows)
 		for _ in pairs(parent._detailKinds) do kindCount = kindCount + 1 end
 		for _ in pairs(parent._fullTypeSeen) do fullTypeCount = fullTypeCount + 1 end
 		parent.variantCount = variantCount
+		parent.categoryCount = pathCount
+		parent.nativePaths = {}
+		for nativePath in pairs(parent._pathSeen) do
+			parent.nativePaths[#parent.nativePaths + 1] = nativePath
+		end
+		table.sort(parent.nativePaths)
+		parent.locationCount = #parent.locations
 		local variantSearchParts = {}
 		for i = 1, #parent.variantSummary do
 			local summary = parent.variantSummary[i]
 			variantSearchParts[#variantSearchParts + 1] = tostring(summary.key or "")
+			if summary.displayName then variantSearchParts[#variantSearchParts + 1] = summary.displayName end
 			if summary.mediaTitle then variantSearchParts[#variantSearchParts + 1] = summary.mediaTitle end
 			if summary.dynamicStateKey then variantSearchParts[#variantSearchParts + 1] = summary.dynamicStateKey end
+			if summary.nativePath then variantSearchParts[#variantSearchParts + 1] = summary.nativePath end
 		end
 		parent.variantSearchText = table.concat(variantSearchParts, " ")
 		if parent._detailKinds.recorded_media then
@@ -260,15 +319,9 @@ local function compactParentRows(detailRows)
 		parent.aggregateAllowed = parent.count == 1 or kindCount == 0
 		parent.detailMode = parent.cosmeticVariants and kindCount == 0 and "variants" or "instances"
 		parent.mixedVariants = pathCount > 1
-		if parent.mixedVariants and kindCount == 1 and parent._detailKinds.fluid then
-			parent.nativePath = "native:containers/liquid"
-			parent.nativeStatus = "classified"
-			parent.vanillaKey = "WaterContainer"
-			parent.effective = "native"
-			parent.categoryEffective = "native"
-			parent.routingIdentity = parent.nativePath
-			parent.categorySource = "VANILLA"
-		elseif not parent.mixedVariants and #parent.variantSummary > 0 then
+		-- Un padre que mezcla rutas no inventa una categoría representativa. La
+		-- UI lo etiqueta como «Varias categorías» y cada hijo conserva la suya.
+		if not parent.mixedVariants and #parent.variantSummary > 0 then
 			parent.nativePath = parent.variantSummary[1].nativePath
 		end
 		parent._variantSeen, parent._pathSeen, parent._detailKinds, parent._fullTypeSeen = nil, nil, nil, nil
@@ -377,19 +430,28 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 					if detailKind then hasStateful = true end
 					detailFullTypes[row.fullType] = true
 					for i = 1, #(row.itemIds or {}) do
+						local itemId = row.itemIds[i]
+						local unit = row.unitDetails and row.unitDetails[itemId] or nil
 							details[#details + 1] = {
-							rowKey = rowKey .. "\31item:" .. tostring(row.itemIds[i]),
-							parentRowKey = rowKey, fullType = row.fullType, itemId = row.itemIds[i],
-							itemIds = { row.itemIds[i] }, aggregateAllowed = false,
+							rowKey = rowKey .. "\31item:" .. tostring(itemId),
+							parentRowKey = rowKey, fullType = row.fullType, itemId = itemId,
+							itemIds = { itemId }, aggregateAllowed = false,
 							count = 1,
 							displayName = row.mediaTitle or row.displayName,
 							nodeId = node.id, zoneId = node.zoneId,
 							detailKind = detailKind, variantKey = row.variantKey,
-							mediaIndex = row.mediaIndex, mediaTitle = row.mediaTitle,
+							mediaIndex = unit and unit.mediaIndex or row.mediaIndex,
+							mediaTitle = unit and unit.mediaTitle or row.mediaTitle,
 							dynamicSignature = row.dynamicSignature,
 							dynamicStateKey = row.dynamicStateKey,
-							dynamicPercent = row.dynamicPercent,
-							condition = row.condition, conditionMax = row.conditionMax,
+							dynamicPercent = unit and unit.dynamicPercent or row.dynamicPercent,
+							fluidState = unit and unit.fluidState or row.fluidState,
+							foodState = unit and unit.foodState or row.foodState,
+							shapeFamily = row.shapeFamily,
+							productFamilyKey = row.productFamilyKey,
+							shapeKey = row.shapeKey,
+							condition = unit and unit.condition or row.condition,
+							conditionMax = unit and unit.conditionMax or row.conditionMax,
 							literatureTitle = row.literatureTitle,
 							nativePath = row.nativePath,
 							nativeStatus = row.nativePath and "classified" or row.nativeStatus,

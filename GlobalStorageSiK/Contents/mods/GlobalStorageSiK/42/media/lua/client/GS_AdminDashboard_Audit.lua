@@ -41,6 +41,8 @@
 require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
+require "GS_SiK_UI_State"
 require "GS_TerminalUI_Scroll"
 require "GS_Config"
 
@@ -49,7 +51,7 @@ GlobalStorageSiK.AdminDashboardAudit = GlobalStorageSiK.AdminDashboardAudit or {
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 8
+local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
 local MIN_SUMMARY_SCROLL_H = FONT_HGT_SMALL * 4
 
 -- dev24: renderWrappedLines() promovida a GlobalStorageSiK.SiK_UI.
@@ -57,6 +59,21 @@ local MIN_SUMMARY_SCROLL_H = FONT_HGT_SMALL * 4
 -- GS_AdminDashboard_Corpus.lua - alias local para no tocar el resto de este
 -- fichero.
 local renderWrappedLines = GlobalStorageSiK.SiK_UI.renderWrappedLinePool
+
+local function captureSummaryState(scroll)
+	return GlobalStorageSiK.SiK_UI.State.capture({
+		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+		selectedKey = scroll._sikSelectedKey,
+		focusedKey = scroll._sikFocusedKey,
+	})
+end
+
+local function restoreSummaryState(scroll, snapshot)
+	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	scroll._sikSelectedKey = state.selectedKey
+	scroll._sikFocusedKey = state.focusedKey
+	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+end
 
 --- Construye la pestaña Taxonomia completa - todos los widgets creados aqui
 --- se añaden como hijos de `ui` (la ventana) y se registran en
@@ -112,6 +129,12 @@ function GlobalStorageSiK.AdminDashboardAudit.build(ui, pad, y, textW, bottomLim
 	-- widget 2 veces.
 	ui.nativeAuditSummaryScroll = GlobalStorageSiK.TerminalScroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
 	track(ui.nativeAuditSummaryScroll)
+	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(ui.nativeAuditSummaryScroll, function()
+		if ui._auditRelayout then return end
+		ui._auditRelayout = true
+		GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
+		ui._auditRelayout = false
+	end)
 
 	GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 end
@@ -177,6 +200,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	-- (mismo patron ya usado por refreshMemberPanel en GS_AdminDashboard.lua
 	-- para listas de tamaño variable) - clear() ya garantiza que ninguna
 	-- linea sobrante de una ejecucion anterior queda visible.
+	local preservedState = captureSummaryState(scroll)
 	GlobalStorageSiK.TerminalScroll.clear(scroll)
 	local contentW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
 	local sy = 2
@@ -186,6 +210,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 		sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyNoRunYet"), 4, sy, contentW - 8,
 			GlobalStorageSiK.TerminalScroll.addChild)
 		GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+		restoreSummaryState(scroll, preservedState)
 		return
 	end
 
@@ -229,6 +254,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	end
 
 	GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+	restoreSummaryState(scroll, preservedState)
 end
 
 --- Envia el comando runNativeAudit - guarda de un solo vuelo en CLIENTE

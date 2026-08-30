@@ -67,6 +67,7 @@ local COOKED_FOOD_RESULT_TOKENS = toSet({ "recipe", "stew", "soup", "fried", "bo
 -- Cocina, dos L3: utensilio manual y electrodomestico.
 local COOKWARE_TOKENS = toSet({ "pan", "pot", "spatula", "whisk", "ladle", "saucepan", "skillet" })
 local APPLIANCE_TOKENS = toSet({ "kettle", "toaster", "blender" })
+local MOVABLE_APPLIANCE_TOKENS = toSet({ "fridge", "refrigerator", "freezer", "microwave", "oven", "stove", "dishwasher" })
 -- Limpieza, dos L3: producto quimico y utensilio.
 local CLEANING_CHEMICAL_TOKENS = toSet({ "bleach", "detergent", "soap" })
 local CLEANING_TOOL_TOKENS = toSet({ "mop", "sponge" })
@@ -86,7 +87,7 @@ local GAME_TOKENS = toSet({ "chess", "boardgame", "playingcard", "dice" })
 -- Movibles vanilla: el prefijo `Mov_` identifica un objeto colocable, pero
 -- no su uso. Solo se clasifica cuando el nombre real aporta una función
 -- inequívoca; no se captura el resto con un cajón genérico.
-local MOVABLE_STORAGE_TOKENS = toSet({ "drawer", "drawers", "cabinet", "chest", "dresser", "shelf", "shelves", "bookcase" })
+local MOVABLE_STORAGE_TOKENS = toSet({ "drawer", "drawers", "cabinet", "chest", "dresser", "shelf", "shelves", "bookcase", "locker", "crate" })
 local MOVABLE_SURFACE_TOKENS = toSet({ "table", "desk", "counter", "workbench" })
 local MOVABLE_SEATING_TOKENS = toSet({ "chair", "sofa", "armchair", "bench", "stool" })
 
@@ -101,15 +102,20 @@ local function classifyHomeLeisure(fullType, si)
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end
 	if U.hasAnyToken(tokens, COOKED_FOOD_RESULT_TOKENS) then return nil end
-	if U.hasAnyToken(tokens, MOVABLE_STORAGE_TOKENS) then
-		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "storage" }, {}, {},
-			U.evidence("name_movable_storage", 30)
+	local isMoveable = U.itemTypeLower(si) == "base:moveable" or U.worldObjectSprite(si) ~= ""
+	if isMoveable and U.hasAnyToken(tokens, MOVABLE_APPLIANCE_TOKENS) then
+		return { l1 = "home_leisure_collection", l2 = "kitchen", l3 = "appliance" }, {}, {},
+			U.evidence("script_movable_appliance", 100)
 	end
-	if U.hasAnyToken(tokens, MOVABLE_SURFACE_TOKENS) then
+	if isMoveable and U.hasAnyToken(tokens, MOVABLE_STORAGE_TOKENS) then
+		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "storage" }, {}, {},
+			U.evidence("script_movable_storage", 100)
+	end
+	if isMoveable and U.hasAnyToken(tokens, MOVABLE_SURFACE_TOKENS) then
 		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "surface" }, {}, {},
 			U.evidence("name_movable_surface", 30)
 	end
-	if U.hasAnyToken(tokens, MOVABLE_SEATING_TOKENS) then
+	if isMoveable and U.hasAnyToken(tokens, MOVABLE_SEATING_TOKENS) then
 		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "seating" }, {}, {},
 			U.evidence("name_movable_seating", 30)
 	end

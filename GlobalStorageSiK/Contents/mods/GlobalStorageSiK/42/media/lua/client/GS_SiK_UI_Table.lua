@@ -4,20 +4,53 @@
 ]]
 
 require "GS_SiK_UI_Core"
+if not GlobalStorageSiK.SiK_UI.Metrics then require "GS_SiK_UI_Metrics" end
 require "GS_TerminalUI_Scroll"
+if not GlobalStorageSiK.SiK_UI.List then require "GS_SiK_UI_List" end
 
 GlobalStorageSiK.SiK_UI.Table = GlobalStorageSiK.SiK_UI.Table or {}
 
 local Table = GlobalStorageSiK.SiK_UI.Table
 
-Table.DEFAULTS = Table.DEFAULTS or {
-	font = UIFont.Small,
-	rowVerticalPadding = 10,
-	headerVerticalPadding = 10,
-	columnGap = 4,
-	left = 0,
-	right = 0,
-}
+Table.DEFAULTS = Table.DEFAULTS or {}
+local TABLE_TOKENS = GlobalStorageSiK.SiK_UI.Metrics.tokens()
+Table.DEFAULTS.font = UIFont.Small
+Table.DEFAULTS.rowVerticalPadding = TABLE_TOKENS.controlVerticalPadding or 10
+Table.DEFAULTS.headerVerticalPadding = TABLE_TOKENS.tableHeaderVerticalPadding or 10
+Table.DEFAULTS.columnGap = TABLE_TOKENS.tableColumnGap or 8
+Table.DEFAULTS.cellPadding = TABLE_TOKENS.tableCellPadding or 6
+Table.DEFAULTS.left = 0
+Table.DEFAULTS.right = 0
+
+local function layoutCacheKey(width, columns, options, metrics)
+	local parts = {
+		tostring(width), tostring(metrics.gap), tostring(metrics.left), tostring(metrics.right),
+		tostring(metrics.cellPadding),
+	}
+	for i = 1, #(columns or {}) do
+		local spec = columns[i]
+		parts[#parts + 1] = table.concat({
+			tostring(spec.key or i), tostring(spec.flex or ""), tostring(spec.width or ""),
+			tostring(spec.widthFraction or ""), tostring(spec.minWidth or ""),
+			tostring(spec.hardMinWidth or ""), tostring(spec.start or ""),
+			tostring(spec.startFraction or ""), tostring(spec.finish or ""),
+			tostring(spec.finishFraction or ""), tostring(spec.right or ""),
+			tostring(options.columnWidths and options.columnWidths[spec.key] or ""),
+			tostring(spec.title or spec.titleKey or ""),
+		}, ":")
+		for j = 1, #(spec.measureValues or {}) do
+			parts[#parts + 1] = tostring(spec.measureValues[j])
+		end
+	end
+	return table.concat(parts, "|")
+end
+
+local function cacheLayout(columns, key, layout)
+	if type(columns) == "table" then
+		columns._sikUiLayoutCache = { key = key, layout = layout }
+	end
+	return layout
+end
 
 --- Métricas comunes de todas las tablas. Cada consumidor puede sobrescribir
 --- solo lo que necesite; cambiar DEFAULTS propaga fuente y densidad globales.
@@ -37,6 +70,7 @@ function Table.metrics(options)
 		gap = tonumber(options.gap) or Table.DEFAULTS.columnGap,
 		left = tonumber(options.left) or Table.DEFAULTS.left,
 		right = tonumber(options.right) or Table.DEFAULTS.right,
+		cellPadding = tonumber(options.cellPadding) or Table.DEFAULTS.cellPadding,
 	}
 end
 
@@ -96,8 +130,14 @@ end
 ---@return table[]
 function Table.resolveColumns(width, columns, options)
 	width = math.max(1, tonumber(width) or 1)
+	columns = columns or {}
 	options = options or {}
 	local metrics = Table.metrics(options)
+	local cacheKey = layoutCacheKey(width, columns, options, metrics)
+	local cached = type(columns) == "table" and columns._sikUiLayoutCache or nil
+	if cached and cached.key == cacheKey then
+		return cached.layout
+	end
 	local flow = false
 	for i = 1, #(columns or {}) do
 		local spec = columns[i]
@@ -144,12 +184,18 @@ function Table.resolveColumns(width, columns, options)
 			out[i] = {
 				key = spec.key, titleKey = spec.titleKey, title = spec.title,
 				align = spec.align or "left", x = x, finish = x + colW,
-				width = colW, pad = tonumber(spec.pad) or 0, spec = spec,
+				width = colW, pad = tonumber(spec.pad) or metrics.cellPadding, spec = spec,
 			}
 			x = x + colW + gap
 		end
+		local last = out[#out]
+		local targetFinish = width - right
+		if last and last.x <= targetFinish and last.finish <= targetFinish then
+			last.finish = targetFinish
+			last.width = targetFinish - last.x
+		end
 		logColumnsIfChanged(columns, width, out)
-		return out
+		return cacheLayout(columns, cacheKey, out)
 	end
 	for i = 1, #(columns or {}) do
 		local spec = columns[i]
@@ -166,12 +212,63 @@ function Table.resolveColumns(width, columns, options)
 			x = x1,
 			finish = x2,
 			width = x2 - x1,
-			pad = tonumber(spec.pad) or 0,
+			pad = tonumber(spec.pad) or metrics.cellPadding,
 			spec = spec,
 		}
 	end
 	logColumnsIfChanged(columns, width, out)
-	return out
+	return cacheLayout(columns, cacheKey, out)
+end
+
+--- Geometria de fila relativa al mismo contentRect que usa la cabecera.
+--- Table consume contentW; la reserva de scrollbar pertenece exclusivamente a Block.
+---@param contentRect table
+---@param rowIndex number
+---@param options table|nil
+---@return table
+function Table.rowRect(contentRect, rowIndex, options)
+	contentRect = contentRect or {}
+	options = options or {}
+	local metrics = Table.metrics(options)
+	local rowHeight = tonumber(options.rowHeight) or tonumber(contentRect.rowHeight)
+		or metrics.rowHeight
+	local headerHeight = tonumber(options.headerHeight) or tonumber(contentRect.headerHeight) or 0
+	local index = math.max(1, math.floor(tonumber(rowIndex) or 1))
+	return {
+		x = tonumber(contentRect.x) or 0,
+		y = (tonumber(contentRect.y) or 0) + headerHeight + (index - 1) * rowHeight,
+		w = math.max(0, tonumber(contentRect.w or contentRect.contentW) or 0),
+		h = math.max(0, rowHeight),
+		rowIndex = index,
+	}
+end
+
+--- Hitbox canonico: nunca vuelve a medir ni desplazar la fila renderizada.
+---@param contentRect table
+---@param rowIndex number
+---@param options table|nil
+---@return table
+function Table.hitRect(contentRect, rowIndex, options)
+	return Table.rowRect(contentRect, rowIndex, options)
+end
+
+--- Resuelve una tabla completa a partir del contentRect entregado por Block.
+---@param contentRect table
+---@param columns table[]
+---@param options table|nil
+---@return table
+function Table.resolve(contentRect, columns, options)
+	contentRect = contentRect or {}
+	local contentW = math.max(0, tonumber(contentRect.w or contentRect.contentW) or 0)
+	return {
+		contentRect = {
+			x = tonumber(contentRect.x) or 0,
+			y = tonumber(contentRect.y) or 0,
+			w = contentW,
+			h = math.max(0, tonumber(contentRect.h) or 0),
+		},
+		columns = Table.resolveColumns(contentW, columns or {}, options),
+	}
 end
 
 --- Conecta el divisor que ya dibuja drawHeader con un ajuste de ancho real.
@@ -281,8 +378,8 @@ end
 --- API propia minima: el consumidor aporta la fila y su actualizador.
 function Table.createVirtual(parent, x, y, w, h, rowHeight, padding, columns, onCreateRow, onUpdateRow, options)
 	local metrics = Table.metrics(options)
-	local list = GlobalStorageSiK.SiK_UI.VirtualList.create(parent, x, y, w, h,
-		rowHeight or metrics.rowHeight, padding)
+	local list = GlobalStorageSiK.SiK_UI.List.createVirtual(parent, x, y, w, h,
+		rowHeight or metrics.rowHeight, padding, onCreateRow, onUpdateRow)
 	list._sikTableColumns = columns or {}
 	list._sikTableOptions = options or {}
 	list.getColumnLayout = function(self)
@@ -292,7 +389,5 @@ function Table.createVirtual(parent, x, y, w, h, rowHeight, padding, columns, on
 		self._sikTableColumns = nextColumns or {}
 		if self.refreshItems then self:refreshItems() end
 	end
-	if onCreateRow then list:setOnCreateItem(onCreateRow) end
-	if onUpdateRow then list:setOnUpdateItem(onUpdateRow) end
 	return list
 end

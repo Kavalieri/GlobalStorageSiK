@@ -85,6 +85,58 @@ local function itemDisplayCategory(item)
 	return value and isSafeSourceCategory(value) and value or nil
 end
 
+-- Los objetos recogidos del mundo no siempre conservan una identidad útil en
+-- el ScriptItem. En particular, muchos muebles llegan como Moveable genérico:
+-- su función real vive en las propiedades del sprite que ReadFromWorldSprite
+-- dejó en la instancia. Resolverla aquí mantiene separadas dos familias que
+-- vanilla también trata como clases distintas: Moveable (mueble) e
+-- InventoryContainer equipable (mochila).
+local function moveablePathFromItem(item)
+	if not item then return nil end
+	if instanceof then
+		local isMoveable = safeCall(function() return instanceof(item, "Moveable") end)
+		if isMoveable ~= true then return nil end
+	end
+	local worldSprite = item.getWorldSprite
+		and safeCall(function() return item:getWorldSprite() end) or nil
+	if (not worldSprite or worldSprite == "") and item.getWorldObjectSprite then
+		worldSprite = safeCall(function() return item:getWorldObjectSprite() end)
+	end
+	if (not worldSprite or worldSprite == "") and item.getModData then
+		local md = safeCall(function() return item:getModData() end)
+		worldSprite = md and (md.WorldObjectSprite or md.worldObjectSprite
+			or md.worldSprite or md.sprite) or nil
+	end
+	if not worldSprite or worldSprite == "" or not getSprite then return nil end
+	local sprite = safeCall(function() return getSprite(worldSprite) end)
+	local props = sprite and sprite.getProperties
+		and safeCall(function() return sprite:getProperties() end) or nil
+	if not props then return nil end
+	local function has(name)
+		return props.has and safeCall(function() return props:has(name) end) == true
+	end
+	local function value(name)
+		return has(name) and props.get and safeCall(function() return props:get(name) end) or nil
+	end
+	local containerKind = string.lower(tostring(value("container") or ""))
+	local applianceContainer = containerKind == "fridge" or containerKind == "freezer"
+		or containerKind == "microwave" or containerKind == "stove"
+		or containerKind == "oven" or containerKind == "dishwasher"
+	local refrigerated = has("IsFridge") or has("Freezer")
+		or containerKind:find("fridge", 1, true) ~= nil
+		or containerKind:find("freezer", 1, true) ~= nil
+	local isoType = string.lower(tostring(value("IsoType") or ""))
+	if refrigerated or applianceContainer or isoType == "isostove" then
+		return { l1 = "home_leisure_collection", l2 = "kitchen", l3 = "appliance" }
+	end
+	if containerKind ~= "" or has("ContainerCapacity") or has("FreezerCapacity") then
+		return { l1 = "home_leisure_collection", l2 = "furnishing", l3 = "storage" }
+	end
+	return nil
+end
+
+Resolution.moveablePathFromItem = moveablePathFromItem
+
 local function nativeStatus(result, path)
 	if not result then return "error" end
 	if result.pending then return "pending" end
@@ -105,6 +157,17 @@ local function fromAuthoritativeRow(fullType, row)
 	local effective = row.effective or row.categoryEffective
 	local nativeStatus = cleanVanillaKey(row.nativeStatus)
 	local vanillaKey = cleanVanillaKey(row.vanillaKey)
+	if effective == "variants" and nativeStatus == "variants" and row.nativePath == nil
+		and type(row.routingIdentity) == "string" and row.routingIdentity:match("^variants:")
+		and type(row.nativePaths) == "table" and #row.nativePaths > 1 then
+		return {
+			fullType = fullType, nativeStatus = "variants", nativePath = nil,
+			nativePaths = row.nativePaths, vanillaKey = vanillaKey,
+			effective = "variants", routingIdentity = row.routingIdentity,
+			labelKey = "IGUI_GS_MultipleCategories", colorL1 = nil,
+			categorySource = row.categorySource,
+		}
+	end
 	if not nativeStatus or not vanillaKey or not isSafeSourceCategory(vanillaKey) then return nil end
 	if effective == "native" then
 		local nativePath = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
@@ -129,19 +192,21 @@ local function fromAuthoritativeRow(fullType, row)
 	return nil
 end
 
-local function buildBase(fullType, item)
+local function buildBase(fullType, item, knownInstancePath)
 	if type(fullType) ~= "string" or fullType == "" then
 		return { fullType = fullType, nativeStatus = "error", vanillaKey = "Misc", effective = "vanilla", routingIdentity = "vanilla:Misc", labelKey = "Misc" }
 	end
 	local result = GlobalStorageSiK.NativeClassifier.classify(fullType)
 	local path = result and GlobalStorageSiK.NativeProduct.normalizePath(result.primaryPath) or nil
-	local fluidPath = item and GlobalStorageSiK.FluidTaxonomy.resolve(item) or nil
-	if fluidPath then path = GlobalStorageSiK.NativeProduct.normalizePath(fluidPath) end
+	local fluidPath = knownInstancePath or (item and GlobalStorageSiK.FluidTaxonomy.resolve(item) or nil)
+	local moveablePath = item and moveablePathFromItem(item) or nil
+	local instancePath = fluidPath or moveablePath
+	if instancePath then path = GlobalStorageSiK.NativeProduct.normalizePath(instancePath) end
 	-- El contenido de un contenedor es una variante declarada por instancia.
 	-- Puede sustituir una ruta estática "containers/liquid" (o incluso una
 	-- abstención del ScriptItem), por lo que no debe heredar el estado de la
 	-- clasificación estática al decidir si la ruta dinámica es utilizable.
-	local status = fluidPath and "classified" or nativeStatus(result, path)
+	local status = instancePath and "classified" or nativeStatus(result, path)
 	if status ~= "classified" then path = nil end
 	local vanillaKey = itemDisplayCategory(item) or scriptDisplayCategory(fullType) or "Misc"
 	local categorySource = sourceCategoryKind(vanillaKey)
@@ -170,7 +235,7 @@ GlobalStorageSiK.CatalogManager.onEpochChanged(resetCache)
 ---@param row table|nil
 ---@param item InventoryItem|nil
 ---@return table
-function Resolution.resolve(fullType, row, item)
+function Resolution.resolve(fullType, row, item, knownInstancePath)
 	if type(fullType) ~= "string" or fullType == "" then
 		return buildBase(fullType, item)
 	end
@@ -178,7 +243,7 @@ function Resolution.resolve(fullType, row, item)
 		local authoritative = fromAuthoritativeRow(fullType, row)
 		if authoritative then return authoritative end
 	end
-	if item then return buildBase(fullType, item) end
+	if item then return buildBase(fullType, item, knownInstancePath) end
 	local cached = cache[fullType]
 	if cached and cached.nativeStatus ~= "pending" then return cached end
 	local resolved = buildBase(fullType, nil)
@@ -234,6 +299,9 @@ end
 function Resolution.label(resolved)
 	if resolved and resolved.effective == "native" then
 		return GlobalStorageSiK.NativeProduct.getView(resolved.nativePath).fullLabel
+	end
+	if resolved and resolved.effective == "variants" then
+		return GlobalStorageSiK.I18n.text("IGUI_GS_MultipleCategories")
 	end
 	local key = resolved and resolved.vanillaKey or "Misc"
 	local i18n = GlobalStorageSiK.I18n

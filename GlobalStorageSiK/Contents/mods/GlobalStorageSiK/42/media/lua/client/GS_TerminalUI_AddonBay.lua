@@ -1,306 +1,120 @@
 --[[
-
-	GlobalStorageSiK - Bahía de slots de addons (terminal)
-
-	Autor: SiK
-
-	Fecha: 2025-06-27
-
-	Descripción: Ranuras con borde rojo/verde; ancho dinámico según etiqueta.
-
+	GlobalStorageSiK - Responsive addon bay inside the Addons tab.
+	Slots use the shared Controls button instead of a private painted grid.
 ]]
 
-
-
 require "ISUI/ISPanel"
-
 require "GS_I18n"
-
 require "GS_AddonRegistry"
-
 require "GS_TerminalUI_Scroll"
-
 require "GS_AddonManageUI"
-
-
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalAddonBay = GlobalStorageSiK.TerminalAddonBay or {}
 
---- Disquete vacío: se muestra mientras el addon no está instalado.
-local FLOPPY_ICON_PATH = "media/textures/Item_GS_FloppyDisk_Blank.png"
-
-
-
 local T = GlobalStorageSiK.I18n.text
+local METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("standard")
+local SLOT_GAP = METRICS.controlGap
+local SLOT_MIN_W = 140
 
--- BUG REAL cerrado (2026-08-23, pedido explicito del usuario): las ranuras
--- de Craft/Builder/Reader mostraban un nombre generico fijo por titleKey
--- ("Craft", "Constructor", "Lector"), mientras que Tablet mostraba el
--- nombre real del periferico ("Antena WiFi GS") solo porque su titleKey
--- estaba redactado a mano con ese mismo texto - inconsistencia entre
--- addons, no una diferencia de diseño intencional. Ahora TODAS las ranuras
--- resuelven el nombre real del item instalable (def.itemType) via
--- I18n.typeDisplayName (misma fuente que ItemName.json, ya traducida a los
--- 10 idiomas del juego para el item en si) - titleKey queda como fallback
--- solo si el addon no define itemType.
----@param def table
----@return string
 local function addonSlotLabel(def)
 	if def.itemType and def.itemType ~= "" and GlobalStorageSiK.I18n.typeDisplayName then
 		local name = GlobalStorageSiK.I18n.typeDisplayName(def.itemType)
-		if name and name ~= "" then
-			return name
-		end
+		if name and name ~= "" then return name end
 	end
 	return T(def.titleKey or "IGUI_GS_AddonUnknown")
 end
 
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-
-local SLOT_GAP = 16
-
-local SLOT_MIN = 72
-
-local SLOT_FIXED = 88
-
-local ICON_PAD = 10
-
-local LABEL_H = FONT_HGT_SMALL + 6
-
-
-
----@param def table
-
----@param ctx table
-
----@return number r,g,b,a
-
-local function slotBorderColor(def, ctx)
-
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+local function slotTooltip(def, installed)
 	if not GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
-
-		return pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.7
-
+		return T("IGUI_GS_AddonStatusModOff")
 	end
-
-	if ctx.installed and ctx.installed[def.id] then
-
-		return pal.statusOk[1], pal.statusOk[2], pal.statusOk[3], 1
-
-	end
-
-	return pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.5
-
+	if installed then return T("IGUI_GS_AddonStatusInstalled") end
+	return T("IGUI_GS_AddonStatusReady")
 end
 
-
-
---- Calcula ancho de ranura según etiquetas y espacio disponible.
-
----@param defs table[]
-
----@param availW number
-
----@return number slotW, number rowW
-
-local function measureBayLayout(defs, availW)
-
-	local count = #defs
-
-	if count <= 0 then
-
-		return SLOT_MIN, 0
-
+local function slotText(def, installed)
+	local status
+	if not GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
+		status = T("IGUI_GS_AddonStatusMissingMod")
+	elseif installed then
+		status = T("IGUI_GS_AddonStatusInstalled")
+	else
+		status = T("IGUI_GS_AddonNotInstalledHereMsg")
 	end
-
-	local tm = getTextManager()
-
-	local maxLabelW = 0
-
-	for i = 1, count do
-
-		local label = addonSlotLabel(defs[i])
-
-		maxLabelW = math.max(maxLabelW, tm:MeasureStringX(UIFont.Small, label))
-
-	end
-
-	local minSlotW = math.max(SLOT_MIN, maxLabelW + 14)
-
-	local slotW = minSlotW > SLOT_FIXED and minSlotW or SLOT_FIXED
-
-	local rowW = count * slotW + (count - 1) * SLOT_GAP
-
-	return slotW, rowW
-
+	return addonSlotLabel(def) .. " · " .. status
 end
 
+local function gridMetrics(count, width)
+	if count <= 0 then return 0, 0, 0 end
+	local columns = math.max(1, math.floor((width + SLOT_GAP) /
+		(SLOT_MIN_W + SLOT_GAP)))
+	columns = math.min(count, columns)
+	local buttonW = math.max(72,
+		math.floor((width - (columns - 1) * SLOT_GAP) / columns))
+	local rows = math.ceil(count / columns)
+	return columns, rows, buttonW
+end
 
+function GlobalStorageSiK.TerminalAddonBay.layout(host, width)
+	if not host then return 0 end
+	width = math.max(72, tonumber(width) or host.width or 72)
+	local buttons = host.slotButtons or {}
+	local columns, rows, buttonW = gridMetrics(#buttons, width)
+	for i = 1, #buttons do
+		local column = (i - 1) % columns
+		local row = math.floor((i - 1) / columns)
+		local button = buttons[i]
+		button:setX(column * (buttonW + SLOT_GAP))
+		button:setY(row * (METRICS.buttonHeight + SLOT_GAP))
+		button:setWidth(buttonW)
+		button:setHeight(METRICS.buttonHeight)
+	end
+	local height = rows * METRICS.buttonHeight + math.max(0, rows - 1) * SLOT_GAP
+	host:setWidth(width)
+	host:setHeight(height)
+	return height
+end
 
----@param scroll ISPanel
-
----@param x number
-
----@param y number
-
----@param innerW number
-
----@param defs table[]
-
----@param ctx table
-
----@return number
+local function openAddon(def, ctx)
+	if not def or not GlobalStorageSiK.AddonRegistry.isModActive(def.id) then return end
+	GlobalStorageSiK.AddonManageUI.show(def.id, ctx.networkId, ctx.anchor,
+		ctx.terminal, ctx.installed)
+end
 
 function GlobalStorageSiK.TerminalAddonBay.addBay(scroll, x, y, innerW, defs, ctx)
-
 	local count = #defs
-
-	if count <= 0 then
-
-		return y
-
-	end
-
-	local availW = math.max(SLOT_MIN, innerW - x * 2)
-
-	local slotW, rowW = measureBayLayout(defs, availW)
-
-	local slotH = slotW
-
-	local rowH = slotH + LABEL_H + 4
-
-	local host = ISPanel:new(x, y, rowW, rowH)
-
+	if count <= 0 then return y end
+	local width = math.max(72, innerW - x * 2)
+	local host = ISPanel:new(x, y, width, METRICS.buttonHeight)
 	host:initialise()
-
 	host.drawBackground = false
+	host.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	host._sikAddonBay = true
+	host.slotButtons = {}
 
-	host.defs = defs
-
-	host.ctx = ctx
-
-	host.slotW = slotW
-
-	host.slotH = slotH
-
-	host.prerender = function(panel)
-
-		ISPanel.prerender(panel)
-
-		local defsLocal = panel.defs or {}
-
-		local ctxLocal = panel.ctx or {}
-
-		local sw = panel.slotW or SLOT_MIN
-
-		local sh = panel.slotH or sw
-
-		local slotX = 0
-
-		for i = 1, #defsLocal do
-
-			local def = defsLocal[i]
-
-			local br, bg, bb, ba = slotBorderColor(def, ctxLocal)
-
-			panel:drawRect(slotX, 0, sw, sh, 0.96, 0.05, 0.05, 0.05)
-
-			panel:drawRectBorder(slotX, 0, sw, sh, ba, br, bg, bb)
-
-			local isInstalled = ctxLocal.installed and ctxLocal.installed[def.id] ~= nil
-
-			local pad = ICON_PAD
-
-			if isInstalled then
-
-				-- Icono REAL del periferico (ver iconPath en el registro de
-				-- cada addon, p.ej. Item_GS_WifiAntenna.png) - antes un mapa
-				-- aparte aqui lo sobrescribia con el icono de pestaña
-				-- estilizado, por eso nunca se veia el periferico real.
-				local iconPath = def.iconPath
-
-				local tex = iconPath and getTexture(iconPath) or nil
-
-				if tex then
-
-					panel:drawTextureScaledAspect(tex, slotX + pad, pad, sw - pad * 2, sh - pad * 2, 1, 1, 1, 1)
-
-				else
-
-					local _fp = GlobalStorageSiK.SiK_UI.PALETTE
-					panel:drawText("?", slotX + sw / 2 - 4, sh / 2 - 8, _fp.textMuted[1], _fp.textMuted[2], _fp.textMuted[3], 1, UIFont.Small)
-
-				end
-
-			else
-
-				local floppyTex = getTexture(FLOPPY_ICON_PATH)
-
-				if floppyTex then
-
-					panel:drawTextureScaledAspect(floppyTex, slotX + pad, pad, sw - pad * 2, sh - pad * 2, 0.5, 0.6, 0.6, 0.6)
-
-				end
-
-			end
-
-			local label = addonSlotLabel(def)
-
-			local tw = getTextManager():MeasureStringX(UIFont.Small, label)
-
-			local _lp = GlobalStorageSiK.SiK_UI.PALETTE
-			panel:drawText(label, slotX + math.floor((sw - tw) / 2), sh + 2, _lp.textSecondary[1], _lp.textSecondary[2], _lp.textSecondary[3], 1, UIFont.Small)
-
-			slotX = slotX + sw + SLOT_GAP
-
-		end
-
+	for i = 1, count do
+		local def = defs[i]
+		local slotDef = def
+		local installed = ctx.installed and ctx.installed[def.id] ~= nil
+		local active = GlobalStorageSiK.AddonRegistry.isModActive(def.id)
+		local button = GlobalStorageSiK.SiK_UI.Controls.button(host, {
+			x = 0, y = 0, w = SLOT_MIN_W, h = METRICS.buttonHeight,
+			text = slotText(def, installed), fullWidth = true,
+			locked = not active,
+			activeColor = installed and GlobalStorageSiK.SiK_UI.PALETTE.statusOk or nil,
+			tooltip = slotTooltip(def, installed),
+			onClick = function() openAddon(slotDef, ctx) end,
+		})
+		host.slotButtons[#host.slotButtons + 1] = button
 	end
 
-	-- Clic en una ranura abre la ventana de gestion de ese addon (ver
-	-- GS_AddonManageUI.lua) - antes la bahia era puramente visual, sin
-	-- ninguna interaccion (reportado: los botones instalar/retirar solo
-	-- vivian en el bloque apilado de abajo, ahora retirado).
-	host.onMouseDown = function(panel, mx, my)
-		local defsLocal = panel.defs or {}
-		local ctxLocal = panel.ctx or {}
-		local sw = panel.slotW or SLOT_MIN
-		local slotX = 0
-		for i = 1, #defsLocal do
-			if mx >= slotX and mx < slotX + sw and my >= 0 and my < (panel.slotH or sw) then
-				local def = defsLocal[i]
-				if def and GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
-					GlobalStorageSiK.AddonManageUI.show(def.id, ctxLocal.networkId, ctxLocal.anchor, ctxLocal.terminal, ctxLocal.installed)
-				end
-				return true
-			end
-			slotX = slotX + sw + SLOT_GAP
-		end
-		return false
-	end
-
+	local height = GlobalStorageSiK.TerminalAddonBay.layout(host, width)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, host)
-
-	return y + rowH + 8
-
+	return y + height + SLOT_GAP
 end
-
-
-
----@param defCount number
-
----@return number
 
 function GlobalStorageSiK.TerminalAddonBay.measureHeight(defCount)
-
-	if defCount <= 0 then
-
-		return 0
-
-	end
-
-	return SLOT_MIN + LABEL_H + 18
-
+	if defCount <= 0 then return 0 end
+	return METRICS.buttonHeight
 end
-

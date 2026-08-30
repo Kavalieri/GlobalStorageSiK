@@ -8,6 +8,7 @@
 require "GS_Router"
 require "GS_I18n"
 require "GS_FluidTaxonomy"
+require "GS_NativeProduct"
 
 GlobalStorageSiK.ItemSnapshot = {}
 
@@ -23,6 +24,10 @@ local function readWorldSprite(item)
 	local sprite = nil
 	if item.getWorldSprite then
 		local ok, value = pcall(function() return item:getWorldSprite() end)
+		if ok then sprite = value end
+	end
+	if (not sprite or sprite == "") and item.getWorldObjectSprite then
+		local ok, value = pcall(function() return item:getWorldObjectSprite() end)
 		if ok then sprite = value end
 	end
 	if (not sprite or sprite == "") and item.getModData then
@@ -154,10 +159,149 @@ local function conditionState(item)
 	return "condition=" .. tostring(current) .. "/" .. tostring(maximum), current, maximum
 end
 
-local function looksRecordedMedia(fullType)
-	local lower = string.lower(tostring(fullType or ""))
-	return lower:find("vhs", 1, true) ~= nil or lower:find("cassette", 1, true) ~= nil
-		or lower:find("dvd", 1, true) ~= nil or lower:find("cd", 1, true) ~= nil
+local function boolState(item, methodName)
+	local method = item and item[methodName]
+	if not method then return false end
+	local ok, value = pcall(function() return method(item) end)
+	return ok and value == true
+end
+
+local function scalarState(item, methodName)
+	local method = item and item[methodName]
+	if not method then return nil end
+	local ok, value = pcall(function() return method(item) end)
+	return ok and value or nil
+end
+
+local function collectionState(item, methodName)
+	local collection = scalarState(item, methodName)
+	if not collection then return nil end
+	local values = {}
+	if collection.size and collection.get then
+		local size = tonumber(scalarState(collection, "size")) or 0
+		for i = 0, size - 1 do
+			local ok, value = pcall(function() return collection:get(i) end)
+			if ok and value ~= nil then values[#values + 1] = tostring(value) end
+		end
+	elseif type(collection) == "table" then
+		for _, value in pairs(collection) do
+			if value ~= nil then values[#values + 1] = tostring(value) end
+		end
+	end
+	if #values == 0 then return nil end
+	table.sort(values)
+	return values
+end
+
+local function encodeStateList(values)
+	return values and table.concat(values, "\30") or ""
+end
+
+-- Estado discreto que hace que dos raciones de comida dejen de ser
+-- intercambiables. No incluye la edad cruda: cambia continuamente y partiría
+-- el índice en una fila por unidad aun cuando vanilla las presenta en el mismo
+-- estado. Las transiciones que sí cambian lo que el jugador recibe (crudo,
+-- cocinado, quemado, congelado o podrido) forman parte de la identidad.
+local function foodState(item)
+	if not item then return nil, nil end
+	local isFood = boolState(item, "isFood") or boolState(item, "IsFood")
+	if instanceof then
+		local ok, value = pcall(function() return instanceof(item, "Food") end)
+		isFood = ok and value == true
+	end
+	if not isFood and item.getAge then
+		local ok, age = pcall(function() return item:getAge() end)
+		isFood = ok and type(age) == "number"
+	end
+	if not isFood then return nil, nil end
+	local extraItems = collectionState(item, "getExtraItems")
+	local spices = collectionState(item, "getSpices")
+	local uses = scalarState(item, "getCurrentUsesFloat")
+	if type(uses) ~= "number" then uses = scalarState(item, "getCurrentUses") end
+	if type(uses) == "number" then uses = math.floor(uses * 10000 + 0.5) / 10000 else uses = nil end
+	local customName = nil
+	if boolState(item, "isCustomName") then
+		customName = scalarState(item, "getDisplayName") or scalarState(item, "getName")
+		customName = customName and tostring(customName) or nil
+	end
+	local state = {
+		cooked = boolState(item, "isCooked"),
+		burnt = boolState(item, "isBurnt"),
+		frozen = boolState(item, "isFrozen"),
+		rotten = boolState(item, "isRotten"),
+		extraItems = extraItems,
+		spices = spices,
+		uses = uses,
+		customName = customName,
+	}
+	local signature = string.format(
+		"food:cooked=%d;burnt=%d;frozen=%d;rotten=%d;uses=%s;extra=%s;spices=%s;name=%s",
+		state.cooked and 1 or 0, state.burnt and 1 or 0,
+		state.frozen and 1 or 0, state.rotten and 1 or 0,
+		tostring(uses or ""), encodeStateList(extraItems), encodeStateList(spices),
+		tostring(customName or ""))
+	return signature, state
+end
+
+local function actualWeight(item)
+	if not item then return nil end
+	local ok, value = pcall(function()
+		if item.getActualWeight then return item:getActualWeight() end
+		if item.getWeight then return item:getWeight() end
+		return nil
+	end)
+	return ok and type(value) == "number" and value or nil
+end
+
+---@param item InventoryItem|nil
+---@return table detalle serializable exacto para tooltip remoto
+function GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(item)
+	if not item then return {} end
+	local fullType = item.getFullType and item:getFullType() or nil
+	local _, condition, conditionMax = conditionState(item)
+	local fluid = GlobalStorageSiK.FluidTaxonomy.inspect
+		and GlobalStorageSiK.FluidTaxonomy.inspect(item) or nil
+	local fluidAmount, fluidCapacity = fluid and fluid.amount or nil, fluid and fluid.capacity or nil
+	local fluidState = fluid and fluid.detail or nil
+	local dynamicPath = fluid and fluid.path or nil
+	local foodStateKey, food = foodState(item)
+	return {
+		fullType = fullType,
+		displayName = fullType and GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType) or nil,
+		weight = actualWeight(item),
+		condition = condition,
+		conditionMax = conditionMax,
+		mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item),
+		mediaTitle = recordedMediaTitleFromItem(item),
+		dynamicStateKey = (fluid and fluid.stateKey) or foodStateKey,
+		dynamicPercent = fluid and fluid.fillPercent or nil,
+		fluidType = fluid and fluid.canonicalType or nil,
+		fluidAmount = fluidAmount,
+		fluidCapacity = fluidCapacity,
+		fluidState = fluidState,
+		foodState = food,
+		nativePath = dynamicPath and GlobalStorageSiK.NativeProduct
+			and GlobalStorageSiK.NativeProduct.encodePath(dynamicPath) or nil,
+	}
+end
+
+local function looksRecordedMedia(item, fullType)
+	if item and item.isRecordedMedia then
+		local ok, value = pcall(function() return item:isRecordedMedia() end)
+		if ok and value == true then return true end
+	end
+	local scriptItem = item and item.getScriptItem
+		and select(2, pcall(function() return item:getScriptItem() end)) or nil
+	if scriptItem and scriptItem.getRecordedMediaCat then
+		local ok, value = pcall(function() return scriptItem:getRecordedMediaCat() end)
+		if ok and value and tostring(value) ~= "" then return true end
+	end
+	-- Compatibilidad acotada para fixtures/mods antiguos sin señal estructural.
+	-- Solo tipos que empiezan como soporte grabado; nunca CDPlayer/DVDPlayer.
+	local name = string.lower(tostring(fullType or "")):match("^[^.]+%.(.+)$")
+	name = name or string.lower(tostring(fullType or ""))
+	return name:find("vhs", 1, true) == 1 or name:find("cassette", 1, true) == 1
+		or name:find("dvd_disc", 1, true) == 1 or name:find("cd_disc", 1, true) == 1
 end
 
 local function metadataForItem(item, fullType)
@@ -221,9 +365,27 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- transfiere.
 	local mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
 	local mediaTitle = recordedMediaTitleFromItem(item)
-	local dynamicPath, dynamicSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
-	local dynamicStateKey = GlobalStorageSiK.FluidTaxonomy.stateKey(item)
-	local dynamicPercent = GlobalStorageSiK.FluidTaxonomy.fillPercent(item)
+	local worldSprite = readWorldSprite(item)
+	local isMoveable = false
+	if instanceof then
+		local ok, value = pcall(function() return instanceof(item, "Moveable") end)
+		isMoveable = ok and value == true
+	elseif item.getScriptItem then
+		local okScript, scriptItem = pcall(function() return item:getScriptItem() end)
+		if okScript and scriptItem and scriptItem.getItemType then
+			local okType, itemType = pcall(function() return scriptItem:getItemType() end)
+			isMoveable = okType and string.lower(tostring(itemType or "")) == "base:moveable"
+		end
+	end
+	local fluid = GlobalStorageSiK.FluidTaxonomy.inspect
+		and GlobalStorageSiK.FluidTaxonomy.inspect(item) or nil
+	local dynamicPath, dynamicSignature = fluid and fluid.path or nil, fluid and fluid.signature or nil
+	local dynamicStateKey = fluid and fluid.stateKey or nil
+	local dynamicPercent = fluid and fluid.fillPercent or nil
+	local fluidAmount, fluidCapacity = fluid and fluid.amount or nil, fluid and fluid.capacity or nil
+	local fluidState = fluid and fluid.detail or nil
+	local foodStateKey, food = foodState(item)
+	if not dynamicStateKey then dynamicStateKey = foodStateKey end
 	local conditionSignature, condition, conditionMax = conditionState(item)
 	local literatureTitle = literatureTitleFromItem(item)
 	local itemId = nil
@@ -233,19 +395,36 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	end
 	local detailKind = nil
 	local variantKey = "fungible"
-	if mediaIndex ~= nil or looksRecordedMedia(fullType) then
+	if mediaIndex ~= nil or looksRecordedMedia(item, fullType) then
 		detailKind = "recorded_media"
 		variantKey = mediaIndex ~= nil and ("media:" .. tostring(mediaIndex))
 			or ("media:unknown:" .. tostring(itemId or "missing"))
 	elseif dynamicSignature then
 		detailKind = "fluid"
 		variantKey = "fluid:" .. dynamicSignature
+		if fluidState and fluidState.mixture and fluidState.compositionExact == false then
+			-- Sin enumeración completa de la mezcla nunca se promete fungibilidad:
+			-- cada unidad permanece seleccionable por su itemId hasta que el
+			-- runtime confirme la composición exacta.
+			variantKey = variantKey .. ";unit=" .. tostring(itemId or "missing")
+		end
+	elseif foodStateKey then
+		detailKind = "food"
+		variantKey = foodStateKey
 	elseif conditionSignature then
 		detailKind = "condition"
 		variantKey = conditionSignature
 	elseif literatureTitle or learnedRecipeNamesFromItem(item) or numberOfPagesFromItem(item) then
 		detailKind = "literature"
 		variantKey = "literature:" .. tostring(literatureTitle or fullType)
+	end
+	-- El mismo fullType Moveable puede representar sprites y funciones físicas
+	-- distintas. El sprite participa siempre en la identidad de la fila, sin
+	-- borrar el estado dinámico adicional que pudiera tener la unidad.
+	if worldSprite then
+		local spriteKey = "sprite:" .. tostring(worldSprite)
+		variantKey = variantKey == "fungible" and spriteKey or (spriteKey .. "|" .. variantKey)
+		if isMoveable and not detailKind then detailKind = "moveable" end
 	end
 	local groupKey = fullType
 	if variantKey ~= "fungible" then groupKey = groupKey .. "\31variant:" .. variantKey end
@@ -275,19 +454,27 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			dynamicSignature = dynamicSignature,
 			dynamicStateKey = dynamicStateKey,
 			dynamicPercent = dynamicPercent,
+			fluidState = fluidState,
+			shapeFamily = fluidState and fluidState.shapeFamily or nil,
+			productFamilyKey = fluidState and fluidState.productFamilyKey or nil,
+			shapeKey = fluidState and fluidState.shapeKey or nil,
+			foodState = food,
 			conditionSignature = conditionSignature,
 			condition = condition,
 			conditionMax = conditionMax,
 			detailKind = detailKind,
 			variantKey = variantKey,
 			itemIds = {},
+			totalWeight = 0,
+			totalFluidAmount = 0,
+			totalFluidCapacity = 0,
 			count = 0,
 		}
 		-- La ruta del contenido líquido es por instancia y no puede recuperarse
 		-- después desde el ScriptItem estático. Se publica ya resuelta dentro de
 		-- la fila autoritativa para que UI y enrutado describan la misma variante.
-		if dynamicPath and GlobalStorageSiK.CategoryResolution then
-			local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
+		if (dynamicPath or worldSprite) and GlobalStorageSiK.CategoryResolution then
+			local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item, dynamicPath)
 			row.nativePath = resolved.nativePath
 			row.nativeStatus = resolved.nativeStatus
 			row.vanillaKey = resolved.vanillaKey
@@ -304,7 +491,28 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- una sola entrada física. Usarlo aquí inflaba 84 clavos hasta 420 y hacía
 	-- que la retirada eliminase 84 IDs mientras confirmaba 420 unidades.
 	row.count = row.count + 1
-	if itemId ~= nil then row.itemIds[#row.itemIds + 1] = itemId end
+	local weight = actualWeight(item)
+	if weight then row.totalWeight = (row.totalWeight or 0) + weight end
+	if type(fluidAmount) == "number" then row.totalFluidAmount = (row.totalFluidAmount or 0) + fluidAmount end
+	if type(fluidCapacity) == "number" then row.totalFluidCapacity = (row.totalFluidCapacity or 0) + fluidCapacity end
+	if itemId ~= nil then
+		row.itemIds[#row.itemIds + 1] = itemId
+		-- No persistir una tabla vacia por cada unidad fungible. El mapa por ID
+		-- solo existe cuando una futura fila hija necesita estado de instancia.
+		if mediaIndex ~= nil or mediaTitle ~= nil or dynamicSignature ~= nil or foodStateKey ~= nil
+			or conditionSignature ~= nil or worldSprite ~= nil then
+			row.unitDetails = row.unitDetails or {}
+			row.unitDetails[itemId] = {
+				dynamicPercent = dynamicPercent,
+				fluidState = fluidState,
+				foodState = food,
+				condition = condition,
+				conditionMax = conditionMax,
+				mediaIndex = mediaIndex,
+				mediaTitle = mediaTitle,
+			}
+		end
+	end
 	return true
 end
 
@@ -330,6 +538,12 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 	for groupKey, row in pairs(source or {}) do
 		local existing = target[groupKey]
 		if not existing then
+			local itemIds, unitDetails = {}, nil
+			for i = 1, #(row.itemIds or {}) do itemIds[i] = row.itemIds[i] end
+			for itemId, detail in pairs(row.unitDetails or {}) do
+				unitDetails = unitDetails or {}
+				unitDetails[itemId] = detail
+			end
 			target[groupKey] = {
 				rowKey = row.rowKey or groupKey,
 				fullType = row.fullType,
@@ -347,12 +561,21 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,
+				fluidState = row.fluidState,
+				shapeFamily = row.shapeFamily,
+				productFamilyKey = row.productFamilyKey,
+				shapeKey = row.shapeKey,
+				foodState = row.foodState,
 				conditionSignature = row.conditionSignature,
 				condition = row.condition,
 				conditionMax = row.conditionMax,
 				detailKind = row.detailKind,
 				variantKey = row.variantKey,
-				itemIds = row.itemIds or {},
+				itemIds = itemIds,
+				unitDetails = unitDetails,
+				totalWeight = row.totalWeight or 0,
+				totalFluidAmount = row.totalFluidAmount or 0,
+				totalFluidCapacity = row.totalFluidCapacity or 0,
 				nativePath = row.nativePath,
 				nativeStatus = row.nativeStatus,
 				vanillaKey = row.vanillaKey,
@@ -366,6 +589,13 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 			existing.count = (existing.count or 0) + (row.count or 0)
 			existing.itemIds = existing.itemIds or {}
 			for i = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[i] end
+			for itemId, detail in pairs(row.unitDetails or {}) do
+				existing.unitDetails = existing.unitDetails or {}
+				existing.unitDetails[itemId] = detail
+			end
+			existing.totalWeight = (existing.totalWeight or 0) + (row.totalWeight or 0)
+			existing.totalFluidAmount = (existing.totalFluidAmount or 0) + (row.totalFluidAmount or 0)
+			existing.totalFluidCapacity = (existing.totalFluidCapacity or 0) + (row.totalFluidCapacity or 0)
 		end
 	end
 end

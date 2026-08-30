@@ -17,6 +17,7 @@ require "GS_SiK_UI_Core"
 require "GS_UILayout"
 require "GS_TerminalUI_MemberEditor"
 require "GS_SiK_UI_Table"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalPermissions = {}
 
@@ -25,48 +26,34 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
 local ROW_H = TABLE_METRICS.rowHeight
 local HEADER_H = TABLE_METRICS.headerHeight
-local ENTRY_H = FONT_HGT_SMALL + 6
-local ROW_GAP = 6
-local BLOCK_GAP = 10
+local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("standard")
+local ENTRY_H = CONTROL_METRICS.inputHeight
+local ROW_GAP = CONTROL_METRICS.controlGap
+local BLOCK_GAP = CONTROL_METRICS.rowGap
 local TAG_MEMBER_ROW = "_gsNetMemberRow"
 local POOL = 4
-local COL_ROLE_X = 4
--- Ancho suficiente para el rol mas largo ("Propietario"/"Owner" y
--- equivalentes en los 9 idiomas) sin truncar - medido en vez de fijo a
--- ciegas, igual criterio que la tabla de "Gestion de terminales".
-local COL_ROLE_W = math.max(
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_PermRoleOwner")),
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_PermRoleAdmin")),
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_PermRoleMember")),
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_PermRoleFaction"))
-) + 14
-local COL_NAME_X = COL_ROLE_X + COL_ROLE_W + 12
--- Columna "Conexion", a la derecha del todo - pedido explicito 2026-08-22:
--- "Conectado" en verde para quien sigue en linea, "Desconectado hace X" para
--- el resto. Medida con el peor caso ("99d") igual criterio que COL_ROLE_W.
-local COL_SEEN_W = math.max(
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOnline")),
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOffline", "99d"))
-) + 14
 local MEMBER_TABLE_COLUMNS = {
-	{ key = "role", titleKey = "IGUI_GS_PermColRole", width = COL_ROLE_W, pad = COL_ROLE_X },
-	{ key = "name", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 80, pad = 4 },
-	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, align = "right", pad = 4 },
+	{ key = "role", titleKey = "IGUI_GS_PermColRole", width = 120, pad = 6 },
+	{ key = "name", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 160, pad = 6 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = 140, align = "right", pad = 6 },
 }
-local MEMBER_TABLE_OPTIONS = { left = 0, right = GlobalStorageSiK.SiK_UI.scrollBarWidth() + 4, gap = 12 }
+local MEMBER_TABLE_OPTIONS = { left = 0, right = 0, gap = 8 }
 local ADD_W = 72
 -- v20: fila de miembro simplificada (sin botones "Quitar"/"Roles" inline) -
 -- un clic en la fila abre GS_TerminalUI_MemberEditor.lua, igual patron que
 -- la tabla de "Gestion de terminales" (clic en fila -> ventana modal con
 -- TODAS las acciones validadas por permiso, desplegable de rol incluido).
-local PERM_UI_VERSION = 20
+local PERM_UI_VERSION = 21
 
 local function truncate(text, maxW)
 	return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, UIFont.Small)
 end
 
 local function createRowButton(x, y, w, h, title, target, onClick)
-	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
+	return GlobalStorageSiK.SiK_UI.Controls.button(nil, {
+		x = x, y = y, w = w, h = h, text = title,
+		target = target, onClick = onClick, fullWidth = true,
+	})
 end
 
 ---@param kind string|nil owner|admin|user|faction
@@ -430,8 +417,8 @@ local function createMemberRow(host, terminal, ui)
 		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, MEMBER_TABLE_COLUMNS, MEMBER_TABLE_OPTIONS)
 		local rr, rg, rb = roleColor(data.kind)
 		local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-		local nameMaxW = math.max(40, cols[2].width - 8)
-		self:drawText(truncate(memberRoleLabel(data.kind), cols[1].width - cols[1].pad), cols[1].x + cols[1].pad, yMid,
+		local nameMaxW = math.max(40, cols[2].width - cols[2].pad * 2)
+		self:drawText(truncate(memberRoleLabel(data.kind), cols[1].width - cols[1].pad * 2), cols[1].x + cols[1].pad, yMid,
 			rr, rg, rb, 1, UIFont.Small)
 		local nameText = data.displayName or data.name or "?"
 		local nr, ng, nb = pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3]
@@ -444,10 +431,10 @@ local function createMemberRow(host, terminal, ui)
 		local seenX = cols[3].finish - cols[3].pad
 		if data.online then
 			local gr, gg, gb = pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
-			self:drawTextRight(truncate(T("IGUI_GS_AdminOnline"), COL_SEEN_W), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
+			self:drawTextRight(truncate(T("IGUI_GS_AdminOnline"), cols[3].width - cols[3].pad), seenX, yMid, gr, gg, gb, 1, UIFont.Small)
 		elseif data.lastSeenAt then
 			local seenText = T("IGUI_GS_AdminOffline", GlobalStorageSiK.SiK_UI.relativeAge(data.lastSeenAt))
-			self:drawTextRight(truncate(seenText, COL_SEEN_W), seenX, yMid,
+			self:drawTextRight(truncate(seenText, cols[3].width - cols[3].pad), seenX, yMid,
 				pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		end
 	end
@@ -688,13 +675,9 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.terminalRef = terminal
 
 	local _ppal = GlobalStorageSiK.SiK_UI.PALETTE
-	ui.secLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_PermSectionTitle"), _ppal.textPrimary[1], _ppal.textPrimary[2], _ppal.textPrimary[3], 1, UIFont.Small, true)
-	ui.secLbl:initialise()
-	addPermWidget(scroll, ui, ui.secLbl)
-	y = y + titleH
-
-	ui.accessTableTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_PermMembersTableTitle"), _ppal.textPrimary[1], _ppal.textPrimary[2], _ppal.textPrimary[3], 1, UIFont.Small, true)
-	ui.accessTableTitle:initialise()
+	ui.accessTableTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, text = T("IGUI_GS_PermMembersTableTitle"),
+	})
 	addPermWidget(scroll, ui, ui.accessTableTitle)
 	y = y + titleH
 
@@ -752,8 +735,9 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	end)
 	addPermWidget(scroll, ui, ui.claimAsAdminBtn)
 
-	ui.addBlockTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_PermAddBlockTitle"), _ppal.textPrimary[1], _ppal.textPrimary[2], _ppal.textPrimary[3], 1, UIFont.Small, true)
-	ui.addBlockTitle:initialise()
+	ui.addBlockTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, text = T("IGUI_GS_PermAddBlockTitle"),
+	})
 	addPermWidget(scroll, ui, ui.addBlockTitle)
 
 	-- El motivo de "nadie conectado" ahora vive DENTRO del combo (cabecera
@@ -765,9 +749,9 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	-- puede legitimamente no querer añadir a nadie todavia, no es un paso
 	-- forzoso. El unico feedback al pulsar "Añadir" sin seleccion es el
 	-- aviso breve de abajo (evita el fallo silencioso original).
-	ui.memberPickCombo = ISComboBox:new(pad, y, comboW, ENTRY_H, scroll, nil)
-	ui.memberPickCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(ui.memberPickCombo)
+	ui.memberPickCombo = GlobalStorageSiK.SiK_UI.Controls.combo(nil, {
+		x = pad, y = y, w = comboW, h = ENTRY_H, target = scroll,
+	})
 	addPermWidget(scroll, ui, ui.memberPickCombo)
 	ui.addMemberBtn = createRowButton(pad + comboW + ROW_GAP, y, 200, ENTRY_H, T("IGUI_GS_AddMember"), scroll, function()
 		local pick = resolveMemberPick(ui)
@@ -934,8 +918,7 @@ local function layoutPermsBlock(scroll, ui, startY)
 	}
 	ui.permsStartY = startY + 8
 
-	-- Títulos de sección y de tabla (centrados: solo X/Y, conservan su auto-ancho).
-	col:place(ui.secLbl, titleH)
+	-- Un unico titulo visible para la tabla de miembros.
 	col:place(ui.accessTableTitle, titleH)
 
 	-- Tabla de miembros: posicionar host, rellenar filas (fija altura real), leerla.

@@ -12,6 +12,7 @@ require "GS_NetClient"
 require "GS_TerminalUI_Scroll"
 require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Palette"
+require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.TerminalNetworkStatus = {}
 
@@ -29,18 +30,10 @@ local function addV2Label(scroll, ui, key, x, y, text)
 	return lbl
 end
 
-local function addV2Divider(scroll, ui, key, x, y, width)
-	local divider = ISPanel:new(x, y, width, 1)
-	divider:initialise()
-	divider.drawBackground = true
-	divider.backgroundColor = { r = 0.18, g = 0.18, b = 0.18, a = 0.8 }
-	divider.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, divider)
-	ui[key] = divider
-end
-
 local function addV2Indicator(scroll, ui, key, x, y, width)
-	local row = GlobalStorageSiK.SiK_UI.createStatusIndicatorRow(x, y, width, FONT_HGT_SMALL + 4)
+	local row = GlobalStorageSiK.SiK_UI.Controls.status(nil, {
+		x = x, y = y, w = width, h = FONT_HGT_SMALL + 4,
+	})
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
 	ui.stats[key] = row
 end
@@ -51,15 +44,19 @@ local function setV2Text(lbl, text)
 end
 
 local function buildV2(scroll, terminal, ui, y, innerW)
-	local pad, gap = 14, 10
+	local pad, gap = 8, 8
 	local contentW = math.max(160, innerW - pad * 2)
 	ui.leftX, ui.contentW = pad, contentW
 
-	addV2Divider(scroll, ui, "statusDivider", pad, y, contentW)
-	y = y + 12
-	ui.statusTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NetBlockOverview"))
+	ui.statusBlockY = y
+	ui.statusBlockCard = GlobalStorageSiK.SiK_UI.createSectionCard(0, y, innerW, 10)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.statusBlockCard)
+	y = y + pad
+	ui.statusTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, text = T("IGUI_GS_NetBlockOverview"),
+	})
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.statusTitle)
-	y = y + FONT_HGT_SMALL + 10
+	y = y + FONT_HGT_SMALL + gap
 	local indColW = math.floor((contentW - gap) / 2)
 	ui.indColW = indColW
 	addV2Indicator(scroll, ui, "valPower", pad, y, indColW)
@@ -67,11 +64,19 @@ local function buildV2(scroll, terminal, ui, y, innerW)
 	y = y + FONT_HGT_SMALL + 6
 	addV2Indicator(scroll, ui, "valZones", pad, y, indColW)
 	addV2Indicator(scroll, ui, "valAccess", pad + indColW + gap, y, indColW)
-	y = y + FONT_HGT_SMALL + 12
+	y = y + FONT_HGT_SMALL + pad
+	ui.statusBlockEndY = y
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.statusBlockCard, 0,
+		ui.statusBlockY, innerW, ui.statusBlockEndY - ui.statusBlockY)
+	y = y + gap
 
-	addV2Divider(scroll, ui, "resourcesDivider", pad, y, contentW)
-	y = y + 12
-	ui.statsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NetBlockStats"))
+	ui.resourcesBlockY = y
+	ui.resourcesBlockCard = GlobalStorageSiK.SiK_UI.createSectionCard(0, y, innerW, 10)
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.resourcesBlockCard)
+	y = y + pad
+	ui.statsTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, text = T("IGUI_GS_NetBlockStats"),
+	})
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.statsTitle)
 	y = y + FONT_HGT_SMALL + 10
 	ui.resourceRow1Y = y
@@ -102,11 +107,11 @@ local function buildV2(scroll, terminal, ui, y, innerW)
 	end
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, weightRow)
 	ui.stats.statWeight, ui.weightBar = weightRow, weightRow
-	y = y + weightRow.height + 12
+	y = y + weightRow.height + gap
 
-	addV2Divider(scroll, ui, "reachDivider", pad, y, contentW)
-	y = y + 12
-	ui.reachTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_NetBlockReach"))
+	ui.reachTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, text = T("IGUI_GS_NetBlockReach"),
+	})
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.reachTitle)
 	y = y + FONT_HGT_SMALL + 10
 	ui.reachRowY = y
@@ -114,22 +119,21 @@ local function buildV2(scroll, terminal, ui, y, innerW)
 		T("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox.getTerminalProximityRange()))
 	addV2Label(scroll, ui, "statNetworkRange", pad + indColW + gap, y,
 		T("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox.getContainerMaxDistance()))
-	y = y + FONT_HGT_SMALL + 14
+	y = y + FONT_HGT_SMALL + pad
 	ui.reachEndY = y
 	ui.block1EndY = y
-	if ui.netListCard then
-		GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.netListCard, 4,
-			(ui.netListBlockY or 8) - 2, innerW - 8, y - (ui.netListBlockY or 8) + 4)
-	end
+	ui.resourcesBlockEndY = y
+	GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.resourcesBlockCard, 0,
+		ui.resourcesBlockY, innerW, ui.resourcesBlockEndY - ui.resourcesBlockY)
 
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer()
 	ui.paletteSelector = GlobalStorageSiK.SiK_UI.Palette.createSelector(
-		pad, y + 10, contentW, player, function()
+		pad, y + gap, contentW, player, function()
 			if terminal and terminal.setDirty then terminal:setDirty(true) end
 		end)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.paletteSelector)
-	ui.paletteEndY = y + 10 + ui.paletteSelector.height + 8
+	ui.paletteEndY = y + gap + ui.paletteSelector.height + pad
 	return ui.paletteEndY
 end
 
@@ -165,14 +169,10 @@ end
 
 local function layoutV2(scroll, ui, innerW)
 	if not ui or not ui.stats then return end
-	local pad, gap = 14, 10
+	local pad, gap = 8, 8
 	local contentW = math.max(160, innerW - pad * 2)
 	local colW = math.floor((contentW - gap) / 2)
 	ui.leftX, ui.contentW, ui.indColW = pad, contentW, colW
-	for _, key in ipairs({ "statusDivider", "resourcesDivider", "reachDivider" }) do
-		local divider = ui[key]
-		if divider then GlobalStorageSiK.TerminalScroll.setContentX(scroll, divider, pad); divider:setWidth(contentW) end
-	end
 	for _, key in ipairs({ "statusTitle", "statsTitle", "reachTitle" }) do
 		local lbl = ui[key]
 		if lbl then GlobalStorageSiK.TerminalScroll.setContentX(scroll, lbl, pad) end
@@ -194,10 +194,15 @@ local function layoutV2(scroll, ui, innerW)
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.weightBar, pad)
 		ui.weightBar:setWidth(contentW)
 	end
-	if ui.netListCard then
-		GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.netListCard, 4,
-			(ui.netListBlockY or 8) - 2, innerW - 8,
-			(ui.reachEndY or ui.block1EndY or 200) - (ui.netListBlockY or 8) + 4)
+	if ui.statusBlockCard then
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.statusBlockCard, 0,
+			ui.statusBlockY or 0, innerW,
+			(ui.statusBlockEndY or 0) - (ui.statusBlockY or 0))
+	end
+	if ui.resourcesBlockCard then
+		GlobalStorageSiK.SiK_UI.resizeSectionCard(ui.resourcesBlockCard, 0,
+			ui.resourcesBlockY or 0, innerW,
+			(ui.resourcesBlockEndY or 0) - (ui.resourcesBlockY or 0))
 	end
 	if ui.paletteSelector then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.paletteSelector, pad)

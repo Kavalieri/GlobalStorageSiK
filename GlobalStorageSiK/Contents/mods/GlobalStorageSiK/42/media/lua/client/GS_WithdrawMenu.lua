@@ -245,9 +245,7 @@ end
 ---@param onWithdraw fun(rowData: table, amount: number, targetKey: string|nil)|nil
 
 ---@param selectionRows table[]|nil
----@param parentSubMenu ISContextMenu|nil
-
-function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows, parentSubMenu)
+function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows)
 
 	if not context or not rowData or not onWithdraw then
 
@@ -263,7 +261,9 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 
 	GlobalStorageSiK.ContainerTargets.clearSessionTarget(player)
 
-	local host = parentSubMenu or (GlobalStorageSiK.ContextMenu and GlobalStorageSiK.ContextMenu.ensureRoot(context))
+	-- WithdrawMenu is terminal-internal: the caller already owns the exact menu
+	-- root. External inventory actions use TransferMenu/ItemActions instead.
+	local host = context
 
 	if not host then
 
@@ -312,4 +312,3 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 	end
 
 end
-

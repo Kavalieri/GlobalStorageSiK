@@ -432,47 +432,20 @@ function GlobalStorageSiK.Sandbox.debugDetailEnabled(key)
 	return SandboxVars.GlobalStorageSiK["DebugDetail" .. tostring(key)] == true
 end
 
---- Indica si la construcción GS es gratuita (ambas recetas).
----@return boolean
-function GlobalStorageSiK.Sandbox.freeBuilding()
-	if not SandboxVars.GlobalStorageSiK then
-		return false
-	end
-	return SandboxVars.GlobalStorageSiK.FreeBuilding == true
-end
-
---- Craft gratis del terminal mueble.
----@return boolean
-function GlobalStorageSiK.Sandbox.freeCraftTerminalUnit()
-	if GlobalStorageSiK.Sandbox.freeBuilding() then
-		return true
-	end
-	if not SandboxVars.GlobalStorageSiK then
-		return false
-	end
-	return SandboxVars.GlobalStorageSiK.FreeCraftTerminalUnit == true
-end
-
---- Indica si el craft de una receta GS es gratis.
----@param recipeId string
----@return boolean
-function GlobalStorageSiK.Sandbox.isFreeCraft(recipeId)
-	if recipeId == "terminal_unit" or recipeId == "terminal_install" then
-		return GlobalStorageSiK.Sandbox.freeCraftTerminalUnit()
-	end
-	return GlobalStorageSiK.Sandbox.freeBuilding()
-end
-
+-- Requisitos fijos del producto. No son opciones sandbox: las cuatro claves
+-- históricas que intentaban leer nunca se declararon y por tanto no podían
+-- configurarse. Mantener getters evita duplicar números en recetas/UI sin
+-- fingir una superficie de configuración inexistente.
 --- Nivel Electricidad para instalar terminal GS en ordenador vanilla.
 ---@return number
 function GlobalStorageSiK.Sandbox.getInstallTerminalSkill()
-	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.InstallTerminalSkillLevel or 2
+	return 2
 end
 
 --- Nivel Electricidad para terminal mueble.
 ---@return number
 function GlobalStorageSiK.Sandbox.getTerminalUnitSkill()
-	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.TerminalUnitSkillLevel or 4
+	return 4
 end
 
 --- Máximo de terminales físicos por red.

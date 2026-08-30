@@ -21,6 +21,29 @@ local T = GlobalStorageSiK.I18n.text
 local cache = {}
 local pending = {}
 local CACHE_TTL_MS = 4000
+local PENDING_TIMEOUT_MS = 5000
+local MAX_COUNT_CACHE = 256
+local MAX_PENDING = 128
+local cacheOrder = {}
+local pendingOrder = {}
+
+local function insertBounded(target, order, key, value, limit)
+	if target[key] == nil then
+		order[#order + 1] = key
+		if #order > limit then
+			local oldest = table.remove(order, 1)
+			if oldest then target[oldest] = nil end
+		end
+	end
+	target[key] = value
+end
+
+local function removeOrdered(target, order, key)
+	target[key] = nil
+	for i = #order, 1, -1 do
+		if order[i] == key then table.remove(order, i) end
+	end
+end
 
 -- Cache de sesion, SOLO fullType (2026-08-23, root cause real del spam
 -- "Couldn't find item" que persistia pese a las 4 rondas de cache previas -
@@ -34,6 +57,8 @@ local CACHE_TTL_MS = 4000
 -- Aqui SIEMPRE se llama con row={} (nunca datos de fila reales), asi que
 -- cachear unicamente por fullType es correcto para este call site concreto;
 local _categoryResolveCache = {}
+local _categoryResolveOrder = {}
+local MAX_CATEGORY_CACHE = 512
 local function getCachedCategory(fullType)
 	local cached = _categoryResolveCache[fullType]
 	if cached ~= nil then
@@ -41,7 +66,7 @@ local function getCachedCategory(fullType)
 	end
 	local ok, resolved = pcall(GlobalStorageSiK.CategoryResolution.resolve, fullType, nil)
 	local result = (ok and resolved) or false
-	_categoryResolveCache[fullType] = result
+	insertBounded(_categoryResolveCache, _categoryResolveOrder, fullType, result, MAX_CATEGORY_CACHE)
 	return result or nil
 end
 local hooksInstalled = false
@@ -106,6 +131,9 @@ local FEATURE_ENABLED = true
 --- transferencia hasta que expirase el TTL).
 function GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
 	cache = {}
+	pending = {}
+	cacheOrder = {}
+	pendingOrder = {}
 end
 
 --- Clave de cache/pending: fullType a secas para el caso normal,
@@ -115,10 +143,11 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return string
-local function countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	if mediaIndex ~= nil then return fullType .. "\31mediaIndex:" .. tostring(mediaIndex) end
-	if dynamicStateKey then return fullType .. "\31state:" .. tostring(dynamicStateKey) end
-	return mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType
+local function countsCacheKey(playerNum, fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	local prefix = tostring(tonumber(playerNum) or 0) .. "\30"
+	if mediaIndex ~= nil then return prefix .. fullType .. "\31mediaIndex:" .. tostring(mediaIndex) end
+	if dynamicStateKey then return prefix .. fullType .. "\31state:" .. tostring(dynamicStateKey) end
+	return prefix .. (mediaTitle and (fullType .. "\31media:" .. mediaTitle) or fullType)
 end
 
 --- Recibe la respuesta del servidor con los conteos por red de un fullType
@@ -127,17 +156,18 @@ end
 ---@param networks table[]
 ---@param hasAnyNetwork boolean|nil si el jugador tiene AL MENOS una red accesible (independientemente de si este fullType esta en ella) - distingue "no tienes redes todavia" de "no esta en ninguna de tus redes"
 ---@param mediaTitle string|nil
-function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork, mediaTitle, mediaIndex, dynamicStateKey)
+function GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks, hasAnyNetwork,
+	mediaTitle, mediaIndex, dynamicStateKey, playerNum)
 	if not fullType then
 		return
 	end
-	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	cache[key] = {
+	local key = countsCacheKey(playerNum, fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	insertBounded(cache, cacheOrder, key, {
 		networks = networks or {},
 		hasAnyNetwork = hasAnyNetwork and true or false,
 		ts = getTimestampMs and getTimestampMs() or 0,
-	}
-	pending[key] = nil
+	}, MAX_COUNT_CACHE)
+	removeOrdered(pending, pendingOrder, key)
 end
 
 --- En singleplayer real (no anfitrion), isClient()/isServer() son ambos
@@ -152,28 +182,33 @@ local function isTrueSingleplayer()
 	return not (isClient and isClient()) and not (isServer and isServer())
 end
 
-local function requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	if pending[key] then
+local function requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
+	playerNum = tonumber(playerNum) or 0
+	local key = countsCacheKey(playerNum, fullType, mediaTitle, mediaIndex, dynamicStateKey)
+	local now = getTimestampMs and getTimestampMs() or 0
+	local sentAt = pending[key]
+	if sentAt and (now <= 0 or sentAt <= 0 or now - sentAt < PENDING_TIMEOUT_MS) then
 		return
 	end
+	if sentAt then removeOrdered(pending, pendingOrder, key) end
 	if isTrueSingleplayer() then
-		local player = GlobalStorageSiK.NetClient.getPlayer()
+		local player = GlobalStorageSiK.NetClient.getPlayer(playerNum)
 		if player and GlobalStorageSiK.Index and GlobalStorageSiK.Index.getNetworkCountsForItem then
 			local ok, networks, hasAnyNetwork = pcall(GlobalStorageSiK.Index.getNetworkCountsForItem,
 				player, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 			if ok then
 				GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(fullType, networks,
-					hasAnyNetwork, mediaTitle, mediaIndex, dynamicStateKey)
+					hasAnyNetwork, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
 			end
 		end
 		return
 	end
-	pending[key] = true
-	GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", {
+	insertBounded(pending, pendingOrder, key, now, MAX_PENDING)
+	local sent = GlobalStorageSiK.NetClient.sendCommand("getItemNetworkCounts", {
 		fullType = fullType, mediaTitle = mediaTitle, mediaIndex = mediaIndex,
 		dynamicStateKey = dynamicStateKey,
-	})
+	}, playerNum)
+	if not sent then removeOrdered(pending, pendingOrder, key) end
 end
 
 --- Devuelve conteos cacheados y dispara refresco en segundo plano si caducó.
@@ -184,12 +219,12 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return table[]|nil, boolean loaded, boolean hasAnyNetwork
-local function getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	local key = countsCacheKey(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+local function getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
+	local key = countsCacheKey(playerNum, fullType, mediaTitle, mediaIndex, dynamicStateKey)
 	local entry = cache[key]
 	local now = getTimestampMs and getTimestampMs() or 0
 	if not entry or (now - entry.ts) >= CACHE_TTL_MS then
-		requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+		requestCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
 	end
 	if not entry then
 		return nil, false, false
@@ -205,8 +240,19 @@ end
 ---@param fullType string
 ---@param mediaTitle string|nil
 ---@return table[]|nil, boolean
-function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
-	return getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey)
+function GlobalStorageSiK.ItemNetworkTooltip.getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
+	return getCachedCounts(fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNum)
+end
+
+local function playerNumForItem(item)
+	local container = item and item.getContainer and item:getContainer() or nil
+	for _ = 1, 8 do
+		local parent = container and container.getParent and container:getParent() or nil
+		if not parent then break end
+		if parent.getPlayerNum then return parent:getPlayerNum() end
+		container = parent.getContainer and parent:getContainer() or nil
+	end
+	return 0
 end
 
 local NET_FONT = UIFont.Small
@@ -617,7 +663,7 @@ local function buildTooltipBlocks(item)
 	local dynamicStateKey = GlobalStorageSiK.FluidTaxonomy and GlobalStorageSiK.FluidTaxonomy.stateKey
 		and GlobalStorageSiK.FluidTaxonomy.stateKey(item)
 	local networks, loaded, hasAnyNetwork = getCachedCounts(
-		fullType, mediaTitle, mediaIndex, dynamicStateKey)
+		fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNumForItem(item))
 	if networks and #networks > 0 then
 		for i = 1, #networks do
 			lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
@@ -635,6 +681,33 @@ local function buildTooltipBlocks(item)
 	end
 	if #lines > 0 then
 		blocks[#blocks + 1] = { lines = lines, color = { 0.9, 0.85, 0.4, 1.0 } }
+	end
+
+	-- Las filas padre usan la misma sonda vanilla con contexto agregado. Las
+	-- filas hija adjuntan, bajo demanda, el snapshot exacto recibido del
+	-- servidor. Este bloque complementa DoTooltip; nunca lo sustituye.
+	local remoteContext = GlobalStorageSiK.RemoteItemDetail
+		and GlobalStorageSiK.RemoteItemDetail.contextForProbe
+		and GlobalStorageSiK.RemoteItemDetail.contextForProbe(item) or nil
+	local remote = remoteContext and remoteContext.detail or nil
+	if remote and remote.ok == true then
+		local exactLines = {}
+		if remote.displayName and remote.displayName ~= "" then
+			exactLines[#exactLines + 1] = tostring(remote.displayName)
+		end
+		if type(remote.weight) == "number" then
+			exactLines[#exactLines + 1] = T("IGUI_GS_DetailWeight", string.format("%.2f", remote.weight))
+		end
+		if type(remote.condition) == "number" and type(remote.conditionMax) == "number" then
+			exactLines[#exactLines + 1] = T("IGUI_GS_FilterModeLabel") .. " "
+				.. tostring(remote.condition) .. "/" .. tostring(remote.conditionMax)
+		end
+		if type(remote.dynamicPercent) == "number" then
+			exactLines[#exactLines + 1] = tostring(remote.dynamicPercent) .. "%"
+		end
+		if #exactLines > 0 then
+			blocks[#blocks + 1] = { lines = exactLines, color = { 0.55, 0.85, 1, 1.0 } }
+		end
 	end
 
 	-- Bloque de skills VHS, SEPARADO del resto de informacion (a peticion del

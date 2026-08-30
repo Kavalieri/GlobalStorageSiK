@@ -13,9 +13,12 @@ GlobalStorageSiK.NetClient = GlobalStorageSiK.NetClient or {}
 
 --- Obtiene el jugador local en cliente MP/SP.
 ---@return IsoPlayer|nil
-function GlobalStorageSiK.NetClient.getPlayer()
+function GlobalStorageSiK.NetClient.getPlayer(playerArg)
+	if playerArg and type(playerArg) ~= "number" and playerArg.getUsername then
+		return playerArg
+	end
 	if getSpecificPlayer then
-		local player = getSpecificPlayer(0)
+		local player = getSpecificPlayer(tonumber(playerArg) or 0)
 		if player then
 			return player
 		end
@@ -29,8 +32,9 @@ end
 --- Envía un comando al módulo servidor del mod (B42: requiere IsoPlayer).
 ---@param command string
 ---@param args table|nil
+---@param playerArg IsoPlayer|number|nil
 ---@return boolean
-function GlobalStorageSiK.NetClient.sendCommand(command, args)
+function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 	if not command then
 		return false
 	end
@@ -46,7 +50,7 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args)
 	if type(isServer) == "function" and isServer() and type(isClient) == "function" and not isClient() then
 		return false
 	end
-	local player = GlobalStorageSiK.NetClient.getPlayer()
+	local player = GlobalStorageSiK.NetClient.getPlayer(playerArg)
 	if not player then
 		return false
 	end
@@ -57,10 +61,19 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args)
 	local exempt = GlobalStorageSiK.NetworkResolve
 		and GlobalStorageSiK.NetworkResolve.isSessionExempt(command)
 	if not exempt and not args.networkId then
-		local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+		local ui = nil
+		if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.getInstanceForPlayer then
+			ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+		elseif GlobalStorageSiK.TerminalUI then
+			ui = GlobalStorageSiK.TerminalUI.instance
+		end
 		if ui and ui.terminalState and ui.terminalState.networkId then
 			args.networkId = ui.terminalState.networkId
-		elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId then
+		elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkIdByPlayer
+			and GlobalStorageSiK.Client.activeNetworkIdByPlayer[playerNum] then
+			args.networkId = GlobalStorageSiK.Client.activeNetworkIdByPlayer[playerNum]
+		elseif playerNum == 0 and GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId then
 			args.networkId = GlobalStorageSiK.Client.activeNetworkId
 		end
 	end
@@ -76,10 +89,11 @@ end
 ---@param command string
 ---@param networkId string|nil
 ---@param args table|nil
+---@param playerArg IsoPlayer|number|nil
 ---@return boolean
-function GlobalStorageSiK.NetClient.sendNetworkCommand(command, networkId, args)
+function GlobalStorageSiK.NetClient.sendNetworkCommand(command, networkId, args, playerArg)
 	args = args or {}
 	args.networkId = networkId
 	args._gsExplicitNetwork = true
-	return GlobalStorageSiK.NetClient.sendCommand(command, args)
+	return GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 end

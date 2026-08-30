@@ -4,10 +4,16 @@
 package.loaded["GS_Network"] = true
 
 local registry = { networks = {}, zones = {}, nodes = {} }
+local permissionsData = { networks = {} }
 local migrationLogs = {}
+
+ModData = {
+	getOrCreate = function() return permissionsData end,
+}
 
 GlobalStorageSiK = {
 	MODDATA_KEY = "GlobalStorageSiK",
+	PERMISSIONS_MODDATA_KEY = "GlobalStorageSiK_Permissions",
 	isMultiplayerActive = function() return true end,
 	isAuthoritative = function() return true end,
 	Network = {
@@ -157,15 +163,16 @@ local adminNetwork = {
 registry.networks.admin_kalva = adminNetwork
 assertEqual(Permissions.canAccess(adminKalva, "admin_kalva"), true,
 	"the DEV4 dedicated owner must migrate through the authorization gate")
+local adminPerm = Permissions.getPermNet("admin_kalva")
 assertEqual(Permissions.isOwnerPlayer(adminKalva, "admin_kalva"), true,
 	"the DEV4 dedicated owner must migrate to its UUID")
-assertEqual(adminNetwork.owner, "Kalva", "owner presentation must use the character")
-assertEqual(adminNetwork.ownerAccountLogin, "admin", "the account must remain the authorization anchor")
-assert(adminNetwork.ownerCharacterId:match("^character:gsc_") ~= nil,
+assertEqual(adminPerm.owner, "Kalva", "owner presentation must use the character")
+assertEqual(adminPerm.ownerAccountLogin, "admin", "the account must remain the authorization anchor")
+assert(adminPerm.ownerCharacterId:match("^character:gsc_") ~= nil,
 	"the migrated owner key must be the character UUID")
-assertEqual(adminNetwork.characterPermissions["account:admin|sql:909"], nil,
+assertEqual(adminPerm.characterPermissions["account:admin|sql:909"], nil,
 	"the DEV4 account/sql record must be removed after migration")
-assertEqual(adminNetwork.characterPermissions[adminNetwork.ownerCharacterId].displayName, "Kalva",
+assertEqual(adminPerm.characterPermissions[adminPerm.ownerCharacterId].displayName, "Kalva",
 	"the persisted UI label must use the character")
 local adminSerialized = Permissions.serialize("admin_kalva", adminKalva)
 assertEqual(adminSerialized.memberEntries[1].name, "Kalva",
@@ -176,13 +183,17 @@ assertEqual(Permissions.isOwnerPlayer(supernavos, "owner_collision"), false,
 	"the colliding player must never inherit ownership")
 assertEqual(Permissions.canAccess(supernavos, "owner_collision"), false,
 	"the colliding player must never inherit access")
+assertEqual(Permissions.isOwnerPlayer(kava, "owner_collision"), false,
+	"the read-only owner query must not migrate legacy identity as a side effect")
+assertEqual(Permissions.canAccess(kava, "owner_collision"), true,
+	"the authorization gate must migrate the verified legacy owner")
 assertEqual(Permissions.isOwnerPlayer(kava, "owner_collision"), true,
-	"the authoritative owner account must repair its identity")
+	"the owner query must observe the identity migrated by the authorization gate")
 
-local repaired = registry.networks.owner_collision
+local repaired = Permissions.getPermNet("owner_collision")
 assertEqual(repaired.ownerCharacterId, kavaId, "owner ID must be migrated")
 assertEqual(repaired.owner, "Kava", "owner character name must keep exact case")
-assertEqual(repaired.ownerAccount, "KavaAccount", "owner account must keep exact case")
+assertEqual(repaired.ownerAccountLogin, "KavaAccount", "owner account must keep exact case")
 assertEqual(repaired.characterPermissions["character:7"], nil,
 	"ambiguous legacy owner record must be removed")
 assertEqual(repaired.characterPermissions[kavaId].displayName, "Kava",
@@ -220,9 +231,10 @@ assertEqual(Permissions.canAccess(imposter, "member_collision"), false,
 	"an unrelated account must not migrate a colliding member ID")
 assertEqual(Permissions.canAccess(sarini, "member_collision"), true,
 	"the matching account and nominal member must migrate")
-assertEqual(registry.networks.member_collision.characterPermissions[Permissions.getCharacterId(sarini)].role,
+local memberPerm = Permissions.getPermNet("member_collision")
+assertEqual(memberPerm.characterPermissions[Permissions.getCharacterId(sarini)].role,
 	MEMBER, "the migrated member must retain its role")
-assertEqual(registry.networks.member_collision.memberZoneDenials[Permissions.getCharacterId(sarini)].zone_a,
+assertEqual(memberPerm.memberZoneDenials[Permissions.getCharacterId(sarini)].zone_a,
 	true, "legacy zone denials must follow the verified member")
 assertEqual(Permissions.countBackupMembers("member_collision"), 1,
 	"a UUID member must remain visible to backup-member accounting")
@@ -249,21 +261,26 @@ assertEqual(spoofOk, false, "the client cannot transfer ownership to an unregist
 local offlineOk = Permissions.transferOwner(
 	"offline_transfer", kava, "OfflineAccount", true, "OfflineAccount", "")
 assertEqual(offlineOk, true, "an existing offline member account can receive ownership")
-assertEqual(registry.networks.offline_transfer.ownerAccount, "OfflineAccount",
+local offlinePerm = Permissions.getPermNet("offline_transfer")
+assertEqual(offlinePerm.ownerAccountLogin, "OfflineAccount",
 	"offline ownership must persist the exact account")
-assertEqual(registry.networks.offline_transfer.ownerCharacterId, "",
+assertEqual(offlinePerm.ownerCharacterId, "",
 	"offline ownership must not invent a character ID")
 local offlinePlayer = player("OfflineAccount", "Propietaria", "Offline", "OfflineAccount", 7, 808)
+assertEqual(Permissions.isOwnerPlayer(offlinePlayer, "offline_transfer"), false,
+	"the read-only owner query must not bind an offline transfer as a side effect")
+assertEqual(Permissions.canAccess(offlinePlayer, "offline_transfer"), true,
+	"the authorization gate must bind the verified offline owner account")
 assertEqual(Permissions.isOwnerPlayer(offlinePlayer, "offline_transfer"), true,
-	"the offline owner account must bind to its persistent character when it connects")
-assertEqual(registry.networks.offline_transfer.ownerCharacterId, Permissions.getCharacterId(offlinePlayer),
+	"the bound offline owner must be visible to the read-only owner query")
+assertEqual(offlinePerm.ownerCharacterId, Permissions.getCharacterId(offlinePlayer),
 	"the connected offline owner must receive its account-scoped character ID")
-assertEqual(registry.networks.offline_transfer.owner, "Propietaria Offline",
+assertEqual(offlinePerm.owner, "Propietaria Offline",
 	"the owner presentation must refresh from the connected character")
 
--- Death succession must operate on the account-scoped owner ID. A new
--- character from the former account cannot reclaim a network already handed
--- to its configured backup member.
+-- Death leaves ownership vacant for the explicit claim cascade. Existing
+-- admins keep their own role, but no disconnected member is promoted by an
+-- unordered server-side iteration.
 local sariniId = Permissions.getCharacterId(sarini)
 registry.networks.owner_death = {
 	id = "owner_death",
@@ -280,10 +297,13 @@ registry.networks.owner_death = {
 	memberZoneDenials = {},
 }
 Permissions.handleOwnerDeath(kava)
-assertEqual(registry.networks.owner_death.ownerCharacterId, sariniId,
-	"the configured backup admin must inherit ownership")
-assertEqual(registry.networks.owner_death.owner, "Sarini Trece",
-	"successor name must keep exact case")
+local deathPerm = Permissions.getPermNet("owner_death")
+assertEqual(deathPerm.ownerCharacterId, nil,
+	"owner death must leave the network vacant for explicit claim")
+assertEqual(deathPerm.owner, "",
+	"owner death must clear the presentation without auto-promoting")
+assertEqual(deathPerm.characterPermissions[sariniId].role, Permissions.ROLE_ADMIN,
+	"the backup admin must retain its own role while ownership is vacant")
 local replacementKava = player("KavaAccount", "Kava", "Nueva", "Kava Nueva", 12, 101)
 assert(Permissions.getCharacterId(replacementKava) ~= kavaId,
 	"a replacement character reusing the same account/sql slot must receive another UUID")
@@ -307,7 +327,7 @@ local fresh = { id = "unicode", allowedUsers = {}, adminUsers = {}, memberZoneDe
 assertEqual(Permissions.initializeOwner(fresh, unicodePlayer), true,
 	"a Unicode owner must be initialized")
 assertEqual(fresh.owner, "凯 瓦", "Unicode character name must be preserved")
-assertEqual(fresh.ownerAccount, "玩家账户", "Unicode account must be preserved")
+assertEqual(fresh.ownerAccountLogin, "玩家账户", "Unicode account must be preserved")
 assertEqual(fresh.characterPermissions[fresh.ownerCharacterId].displayName, "凯 瓦",
 	"Unicode character name must be preserved as the visible label")
 local unsafe = { id = "unsafe", allowedUsers = {}, adminUsers = {}, memberZoneDenials = {} }
@@ -328,7 +348,8 @@ local addOk, addChanged, addReason = Permissions.addCharacter("idempotent", sari
 assertEqual(addOk, true, "first member add must succeed")
 assertEqual(addChanged, true, "first member add must mutate")
 assertEqual(addReason, "added", "first member add reason")
-assertEqual(#registry.networks.idempotent.allowedUsers, 0,
+local idempotentPerm = Permissions.getPermNet("idempotent")
+assertEqual(#idempotentPerm.allowedUsers, 0,
 	"online binding must consume the offline nominal membership")
 local againOk, againChanged, againReason = Permissions.addCharacter("idempotent", sarini)
 assertEqual(againOk, true, "repeated add must be a successful no-op")
