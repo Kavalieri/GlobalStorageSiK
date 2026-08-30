@@ -764,6 +764,7 @@
 	"IGUI_GS_NetworkFooter": "Red: {1}",
 	"IGUI_GS_NetworkDisplay": "{1} (id: {2})",
 	"IGUI_GS_Connected": "Conectado",
+	"IGUI_GS_ResizeDragTooltip": "Arrastra para redimensionar",
 	"IGUI_GS_RescanAll": "Reescanear todas las zonas",
 	"IGUI_GS_ScanProgress": "Escaneando zona {1}/{2}: {3}",
 	"IGUI_GS_ScanCancel": "Cancelar escaneo",

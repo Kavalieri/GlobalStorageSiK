@@ -18,7 +18,17 @@ local function contains(text, needle, label)
 end
 
 local function excludes(text, needle, label)
-	assert(not text:find(needle, 1, true), label or ("unexpected " .. needle))
+        assert(not text:find(needle, 1, true), label or ("unexpected " .. needle))
+end
+
+local function countPlain(text, needle)
+        local count, cursor = 0, 1
+        while true do
+                local at = text:find(needle, cursor, true)
+                if not at then return count end
+                count = count + 1
+                cursor = at + #needle
+        end
 end
 
 local itemsSource = read(CLIENT .. "GS_TerminalUI_Items.lua")
@@ -80,14 +90,43 @@ Support.check(suite, "drag integration keeps compact visuals and exact semantic 
 	return true
 end)
 
-Support.check(suite, "source captures exactly once and every finalization releases capture", function()
-	contains(dragSource, "sourceWidget:setCapture(true)", "drag origin never captures mouse-up")
-	contains(dragSource, "function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer",
-		"single finalization entry point missing")
-	contains(dragSource, "sourceWidget", "drag state loses capture owner")
-	contains(dragSource, "setCapture(false)", "cancel/drop does not release capture")
-	contains(dragSource, "TerminalWithdrawDrag.cancel()", "finalization does not consume active state")
-	return true
+Support.check(suite, "terminal owns capture exactly once and every finalization releases it", function()
+        contains(dragSource, "local captureOwner = sourceWidget and sourceWidget.terminal or nil",
+                "capture owner is not the source row terminal")
+        contains(dragSource, "captureOwner = captureOwner", "active drag loses its capture owner")
+        contains(dragSource, "captureOwner:setCapture(true)", "terminal never captures mouse-up")
+        excludes(dragSource, "sourceWidget:setCapture(true)", "child row captures instead of terminal")
+        contains(dragSource, "function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer",
+                "single finalization entry point missing")
+        contains(dragSource, "activeDrag and activeDrag.captureOwner or nil",
+                "cancel does not read the exact active capture owner")
+        contains(dragSource, "captureOwner:setCapture(false)",
+                "cancel/drop does not release terminal capture")
+        return true
+end)
+
+Support.check(suite, "drag logging is event-only and has no move or frame noise", function()
+        assert(countPlain(dragSource, "GlobalStorageSiK.Log.") == 3,
+                "drag has logs outside the three allowed lifecycle events")
+        contains(dragSource, '"dragDropAttempt"', "drop attempt log missing")
+        contains(dragSource, '"dragDropSent"', "drop sent log missing")
+        contains(dragSource, '"dragCancelled reason="', "cancel reason log missing")
+        excludes(dragSource, "print(", "drag emits an unstructured print")
+        local moveStart = assert(dragSource:find(
+                "function GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer", 1, true),
+                "moveToPointer missing")
+        local moveEnd = assert(dragSource:find(
+                "local function clearDrag", moveStart, true), "moveToPointer boundary missing")
+        excludes(dragSource:sub(moveStart, moveEnd - 1), "GlobalStorageSiK.Log.",
+                "pointer movement logs per event/frame")
+        return true
+end)
+
+Support.check(suite, "warehouse expander owns a 32 pixel click target", function()
+        contains(itemsSource, "local EXPANDER_HITBOX_W = 32", "expander target is not canonical")
+        contains(itemsSource, "x <= EXPANDER_HITBOX_W", "row click bypasses expander target")
+        excludes(itemsSource, "x <= 20", "legacy 20 pixel expander target remains")
+        return true
 end)
 
 Support.check(suite, "drag has no polling sync or global monkey patch route", function()

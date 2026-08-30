@@ -38,6 +38,7 @@ local function detailPagesByRowKey()
 end
 
 local T = GlobalStorageSiK.I18n.text
+local EXPANDER_HITBOX_W = 32
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local ICON_SIZE = 32
 local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
@@ -1636,6 +1637,14 @@ local function createItemRow(scroll, listPanel, terminal)
 		if isRightMouseButtonDown and isRightMouseButtonDown() then
 			return false
 		end
+		if self.itemData and self.itemData._gsRowKind == "parent"
+			and self.itemData.expandable and x >= 0 and x <= EXPANDER_HITBOX_W then
+			self._gsExpandPressed = true
+			self._gsDragPending = false
+			self._gsDragAccum = 0
+			return true
+		end
+		self._gsExpandPressed = nil
 		self._gsDragPending = true
 		self._gsDragAccum = 0
 		return true
@@ -1675,6 +1684,7 @@ local function createItemRow(scroll, listPanel, terminal)
 	end
 	row.onMouseMoveOutside = row.onMouseMove
 	row.onMouseUpOutside = function(self, x, y)
+		self._gsExpandPressed = nil
 		self._gsDragPending = false
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
@@ -1687,6 +1697,16 @@ local function createItemRow(scroll, listPanel, terminal)
 		if self.itemData and self.itemData._gsStale then return true end
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
+		end
+		if self._gsExpandPressed then
+			self._gsExpandPressed = nil
+			self._gsDragPending = false
+			if self.itemData and self.itemData._gsRowKind == "parent"
+				and self.itemData.expandable and x >= 0 and x <= EXPANDER_HITBOX_W then
+				return toggleExpanded(self.listPanel, self.terminal, self.itemData)
+			end
+			GlobalStorageSiK.TerminalItems.onInteractionFinished(self.listPanel)
+			return true
 		end
 		if self.itemData and self.itemData._gsPager and self.listPanel then
 			local data = self.itemData
@@ -1701,10 +1721,6 @@ local function createItemRow(scroll, listPanel, terminal)
 		end
 		if self._gsDragPending and self.listPanel then
 			self._gsDragPending = false
-			if self.itemData and self.itemData._gsRowKind == "parent"
-				and self.itemData.expandable and x <= 20 then
-				return toggleExpanded(self.listPanel, self.terminal, self.itemData)
-			end
 			handleRowClick(self.listPanel, self)
 			GlobalStorageSiK.TerminalItems.onInteractionFinished(self.listPanel)
 			return true

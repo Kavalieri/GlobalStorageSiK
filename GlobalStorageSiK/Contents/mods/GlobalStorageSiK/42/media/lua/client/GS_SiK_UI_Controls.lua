@@ -43,7 +43,7 @@ function Controls.metrics(profile)
 		controlGap = density and density.controlGap or 8,
 		windowPadding = 14,
 		blockPadding = 8,
-		resizeHandle = 14,
+		resizeHandle = SiK_UI.Metrics.tokens().resizeHandle,
 	}
 end
 

@@ -278,6 +278,10 @@ local function normalizeVisualRows(rows, payloadRows, fallback)
 	return out
 end
 
+local function logCancelled(reason)
+	GlobalStorageSiK.Log.debug("WithdrawDrag", "dragCancelled reason=" .. tostring(reason))
+end
+
 --- Inicia un drag con estado visual y payload deliberadamente separados.
 ---@param rowData table
 ---@param amount number|nil
@@ -289,18 +293,20 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel() end
 	payloadRows = normalizePayloadRows(payloadRows, rowData)
 	visualRows = normalizeVisualRows(visualRows, payloadRows, rowData)
+	local captureOwner = sourceWidget and sourceWidget.terminal or nil
 	activeDrag = {
 		payloadRows = payloadRows,
 		visualRows = visualRows,
 		rowData = rowData,
 		amount = amount or 1,
 		sourceWidget = sourceWidget,
+		captureOwner = captureOwner,
 	}
 	-- La captura empieza solo al superar el umbral. Así el origen recibe el
 	-- mouseUp aunque el cursor ya este sobre ISInventoryPane/loot vanilla.
-	if sourceWidget and sourceWidget.setCapture then
-		sourceWidget:setCapture(true)
-		sourceWidget._gsDragCaptured = true
+	if captureOwner and captureOwner.setCapture then
+		captureOwner:setCapture(true)
+		captureOwner._gsWithdrawDragCaptured = true
 	end
 	if sourceWidget and GlobalStorageSiK.RemoteItemDetail then
 		GlobalStorageSiK.RemoteItemDetail.deactivate(sourceWidget)
@@ -330,13 +336,14 @@ function GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
 	return true
 end
 
-function GlobalStorageSiK.TerminalWithdrawDrag.cancel()
+local function clearDrag(cancelReason)
 	local source = activeDrag and activeDrag.sourceWidget or nil
-	if source and source.setCapture and source._gsDragCaptured then
+	local captureOwner = activeDrag and activeDrag.captureOwner or nil
+	if captureOwner and captureOwner.setCapture and captureOwner._gsWithdrawDragCaptured then
 		-- Liberacion unica y comun para drop valido, invalido, Escape, cierre y
 		-- limpieza de sesion. No queda captura viva aunque el preview ya no exista.
-		pcall(function() source:setCapture(false) end)
-		source._gsDragCaptured = nil
+		pcall(function() captureOwner:setCapture(false) end)
+		captureOwner._gsWithdrawDragCaptured = nil
 	end
 	activeDrag = nil
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = nil
@@ -345,6 +352,15 @@ function GlobalStorageSiK.TerminalWithdrawDrag.cancel()
 	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onInteractionFinished then
 		GlobalStorageSiK.TerminalItems.onInteractionFinished(source and source.listPanel or nil)
 	end
+	if cancelReason then
+		logCancelled(cancelReason)
+	end
+end
+
+function GlobalStorageSiK.TerminalWithdrawDrag.cancel(reason)
+	if not activeDrag then return false end
+	clearDrag(reason or "cancelled")
+	return true
 end
 
 function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
@@ -360,21 +376,30 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
 	if not key then return false end
 	local drag = activeDrag
-	GlobalStorageSiK.TerminalWithdrawDrag.cancel()
+	clearDrag(nil)
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
 	local rows = drag.payloadRows or { drag.rowData }
+	local sent
 	if #rows > 1 then
-		return GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
+		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
+	else
+		sent = GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1], drag.amount, key, searchQuery)
 	end
-	return GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1], drag.amount, key, searchQuery)
+	if sent then
+		GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropSent")
+	else
+		logCancelled("sendRejected")
+	end
+	return sent
 end
 
 function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 	if not activeDrag then return false end
+	GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropAttempt")
 	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
 	local dropped = pane and GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane) or false
-	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel() end
+	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel("invalidTarget") end
 	return dropped
 end
 

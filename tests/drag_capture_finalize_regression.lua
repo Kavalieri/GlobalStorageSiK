@@ -29,6 +29,7 @@ function ISPanel:setY(y) self.y = y end
 
 local escapeClose, transientCleanup = nil, nil
 local sent, destinationAvailable, destinationKey = {}, true, "player:main"
+local logEvents = {}
 local player = { getPlayerNum = function() return 0 end }
 GlobalStorageSiK = {
 	NetClient = { getPlayer = function() return player end },
@@ -59,6 +60,9 @@ GlobalStorageSiK = {
 		transientCleanup = callback
 		return true
 	end },
+	Log = { debug = function(_, message)
+		logEvents[#logEvents + 1] = message
+	end },
 	TerminalItems = {
 		rowHeight = function() return 40 end,
 		describeRow = function(row) return { data = row } end,
@@ -78,10 +82,13 @@ getTextManager = function() return {
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalWithdrawDrag.lua")
 
-local captureEvents = {}
-local source = {
-	width = 400, listPanel = {}, terminal = {},
+local captureEvents, sourceCaptureEvents = {}, {}
+local terminal = {
 	setCapture = function(_, value) captureEvents[#captureEvents + 1] = value == true end,
+}
+local source = {
+	width = 400, listPanel = {}, terminal = terminal,
+	setCapture = function(_, value) sourceCaptureEvents[#sourceCaptureEvents + 1] = value == true end,
 }
 local parent = { rowKey = "parent", fullType = "Base.Nails", count = 20 }
 local child = { rowKey = "child", fullType = "Base.Nails", itemId = 42 }
@@ -94,7 +101,9 @@ assert(sent[1].key == "player:main", "inventory drop lost its exact destination"
 assert(GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer() == false,
 	"second finalization was not ignored")
 assert(#sent == 1, "same gesture sent more than one withdrawal")
-assert(captureEvents[#captureEvents] == false, "valid drop did not release source capture")
+assert(captureEvents[1] == true and captureEvents[#captureEvents] == false,
+	"valid drop did not capture/release terminal")
+assert(#sourceCaptureEvents == 0, "child row captured mouse instead of terminal")
 
 destinationKey = "world:crate"
 assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(parent, 0,
@@ -129,5 +138,19 @@ assert(not GlobalStorageSiK.TerminalWithdrawDrag.isActive(),
 	"external close retained active payload")
 assert(captureEvents[#captureEvents] == false, "external close did not release capture")
 assert(#sent == 2, "external close emitted a transfer")
+
+assert(logEvents[1] == "dragDropAttempt" and logEvents[2] == "dragDropSent",
+	"valid drop lifecycle logs are not ordered")
+local allowed = { dragDropAttempt = true, dragDropSent = true }
+local sawCancel = false
+for i = 1, #logEvents do
+	local event = logEvents[i]
+	if event:find("dragCancelled reason=", 1, true) == 1 then
+		sawCancel = true
+	else
+		assert(allowed[event], "unexpected drag log event: " .. tostring(event))
+	end
+end
+assert(sawCancel, "cancel lifecycle reason was not logged")
 
 print("drag_capture_finalize_regression: OK")

@@ -1146,35 +1146,47 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 		footerX = panel.tabRail.width or 0
 	end
 	local footerW = math.max(0, panel.width - footerX)
-	panel:drawRect(footerX, y, footerW, panel.statusFooterHeight, 0.85, 0.08, 0.08, 0.08)
-	panel:drawRect(footerX, y, footerW, 1, 0.7, 0.28, 0.28, 0.28)
 	local networkId = state and state.networkId or ""
 	local netName = state and state.networkName or ""
 	local label = netName ~= "" and netName or networkId
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local dotSize = 6
-	local dotX = footerX + panel.padding
-	local dotY = y + math.floor((FONT_HGT_SMALL - dotSize) / 2) + 2
+	local connected = T("IGUI_GS_Connected")
+	local versions = panel._sikRuntimeVersionText or GlobalStorageSiK.SiK_UI.runtimeVersionText()
+	local tm = getTextManager()
+	local pad = panel.padding or 8
+	local versionsW = tm:MeasureStringX(UIFont.Small, versions)
+	-- En compacto se puede recuperar el ancho ocupado por el rail para mantener
+	-- la cadena de versiones completa; nunca se trunca ni se envuelve.
+	if versionsW + pad * 2 > footerW and footerX > 0 then
+		footerX = 0
+		footerW = panel.width
+	end
+	panel:drawRect(footerX, y, footerW, panel.statusFooterHeight, 0.85, 0.08, 0.08, 0.08)
+	panel:drawRect(footerX, y, footerW, 1, 0.7, 0.28, 0.28, 0.28)
+	local innerW = math.max(0, footerW - pad * 2)
+	local prefix = connected
+	if label ~= "" then prefix = connected .. " | " end
+	local prefixW = tm:MeasureStringX(UIFont.Small, prefix)
+	local labelMaxW = math.max(0, innerW - dotSize - 8 - prefixW)
+	local visibleLabel = label ~= ""
+		and GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small) or ""
+	local statusText = prefix .. visibleLabel
+	local statusW = tm:MeasureStringX(UIFont.Small, statusText)
+	local statusGroupW = dotSize + 8 + statusW
+	local dotX = footerX + math.max(pad, math.floor((footerW - statusGroupW) / 2))
+	local firstLineY = y + math.max(2,
+		math.floor((panel.statusFooterHeight / 2 - FONT_HGT_SMALL) / 2))
+	local dotY = firstLineY + math.floor((FONT_HGT_SMALL - dotSize) / 2)
 	panel:drawRect(dotX, dotY, dotSize, dotSize, 1,
 		pal.statusOk[1], pal.statusOk[2], pal.statusOk[3])
-	local textY = y + 2
-	local connected = T("IGUI_GS_Connected")
-	local leftText = label ~= "" and (connected .. " | " .. label) or connected
-	local versions = panel._sikRuntimeVersionText or GlobalStorageSiK.SiK_UI.runtimeVersionText()
-	local innerRight = footerX + footerW - panel.padding
-	local leftX = dotX + dotSize + 8
-	local leftMaxW = math.max(0, innerRight - leftX)
-	if leftMaxW > 8 then
-		leftText = GlobalStorageSiK.SiK_UI.truncateText(leftText, leftMaxW, UIFont.Small)
-		panel:drawText(leftText, leftX, textY,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-	end
-	local versionsMaxW = math.max(0, innerRight - (footerX + panel.padding))
-	if versionsMaxW > 8 then
-		local visibleVersions = GlobalStorageSiK.SiK_UI.truncateText(versions, versionsMaxW, UIFont.Small)
-		panel:drawText(visibleVersions, footerX + panel.padding, textY + FONT_HGT_SMALL,
-			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-	end
+	panel:drawText(statusText, dotX + dotSize + 8, firstLineY,
+		pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+	local versionsX = footerX + math.max(pad,
+		math.min(math.floor((footerW - versionsW) / 2), footerW - pad - versionsW))
+	local secondLineY = y + math.floor(panel.statusFooterHeight / 2)
+	panel:drawText(versions, versionsX, secondLineY,
+		pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 end
 
 --- Configura arrastre solo desde la cabecera.

@@ -8,6 +8,7 @@ require "ISUI/ISPanel"
 require "ISUI/ISButton"
 require "ISUI/ISLabel"
 require "ISUI/ISTextEntryBox"
+require "ISUI/ISToolTip"
 require "GS_TerminalUI_TabRail"
 require "GS_TerminalUI_Tabs"
 require "ISUI/ISComboBox"
@@ -177,7 +178,9 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 
 local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
-local RESIZE_GRAB = 14
+local function resizeHandleSize()
+	return GlobalStorageSiK.SiK_UI.Metrics.tokens().resizeHandle
+end
 
 --- Refresca contenido de la pestaña activa (carga diferida).
 ---@param self GS_TerminalUI
@@ -332,7 +335,7 @@ end
 --- Arrastre por cabecera y redimensionado en esquina inferior derecha.
 function GS_TerminalUI:installMouseHandlers()
 	self.onMouseDown = function(me, x, y)
-		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.resizeEdgeAt(me, x, y, RESIZE_GRAB)
+		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.resizeEdgeAt(me, x, y, resizeHandleSize())
 		if resizeEdge then
 			me.resizing = true
 			me.resizeEdge = resizeEdge
@@ -347,6 +350,9 @@ function GS_TerminalUI:installMouseHandlers()
 		return ISPanel.onMouseDown(me, x, y)
 	end
 	self.onMouseUp = function(me, x, y)
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
+		end
 		if me.resizing then
 			me.resizing = false
 			me.resizeEdge = nil
@@ -364,6 +370,9 @@ function GS_TerminalUI:installMouseHandlers()
 		return ISPanel.onMouseUp(me, x, y)
 	end
 	self.onMouseUpOutside = function(me, x, y)
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
+		end
 		if me.resizing then
 			me.resizing = false
 			me.resizeEdge = nil
@@ -381,6 +390,10 @@ function GS_TerminalUI:installMouseHandlers()
 		return ISPanel.onMouseUpOutside(me, x, y)
 	end
 	self.onMouseMove = function(me, dx, dy)
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
+			return true
+		end
 		if me.resizing then
 			local rect = GlobalStorageSiK.SiK_UI.Window.resizeDelta(me, me.resizeEdge, dx, dy)
 			if rect then me:applyResponsiveBounds(rect.x, rect.y, rect.w, rect.h) end
@@ -394,6 +407,10 @@ function GS_TerminalUI:installMouseHandlers()
 		return ISPanel.onMouseMove(me, dx, dy)
 	end
 	self.onMouseMoveOutside = function(me, dx, dy)
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
+			return true
+		end
 		if me.resizing then
 			local rect = GlobalStorageSiK.SiK_UI.Window.resizeDelta(me, me.resizeEdge, dx, dy)
 			if rect then me:applyResponsiveBounds(rect.x, rect.y, rect.w, rect.h) end
@@ -808,6 +825,41 @@ function GS_TerminalUI:prerender()
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
 	GlobalStorageSiK.SiK_UI.renderStatusFooter(self, self.terminalState)
+	local grip = resizeHandleSize()
+	local gx, gy = self.width - grip, self.height - grip
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	-- Tres diagonales escalonadas con la primitiva ISUI garantizada. No usar
+	-- drawLine2: no forma parte del contrato Lua/Kahlua expuesto por vanilla.
+	for line = 0, 2 do
+		local length = 4 + line * 3
+		for step = 0, length - 1 do
+			self:drawRect(self.width - 3 - step * 2,
+				self.height - 3 - (length - 1 - step) * 2,
+				2, 2, 1, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3])
+		end
+	end
+	local mouseX = getMouseX and (getMouseX() - self:getAbsoluteX()) or -1
+	local mouseY = getMouseY and (getMouseY() - self:getAbsoluteY()) or -1
+	local overGrip = mouseX >= gx and mouseX <= self.width
+		and mouseY >= gy and mouseY <= self.height
+	if overGrip and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+		if not self._gsResizeTooltip then
+			self._gsResizeTooltip = ISToolTip:new()
+			self._gsResizeTooltip:initialise()
+			self._gsResizeTooltip:instantiate()
+			self._gsResizeTooltip:setOwner(self)
+		end
+		self._gsResizeTooltip:setName(T("IGUI_GS_ResizeDragTooltip"))
+		if not self._gsResizeTooltip:isVisible() then
+			self._gsResizeTooltip:setVisible(true)
+			self._gsResizeTooltip:addToUIManager()
+		end
+	else
+		if self._gsResizeTooltip and self._gsResizeTooltip:isVisible() then
+			self._gsResizeTooltip:removeFromUIManager()
+			self._gsResizeTooltip:setVisible(false)
+		end
+	end
 	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
@@ -1063,27 +1115,13 @@ function GS_TerminalUI:applyRefreshIfNeeded(force)
 	end
 end
 
---- Atajo habitual de ventana en videojuegos (pedido explicito, 2026-08-17):
---- Escape cierra el terminal, igual que cualquier otra ventana del mod
---- (editores modales, ventana de bloqueo, etc. - todas ya lo hacian, esta
---- era la unica que no). Los modales propios (TerminalEditor, NodeEditor,
---- MemberEditor, ZoneEditor...) son ventanas de UIManager INDEPENDIENTES,
---- no hijas de este panel, y ya consumen su propio Escape (return true) -
---- cuando hay uno abierto encima, este handler ni se llega a invocar, sin
---- conflicto entre ambos.
----@param key number
----@return boolean
-function GS_TerminalUI:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:onClose()
-		return true
-	end
-	return ISPanel.onKeyRelease(self, key)
-end
-
 function GS_TerminalUI:onClose()
 	if self._closing then return end
 	self._closing = true
+	if self._gsResizeTooltip and self._gsResizeTooltip:isVisible() then
+		self._gsResizeTooltip:removeFromUIManager()
+		self._gsResizeTooltip:setVisible(false)
+	end
 	GlobalStorageSiK.SiK_UI.Window.remember(self, "terminal-shell", self.playerNum)
 	if GlobalStorageSiK.UIDebug then GlobalStorageSiK.UIDebug.log("OPEN", "onClose()") end
 	if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == self then

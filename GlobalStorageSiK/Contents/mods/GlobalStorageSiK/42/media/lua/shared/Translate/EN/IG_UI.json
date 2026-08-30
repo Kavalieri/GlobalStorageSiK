@@ -764,6 +764,7 @@
 	"IGUI_GS_NetworkFooter": "Network: {1}",
 	"IGUI_GS_NetworkDisplay": "{1} (id: {2})",
 	"IGUI_GS_Connected": "Connected",
+	"IGUI_GS_ResizeDragTooltip": "Drag to resize",
 	"IGUI_GS_RescanAll": "Rescan all zones",
 	"IGUI_GS_ScanProgress": "Scanning zone {1}/{2}: {3}",
 	"IGUI_GS_ScanCancel": "Cancel scan",

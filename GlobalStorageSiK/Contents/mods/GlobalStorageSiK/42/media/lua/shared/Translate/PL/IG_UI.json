@@ -1147,6 +1147,7 @@
 	"IGUI_GS_AdminTabNetwork": "Network support",
 	"IGUI_GS_AdminTabTaxonomy": "Taxonomy",
 	"IGUI_GS_Connected": "Connected",
+	"IGUI_GS_ResizeDragTooltip": "Drag to resize",
 	"IGUI_GS_ItemPage": "Units {1}-{2} of {3}",
 	"IGUI_GS_NativeAuditAbortedMsg": "Catalog audit aborted: {1}",
 	"IGUI_GS_NativeAuditBtn": "Audit catalog",

@@ -55,6 +55,7 @@ local blocked = read(CLIENT .. "GS_TerminalUI_Blocked.lua")
 local tabs = read(CLIENT .. "GS_TerminalUI_Tabs.lua")
 local rail = read(CLIENT .. "GS_TerminalUI_TabRail.lua")
 local core = read(CLIENT .. "GS_SiK_UI_Core.lua")
+local controlsSource = read(CLIENT .. "GS_SiK_UI_Controls.lua")
 local windowSource = read(CLIENT .. "GS_SiK_UI_Window.lua")
 
 Support.check(suite, "terminal loads the modular foundation in dependency order", function()
@@ -139,6 +140,12 @@ Support.check(suite, "footer is rendered every frame rather than during layout",
 	return true
 end)
 
+Support.check(suite, "terminal delegates Escape exclusively to the per-player stack", function()
+	excludes(terminal, "function GS_TerminalUI:onKeyRelease",
+		"terminal defines a second Escape close path on key release")
+	return true
+end)
+
 Support.check(suite, "blocked and full modes reuse the same terminal shell", function()
 	contains(api, "getInstanceForPlayer(playerNum)",
 		"blocked API does not route the shared shell by local player")
@@ -208,9 +215,9 @@ local Inventory = ui.SurfaceInventory
 
 Support.check(suite, "compact standard wide rails and shell chrome are canonical", function()
 	local expected = {
-		compact = { rail = 70, item = 50, icon = 36 },
-		standard = { rail = 88, item = 58, icon = 40 },
-		wide = { rail = 96, item = 58, icon = 40 },
+		compact = { rail = 76, item = 60, icon = 44 },
+		standard = { rail = 96, item = 68, icon = 52 },
+		wide = { rail = 104, item = 68, icon = 52 },
 	}
 	for name, values in pairs(expected) do
 		local profile = Metrics.profile(name)
@@ -219,23 +226,30 @@ Support.check(suite, "compact standard wide rails and shell chrome are canonical
 		assert(profile.window.railIconSize == values.icon, name .. " rail icon size")
 		assert(profile.window.railGap == 4, name .. " rail gap")
 		assert(profile.window.headerHeight == 48, name .. " header height")
-		assert(profile.window.footerHeight == 32, name .. " footer height")
+		assert(profile.window.footerHeight == 48, name .. " footer height")
 	end
+	assert(Metrics.tokens().resizeHandle == 24, "shared resize handle")
+	contains(controlsSource, "resizeHandle = SiK_UI.Metrics.tokens().resizeHandle",
+		"Controls duplicates the resize handle instead of consuming Metrics")
+	contains(terminal, "SiK_UI.Metrics.tokens().resizeHandle",
+		"terminal duplicates the resize handle instead of consuming Metrics")
 	return true
 end)
 
 Support.check(suite, "shell rectangles and bidirectional resize share one geometry owner", function()
 	local boxes = Metrics.shellRects("standard", 1100, 700, false)
-	assert(boxes.header.h == 48 and boxes.footer.h == 32, "shell chrome rects")
-	assert(boxes.rail.w == 88 and boxes.content.x == 88, "rail/content axis")
-	assert(boxes.content.h == 620 and boxes.footer.y == 668, "body/footer partition")
+	assert(boxes.header.h == 48 and boxes.footer.h == 48, "shell chrome rects")
+	assert(boxes.rail.w == 96 and boxes.content.x == 96, "rail/content axis")
+	assert(boxes.content.h == 604 and boxes.footer.y == 652, "body/footer partition")
 	local panel = {
 		x = 100, y = 100, width = 720, height = 480, playerNum = 0,
 		_sikWindowProfile = "standard", minimumWidth = 720, minimumHeight = 480,
 		maximumWidth = 1168, maximumHeight = 868,
 	}
-	assert(Window.resizeEdgeAt(panel, 1, 1, 14) == "top-left", "top-left handle")
-	assert(Window.resizeEdgeAt(panel, 719, 240, 14) == "right", "right handle")
+	assert(Window.resizeEdgeAt(panel, 1, 1, Metrics.tokens().resizeHandle) == "top-left",
+		"top-left handle")
+	assert(Window.resizeEdgeAt(panel, 719, 240, Metrics.tokens().resizeHandle) == "right",
+		"right handle")
 	local viewport = { x = 16, y = 16, w = 1168, h = 868, profile = "standard", playerNum = 0 }
 	local grown = Window.resizeDelta(panel, "bottom-right", 300, 200, viewport)
 	assert(grown.w == 1020 and grown.h == 680, "resize does not grow")
