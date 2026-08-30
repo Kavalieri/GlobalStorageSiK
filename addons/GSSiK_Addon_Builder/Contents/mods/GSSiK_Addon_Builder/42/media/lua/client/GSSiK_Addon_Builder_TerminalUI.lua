@@ -9,157 +9,193 @@ require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_Libs"
 require "GS_TerminalUI_Scroll"
-require "GS_SiK_UI_Core"
+require "GS_SiK_UI_Controls"
 require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Builder_Sandbox"
 
 GlobalStorageSiK.TerminalBuilder = GlobalStorageSiK.TerminalBuilder or {}
 
 local T = GlobalStorageSiK.I18n.text
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local CONTENT_PAD = 8
-local BLOCK_GAP = 8
-local BTN_H = FONT_HGT_SMALL + 10
+local SiK_UI = GlobalStorageSiK.SiK_UI
+local Controls = SiK_UI.Controls
 
-local function addWrappedLabel(scroll, x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
-	for i = 1, #lines do
-		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
-		lbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
-	return y
+local function contentHost(scroll)
+	return GlobalStorageSiK.TerminalScroll.childHost(scroll) or scroll
 end
 
-local function addSectionTitle(scroll, x, y, titleKey, innerW)
-	local title = T(titleKey)
-	local titleH = FONT_HGT_SMALL + 8
-	local hdrW = math.max(120, innerW - x * 2)
-	local hdr = ISPanel:new(x, y, hdrW, titleH)
-	hdr:initialise()
-	hdr.drawBackground = false
-	hdr.prerender = function(panel)
-		ISPanel.prerender(panel)
-		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, 0)
-		panel:drawText(title, 8, 2, 0.88, 0.9, 0.94, 1, UIFont.Small)
+local function sessionPresentation()
+	local sessionStatus = GlobalStorageSiK.CraftSession.getStatus("Builder")
+	local openError = GlobalStorageSiK.CraftSession.getLastOpenError
+		and GlobalStorageSiK.CraftSession.getLastOpenError()
+	if openError then
+		if openError == "addon_unavailable" then
+			return sessionStatus, T("IGUI_GS_CraftOpenErrorAddon"), "error"
+		elseif openError == "no_player" then
+			return sessionStatus, T("IGUI_GS_CraftOpenErrorNoPlayer"), "error"
+		elseif openError == "out_of_range" then
+			return sessionStatus, T("IGUI_GS_CraftOpenErrorRange"), "error"
+		end
+		return sessionStatus, T("IGUI_GS_CraftOpenErrorOpener"), "error"
+	elseif sessionStatus.active then
+		return sessionStatus,
+			T("IGUI_GS_CraftSessionActive", tostring(sessionStatus.networkContainers or 0)),
+			"ok"
+	elseif sessionStatus.lastEndReason == "access_lost" then
+		return sessionStatus, T("IGUI_GS_CraftSessionAccessLost"), "warn"
 	end
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, hdr)
-	return y + titleH + 6
+	return sessionStatus, T("IGUI_GS_CraftSessionInactive"), "info"
+end
+
+local function layoutContent(panel)
+	local scroll = panel and panel.builderScroll
+	if not scroll then return end
+	local rect = GlobalStorageSiK.TerminalScroll.contentRect(scroll)
+	local metrics = Controls.metrics(panel.profile)
+	local x = rect.x
+	local y = rect.y
+	local w = math.max(0, rect.w)
+
+	if panel.builderStatus then
+		panel.builderStatus:setX(x)
+		panel.builderStatus:setY(y)
+		panel.builderStatus:setWidth(w)
+		y = y + metrics.statusHeight + metrics.rowGap
+	end
+	if panel.builderInterfaceLbl then
+		panel.builderInterfaceLbl:setX(x)
+		panel.builderInterfaceLbl:setY(y)
+		y = y + getTextManager():getFontHeight(UIFont.Small) + metrics.rowGap
+	end
+	if panel.builderWarning then
+		panel.builderWarning:setX(x)
+		panel.builderWarning:setY(y)
+		panel.builderWarning:setWidth(w)
+		y = y + metrics.statusHeight + metrics.rowGap
+	end
+	if panel.builderOpenBtn then
+		panel.builderOpenBtn:setX(x)
+		panel.builderOpenBtn:setY(y)
+		panel.builderOpenBtn:setWidth(w)
+		y = y + metrics.buttonHeight
+	end
+
+	local contentHeight = y + metrics.blockPadding
+	if scroll._gsBuilderContentHeight ~= contentHeight then
+		scroll._gsBuilderContentHeight = contentHeight
+		GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentHeight)
+	end
 end
 
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI
 function GlobalStorageSiK.TerminalBuilder.buildPanel(panel, terminal)
-	if panel.builderBuilt then
-		return
-	end
+	if panel.builderBuilt then return end
 	panel.builderBuilt = true
 	panel.drawBackground = false
 	panel.terminalRef = terminal
-	panel.builderScroll = GlobalStorageSiK.TerminalScroll.create(panel, terminal.padding or 8, 0, 280, 120)
 
-	-- Version del addon, esquina inferior derecha - fuera del scroll (nunca
-	-- se mueve con el contenido), discreta a propósito.
-	local verText = "v" .. tostring(GSSiK_Addon_Builder.VERSION or "?")
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	panel.versionLbl = ISLabel:new(0, 0, FONT_HGT_SMALL, verText, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.5, UIFont.Small, true)
-	panel.versionLbl:initialise()
-	panel:addChild(panel.versionLbl)
+	local metrics = Controls.metrics(panel.profile)
+	local initialW = math.max(1, (panel.width or 1) - metrics.blockPadding * 2)
+	panel.builderHeader = Controls.blockHeader(panel, {
+		x = metrics.blockPadding,
+		y = metrics.blockPadding,
+		w = initialW,
+		text = T("IGUI_GS_SectionBuildRemote"),
+		tooltip = T("IGUI_GS_BuildRemoteHint"),
+		target = panel,
+	})
+	panel.builderScroll = GlobalStorageSiK.TerminalScroll.create(panel,
+		metrics.blockPadding, 0, initialW, metrics.statusHeight)
+	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(panel.builderScroll,
+		function()
+			layoutContent(panel)
+		end)
 end
 
 ---@param panel ISPanel
 ---@param innerW number
 ---@param innerH number
 function GlobalStorageSiK.TerminalBuilder.layout(panel, innerW, innerH)
-	if not panel or not panel.builderScroll then
-		return
-	end
-	local pad = panel.padding or 8
-	local y = pad
-	local bottomPad = GlobalStorageSiK.TerminalScroll.listBottomGap()
-	local scrollH = math.max(120, innerH - y - pad - bottomPad)
-	panel.builderScroll:setX(pad)
-	panel.builderScroll:setY(y)
-	GlobalStorageSiK.TerminalScroll.resize(panel.builderScroll, innerW - pad * 2, scrollH)
+	if not panel or not panel.builderScroll then return end
+	local metrics = Controls.metrics(panel.profile)
+	local pad = metrics.blockPadding
+	local headerH = panel.builderHeader and panel.builderHeader.height
+		or metrics.sectionHeight
+	local scrollY = pad + headerH + metrics.rowGap
+	local scrollH = math.max(metrics.statusHeight, innerH - scrollY - pad)
 
-	if panel.versionLbl then
-		local tw = getTextManager():MeasureStringX(UIFont.Small, panel.versionLbl.name or "")
-		panel.versionLbl:setX(math.max(pad, innerW - pad - tw))
-		panel.versionLbl:setY(innerH - FONT_HGT_SMALL - 2)
-		panel.versionLbl:bringToTop()
+	if panel.builderHeader then
+		panel.builderHeader.title:setY(pad)
+		if panel.builderHeader.info then
+			panel.builderHeader.info:setY(pad
+				+ math.floor((headerH - getTextManager():getFontHeight(UIFont.Small)) / 2))
+		end
 	end
+	panel.builderScroll:setX(pad)
+	panel.builderScroll:setY(scrollY)
+	GlobalStorageSiK.TerminalScroll.resize(panel.builderScroll,
+		math.max(0, innerW - pad * 2), scrollH)
+	layoutContent(panel)
 end
 
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI|nil
 function GlobalStorageSiK.TerminalBuilder.refresh(panel, terminal)
-	if not panel or not panel.builderScroll then
-		return
-	end
+	if not panel or not panel.builderScroll then return end
 	local scroll = panel.builderScroll
+	local host = contentHost(scroll)
 	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
 	GlobalStorageSiK.TerminalScroll.clear(scroll, true)
+	panel.builderStatus = nil
+	panel.builderInterfaceLbl = nil
+	panel.builderWarning = nil
+	panel.builderOpenBtn = nil
+	local initialW = math.max(1, GlobalStorageSiK.TerminalScroll.contentWidth(scroll))
 
-	local pad = CONTENT_PAD
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	local cardW = math.max(260, innerW - pad * 2)
-	local y = pad
+	local sessionStatus, statusText, statusKind = sessionPresentation()
+	panel.builderStatus = Controls.status(host, {
+		x = 0, y = 0, w = initialW,
+		text = statusText,
+		status = statusKind,
+	})
 
-	-- dev39 (pedido explicito del usuario, extendido a "cualquier ventana de
-	-- crafteo/build"): el parrafo bajo el titulo pasa a un boton "?" junto al
-	-- propio titulo, igual que en Craft y en los editores de nodo/zona.
-	local titleY = y
-	y = addSectionTitle(scroll, pad, y, "IGUI_GS_SectionBuildRemote", innerW)
-	GlobalStorageSiK.SiK_UI.addBlockInfoBtn(scroll, pad + 8, titleY + 2, T("IGUI_GS_SectionBuildRemote"), T("IGUI_GS_BuildRemoteHint"), scroll)
-
-	local sessionStatus = GlobalStorageSiK.CraftSession.getStatus("Builder")
-	local statusText, statusR, statusG, statusB = nil, 0.5, 0.72, 0.55
-	local openError = GlobalStorageSiK.CraftSession.getLastOpenError and GlobalStorageSiK.CraftSession.getLastOpenError()
-	if openError then
-		statusR, statusG, statusB = 0.9, 0.4, 0.35
-		if openError == "addon_unavailable" then
-			statusText = T("IGUI_GS_CraftOpenErrorAddon")
-		elseif openError == "no_player" then
-			statusText = T("IGUI_GS_CraftOpenErrorNoPlayer")
-		elseif openError == "out_of_range" then
-			statusText = T("IGUI_GS_CraftOpenErrorRange")
-		else
-			statusText = T("IGUI_GS_CraftOpenErrorOpener")
-		end
-	elseif sessionStatus.active then
-		statusText = T("IGUI_GS_CraftSessionActive", tostring(sessionStatus.networkContainers or 0))
-	elseif sessionStatus.lastEndReason == "access_lost" then
-		statusText = T("IGUI_GS_CraftSessionAccessLost")
-	else
-		statusText = T("IGUI_GS_CraftSessionInactive")
-	end
-	y = addWrappedLabel(scroll, pad, y, statusText, cardW, statusR, statusG, statusB)
-	y = y + BLOCK_GAP
-
-	-- Aviso suave (no es un error): ver comentario equivalente en
-	-- GSSiK_Addon_Craft_TerminalUI.lua.
-	if sessionStatus.active and (sessionStatus.unavailableContainers or 0) > 0 then
-		y = addWrappedLabel(scroll, pad, y, T("IGUI_GS_CraftContainersUnavailable", tostring(sessionStatus.unavailableContainers)), cardW, 0.85, 0.7, 0.3)
-		y = y + BLOCK_GAP
-	end
-
-	-- dev39: boton a ancho completo, misma norma que Craft/resto del mod.
 	local hasNeatBuilding = GlobalStorageSiK.Libs.hasNeatBuilding()
-	local buildLabelKey = hasNeatBuilding and "IGUI_GS_CraftOpenBuildNeat" or "IGUI_GS_CraftOpenBuildVanilla"
-	local buildBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, cardW, BTN_H, T(buildLabelKey), scroll, function()
-		if hasNeatBuilding then
-			if terminal and terminal.onOpenNeatBuild then
-				terminal:onOpenNeatBuild()
-			end
-		elseif terminal and terminal.onOpenVanillaBuild then
-			terminal:onOpenVanillaBuild()
-		end
-	end, nil, true)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, buildBtn)
-	y = y + BTN_H + 6
+	local interfaceKey = hasNeatBuilding and "IGUI_GS_BuildInterfaceNeat"
+		or "IGUI_GS_BuildInterfaceVanilla"
+	panel.builderInterfaceLbl = ISLabel:new(0, 0,
+		getTextManager():getFontHeight(UIFont.Small),
+		T("IGUI_GS_BuildInterfaceDetected", T(interfaceKey)),
+		SiK_UI.PALETTE.textPrimary[1], SiK_UI.PALETTE.textPrimary[2],
+		SiK_UI.PALETTE.textPrimary[3], 1, UIFont.Small, true)
+	panel.builderInterfaceLbl:initialise()
+	host:addChild(panel.builderInterfaceLbl)
 
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
+	if sessionStatus.active and (sessionStatus.unavailableContainers or 0) > 0 then
+		panel.builderWarning = Controls.status(host, {
+			x = 0, y = 0, w = initialW,
+			text = T("IGUI_GS_CraftContainersUnavailable",
+				tostring(sessionStatus.unavailableContainers)),
+			status = "warn",
+		})
+	end
+
+	local buildLabelKey = hasNeatBuilding and "IGUI_GS_CraftOpenBuildNeat"
+		or "IGUI_GS_CraftOpenBuildVanilla"
+	panel.builderOpenBtn = Controls.button(host, {
+		x = 0, y = 0, w = initialW,
+		text = T(buildLabelKey),
+		target = scroll,
+		fullWidth = true,
+		onClick = function()
+			if hasNeatBuilding then
+				if terminal and terminal.onOpenNeatBuild then terminal:onOpenNeatBuild() end
+			elseif terminal and terminal.onOpenVanillaBuild then
+				terminal:onOpenVanillaBuild()
+			end
+		end,
+	})
+
+	layoutContent(panel)
 	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 	GlobalStorageSiK.TerminalScroll.applyPanelOffset(scroll)
 end
