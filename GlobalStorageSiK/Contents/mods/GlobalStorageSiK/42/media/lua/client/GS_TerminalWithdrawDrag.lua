@@ -140,6 +140,55 @@ function GlobalStorageSiK.TerminalWithdrawDrag.getPayloadRows()
 	return activeDrag and activeDrag.payloadRows or {}
 end
 
+local function normalizePayloadRows(rows, fallback)
+	rows = rows and #rows > 0 and rows or { fallback }
+	local selectedParents = {}
+	for i = 1, #rows do
+		local row = rows[i]
+		if row and row._gsRowKind == "parent" then
+			local key = rowIdentity(row)
+			if key then selectedParents[key] = true end
+		end
+	end
+	local out, seen = {}, {}
+	for i = 1, #rows do
+		local row = rows[i]
+		local key = rowIdentity(row)
+		local coveredChild = row and row._gsRowKind == "child" and row.parentRowKey
+			and selectedParents[row.parentRowKey]
+		if row and row.fullType and key and not seen[key] and not coveredChild then
+			seen[key] = true
+			out[#out + 1] = row
+		end
+	end
+	return out
+end
+
+local function normalizeVisualRows(rows, payloadRows, fallback)
+	rows = rows and #rows > 0 and rows or { fallback }
+	local selected, selectedParents = {}, {}
+	for i = 1, #payloadRows do
+		local row = payloadRows[i]
+		local key = rowIdentity(row)
+		if key then selected[key] = true end
+		if key and row._gsRowKind == "parent" then selectedParents[key] = true end
+	end
+	local out, seen = {}, {}
+	for i = 1, #rows do
+		local row = rows[i]
+		local key = rowIdentity(row)
+		local coveredChild = row and row._gsRowKind == "child" and row.parentRowKey
+			and selectedParents[row.parentRowKey]
+		if row and not row._gsPager and key and not seen[key]
+			and (selected[key] or coveredChild) then
+			seen[key] = true
+			out[#out + 1] = row
+		end
+	end
+	if #out == 0 and fallback then out[1] = fallback end
+	return out
+end
+
 --- Inicia un drag con estado visual y payload deliberadamente separados.
 ---@param rowData table
 ---@param amount number|nil
@@ -148,8 +197,8 @@ end
 ---@param sourceWidget ISPanel|nil
 function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRows, visualRows, sourceWidget)
 	if not rowData or not rowData.fullType then return false end
-	payloadRows = payloadRows and #payloadRows > 0 and payloadRows or { rowData }
-	visualRows = visualRows and #visualRows > 0 and visualRows or { rowData }
+	payloadRows = normalizePayloadRows(payloadRows, rowData)
+	visualRows = normalizeVisualRows(visualRows, payloadRows, rowData)
 	activeDrag = {
 		payloadRows = payloadRows,
 		visualRows = visualRows,
