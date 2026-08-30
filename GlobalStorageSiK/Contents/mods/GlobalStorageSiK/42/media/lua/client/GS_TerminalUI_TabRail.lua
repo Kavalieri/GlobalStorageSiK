@@ -193,6 +193,7 @@ function GS_TerminalTabRail:new(x, y, w, h, terminal, tabDefs, footerTabDef)
 		terminal and terminal._sikWindowProfile or "standard")
 	o.padding = profile.window.railPadding
 	o.itemHeight = profile.window.railItemHeight
+	o.iconSize = profile.window.railIconSize
 	o.itemGap = profile.window.railGap
 	o.scrollBarWidth = 0
 	o.tabSlots = {}
@@ -247,6 +248,7 @@ function GS_TerminalTabRail:layoutSlots()
 			slot:setY(y)
 			slot:setWidth(self.itemHeight)
 			slot:setHeight(self.itemHeight)
+			slot.iconSize = self.iconSize
 			y = y + self.itemHeight + self.itemGap
 		end
 	end
@@ -261,12 +263,18 @@ function GS_TerminalTabRail:layoutSlots()
 		local slot = self.dynamicSlots[i]
 		if slot then
 			slot:setY(y)
+			slot:setWidth(self.itemHeight)
+			slot:setHeight(self.itemHeight)
+			slot.iconSize = self.iconSize
 			y = y + self.itemHeight + self.itemGap
 		end
 	end
 	if self.footerSlot then
 		local footerY = math.max(y + 8, self.height - self.padding - self.itemHeight)
 		self.footerSlot:setY(footerY)
+		self.footerSlot:setWidth(self.itemHeight)
+		self.footerSlot:setHeight(self.itemHeight)
+		self.footerSlot.iconSize = self.iconSize
 	end
 end
 
@@ -380,6 +388,7 @@ function GlobalStorageSiK.TerminalTabRail.layout(terminal)
 		terminal._sikWindowProfile or "standard")
 	terminal.tabRail.padding = profile.window.railPadding
 	terminal.tabRail.itemHeight = profile.window.railItemHeight
+	terminal.tabRail.iconSize = profile.window.railIconSize
 	terminal.tabRail.itemGap = profile.window.railGap
 	terminal.tabRail:layoutSlots()
 	terminal.tabRail:syncSelection()

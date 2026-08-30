@@ -420,7 +420,7 @@
 	"IGUI_GS_ColName": "Имя",
 	"IGUI_GS_ColCategory": "Категория",
 	"IGUI_GS_CategoryTooltipTitle": "Полная категория",
-	"IGUI_GS_CategoryTooltipMain": "Категория: {1}",
+	"IGUI_GS_CategoryTooltipMain": "Семейство: {1}",
 	"IGUI_GS_CategoryTooltipSub": "Подкатегория: {1}",
 	"IGUI_GS_CategoryTooltipLeaf": "Деталь: {1}",
 	"IGUI_GS_NodeMoreCategories": "+ ещё {1} принимаемых категорий",

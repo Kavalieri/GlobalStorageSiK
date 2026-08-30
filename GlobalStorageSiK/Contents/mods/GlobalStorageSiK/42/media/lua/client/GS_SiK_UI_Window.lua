@@ -49,24 +49,44 @@ local function profileSpec(profileName)
 	}
 end
 
---- Pure responsive geometry. Content minima degrade inside small viewports.
-function Window.resolveProfile(profileName, viewport, options)
+--- Interactive limits have a single owner. Profile maxima describe the
+--- preferred opening size; explicit consumer maxima remain supported, while
+--- an unconstrained resizable window may grow to the complete safe viewport.
+function Window.resolveLimits(profileName, viewport, options)
 	options = options or {}
 	viewport = resolveViewport(viewport, options)
 	profileName = profileName or viewport.profile or "standard"
 	local spec = profileSpec(profileName)
 	local availableW = math.max(0, math.floor(tonumber(viewport.w) or 0))
 	local availableH = math.max(0, math.floor(tonumber(viewport.h) or 0))
-	local minW = tonumber(options.minWidth or options.contentMinW) or spec.minW
-	local minH = tonumber(options.minHeight or options.contentMinH) or spec.minH
-	local maxW = math.min(tonumber(options.maxWidth) or spec.maxW, availableW)
-	local maxH = math.min(tonumber(options.maxHeight) or spec.maxH, availableH)
-	local wantedW = tonumber(options.width) or math.max(spec.preferredW, minW)
-	local wantedH = tonumber(options.height) or math.max(spec.preferredH, minH)
-	local effectiveMinW = math.min(minW, maxW)
-	local effectiveMinH = math.min(minH, maxH)
-	local width = clamp(math.floor(wantedW), effectiveMinW, maxW)
-	local height = clamp(math.floor(wantedH), effectiveMinH, maxH)
+	local maximumW = math.min(tonumber(options.maxWidth) or availableW, availableW)
+	local maximumH = math.min(tonumber(options.maxHeight) or availableH, availableH)
+	local requestedMinW = tonumber(options.minWidth or options.contentMinW) or spec.minW
+	local requestedMinH = tonumber(options.minHeight or options.contentMinH) or spec.minH
+	return {
+		minW = math.min(requestedMinW, maximumW),
+		minH = math.min(requestedMinH, maximumH),
+		maxW = maximumW,
+		maxH = maximumH,
+		profile = profileName,
+		playerNum = viewport.playerNum or options.playerNum or 0,
+		viewport = viewport,
+	}
+end
+
+--- Pure responsive geometry. Content minima degrade inside small viewports.
+function Window.resolveProfile(profileName, viewport, options)
+	options = options or {}
+	viewport = resolveViewport(viewport, options)
+	profileName = profileName or viewport.profile or "standard"
+	local spec = profileSpec(profileName)
+	local limits = Window.resolveLimits(profileName, viewport, options)
+	local availableW = math.max(0, math.floor(tonumber(viewport.w) or 0))
+	local availableH = math.max(0, math.floor(tonumber(viewport.h) or 0))
+	local wantedW = tonumber(options.width) or math.max(spec.preferredW, limits.minW)
+	local wantedH = tonumber(options.height) or math.max(spec.preferredH, limits.minH)
+	local width = clamp(math.floor(wantedW), limits.minW, limits.maxW)
+	local height = clamp(math.floor(wantedH), limits.minH, limits.maxH)
 	local left = math.floor(tonumber(viewport.x) or 0)
 	local top = math.floor(tonumber(viewport.y) or 0)
 	local x = tonumber(options.x)
@@ -150,11 +170,15 @@ function Window.apply(panel, onClose, key, options)
 	SiK_UI.setupModalPanel(panel, function() close(panel) end, panel.padding)
 	Window.installEscape(panel, close, options.escapePriority)
 	panel.resizable = options.resizable ~= false
-	local spec = profileSpec(panel._sikWindowProfile)
-	panel.minimumWidth = tonumber(options.minWidth) or spec.minW
-	panel.minimumHeight = tonumber(options.minHeight) or spec.minH
-	panel.maximumWidth = tonumber(options.maxWidth) or spec.maxW
-	panel.maximumHeight = tonumber(options.maxHeight) or spec.maxH
+	local viewport = resolveViewport(options.viewport, {
+		playerNum = playerNum, environment = options.environment,
+	})
+	local limits = Window.resolveLimits(panel._sikWindowProfile, viewport, options)
+	panel.minimumWidth = limits.minW
+	panel.minimumHeight = limits.minH
+	panel.maximumWidth = limits.maxW
+	panel.maximumHeight = limits.maxH
+	panel._sikSafeViewport = limits.viewport
 	local priorResize = panel.onResize
 	panel.onResize = function(self, ...)
 		Window.layoutHeader(self, options)

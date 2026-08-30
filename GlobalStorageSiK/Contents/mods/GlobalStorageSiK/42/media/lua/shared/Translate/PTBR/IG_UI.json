@@ -420,7 +420,7 @@
 	"IGUI_GS_ColName": "Nome",
 	"IGUI_GS_ColCategory": "Categoria",
 	"IGUI_GS_CategoryTooltipTitle": "Categoria completa",
-	"IGUI_GS_CategoryTooltipMain": "Categoria: {1}",
+	"IGUI_GS_CategoryTooltipMain": "Família: {1}",
 	"IGUI_GS_CategoryTooltipSub": "Subcategoria: {1}",
 	"IGUI_GS_CategoryTooltipLeaf": "Detalhe: {1}",
 	"IGUI_GS_NodeMoreCategories": "+ {1} categorias aceitas a mais",

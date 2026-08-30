@@ -814,6 +814,7 @@ function GlobalStorageSiK.SiK_UI.createSearchBox(x, y, w, h, parentPanel, onText
 		entry.onTextChange = function()
 			local hasText = (entry:getText() or "") ~= ""
 			clearBtn:setVisible(hasText)
+			GlobalStorageSiK.SiK_UI.layoutSearchBox(box, box.width, box.height)
 			if origChange then
 				origChange()
 			end
@@ -836,7 +837,8 @@ function GlobalStorageSiK.SiK_UI.layoutSearchBox(box, w, h)
 	local entry = box.searchEntry
 	local entryX = 0
 	local clearSize = math.floor(h * 0.6)
-	local entryW = math.max(48, w - entryX - clearSize - 6)
+	local clearRight = 2
+	local entryW = math.max(0, w - entryX)
 	if entry then
 		entry:setX(entryX)
 		entry:setY(0)
@@ -844,7 +846,7 @@ function GlobalStorageSiK.SiK_UI.layoutSearchBox(box, w, h)
 		entry:setHeight(h)
 	end
 	if box.clearBtn then
-		box.clearBtn:setX(entryX + entryW - clearSize - 2)
+		box.clearBtn:setX(math.max(entryX, w - clearSize - clearRight))
 		box.clearBtn:setY(math.floor((h - clearSize) / 2))
 		box.clearBtn:setWidth(clearSize)
 		box.clearBtn:setHeight(clearSize)
@@ -1043,13 +1045,27 @@ function GlobalStorageSiK.SiK_UI.renderPanelBackground(panel)
 	panel:drawRect(0, headerH, panel.width, 1, 0.45, pal.accentLine[1], pal.accentLine[2], pal.accentLine[3])
 end
 
+local function headerTextRight(panel, pad)
+	local right = panel.width - pad
+	if panel.closeBtn then
+		local closeX = panel.closeBtn.getX and panel.closeBtn:getX() or panel.closeBtn.x
+		if tonumber(closeX) then right = math.min(right, closeX - 8) end
+	end
+	return math.max(pad, right)
+end
+
 --- Cabecera de la ventana bloqueada (texto blanco, icono GS opcional).
 ---@param panel ISPanel
 function GlobalStorageSiK.SiK_UI.renderBlockedHeader(panel)
 	local iconSize = math.max(20, math.min(28, panel.headerHeight - 10))
 	local textX = GlobalStorageSiK.SiK_UI.drawHeaderLogo(panel, iconSize)
-	local titleY = math.floor((panel.headerHeight - getTextManager():getFontHeight(UIFont.Medium)) / 2)
-	panel:drawText(T("IGUI_GS_BlockedTitle"), textX, titleY, 1, 1, 1, 1, UIFont.Medium)
+	local tm = getTextManager()
+	local titleY = math.floor((panel.headerHeight - tm:getFontHeight(UIFont.Medium)) / 2)
+	local maxW = math.max(0, headerTextRight(panel, panel.padding or 8) - textX)
+	if maxW > 8 then
+		local title = GlobalStorageSiK.SiK_UI.truncateText(T("IGUI_GS_BlockedTitle"), maxW, UIFont.Medium)
+		panel:drawText(title, textX, titleY, 1, 1, 1, 1, UIFont.Medium)
+	end
 end
 
 --- Dibuja la cabecera SiK UI con icono GS y titulo legible.
@@ -1066,14 +1082,40 @@ function GlobalStorageSiK.SiK_UI.renderHeader(panel)
 	local font = UIFont.Medium
 	local tm = getTextManager()
 	local titleY = math.floor((panel.headerHeight - tm:getFontHeight(font)) / 2)
-	panel:drawText(title, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
-	panel:drawText(title, textX, titleY, 1, 1, 1, 1, font)
-	local titleW = tm:MeasureStringX(font, title)
+	local right = headerTextRight(panel, pad)
+	local availableW = math.max(0, right - textX)
+	local visibleTitle = GlobalStorageSiK.SiK_UI.truncateText(title, availableW, font)
+	panel:drawText(visibleTitle, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
+	panel:drawText(visibleTitle, textX, titleY, 1, 1, 1, 1, font)
+	local titleW = tm:MeasureStringX(font, visibleTitle)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	local contextFont = UIFont.Small
 	local contextY = math.floor((panel.headerHeight - tm:getFontHeight(contextFont)) / 2)
-	panel:drawText(netName, textX + titleW + 8, contextY,
-		pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, contextFont)
+	local contextX = textX + titleW + 8
+	local contextW = math.max(0, right - contextX)
+	if contextW > 8 and visibleTitle == title then
+		local visibleContext = GlobalStorageSiK.SiK_UI.truncateText(netName, contextW, contextFont)
+		panel:drawText(visibleContext, contextX, contextY,
+			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, contextFont)
+	end
+end
+
+function GlobalStorageSiK.SiK_UI.runtimeVersionText()
+	local parts = {}
+	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
+	parts[#parts + 1] = "Core " .. tostring(coreVersion or "?")
+	local addons = {
+		{ "Craft", rawget(_G, "GSSiK_Addon_Craft") },
+		{ "Builder", rawget(_G, "GSSiK_Addon_Builder") },
+		{ "Tablet", rawget(_G, "GSSiK_Addon_Tablet") },
+	}
+	for i = 1, #addons do
+		local runtime = addons[i][2]
+		if type(runtime) == "table" and runtime.VERSION then
+			parts[#parts + 1] = addons[i][1] .. " " .. tostring(runtime.VERSION)
+		end
+	end
+	return table.concat(parts, " · ")
 end
 
 --- Dibuja barra de estado inferior en pestaña Red.
@@ -1102,12 +1144,24 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 	panel:drawRect(dotX, dotY, dotSize, dotSize, 1,
 		pal.statusOk[1], pal.statusOk[2], pal.statusOk[3])
 	local textY = y + math.floor((panel.statusFooterHeight - FONT_HGT_SMALL) / 2)
+	local tm = getTextManager()
 	local connected = T("IGUI_GS_Connected")
-	panel:drawText(connected, dotX + dotSize + 8, textY,
-		pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
-	local connectedW = getTextManager():MeasureStringX(UIFont.Small, connected)
-	if label ~= "" then
-		panel:drawText(label, dotX + dotSize + 16 + connectedW, textY,
+	local leftText = label ~= "" and (connected .. " · " .. label) or connected
+	local versions = panel._sikRuntimeVersionText or GlobalStorageSiK.SiK_UI.runtimeVersionText()
+	local innerRight = footerX + footerW - panel.padding
+	local versionsMaxW = math.max(80, math.floor(footerW * 0.58))
+	local visibleVersions = GlobalStorageSiK.SiK_UI.truncateText(versions, versionsMaxW, UIFont.Small)
+	local versionsW = tm:MeasureStringX(UIFont.Small, visibleVersions)
+	local versionsX = math.max(dotX + dotSize + 8, innerRight - versionsW)
+	local leftX = dotX + dotSize + 8
+	local leftMaxW = math.max(0, versionsX - 8 - leftX)
+	if leftMaxW > 8 then
+		leftText = GlobalStorageSiK.SiK_UI.truncateText(leftText, leftMaxW, UIFont.Small)
+		panel:drawText(leftText, leftX, textY,
+			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+	end
+	if versionsW > 0 then
+		panel:drawText(visibleVersions, versionsX, textY,
 			pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 	end
 end

@@ -420,7 +420,7 @@
 	"IGUI_GS_ColName": "名称",
 	"IGUI_GS_ColCategory": "类别",
 	"IGUI_GS_CategoryTooltipTitle": "完整类别",
-	"IGUI_GS_CategoryTooltipMain": "类别：{1}",
+	"IGUI_GS_CategoryTooltipMain": "系列：{1}",
 	"IGUI_GS_CategoryTooltipSub": "子类别：{1}",
 	"IGUI_GS_CategoryTooltipLeaf": "细分：{1}",
 	"IGUI_GS_NodeMoreCategories": "+ 另有 {1} 个可接受类别",

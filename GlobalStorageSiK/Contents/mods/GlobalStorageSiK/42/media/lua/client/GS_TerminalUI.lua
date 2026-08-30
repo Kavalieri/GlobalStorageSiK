@@ -179,12 +179,6 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
 local RESIZE_GRAB = 14
 
-local function clamp(value, low, high)
-	if value < low then return low end
-	if value > high then return high end
-	return value
-end
-
 --- Refresca contenido de la pestaña activa (carga diferida).
 ---@param self GS_TerminalUI
 function GS_TerminalUI:refreshActiveTabContent()
@@ -261,6 +255,9 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 	playerNum = palettePlayer and palettePlayer.getPlayerNum and palettePlayer:getPlayerNum() or playerNum
 	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
 	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(viewport.profile)
+	local limits = GlobalStorageSiK.SiK_UI.Window.resolveLimits(viewport.profile, viewport, {
+		playerNum = playerNum,
+	})
 	local tokens = GlobalStorageSiK.SiK_UI.Metrics.tokens()
 	o.playerNum = playerNum
 	o._sikWindowProfile = viewport.profile
@@ -271,10 +268,11 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 	o.backgroundColor = { r = uiBg[1], g = uiBg[2], b = uiBg[3], a = 0.98 }
 	o.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	o.terminalState = nil
-	o.minimumWidth = math.min(profile.window.minWidth, viewport.w)
-	o.minimumHeight = math.min(profile.window.minHeight, viewport.h)
-	o.maximumWidth = math.min(profile.window.maxWidth, viewport.w)
-	o.maximumHeight = math.min(profile.window.maxHeight, viewport.h)
+	o.minimumWidth = limits.minW
+	o.minimumHeight = limits.minH
+	o.maximumWidth = limits.maxW
+	o.maximumHeight = limits.maxH
+	o._sikSafeViewport = viewport
 	o.resizable = true
 	o.drawBackground = false
 	o.resizing = false
@@ -289,21 +287,25 @@ end
 function GS_TerminalUI:applyResponsiveBounds(nextX, nextY, nextW, nextH)
 	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(self.playerNum or 0)
 	local profile = GlobalStorageSiK.SiK_UI.Metrics.profile(viewport.profile)
+	local limits = GlobalStorageSiK.SiK_UI.Window.resolveLimits(viewport.profile, viewport, {
+		playerNum = self.playerNum or 0,
+	})
+	local rect = GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
+		x = nextX, y = nextY, width = nextW, height = nextH,
+		playerNum = self.playerNum or 0,
+	})
 	self._sikWindowProfile = viewport.profile
-	self.minimumWidth = math.min(profile.window.minWidth, viewport.w)
-	self.minimumHeight = math.min(profile.window.minHeight, viewport.h)
-	self.maximumWidth = math.min(profile.window.maxWidth, viewport.w)
-	self.maximumHeight = math.min(profile.window.maxHeight, viewport.h)
+	self.minimumWidth = limits.minW
+	self.minimumHeight = limits.minH
+	self.maximumWidth = limits.maxW
+	self.maximumHeight = limits.maxH
+	self._sikSafeViewport = viewport
 	self.headerHeight = profile.window.headerHeight
 	self.statusFooterHeight = profile.window.footerHeight
-	local width = clamp(math.floor(tonumber(nextW) or self.width), self.minimumWidth, self.maximumWidth)
-	local height = clamp(math.floor(tonumber(nextH) or self.height), self.minimumHeight, self.maximumHeight)
-	local x = clamp(math.floor(tonumber(nextX) or self.x), viewport.x, viewport.x + viewport.w - width)
-	local y = clamp(math.floor(tonumber(nextY) or self.y), viewport.y, viewport.y + viewport.h - height)
-	self:setWidth(width)
-	self:setHeight(height)
-	self:setX(x)
-	self:setY(y)
+	self:setWidth(rect.w)
+	self:setHeight(rect.h)
+	self:setX(rect.x)
+	self:setY(rect.y)
 end
 
 function GS_TerminalUI:syncAfterResponsiveResize()
@@ -461,7 +463,7 @@ function GS_TerminalUI:buildItemsToolbar()
 	local pad = self.padding
 	local rowH = FONT_HGT_SMALL + 8
 	local btnW = GlobalStorageSiK.SiK_UI.measureButtonWidth(T("IGUI_GS_Search"), UIFont.Small, 16, 56, 120)
-	local gap = 6
+	local gap = GlobalStorageSiK.SiK_UI.Metrics.spacing(8)
 	local y = pad
 
 	self.itemsTitleLbl = GlobalStorageSiK.TerminalSections.addTitleLabel(
@@ -598,6 +600,7 @@ function GS_TerminalUI:calculateLayout()
 	local h = self.height
 	local pad = self.padding
 	local closeSize = math.max(FONT_HGT_MEDIUM, 24)
+	self._sikRuntimeVersionText = GlobalStorageSiK.SiK_UI.runtimeVersionText()
 
 	if self.closeBtn then
 		local closeSize = math.max(FONT_HGT_MEDIUM, 24)
@@ -610,10 +613,10 @@ function GS_TerminalUI:calculateLayout()
 	end
 
 	local tabY = self.headerHeight
-	local bodyH = math.max(160, h - tabY - (self.statusFooterHeight or 0))
-	local railH = math.max(160, h - tabY)
-	local railW = GlobalStorageSiK.TerminalTabs.measureRailWidth(self)
-	local contentW = math.max(240, w - railW)
+	local bodyH = math.max(0, h - tabY - (self.statusFooterHeight or 0))
+	local railH = math.max(0, h - tabY)
+	local railW = math.min(w, GlobalStorageSiK.TerminalTabs.measureRailWidth(self))
+	local contentW = math.max(0, w - railW)
 
 	local blockedMode = self.accessMode == "blocked"
 	if self.tabRail then
@@ -630,7 +633,7 @@ function GS_TerminalUI:calculateLayout()
 		if blockedMode then
 			self.contentHost:setX(0)
 			self.contentHost:setY(tabY)
-			self.contentHost:setWidth(math.max(240, w))
+			self.contentHost:setWidth(w)
 			self.contentHost:setHeight(bodyH)
 		else
 			self.contentHost:setX(railW)
@@ -640,7 +643,7 @@ function GS_TerminalUI:calculateLayout()
 		end
 	end
 
-	local innerW = blockedMode and math.max(240, w) or contentW
+	local innerW = blockedMode and w or contentW
 	local innerH = bodyH
 
 	local tabPanels = { self.networkPanel, self.configPanel, self.itemsPanel, self.addonsPanel, self.blockedPanel }
@@ -674,7 +677,7 @@ function GS_TerminalUI:calculateLayout()
 
 	if self.itemsListPanel and self.itemsPanel then
 		local rowH = FONT_HGT_SMALL + 8
-		local gap = 6
+		local gap = GlobalStorageSiK.SiK_UI.Metrics.spacing(8)
 		local hintH = FONT_HGT_SMALL * 2
 		local statusH = FONT_HGT_SMALL + 6
 		local contentW = innerW - pad * 2
@@ -1109,6 +1112,9 @@ function GS_TerminalUI:onClose()
 	end
 	if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
 		GlobalStorageSiK.WithdrawClient.cancelAll()
+	end
+	if GlobalStorageSiK.TerminalWithdrawDrag and GlobalStorageSiK.TerminalWithdrawDrag.cancel then
+		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
 	end
 	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.clearTransientCaches then
 		GlobalStorageSiK.Client.clearTransientCaches(self.playerNum)

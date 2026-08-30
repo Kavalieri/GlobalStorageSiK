@@ -1,46 +1,47 @@
 --[[
 	GlobalStorageSiK - Arrastre de retiro desde terminal hacia inventario vanilla
-	Autor: SiK
-	Fecha: 2025-06-24
-	Descripción: Soltar fila de red sobre ISInventoryPane para extraer al contenedor bajo el ratón.
+	El ghost comparte descriptor y renderer con la fila real del Almacen.
 ]]
 
 require "GS_NetClient"
-require "GS_DepositSources"
 require "GS_WithdrawClient"
 require "GS_ContainerTargets"
-require "GS_I18n"
 require "GS_SiK_UI_EscapeStack"
 require "ISUI/ISPanel"
 
 GlobalStorageSiK.TerminalWithdrawDrag = {}
 
 local activeDrag = nil
-local tickInstalled = false
-local hooksInstalled = false
 local dragPreviewPanel = nil
+local cleanupRegistered = false
 
 local GSWithdrawDragPreview = ISPanel:derive("GSWithdrawDragPreview")
+local GSWithdrawDragPreviewRow = ISPanel:derive("GSWithdrawDragPreviewRow")
 
--- BUG REAL cerrado (2026-08-23): este fichero mantenia su PROPIA cadena de
--- fallback para el icono (getItemTex directo -> ScriptItem -> sprite crudo
--- via getSprite), mas corta que la de GS_TerminalUI_Items.lua - nunca llegaba
--- a reconstruir el item real desde el worldSprite via ISMoveableSpriteProps,
--- asi que un item derivado de un Moveable (p.ej. una caja recogida, con
--- worldSprite pero sin ScriptItem real) mostraba "?" en el fantasma de
--- arrastre pese a que la fila de origen SI mostraba su icono correcto en el
--- Almacen. GlobalStorageSiK.TerminalItems.textureForRow (GS_TerminalUI_Items.
--- lua) es la unica ruta robusta ya probada - se delega en ella en vez de
--- mantener un segundo camino que puede divergir. Sin "require" explicito a
--- proposito: GS_TerminalUI_Items.lua ya requiere este fichero (orden
--- inverso), asi que enlazar por la tabla global en tiempo de llamada (nunca
--- al cargar el fichero) evita un require circular.
-local function dragTexture(row)
-	if not row or not row.fullType then return nil end
-	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.textureForRow then
-		return GlobalStorageSiK.TerminalItems.textureForRow(row)
+local function rowIdentity(row)
+	return row and (row.rowKey or row.fullType) or nil
+end
+
+function GSWithdrawDragPreviewRow:new(x, y, width, height, descriptor, rowIndex)
+	local o = ISPanel:new(x, y, width, height)
+	setmetatable(o, self)
+	self.__index = self
+	o.descriptor = descriptor
+	o.rowIndex = rowIndex
+	o.drawBackground = false
+	o.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	o.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	return o
+end
+
+function GSWithdrawDragPreviewRow:prerender()
+	ISPanel.prerender(self)
+	if self.descriptor and GlobalStorageSiK.TerminalItems
+		and GlobalStorageSiK.TerminalItems.drawRowDescriptor then
+		GlobalStorageSiK.TerminalItems.drawRowDescriptor(self, self.descriptor, {
+			rowIndex = self.rowIndex, hovered = false, selected = true,
+		})
 	end
-	return nil
 end
 
 function GSWithdrawDragPreview:new(x, y, width, height)
@@ -50,40 +51,44 @@ function GSWithdrawDragPreview:new(x, y, width, height)
 	return o
 end
 
-function GSWithdrawDragPreview:render()
-	ISPanel.render(self)
-	local drag = activeDrag
-	if not drag then return end
-	local row = drag.rowData or {}
-	local texture = dragTexture(row)
-	if texture then
-		self:drawTextureScaledAspect(texture, 6, 6, 40, 40, 0.95, 1, 1, 1)
-	else
-		self:drawText("?", 20, 12, 1, 1, 1, 1, UIFont.Medium)
-	end
-	local rows = drag.rows or {}
-	local amount = math.max(1, math.floor(tonumber(drag.amount) or 1))
-	local label = #rows > 1 and ("+" .. tostring(#rows - 1)) or tostring(amount)
-	local badgeW = math.max(22, 8 + (#label * 8))
-	local badgeX = self.width - badgeW - 2
-	self:drawRect(badgeX, self.height - 20, badgeW, 18, 0.92, 0.05, 0.05, 0.05)
-	self:drawRectBorder(badgeX, self.height - 20, badgeW, 18, 0.9, 0.7, 0.7, 0.7)
-	self:drawTextCentre(label, badgeX + math.floor(badgeW / 2), self.height - 19,
-		1, 1, 1, 1, UIFont.Small)
-end
-
 local function destroyPreview()
 	if dragPreviewPanel then
+		GlobalStorageSiK.SiK_UI.EscapeStack.remove(dragPreviewPanel)
 		dragPreviewPanel:removeFromUIManager()
 		dragPreviewPanel = nil
 	end
 end
 
-local function createPreview()
+local function pointerPosition(width, height)
+	local mx = getMouseX and getMouseX() or 0
+	local my = getMouseY and getMouseY() or 0
+	local screenW = getCore and getCore():getScreenWidth() or (mx + width + 16)
+	local screenH = getCore and getCore():getScreenHeight() or (my + height + 16)
+	return math.max(0, math.min(mx + 14, screenW - width - 8)),
+		math.max(0, math.min(my + 14, screenH - height - 8))
+end
+
+local function createPreview(sourceWidget)
 	destroyPreview()
-	dragPreviewPanel = GSWithdrawDragPreview:new((getMouseX and getMouseX() or 0) + 14,
-		(getMouseY and getMouseY() or 0) + 14, 54, 54)
+	local items = GlobalStorageSiK.TerminalItems
+	if not activeDrag or not items or not items.describeRow or not items.drawRowDescriptor then return end
+	local rowH = items.rowHeight and items.rowHeight() or 40
+	local visualRows = activeDrag.visualRows or {}
+	local width = math.max(520, sourceWidget and sourceWidget.width or 720)
+	local height = math.max(rowH, #visualRows * rowH)
+	local x, y = pointerPosition(width, height)
+	dragPreviewPanel = GSWithdrawDragPreview:new(x, y, width, height)
 	dragPreviewPanel:initialise()
+	dragPreviewPanel.backgroundColor = { r = 0.035, g = 0.035, b = 0.035, a = 0.94 }
+	dragPreviewPanel.borderColor = { r = 0.38, g = 0.42, b = 0.46, a = 0.9 }
+	local listPanel = sourceWidget and sourceWidget.listPanel or nil
+	local terminal = sourceWidget and sourceWidget.terminal or nil
+	for i = 1, #visualRows do
+		local descriptor = items.describeRow(visualRows[i], listPanel, terminal, nil)
+		local rowPanel = GSWithdrawDragPreviewRow:new(0, (i - 1) * rowH, width, rowH, descriptor, i)
+		rowPanel:initialise()
+		dragPreviewPanel:addChild(rowPanel)
+	end
 	local player = GlobalStorageSiK.NetClient.getPlayer()
 	dragPreviewPanel.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
 	GlobalStorageSiK.SiK_UI.EscapeStack.install(dragPreviewPanel, function()
@@ -92,8 +97,6 @@ local function createPreview()
 	if dragPreviewPanel.javaObject and dragPreviewPanel.javaObject.setConsumeMouseEvents then
 		dragPreviewPanel.javaObject:setConsumeMouseEvents(false)
 	end
-	dragPreviewPanel.backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.72 }
-	dragPreviewPanel.borderColor = { r = 0.75, g = 0.75, b = 0.75, a = 0.75 }
 	dragPreviewPanel:setAlwaysOnTop(true)
 	dragPreviewPanel:addToUIManager()
 end
@@ -112,53 +115,67 @@ local function expandInventoryPages()
 			if page.isCollapsed then
 				page.isCollapsed = false
 				if page.clearMaxDrawHeight then page:clearMaxDrawHeight() end
-				local pane = page.inventoryPane
-				if isClient and isClient() and pane and pane.inventory and pane.inventory.requestSync then
-					pane.inventory:requestSync()
-				end
 			end
 		end
 	end
 end
 
---- Indica si hay un arrastre de retiro activo.
----@return boolean
+local function ensureTransientCleanup()
+	if cleanupRegistered or not GlobalStorageSiK.Client
+		or not GlobalStorageSiK.Client.registerTransientCleanup then return end
+	cleanupRegistered = GlobalStorageSiK.Client.registerTransientCleanup("terminal-withdraw-drag", function()
+		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
+	end) == true
+end
+
 function GlobalStorageSiK.TerminalWithdrawDrag.isActive()
 	return activeDrag ~= nil
 end
 
---- Inicia arrastre de una fila de la red (o de la selección múltiple).
+function GlobalStorageSiK.TerminalWithdrawDrag.getPreviewRows()
+	return activeDrag and activeDrag.visualRows or {}
+end
+
+function GlobalStorageSiK.TerminalWithdrawDrag.getPayloadRows()
+	return activeDrag and activeDrag.payloadRows or {}
+end
+
+--- Inicia un drag con estado visual y payload deliberadamente separados.
 ---@param rowData table
 ---@param amount number|nil
----@param selectionRows table[]|nil
-function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, selectionRows)
-	if not rowData or not rowData.fullType then
-		return
-	end
-	local rows = selectionRows
-	if selectionRows and #selectionRows > 1 then
-		rows = selectionRows
-	else
-		rows = { rowData }
-	end
+---@param payloadRows table[]|nil
+---@param visualRows table[]|nil
+---@param sourceWidget ISPanel|nil
+function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRows, visualRows, sourceWidget)
+	if not rowData or not rowData.fullType then return false end
+	payloadRows = payloadRows and #payloadRows > 0 and payloadRows or { rowData }
+	visualRows = visualRows and #visualRows > 0 and visualRows or { rowData }
 	activeDrag = {
-		rows = rows,
+		payloadRows = payloadRows,
+		visualRows = visualRows,
 		rowData = rowData,
 		amount = amount or 1,
 	}
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = rowData
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes = {}
-	for i = 1, #rows do
-		local key = rows[i] and (rows[i].rowKey or rows[i].fullType)
-		if key then
-			GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes[key] = true
-		end
+	for i = 1, #visualRows do
+		local key = rowIdentity(visualRows[i])
+		if key then GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes[key] = true end
 	end
+	ensureTransientCleanup()
 	expandInventoryPages()
-	createPreview()
+	createPreview(sourceWidget)
+	return true
 end
 
---- Cancela arrastre activo.
+function GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
+	if not dragPreviewPanel then return false end
+	local x, y = pointerPosition(dragPreviewPanel.width, dragPreviewPanel.height)
+	dragPreviewPanel:setX(x)
+	dragPreviewPanel:setY(y)
+	return true
+end
+
 function GlobalStorageSiK.TerminalWithdrawDrag.cancel()
 	activeDrag = nil
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = nil
@@ -166,91 +183,40 @@ function GlobalStorageSiK.TerminalWithdrawDrag.cancel()
 	destroyPreview()
 end
 
---- Intenta completar retiro sobre un panel de inventario.
----@param pane ISInventoryPane|nil
----@return boolean
 function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
-	if not activeDrag then
-		return false
-	end
-
+	if not activeDrag then return false end
 	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
-	if not pane then
-		return false
-	end
-
+	if not pane then return false end
 	local container = GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
-	if not container then
-		return false
-	end
-
+	if not container then return false end
 	local player = GlobalStorageSiK.NetClient.getPlayer()
-	if not player then
+	if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
 		return false
 	end
-	if not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
-		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
-		return false
-	end
-
 	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
-	if not key then
-		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
-		return false
-	end
-
+	if not key then return false end
 	local drag = activeDrag
 	GlobalStorageSiK.TerminalWithdrawDrag.cancel()
-
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
-
-	local rows = drag.rows or { drag.rowData }
+	local rows = drag.payloadRows or { drag.rowData }
 	if #rows > 1 then
 		return GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
 	end
 	return GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1], drag.amount, key, searchQuery)
 end
 
---- Tick: suelta fuera de inventario cancela; suelta sobre inventario retira.
-local function onTickWithdraw()
-	if not activeDrag then
-		return
-	end
-	if dragPreviewPanel then
-		dragPreviewPanel:setX((getMouseX and getMouseX() or 0) + 14)
-		dragPreviewPanel:setY((getMouseY and getMouseY() or 0) + 14)
-	end
-	if isMouseButtonDown and isMouseButtonDown(0) then
-		return
-	end
-	GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(GlobalStorageSiK.ContainerTargets.findPaneAtMouse())
-	if activeDrag then
-		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
-	end
+function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
+	if not activeDrag then return false end
+	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
+	local dropped = pane and GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane) or false
+	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel() end
+	return dropped
 end
 
---- Engancha soltado sobre paneles de inventario vanilla.
+-- Compatibilidad con el cargador anterior. Ya no instala OnTick ni monkey
+-- patches globales: el widget de origen captura move/up/outside.
 function GlobalStorageSiK.TerminalWithdrawDrag.installHooks()
-	if hooksInstalled then
-		return
-	end
-	hooksInstalled = true
-
-	if ISInventoryPane and ISInventoryPane.onMouseUp then
-		local originalMouseUp = ISInventoryPane.onMouseUp
-		ISInventoryPane.onMouseUp = function(self, x, y)
-			if GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(self) then
-				return true
-			end
-			return originalMouseUp(self, x, y)
-		end
-	end
-
-	if not tickInstalled then
-		tickInstalled = true
-		Events.OnTick.Add(onTickWithdraw)
-	end
+	ensureTransientCleanup()
+	return true
 end
-
-GlobalStorageSiK.TerminalWithdrawDrag.installHooks()

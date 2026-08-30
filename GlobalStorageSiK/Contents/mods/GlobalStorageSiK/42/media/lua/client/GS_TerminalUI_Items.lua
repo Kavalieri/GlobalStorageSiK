@@ -55,6 +55,8 @@ local ITEM_TABLE_COLUMNS = {
 	{ key = "count", titleKey = "IGUI_GS_ColCount", width = 70, align = "right", pad = 6 },
 }
 local ITEM_TABLE_OPTIONS = { left = 0, right = 0, gap = 8 }
+local MOVABLE_PRESENTATION_CACHE = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 
 function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
 	if not terminal or not row or not row.rowKey or not row.expandable then return false end
@@ -796,6 +798,7 @@ local function buildDisplayRows(panel, terminal, parents)
 					local child = detailPage.items[j]
 					child._gsRowKind = "child"
 					child._gsDepth = 1
+					child.parentRowKey = key
 					child.locations = child.locations or (child.nodeId and { { nodeId = child.nodeId, count = child.count or 1 } } or nil)
 					out[#out + 1] = child
 				end
@@ -1223,6 +1226,165 @@ local function toggleExpanded(listPanel, terminal, data)
 	return true
 end
 
+local function presentationProjection(data)
+	local projection = GlobalStorageSiK.NativeProduct.getRowProjection(data)
+	if projection.mode ~= "vanilla" or projection.vanillaKey ~= "Misc"
+		or not data or not data.worldSprite then
+		return projection
+	end
+	local cacheKey = tostring(data.fullType or "") .. "\31" .. tostring(data.worldSprite)
+	local cached = MOVABLE_PRESENTATION_CACHE[cacheKey]
+	if cached ~= nil then return cached or projection end
+	-- Fallback exclusivamente visual: un Moveable puede llegar con el
+	-- DisplayCategory generico "Misc" aunque su instancia reconstruida tenga
+	-- una familia concreta. No se modifica snapshot, indice, routing ni red.
+	local probe = itemProbe(data)
+	local resolved = probe and GlobalStorageSiK.CategoryResolution.resolve(data.fullType, nil, probe) or nil
+	if resolved and resolved.effective ~= "vanilla" then
+		local fallback = {
+			mode = resolved.effective,
+			key = resolved.routingIdentity,
+			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
+			color = GlobalStorageSiK.CategoryResolution.color(resolved),
+			nativePath = resolved.nativePath,
+		}
+		MOVABLE_PRESENTATION_CACHE[cacheKey] = fallback
+		return fallback
+	end
+	MOVABLE_PRESENTATION_CACHE[cacheKey] = false
+	return projection
+end
+
+--- Descriptor visual canonico compartido por la fila y su DragGhost.
+---@param data table
+---@param listPanel ISPanel|nil
+---@param terminal GS_TerminalUI|nil
+---@param zoneLabel string|nil
+---@return table
+function GlobalStorageSiK.TerminalItems.describeRow(data, listPanel, terminal, zoneLabel)
+	local expanded = data and data.expandable and listPanel and listPanel._expandedKeys
+		and listPanel._expandedKeys[rowIdentity(data)] == true
+	local indicator = "."
+	if data and data._gsRowKind == "child" then indicator = "L"
+	elseif data and data.expandable then indicator = expanded and "v" or ">" end
+	local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
+	if data._gsRowKind == "child" and data.detailKind == "condition"
+		and data.condition and data.conditionMax then
+		name = name .. "  [" .. tostring(data.condition) .. "/" .. tostring(data.conditionMax) .. "]"
+	elseif data._gsRowKind == "child" and data.detailKind == "fluid" and data.dynamicPercent then
+		name = name .. "  [" .. tostring(data.dynamicPercent) .. "%]"
+	end
+	local projection = presentationProjection(data)
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local player = terminal and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
+		or getSpecificPlayer(0)
+	return {
+		identity = rowIdentity(data), data = data, indicator = indicator,
+		texture = itemTexture(data), name = name,
+		category = projection.fullLabel ~= "" and projection.fullLabel
+			or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr),
+		categoryColor = projection.color or pal.textMuted,
+		zone = zoneLabel or resolveZoneLabel(terminal, data) or T("IGUI_GS_PunctuationEmDash"),
+		count = tostring(data.count or 0), depth = data._gsDepth or 0,
+		rowKind = data._gsRowKind, expanded = expanded,
+		literatureRead = isLiteratureReadSafe(player, data),
+	}
+end
+
+--- Dibuja el descriptor con las mismas columnas, icono y espaciado del Almacen.
+---@param target ISPanel
+---@param descriptor table
+---@param options table|nil {rowIndex,hovered,selected,drawBackground}
+function GlobalStorageSiK.TerminalItems.drawRowDescriptor(target, descriptor, options)
+	options = options or {}
+	if options.drawBackground ~= false then
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(target, options.rowIndex or 1,
+			options.hovered == true, options.selected == true)
+	end
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local iconY = math.floor((target.height - ICON_SIZE) / 2)
+	if descriptor.texture then
+		target:drawTextureScaledAspect(descriptor.texture, 20, iconY, ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
+	end
+	if descriptor.literatureRead then
+		local tick = getTexture("media/ui/Tick_Mark-10.png")
+		if tick then target:drawTexture(tick, 20, iconY - 1, 1, 1, 1, 1) end
+	end
+	local columns = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
+		target.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
+	local nameCol, catCol, zoneCol, countCol = columns[1], columns[2], columns[3], columns[4]
+	target:drawText(descriptor.indicator, nameCol.x + 3,
+		math.floor((target.height - FONT_HGT_SMALL) / 2), 0.55, 0.72, 0.9, 1, UIFont.Small)
+	-- 8 px es el gap canonico validado entre icono y nombre.
+	local textX = nameCol.x + 20 + ICON_SIZE + 8
+	local catX = catCol.x + catCol.pad
+	local zoneX = zoneCol.x + zoneCol.pad
+	local yMid = math.floor((target.height - FONT_HGT_SMALL) / 2)
+	target:drawText(truncateText(descriptor.name, nameCol.finish - textX - 8, UIFont.Small),
+		textX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
+	target:drawText(truncateText(descriptor.category, catCol.finish - catX - catCol.pad, UIFont.Small),
+		catX, yMid, descriptor.categoryColor[1], descriptor.categoryColor[2], descriptor.categoryColor[3], 1, UIFont.Small)
+	target:drawText(truncateText(descriptor.zone, zoneCol.finish - zoneX - zoneCol.pad, UIFont.Small),
+		zoneX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
+	target:drawTextRight(descriptor.count, countCol.finish - countCol.pad, yMid,
+		pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+end
+
+function GlobalStorageSiK.TerminalItems.rowHeight()
+	return ROW_H
+end
+
+--- Separa las filas que se dibujan de las que se envian al servidor.
+--- Un padre desplegado dibuja su bloque, pero conserva un unico payload agregado.
+function GlobalStorageSiK.TerminalItems.buildDragState(listPanel, rowData, selectionRows)
+	local displayed = listPanel and listPanel._lastItems or {}
+	local selected = {}
+	local sourceRows = selectionRows and #selectionRows > 1 and selectionRows or { rowData }
+	for i = 1, #sourceRows do
+		local key = rowIdentity(sourceRows[i])
+		if key then selected[key] = true end
+	end
+	local payloadRows, visualRows, payloadSeen, visualSeen, coveredParents = {}, {}, {}, {}, {}
+	local function addPayload(row)
+		local key = rowIdentity(row)
+		if row and row.fullType and key and not payloadSeen[key] then
+			payloadSeen[key] = true
+			payloadRows[#payloadRows + 1] = row
+		end
+	end
+	local function addVisual(row)
+		local key = rowIdentity(row)
+		if row and not row._gsPager and key and not visualSeen[key] then
+			visualSeen[key] = true
+			visualRows[#visualRows + 1] = row
+		end
+	end
+	for i = 1, #displayed do
+		local row = displayed[i]
+		local key = rowIdentity(row)
+		if key and selected[key] then
+			if row._gsRowKind == "child" and row.parentRowKey and selected[row.parentRowKey] then
+				coveredParents[row.parentRowKey] = true
+			else
+				addPayload(row)
+				addVisual(row)
+				if row._gsRowKind == "parent" and row.expandable and listPanel._expandedKeys
+					and listPanel._expandedKeys[key] then
+					local j = i + 1
+					while j <= #displayed and displayed[j]._gsRowKind == "child"
+						and displayed[j].parentRowKey == key do
+						addVisual(displayed[j])
+						j = j + 1
+					end
+				end
+			end
+		end
+	end
+	if #payloadRows == 0 then addPayload(rowData) end
+	if #visualRows == 0 then addVisual(rowData) end
+	return { payloadRows = payloadRows, visualRows = visualRows }
+end
+
 --- Crea una fila reutilizable de la lista virtual SiK UI.
 ---@param scroll ISPanel
 ---@param listPanel ISPanel
@@ -1268,64 +1430,12 @@ local function createItemRow(scroll, listPanel, terminal)
 			self:drawText(">", right - 18, math.floor((self.height - FONT_HGT_SMALL) / 2),
 				data.hasNext and 0.75 or 0.35, data.hasNext and 0.8 or 0.35, data.hasNext and 0.85 or 0.35, 1, UIFont.Small)
 		elseif data then
-			local pal = GlobalStorageSiK.SiK_UI.PALETTE
-			local tex = itemTexture(data)
-			local iconY = math.floor((self.height - ICON_SIZE) / 2)
-			if tex then
-				self:drawTextureScaledAspect(tex, 20, iconY, ICON_SIZE, ICON_SIZE, 1, 1, 1, 1)
-			end
-			-- Mismo tick vanilla (media/ui/Tick_Mark-10.png) que ISInventoryPane
-			-- dibuja sobre un libro/revista ya leido - reconocible al instante,
-			-- sin inventar un icono propio para lo mismo.
-			local player = self.terminal and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-				or getSpecificPlayer(0)
-			if isLiteratureReadSafe(player, data) then
-				local tick = getTexture("media/ui/Tick_Mark-10.png")
-				if tick then
-					self:drawTexture(tick, 20, iconY - 1, 1, 1, 1, 1)
-				end
-			end
-			local columns = GlobalStorageSiK.SiK_UI.Table.resolveColumns(
-				self.width, ITEM_TABLE_COLUMNS, ITEM_TABLE_OPTIONS)
-			local nameCol, catCol, zoneCol, countCol = columns[1], columns[2], columns[3], columns[4]
-			local indicator = "."
-			if data._gsRowKind == "child" then
-				indicator = "L"
-			elseif data.expandable then
-				indicator = self.listPanel and self.listPanel._expandedKeys
-					and self.listPanel._expandedKeys[rowIdentity(data)] and "v" or ">"
-			end
-			self:drawText(indicator, nameCol.x + 3, math.floor((self.height - FONT_HGT_SMALL) / 2),
-				0.55, 0.72, 0.9, 1, UIFont.Small)
-			local textX = nameCol.x + 20 + ICON_SIZE + 8
-			local name = GlobalStorageSiK.I18n.itemDisplayName(data.fullType, data.displayName, data.worldSprite)
-			if data._gsRowKind == "child" and data.detailKind == "condition"
-				and data.condition and data.conditionMax then
-				name = name .. "  [" .. tostring(data.condition) .. "/" .. tostring(data.conditionMax) .. "]"
-			elseif data._gsRowKind == "child" and data.detailKind == "fluid" and data.dynamicPercent then
-				name = name .. "  [" .. tostring(data.dynamicPercent) .. "%]"
-			end
-			local projection = GlobalStorageSiK.NativeProduct.getRowProjection(data)
-			local cat = projection.fullLabel ~= "" and projection.fullLabel
-				or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr)
-			local catColor = projection.color or pal.textMuted
-			local zoneLabel = self._gsZoneLabel or T("IGUI_GS_PunctuationEmDash")
-			local count = tostring(data.count or 0)
-			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-			local catX = catCol.x + catCol.pad
-			local zoneX = zoneCol.x + zoneCol.pad
-			local nameMaxW = nameCol.finish - textX - 8
-			-- Reserva de espacio para la columna Cant. (numero corto, pero con
-			-- margen holgado: hay contenedores con miles de unidades) antes de
-			-- truncar categoria/zona - sin esto, un texto largo (p.ej.
-			-- "Herramienta / Arma - Arma de hoja corta") se dibujaba entero y se
-			-- solapaba visualmente con la cantidad.
-			local catMaxW = catCol.finish - catX - catCol.pad
-			local zoneMaxW = zoneCol.finish - zoneX - zoneCol.pad
-			self:drawText(truncateText(name, nameMaxW, UIFont.Small), textX, yMid, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-			self:drawText(truncateText(cat, catMaxW, UIFont.Small), catX, yMid, catColor[1], catColor[2], catColor[3], 1, UIFont.Small)
-			self:drawText(truncateText(zoneLabel, zoneMaxW, UIFont.Small), zoneX, yMid, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-			self:drawTextRight(count, countCol.finish - countCol.pad, yMid, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+			local descriptor = GlobalStorageSiK.TerminalItems.describeRow(
+				data, self.listPanel, self.terminal, self._gsZoneLabel)
+			GlobalStorageSiK.TerminalItems.drawRowDescriptor(self, descriptor, {
+				rowIndex = self.rowIndex, hovered = self:isMouseOver(), selected = selected,
+				drawBackground = false,
+			})
 		end
 
 		-- Tooltip al pasar el raton: en TODA la fila (icono/nombre/categoria)
@@ -1398,6 +1508,10 @@ local function createItemRow(scroll, listPanel, terminal)
 	end
 
 	row.onMouseMove = function(self, dx, dy)
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
+			return true
+		end
 		if not self._gsDragPending or not self.itemData or not self.terminal then
 			return false
 		end
@@ -1417,20 +1531,26 @@ local function createItemRow(scroll, listPanel, terminal)
 			-- arrastrar una fila con varias unidades solo se retiraba 1. El
 			-- usuario pide que arrastrar mueva todo por defecto, y que las
 			-- cantidades parciales queden solo para las opciones del menu.
-			if multiDrag then
-				GlobalStorageSiK.TerminalWithdrawDrag.begin(self.itemData, 0, selection)
-			else
-				GlobalStorageSiK.TerminalWithdrawDrag.begin(self.itemData, 0)
-			end
+			local dragState = GlobalStorageSiK.TerminalItems.buildDragState(
+				self.listPanel, self.itemData, multiDrag and selection or nil)
+			GlobalStorageSiK.TerminalWithdrawDrag.begin(self.itemData, 0,
+				dragState.payloadRows, dragState.visualRows, self)
 			return true
 		end
 		return false
 	end
 	row.onMouseMoveOutside = row.onMouseMove
+	row.onMouseUpOutside = function(self, x, y)
+		self._gsDragPending = false
+		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
+			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
+		end
+		return false
+	end
 
 	row.onMouseUp = function(self, x, y)
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
-			return false
+			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 		end
 		if self.itemData and self.itemData._gsPager and self.listPanel then
 			local data = self.itemData

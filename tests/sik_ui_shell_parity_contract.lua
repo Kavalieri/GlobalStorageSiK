@@ -170,7 +170,7 @@ end)
 
 Support.check(suite, "header has no hyphen separator or visible version", function()
 	local header = section(core, "function GlobalStorageSiK.SiK_UI.renderHeader(panel)",
-		"function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)")
+		"function GlobalStorageSiK.SiK_UI.runtimeVersionText()")
 	excludes(header, '" - "', "header must not render hyphen separator")
 	excludes(header, "MOD_VERSION", "header must not render build version")
 	excludes(header, "modversion", "header must not render mod.info version")
@@ -202,18 +202,38 @@ local Inventory = ui.SurfaceInventory
 
 Support.check(suite, "compact standard wide rails and shell chrome are canonical", function()
 	local expected = {
-		compact = { rail = 70, item = 50 },
-		standard = { rail = 88, item = 58 },
-		wide = { rail = 96, item = 58 },
+		compact = { rail = 70, item = 50, icon = 36 },
+		standard = { rail = 88, item = 58, icon = 40 },
+		wide = { rail = 96, item = 58, icon = 40 },
 	}
 	for name, values in pairs(expected) do
 		local profile = Metrics.profile(name)
 		assert(profile.window.railWidth == values.rail, name .. " rail width")
 		assert(profile.window.railItemHeight == values.item, name .. " item height")
+		assert(profile.window.railIconSize == values.icon, name .. " rail icon size")
 		assert(profile.window.railGap == 4, name .. " rail gap")
 		assert(profile.window.headerHeight == 40, name .. " header height")
 		assert(profile.window.footerHeight == 24, name .. " footer height")
 	end
+	return true
+end)
+
+Support.check(suite, "rail consumes profile icon size without changing slot hitboxes", function()
+	contains(rail, "profile.window.railIconSize", "rail ignores the profile icon size")
+	contains(rail, "profile.window.railItemHeight", "rail slot height left the profile")
+	excludes(rail, "itemHeight = profile.window.railIconSize",
+		"visual icon size replaced the validated slot hitbox")
+	return true
+end)
+
+Support.check(suite, "footer reports Core and active addon versions only in runtime chrome", function()
+	local footer = section(core,
+		"function GlobalStorageSiK.SiK_UI.runtimeVersionText()",
+		"function GlobalStorageSiK.SiK_UI.setupHeaderDrag(panel)")
+	contains(footer, "MOD_VERSION", "footer omits the Core runtime version")
+	contains(footer, "runtime.VERSION", "footer omits active addon versions")
+	contains(footer, "runtimeVersionText", "footer does not consume runtime versions")
+	excludes(terminal, 'drawText("Core ', "version text leaked into a tab body")
 	return true
 end)
 
@@ -255,6 +275,24 @@ Support.check(suite, "window minima degrade inside every player viewport", funct
 		})
 		Support.assertWithin(rect, viewport, viewport.profile .. " shell")
 		assert(rect.w <= viewport.w and rect.h <= viewport.h, "minimum overflow")
+	end
+	return true
+end)
+
+Support.check(suite, "arbitrary resize rectangles clamp to the exact safe player viewport", function()
+	local viewport = { x = 816, y = 16, w = 768, h = 868,
+		profile = "compact", playerNum = 3 }
+	local cases = {
+		{ x = -900, y = -700, w = 2400, h = 1600 },
+		{ x = 4000, y = 2200, w = 32, h = 24 },
+		{ x = 1000, y = 300, w = 720, h = 480 },
+	}
+	for i = 1, #cases do
+		local raw = cases[i]
+		raw.profile, raw.playerNum = "compact", 3
+		local clamped = Window.clampRect(raw, viewport)
+		Support.assertWithin(clamped, viewport, "resize case " .. tostring(i))
+		assert(clamped.playerNum == 3, "resize lost local player identity")
 	end
 	return true
 end)

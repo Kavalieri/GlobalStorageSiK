@@ -188,7 +188,8 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	ui:initialise()
 	ui:addToUIManager()
 	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
-	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d", x, y, w, h)
+	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d",
+		rect.x, rect.y, rect.w, rect.h)
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 		GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 	end
