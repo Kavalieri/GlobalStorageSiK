@@ -41,7 +41,7 @@ local required = {
 	"GS_NodeNaming", "GS_TerminalRecipes", "GS_CraftUtils", "GS_PCAcquire", "GS_ReaderAcquire",
 	"GS_DiskProgramming", "GS_AddonRecipes", "GS_ItemSnapshot", "GS_ItemTooltipDetailServer", "GS_FuelConsumption", "GS_Log",
 	"GS_DisplayCategoryPublisher",
-	"GS_NativeAuditServer", "GS_NativeCorpusServer", "GS_Debug", "GS_NetTrace",
+	"GS_WithdrawSelectionTickets", "GS_NativeAuditServer", "GS_NativeCorpusServer", "GS_Debug", "GS_NetTrace",
 }
 for i = 1, #required do package.loaded[required[i]] = true end
 

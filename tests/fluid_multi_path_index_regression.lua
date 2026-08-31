@@ -129,22 +129,19 @@ GlobalStorageSiK.ZoneRefresh = {}
 
 dofile(shared .. "GS_Index.lua")
 local rows = GlobalStorageSiK.Index.buildRows("net", {})
-assert(#rows == 1, "mixed fluid variants must serialize as one parent")
-local parent = rows[1]
 local fuel = "native:vehicles/consumable/fuel"
 local empty = "native:containers/liquid/empty"
-assert(parent.mixedVariants and parent.nativePath == nil and #parent.nativePaths == 2,
-	"mixed parent did not serialize all nativePaths")
-local paths = {}
-for i = 1, #parent.nativePaths do paths[parent.nativePaths[i]] = true end
-assert(paths[fuel] and paths[empty], "mixed parent lost a child route")
-assert(parent.nativeStatus == "variants" and parent.effective == "variants",
-	"mixed parent was not marked as variants")
-local projection = GlobalStorageSiK.NativeProduct.getRowProjection(parent)
-assert(projection.mode == "variants" and projection.fullLabel == "Varias categorías",
-	"mixed parent did not use the variants label")
+assert(#rows == 2, "fluid form+content identities must serialize as separate parents")
+local byPath = {}
+for i = 1, #rows do
+	local row = rows[i]
+	assert(not row.mixedVariants and row.nativePath,
+		"a canonical fluid identity was collapsed into mixed variants")
+	byPath[row.nativePath] = row
+end
+assert(byPath[fuel] and byPath[empty], "fluid identity lost its canonical route")
 
-local index = GlobalStorageSiK.NativeProduct.buildIndex({ parent })
+local index = GlobalStorageSiK.NativeProduct.buildIndex(rows)
 assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, fuel) == 1,
 	"parent is absent or duplicated under the fuel route")
 assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, empty) == 1,
@@ -152,11 +149,11 @@ assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, empty) == 1,
 
 -- A repeated route in a serialized payload must still not duplicate the row
 -- in the shared inverse index.
-local repeated = GlobalStorageSiK.NativeProduct.copyRow(parent)
-repeated.nativePaths = { fuel, fuel, empty }
+local repeated = GlobalStorageSiK.NativeProduct.copyRow(byPath[fuel])
+repeated.nativePaths = { fuel, fuel }
 index = GlobalStorageSiK.NativeProduct.buildIndex({ repeated })
 assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, fuel) == 1,
-	"shared index duplicated a mixed parent for a repeated nativePath")
+	"shared index duplicated a fluid parent for a repeated nativePath")
 
 -- El payload de una fila sin variantes puede contener `nativePaths = {}` por
 -- compatibilidad de serialización. El filtro L1/L2/L3 debe indexar entonces
@@ -192,9 +189,9 @@ GlobalStorageSiK.SiK_UI = {
 GlobalStorageSiK.TerminalWithdrawDrag = { isActive = function() return false end }
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua")
-assert(#GlobalStorageSiK.TerminalItems.filterByMainCategory({ parent }, fuel) == 1,
-	"terminal filter hid a mixed parent from the fuel route")
-assert(#GlobalStorageSiK.TerminalItems.filterByMainCategory({ parent }, empty) == 1,
-	"terminal filter hid a mixed parent from the empty route")
+assert(#GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, fuel) == 1,
+	"terminal filter hid the fuel parent from its route")
+assert(#GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, empty) == 1,
+	"terminal filter hid the empty parent from its route")
 
 print("fluid_multi_path_index_regression: OK")

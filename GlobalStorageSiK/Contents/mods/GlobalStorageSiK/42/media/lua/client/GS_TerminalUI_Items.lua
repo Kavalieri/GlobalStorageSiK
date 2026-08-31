@@ -42,8 +42,6 @@ end
 -- Una cabecera agregada no lleva itemIds por contrato: antes de retirarla se
 -- resuelve su pagina de instancias y se envia exclusivamente la seleccion
 -- exacta. Es estado efimero de cliente, ligado a una sola operacion de drop.
-local pendingExactWithdrawByRowKey = {}
-
 local T = GlobalStorageSiK.I18n.text
 local EXPANDER_HITBOX_W = 32
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
@@ -79,105 +77,9 @@ function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
 	return sent
 end
 
-local function clearPendingExactWithdraw(pending)
-	if not pending then return end
-	for i = 1, #(pending.parentKeys or {}) do
-		pendingExactWithdrawByRowKey[pending.parentKeys[i]] = nil
-	end
-end
-
--- Una revision nueva invalida cualquier pagina exacta que estuviera esperando
--- una cabecera agregada. No hay reintentos en segundo plano: la siguiente
--- accion explicita del jugador vuelve a pedir el detalle vigente.
-local function clearAllPendingExactWithdraws()
-	local pendings, seen = {}, {}
-	for _, pending in pairs(pendingExactWithdrawByRowKey) do
-		if pending and not seen[pending] then
-			seen[pending] = true
-			pendings[#pendings + 1] = pending
-		end
-	end
-	for i = 1, #pendings do clearPendingExactWithdraw(pendings[i]) end
-end
-
-function GlobalStorageSiK.TerminalItems.deferExactWithdraw(terminal, rows, targetKey, searchQuery)
-	if not terminal or not rows or #rows == 0 or not targetKey then return false end
-	local pending = {
-		targetKey = targetKey,
-		searchQuery = searchQuery or "",
-		rows = {},
-		parents = {},
-		parentKeys = {},
-		remaining = 0,
-		networkId = terminal.terminalState and terminal.terminalState.networkId,
-		inventoryRevision = terminal.terminalState and terminal.terminalState.inventoryRevision,
-	}
-	for i = 1, #rows do
-		local row = rows[i]
-		local needsExact = row and row.aggregateAllowed == false
-			and (not row.itemIds or #row.itemIds == 0) and row.expandable and row.rowKey
-		if needsExact then
-			pending.parents[row.rowKey] = row
-			pending.parentKeys[#pending.parentKeys + 1] = row.rowKey
-			pending.remaining = pending.remaining + 1
-		else
-			pending.rows[#pending.rows + 1] = row
-		end
-	end
-	if pending.remaining == 0 then return false end
-	for i = 1, #pending.parentKeys do
-		pendingExactWithdrawByRowKey[pending.parentKeys[i]] = pending
-	end
-	for i = 1, #pending.parentKeys do
-		local rowKey = pending.parentKeys[i]
-		if not GlobalStorageSiK.TerminalItems.requestDetails(terminal, pending.parents[rowKey], 1) then
-			clearPendingExactWithdraw(pending)
-			return false
-		end
-	end
-	return true
-end
-
-local function finishExactWithdraw(terminal, args)
-	local pending = pendingExactWithdrawByRowKey[args.rowKey]
-	if not pending then return false end
-	if pending.networkId and args.networkId and pending.networkId ~= args.networkId then
-		clearPendingExactWithdraw(pending)
-		return true
-	end
-	if pending.inventoryRevision and args.inventoryRevision
-		and pending.inventoryRevision ~= args.inventoryRevision then
-		clearPendingExactWithdraw(pending)
-		return true
-	end
-	for i = 1, #(args.items or {}) do
-		local child = args.items[i]
-		if child and child.itemIds and #child.itemIds > 0 then
-			pending.rows[#pending.rows + 1] = child
-		end
-	end
-	if args.hasNext then
-		if not GlobalStorageSiK.TerminalItems.requestDetails(terminal, pending.parents[args.rowKey], (args.page or 1) + 1) then
-			clearPendingExactWithdraw(pending)
-		end
-		return true
-	end
-	pendingExactWithdrawByRowKey[args.rowKey] = nil
-	pending.remaining = pending.remaining - 1
-	if pending.remaining > 0 then return true end
-	if #pending.rows == 0 then return true end
-	local sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(
-		pending.rows, 0, pending.targetKey, pending.searchQuery)
-	if sent then
-		GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropSent")
-	end
-	return true
-end
-
 function GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted)
 	if not args or not args.rowKey or accepted ~= true then return end
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-	if terminal then finishExactWithdraw(terminal, args) end
 	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
 		local panel = terminal.itemsListPanel
 		panel._detailPending = panel._detailPending or {}
@@ -375,7 +277,6 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
 	-- La pagina anterior puede permanecer como referencia visual, pero se marca
 	-- stale y nunca conserva acciones/itemIds utilizables.
 	panel._detailPending = {}
-	clearAllPendingExactWithdraws()
 	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive()
@@ -1947,10 +1848,26 @@ local function createItemRow(scroll, listPanel, terminal)
 		if tostring(detail and detail.itemId) ~= tostring(self.itemData.itemId) then return end
 		local mediaTitle = detail and (detail.mediaTitle or detail.displayName) or nil
 		if not isGenericRecordedMediaTitle(mediaTitle, self.itemData) then
-			self.itemData.mediaTitle = mediaTitle
-			self.itemData.displayName = mediaTitle
 			local mediaIndex = tonumber(self.itemData.mediaIndex or detail.mediaIndex)
+			local function applyToRows(rows)
+				for i = 1, #(rows or {}) do
+					local candidate = rows[i]
+					if tonumber(candidate.mediaIndex) == mediaIndex then
+						candidate.mediaTitle = mediaTitle
+						candidate.displayName = mediaTitle
+						if type(detail.mediaCodes) == "table" then candidate.mediaCodes = detail.mediaCodes end
+					end
+					applyToRows(candidate.variantSummary)
+				end
+			end
+			applyToRows(self.listPanel and self.listPanel._itemsCatalog)
+			applyToRows(self.listPanel and self.listPanel._lastItems)
+			local pages = detailPagesByRowKey()
+			for _, page in pairs(pages or {}) do applyToRows(page.items) end
 			if mediaIndex then MEDIA_TITLE_CACHE[math.floor(mediaIndex)] = mediaTitle end
+			if self.listPanel and self.listPanel.itemScroll and self.listPanel.itemScroll.refreshItems then
+				self.listPanel.itemScroll:refreshItems()
+			end
 		end
 		local probe = self._gsTooltip.item
 		if probe then

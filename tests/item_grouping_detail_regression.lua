@@ -113,9 +113,11 @@ dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_I
 local rows = GlobalStorageSiK.Index.buildRows("net", {})
 local byType = {}
 local vhsParents = {}
+local petrolParents = {}
 for _, row in ipairs(rows) do
         byType[row.fullType] = row
         if row.fullType == "Base.VHSTape" then vhsParents[#vhsParents + 1] = row end
+        if row.fullType == "Base.PetrolCan" then petrolParents[#petrolParents + 1] = row end
 end
 
 local chips = byType["Base.Crisps"] or byType["Base.Crisps2"] or byType["Base.Crisps3"]
@@ -124,35 +126,71 @@ assert(#chips.fullTypes == 3 and chips.itemIds == nil, "chips compact payload")
 local chipDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, chips.rowKey, 1, 20)
 assert(chipDetails.total == 3 and #chipDetails.items == 3, "three cosmetic variants")
 assert(chipDetails.items[1].aggregateAllowed == true, "expanded cosmetic rows transfer normally")
+local chipVariants = {}
+for _, detail in ipairs(chipDetails.items) do
+	chipVariants[detail.fullType] = detail
+end
+assert(chipVariants["Base.Crisps"] and chipVariants["Base.Crisps"].count == 1
+	and chipVariants["Base.Crisps"].displayName == "Chips - Plain",
+	"plain crisps variant was lost inside the shared family")
+assert(chipVariants["Base.Crisps2"] and chipVariants["Base.Crisps2"].count == 1
+	and chipVariants["Base.Crisps2"].displayName == "Chips - Barbecue",
+	"barbecue crisps variant was lost inside the shared family")
+assert(chipVariants["Base.Crisps3"] and chipVariants["Base.Crisps3"].count == 1
+	and chipVariants["Base.Crisps3"].displayName == "Chips - Salt and Vinegar",
+	"salt and vinegar crisps variant was lost inside the shared family")
 
 assert(#vhsParents == 3, "VHS titles were collapsed into one generic physical-type parent")
-local woodcraft = nil
-for _, row in ipairs(vhsParents) do if row.mediaIndex == 214 then woodcraft = row end end
+local woodcraft, exposure, unknown = nil, nil, nil
+for _, row in ipairs(vhsParents) do
+	if row.mediaIndex == 214 then woodcraft = row end
+	if row.mediaIndex == 315 then exposure = row end
+	if row.mediaIndex == nil then unknown = row end
+end
 assert(woodcraft and woodcraft.count == 2 and woodcraft.expandable
         and woodcraft.aggregateAllowed and woodcraft.displayName == "Woodcraft Ep. 3",
         "same-title VHS copies were not exposed as one exact transferable parent")
+assert(exposure and exposure.count == 1 and exposure.displayName == "Exposure Survival Ep. 5"
+	and exposure.rowKey ~= woodcraft.rowKey,
+	"different VHS mediaIndex/title did not produce a distinct exact parent")
+assert(unknown and unknown.count == 1 and unknown.rowKey ~= woodcraft.rowKey,
+	"unknown VHS identity collapsed with a known edition")
 local vhsDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, woodcraft.rowKey, 1, 20)
 assert(vhsDetails.total == 1 and #vhsDetails.items == 1
         and vhsDetails.items[1].count == 2 and #vhsDetails.items[1].itemIds == 2,
         "exact VHS parent did not retain both physical copies in its detail")
+assert(vhsDetails.items[1].mediaIndex == woodcraft.mediaIndex
+	and vhsDetails.items[1].displayName == woodcraft.displayName,
+	"VHS parent and child did not preserve the same vanilla title/identity")
 
-local petrol = byType["Base.PetrolCan"]
-assert(petrol and petrol.count == 2 and petrol.expandable and not petrol.aggregateAllowed, "fluid parent")
-assert(petrol.mixedVariants and petrol.nativePath == nil,
-	"mixed fluid parent must report multiple categories, never invent a representative path")
-local petrolDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, petrol.rowKey, 1, 20)
-assert(petrolDetails.total == 2 and #petrolDetails.items == 2, "fluid physical instances")
-local fluidPaths = {}
-local filledFluidStateKey = nil
-for _, detail in ipairs(petrolDetails.items) do
-	fluidPaths[detail.nativePath] = true
-	if detail.nativePath == "native:vehicles/consumable/fuel" then
-		filledFluidStateKey = detail.dynamicStateKey
-	end
+assert(#petrolParents == 2, "different fluid identities were compacted into one parent")
+local filledPetrol = nil
+local emptyPetrol = nil
+for _, parent in ipairs(petrolParents) do
+	if parent.nativePath == "native:vehicles/consumable/fuel" then filledPetrol = parent end
+	if parent.nativePath == "native:containers/liquid/empty" then emptyPetrol = parent end
 end
-assert(fluidPaths["native:vehicles/consumable/fuel"] and fluidPaths["native:containers/liquid/empty"],
-	"each fluid child keeps its exact category")
-assert(petrol.itemIds == nil, "ordinary snapshot must not expose all itemIds")
+assert(filledPetrol and emptyPetrol and filledPetrol.rowKey ~= emptyPetrol.rowKey,
+	"filled and empty containers must expose distinct exact-group identities")
+assert(filledPetrol.count == 1 and emptyPetrol.count == 1
+	and not filledPetrol.mixedVariants and not emptyPetrol.mixedVariants,
+	"each fluid parent must retain only its canonical identity")
+assert(filledPetrol.selectionMode == "exact_group" and emptyPetrol.selectionMode == "exact_group",
+	"fluid parents must use the same authoritative exact-group selection contract")
+local filledFluidStateKey = nil
+local emptyFluidStateKey = nil
+local filledDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, filledPetrol.rowKey, 1, 20)
+local emptyDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, emptyPetrol.rowKey, 1, 20)
+assert(filledDetails.total == 1 and #filledDetails.items == 1
+	and filledDetails.items[1].nativePath == filledPetrol.nativePath,
+	"filled fluid detail lost its exact category")
+assert(emptyDetails.total == 1 and #emptyDetails.items == 1
+	and emptyDetails.items[1].nativePath == emptyPetrol.nativePath,
+	"empty fluid detail lost its exact category")
+filledFluidStateKey = filledDetails.items[1].dynamicStateKey
+emptyFluidStateKey = emptyDetails.items[1].dynamicStateKey
+assert(filledPetrol.itemIds == nil and emptyPetrol.itemIds == nil,
+	"ordinary snapshots must not expose all fluid itemIds")
 
 local nails = byType["Base.Nails"]
 assert(nails and nails.count == 16 and nails.expandable and nails.aggregateAllowed, "all multi-unit rows expand")
@@ -163,7 +201,7 @@ local counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.Crisps2"
 assert(#counts == 1 and counts[1].count == 3, "tooltip sums cosmetic family")
 counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.VHSTape", nil, 214, nil)
 assert(#counts == 1 and counts[1].count == 2, "tooltip counts the same VHS edition")
-counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, "empty")
+counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, emptyFluidStateKey)
 assert(#counts == 1 and counts[1].count == 1, "tooltip separates empty fluid containers")
 counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, filledFluidStateKey)
 assert(#counts == 1 and counts[1].count == 1, "tooltip counts matching fluid content")

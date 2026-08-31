@@ -4,6 +4,7 @@
 ]]
 
 require "GS_SiK_UI_Core"
+require "ISUI/ISButton"
 
 local SiK_UI = GlobalStorageSiK.SiK_UI
 SiK_UI.Controls = SiK_UI.Controls or {}
@@ -54,6 +55,63 @@ function Controls.sectionTitle(parent, options)
 		tostring(options.text or ""))
 	label._sikUiControl = "sectionTitle"
 	return addToParent(parent, label)
+end
+
+--- Neutral wrapped copy used below block headers. Informative text belongs
+--- here; Controls.feedback is reserved for actionable failures.
+---@param parent ISUIElement|nil
+---@param options table {x,y,w,text,font,color,lineGap}
+---@return ISPanel
+function Controls.copy(parent, options)
+	options = options or {}
+	local font = options.font or UIFont.Small
+	local lineGap = math.max(0, optionNumber(options, "lineGap", 3))
+	local panel = ISPanel:new(
+		optionNumber(options, "x", 0), optionNumber(options, "y", 0),
+		optionNumber(options, "w", 240), fontHeight(font))
+	panel:initialise()
+	panel.drawBackground = false
+	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	panel._sikUiControl = "copy"
+	panel._sikUiCopyText = tostring(options.text or "")
+	panel._sikUiCopyFont = font
+	panel._sikUiCopyLineGap = lineGap
+	panel._sikUiCopyColor = options.color or SiK_UI.PALETTE.textMuted
+
+	function panel:refreshCopyLayout()
+		local width = math.max(1, self.width or 1)
+		local lines = SiK_UI.wrapTextLines
+			and SiK_UI.wrapTextLines(self._sikUiCopyText, width, self._sikUiCopyFont)
+			or { self._sikUiCopyText }
+		if type(lines) ~= "table" or #lines == 0 then lines = { "" } end
+		self._sikUiCopyLines = lines
+		local lineH = fontHeight(self._sikUiCopyFont)
+		self:setHeight(#lines * lineH + math.max(0, #lines - 1) * self._sikUiCopyLineGap)
+		return self.height
+	end
+
+	function panel:setCopyWidth(width)
+		self:setWidth(math.max(1, math.floor(tonumber(width) or 1)))
+		return self:refreshCopyLayout()
+	end
+
+	function panel:setCopyText(value)
+		self._sikUiCopyText = tostring(value or "")
+		return self:refreshCopyLayout()
+	end
+
+	panel.prerender = function(self)
+		ISPanel.prerender(self)
+		local lines = self._sikUiCopyLines or { self._sikUiCopyText }
+		local lineH = fontHeight(self._sikUiCopyFont)
+		local color = self._sikUiCopyColor
+		for i = 1, #lines do
+			self:drawText(lines[i], 0, (i - 1) * (lineH + self._sikUiCopyLineGap),
+				color[1], color[2], color[3], 1, self._sikUiCopyFont)
+		end
+	end
+	panel:refreshCopyLayout()
+	return addToParent(parent, panel)
 end
 
 -- Cabecera canónica de bloque: Info -> Title -> Action. El consumidor aporta
@@ -111,6 +169,127 @@ function Controls.button(parent, options)
 	if options.danger then SiK_UI.applyDangerButton(button) end
 	button._sikUiControl = "button"
 	return addToParent(parent, button)
+end
+
+--- Canonical geometry for a data-driven addon slot.
+function Controls.addonSlotMetrics()
+	return {
+		minWidth = 140,
+		minHeight = 72,
+		iconSize = 32,
+		padding = 8,
+		gap = 8,
+		stateDotSize = 6,
+	}
+end
+
+local function addonSlotStateColor(state, locked)
+	local palette = SiK_UI.PALETTE
+	if locked or state == "disabled" or state == "missing" then
+		return palette.textMuted
+	end
+	if state == "installed" or state == "active" or state == "ok" then
+		return palette.statusOk
+	end
+	if state == "error" or state == "danger" then
+		return palette.statusDanger
+	end
+	if state == "ready" or state == "warning" or state == "notInstalled" then
+		return palette.statusWarn
+	end
+	return palette.textSecondary
+end
+
+--- Data-driven addon card. Product consumers resolve text, texture and state;
+--- Controls owns the 32 px icon, the two independent labels and the hitbox.
+---@param parent ISUIElement
+---@param options table {x,y,w,h,texture,nameLabel,stateLabel,state,target,onClick,tooltip,locked,activeColor}
+---@return ISButton
+function Controls.addonSlot(parent, options)
+	options = options or {}
+	local metrics = Controls.addonSlotMetrics()
+	local locked = options.locked == true
+	local slot = ISButton:new(
+		optionNumber(options, "x", 0), optionNumber(options, "y", 0),
+		optionNumber(options, "w", metrics.minWidth),
+		optionNumber(options, "h", metrics.minHeight), "",
+		options.target or parent, locked and nil or options.onClick)
+	slot:initialise()
+	slot:setTitle("")
+	slot.font = options.font or UIFont.Small
+	slot.drawBackground = false
+	slot.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	slot.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	slot._sikAddonSlot = true
+	slot._sikUiControl = "addonSlot"
+	slot._sikUiLocked = locked
+	slot._sikUiActiveColor = options.activeColor
+	slot.texture = options.texture
+	slot.nameLabel = tostring(options.nameLabel or "")
+	slot.stateLabel = tostring(options.stateLabel or "")
+	slot.state = options.state or "neutral"
+	slot.wrapHint = optionNumber(options, "wrapHint", metrics.minWidth)
+
+	function slot:getTexture()
+		return self.texture
+	end
+
+	function slot:setData(data)
+		data = data or {}
+		if data.texture ~= nil then self.texture = data.texture end
+		if data.nameLabel ~= nil then self.nameLabel = tostring(data.nameLabel) end
+		if data.stateLabel ~= nil then self.stateLabel = tostring(data.stateLabel) end
+		if data.state ~= nil then self.state = data.state end
+		if data.locked ~= nil then self._sikUiLocked = data.locked == true end
+		if data.activeColor ~= nil then self._sikUiActiveColor = data.activeColor end
+		if data.tooltip and self.setTooltip then self:setTooltip(data.tooltip) end
+	end
+
+	if options.tooltip and slot.setTooltip then slot:setTooltip(options.tooltip) end
+
+	slot.prerender = function(self)
+		SiK_UI.drawButtonSurface(self, self.width, self.height, {
+			pressed = self.pressed,
+			hover = self:isMouseOver(),
+			active = self._sikUiActiveColor ~= nil,
+			activeColor = self._sikUiActiveColor,
+			locked = self._sikUiLocked,
+		})
+		self:updateTooltip()
+	end
+
+	slot.render = function(self)
+		local palette = SiK_UI.PALETTE
+		local alpha = self._sikUiLocked and 0.45 or 1
+		local iconY = math.floor((self.height - metrics.iconSize) / 2)
+		local texture = self:getTexture()
+		if texture then
+			self:drawTextureScaledAspect(texture, metrics.padding, iconY,
+				metrics.iconSize, metrics.iconSize, alpha, 1, 1, 1)
+		end
+
+		local textX = metrics.padding + metrics.iconSize + metrics.gap
+		local textW = math.max(0, self.width - textX - metrics.padding)
+		local nameH = fontHeight(self.font)
+		local stateH = fontHeight(UIFont.Small)
+		local pairH = nameH + 2 + stateH
+		local nameY = math.floor((self.height - pairH) / 2)
+		local stateY = nameY + nameH + 2
+		local name = SiK_UI.truncateText(self.nameLabel, textW, self.font)
+		local state = SiK_UI.truncateText(self.stateLabel,
+			math.max(0, textW - metrics.stateDotSize - 6), UIFont.Small)
+		local nameColor = self._sikUiLocked and palette.textMuted or palette.textPrimary
+		local stateColor = addonSlotStateColor(self.state, self._sikUiLocked)
+		self:drawText(name, textX, nameY, nameColor[1], nameColor[2],
+			nameColor[3], alpha, self.font)
+		local dotY = stateY + math.floor((stateH - metrics.stateDotSize) / 2)
+		self:drawRect(textX, dotY, metrics.stateDotSize, metrics.stateDotSize,
+			alpha, stateColor[1], stateColor[2], stateColor[3])
+		self:drawText(state, textX + metrics.stateDotSize + 6, stateY,
+			stateColor[1], stateColor[2], stateColor[3], alpha, UIFont.Small)
+	end
+
+	return addToParent(parent, slot)
 end
 
 function Controls.icon(parent, options)

@@ -636,27 +636,6 @@ local function buildTooltipBlocks(item, rowContext)
 		dynamicStateKey = GlobalStorageSiK.FluidTaxonomy and GlobalStorageSiK.FluidTaxonomy.stateKey
 			and GlobalStorageSiK.FluidTaxonomy.stateKey(item)
 	end
-	local networks, loaded, hasAnyNetwork = getCachedCounts(
-		fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNumForItem(item))
-	if networks and #networks > 0 then
-		for i = 1, #networks do
-			lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
-		end
-	elseif loaded then
-		-- Distinguir "todavia sin ninguna red creada" (mensaje generico) de
-		-- "tienes redes pero este item no esta en ninguna" - a peticion del
-		-- usuario, que reporto que el segundo mensaje confundia a jugadores
-		-- que aun no habian creado su primera red.
-		if hasAnyNetwork then
-			lines[#lines + 1] = T("IGUI_GS_NetworkCountNone")
-		else
-			lines[#lines + 1] = T("IGUI_GS_NoNetworksYet")
-		end
-	end
-	if #lines > 0 then
-		blocks[#blocks + 1] = { lines = lines, color = { 0.9, 0.85, 0.4, 1.0 } }
-	end
-
 	-- Las filas padre usan la misma sonda vanilla con contexto agregado. Las
 	-- filas hija adjuntan, bajo demanda, el snapshot exacto recibido del
 	-- servidor. El peso/estado/fluido ya los dibuja DoTooltip vanilla: no crear
@@ -665,10 +644,34 @@ local function buildTooltipBlocks(item, rowContext)
 	-- Solo VHS: los libros ya describen en DoTooltip vanilla su habilidad y
 	-- rango, por lo que repetirlo en el anexo SiK añade ruido sin informacion.
 	-- La formacion de una cinta si es dato propio de su media concreta.
-	local skillLines = remote and remote.ok == true and getRemoteVHSTrainingLines(remote)
-		or (not remoteIdentity and getVHSTrainingLines(item)) or nil
+	local mediaDetail = remote and remote.ok == true and remote or nil
+	if not mediaDetail and remoteIdentity and type(remoteIdentity.mediaCodes) == "table" then
+		mediaDetail = { mediaIndex = remoteIdentity.mediaIndex,
+			mediaCodes = remoteIdentity.mediaCodes }
+	end
+	local skillLines = mediaDetail and getRemoteVHSTrainingLines(mediaDetail)
+		or getVHSTrainingLines(item) or nil
 	if skillLines and #skillLines > 0 then
 		blocks[#blocks + 1] = { lines = skillLines, color = { 0.55, 0.85, 1, 1.0 } }
+	end
+
+	-- El bloque SiK cierra el tooltip: primero se explica lo que enseña la
+	-- unidad y después en qué redes existe. No se crea ningún bloque vacío.
+	local networks, loaded, hasAnyNetwork = getCachedCounts(
+		fullType, mediaTitle, mediaIndex, dynamicStateKey, playerNumForItem(item))
+	if networks and #networks > 0 then
+		for i = 1, #networks do
+			lines[#lines + 1] = T("IGUI_GS_NetworkCountLine", networks[i].name, tostring(networks[i].count))
+		end
+	elseif loaded then
+		if hasAnyNetwork then
+			lines[#lines + 1] = T("IGUI_GS_NetworkCountNone")
+		else
+			lines[#lines + 1] = T("IGUI_GS_NoNetworksYet")
+		end
+	end
+	if #lines > 0 then
+		blocks[#blocks + 1] = { lines = lines, color = { 0.9, 0.85, 0.4, 1.0 } }
 	end
 
 	-- Pista narrativa del soldador (solo si el crafteo del GS_SolderingIron

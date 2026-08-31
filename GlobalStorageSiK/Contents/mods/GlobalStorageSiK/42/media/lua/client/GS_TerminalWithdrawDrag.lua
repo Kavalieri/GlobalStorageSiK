@@ -401,14 +401,9 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
 	local rows = drag.payloadRows or { drag.rowData }
 	clearDrag(nil)
-	-- La cabecera sigue siendo el grupo completo, esté expandida o no. Cuando
-	-- el servidor exige selección exacta, el resolver recorre TODAS las páginas
-	-- de esa cabecera antes de encolar sus IDs en micro-lotes; nunca usa la
-	-- página visible como payload. Un hijo ya trae su ID y no se difiere.
-	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.deferExactWithdraw
-		and GlobalStorageSiK.TerminalItems.deferExactWithdraw(terminal, rows, key, searchQuery) then
-		return true
-	end
+	-- La cabecera conserva exactamente el mismo payload semantico colapsada,
+	-- expandida o paginada. Las paginas son solo presentacion; el servidor
+	-- reconstruye el grupo fisico a partir de rowKey + revision.
 	local sent
 	if #rows > 1 then
 		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)

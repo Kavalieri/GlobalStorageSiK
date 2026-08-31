@@ -231,25 +231,41 @@ end
 
 GlobalStorageSiK.CatalogManager.onEpochChanged(resetCache)
 
+local function withCanonicalContract(resolved, row, item)
+	resolved = resolved or {}
+	local out = {}
+	for key, value in pairs(resolved) do out[key] = value end
+	local path = GlobalStorageSiK.NativeProduct.decodePath(out.nativePath)
+	local fluid = item and GlobalStorageSiK.FluidTaxonomy
+		and type(GlobalStorageSiK.FluidTaxonomy.inspect) == "function"
+		and GlobalStorageSiK.FluidTaxonomy.inspect(item) or nil
+	out.identityKey = fluid and fluid.identityKey
+		or (row and (row.dynamicSignature or row.routingIdentity)) or out.routingIdentity
+	out.categoryPathKeys = path and { l1 = path.l1, l2 = path.l2, l3 = path.l3 } or nil
+	out.source = fluid and fluid.source or out.categorySource
+	out.descriptor = fluid and fluid.descriptor or nil
+	return out
+end
+
 ---@param fullType string|nil
 ---@param row table|nil
 ---@param item InventoryItem|nil
 ---@return table
 function Resolution.resolve(fullType, row, item, knownInstancePath)
 	if type(fullType) ~= "string" or fullType == "" then
-		return buildBase(fullType, item)
+		return withCanonicalContract(buildBase(fullType, item), row, item)
 	end
 	-- Una fila del indice ya contiene la decision autoritativa del escaneo. Se
 	-- consulta antes que un probe de tooltip: ese probe solo existe para que
 	-- vanilla pinte el objeto y no puede sustituir la ruta final del servidor.
 	local authoritative = fromAuthoritativeRow(fullType, row)
-	if authoritative then return authoritative end
-	if item then return buildBase(fullType, item, knownInstancePath) end
+	if authoritative then return withCanonicalContract(authoritative, row, item) end
+	if item then return withCanonicalContract(buildBase(fullType, item, knownInstancePath), row, item) end
 	local cached = cache[fullType]
-	if cached and cached.nativeStatus ~= "pending" then return cached end
+	if cached and cached.nativeStatus ~= "pending" then return withCanonicalContract(cached, row, nil) end
 	local resolved = buildBase(fullType, nil)
 	if resolved.nativeStatus ~= "pending" then cache[fullType] = resolved end
-	return resolved
+	return withCanonicalContract(resolved, row, nil)
 end
 
 -- Presentacion comun e inmutable para inventario, tooltip y filas SiK. La
@@ -277,7 +293,7 @@ function Resolution.presentation(fullType, row, item, knownInstancePath)
 	local resolved = Resolution.resolve(fullType, row, item, knownInstancePath)
 	local path = resolved and GlobalStorageSiK.NativeProduct.decodePath(resolved.nativePath) or nil
 	local view = path and GlobalStorageSiK.NativeProduct.getView(path) or nil
-	local signature = Resolution.dynamicSignature(item)
+	local signature = resolved and resolved.identityKey or Resolution.dynamicSignature(item)
 	return {
 		resolution = resolved,
 		nativePath = path,
@@ -286,7 +302,9 @@ function Resolution.presentation(fullType, row, item, knownInstancePath)
 			full = view.fullLabel } or { full = Resolution.label(resolved) },
 		color = Resolution.color(resolved),
 		dynamicSignature = signature,
-		source = resolved and resolved.categorySource or nil,
+		source = resolved and resolved.source or nil,
+		descriptor = resolved and resolved.descriptor or nil,
+		categoryPathKeys = resolved and resolved.categoryPathKeys or nil,
 	}
 end
 

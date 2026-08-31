@@ -155,12 +155,36 @@ local shapes = rowsFor({
 })
 assert(rowCount(shapes) == 3, "different container forms collapsed by equal content/amount")
 
+local hydration = fluidItem("Base.Bag_HydrationBackpack", {
+	amount = 1, capacity = 2, containerName = "HydrationPack", fluidId = "Base:Water",
+})
+local bottle = fluidItem("Base.WaterBottle", {
+	amount = 1, capacity = 2, containerName = "BottlePlastic", fluidId = "Base:Water",
+})
+local hydrationIdentity = assert(GlobalStorageSiK.FluidTaxonomy.inspect(hydration))
+local bottleIdentity = assert(GlobalStorageSiK.FluidTaxonomy.inspect(bottle))
+assert(hydrationIdentity.contentSignature == bottleIdentity.contentSignature,
+	"equal fluid content must expose the same canonical content identity")
+assert(hydrationIdentity.identityKey ~= bottleIdentity.identityKey,
+	"container form must remain part of fluid identity even at equal amount/capacity")
+assert(hydrationIdentity.source == "b42" and hydrationIdentity.descriptor
+	and hydrationIdentity.descriptor.canonicalType == "base:water",
+	"canonical B42 descriptor/source contract was not exposed")
+
 local petrol25 = fluidItem("Base.PetrolCan", {
 	amount = 2.5, capacity = 10, fluidId = "Base:Petrol", category = FluidCategory.Fuel,
 })
 local petrol75 = fluidItem("Base.PetrolCan", {
 	amount = 7.5, capacity = 10, fluidId = "Base:Petrol", category = FluidCategory.Fuel,
 })
+local petrolIdentity25 = assert(GlobalStorageSiK.FluidTaxonomy.inspect(petrol25))
+local petrolIdentity75 = assert(GlobalStorageSiK.FluidTaxonomy.inspect(petrol75))
+assert(petrolIdentity25.identityKey == petrolIdentity75.identityKey
+	and petrolIdentity25.contentSignature == petrolIdentity75.contentSignature,
+	"litres/percentage leaked into grouping identity for equal form+content")
+assert(petrolIdentity25.amount == 2.5 and petrolIdentity75.amount == 7.5
+	and petrolIdentity25.fillPercent == 25 and petrolIdentity75.fillPercent == 75,
+	"exact amount/percentage must remain presentation detail, not group identity")
 local petrolFilled = onlyRow(rowsFor({ petrol25, petrol75 }))
 assert(petrolFilled and petrolFilled.count == 2, "petrol 25/75 percent did not group by content")
 assert(petrolFilled.nativePath == "native:vehicles/consumable/fuel", "filled petrol path")
@@ -176,7 +200,7 @@ local petrolAll = rowsFor({ petrol25, petrol75,
 assert(rowCount(petrolAll) == 2, "empty petrol can collapsed with fuel")
 local emptyPetrol = nil
 for _, row in pairs(petrolAll) do
-	if row.dynamicStateKey == "empty" then emptyPetrol = row end
+	if row.nativePath == "native:containers/liquid/empty" then emptyPetrol = row end
 end
 assert(emptyPetrol and emptyPetrol.nativePath == "native:containers/liquid/empty",
 	"empty petrol can retained fuel taxonomy")
@@ -192,7 +216,7 @@ local waterRows = rowsFor({ waterFull, waterPartial, waterEmpty })
 assert(rowCount(waterRows) == 2, "water bottle full/partial/empty grouping")
 local waterFilled = nil
 for _, row in pairs(waterRows) do
-	if row.dynamicStateKey ~= "empty" then waterFilled = row end
+	if row.nativePath ~= "native:containers/liquid/empty" then waterFilled = row end
 end
 assert(waterFilled and waterFilled.count == 2
 	and waterFilled.unitDetails[waterFull.id].dynamicPercent == 100

@@ -163,6 +163,16 @@ local function startNext()
 	current.all = current.openEnded == true
 	current.sequence = 0
 	current.itemIdOffset = 1
+	current.selectionTicket = nil
+	current.selectionSequence = 1
+	current.staleRetryCount = 0
+	current.awaitingFreshSelection = false
+	current.selectionMode = current.rowData.selectionMode
+		or ((current.rowData.itemIds and #current.rowData.itemIds > 0) and "exact_ids" or "aggregate")
+	if current.selectionMode == "exact_group" then
+		current.all = true
+		current.remaining = nil
+	end
 	nextDispatchMs = nowMs()
 	ensureTickInstalled()
 end
@@ -177,14 +187,22 @@ local function dispatchCurrent()
 	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
 	local exactItemIds = {}
 	local visibleIds = current.rowData.itemIds or {}
-	for i = current.itemIdOffset, math.min(#visibleIds, current.itemIdOffset + requested - 1) do
-		exactItemIds[#exactItemIds + 1] = visibleIds[i]
+	if current.selectionMode == "exact_ids" then
+		for i = current.itemIdOffset, math.min(#visibleIds, current.itemIdOffset + requested - 1) do
+			exactItemIds[#exactItemIds + 1] = visibleIds[i]
+		end
 	end
 	local expectedRequestId = current.requestId
 	-- Armar ANTES del envío: en SP/host el bypass local puede entregar y
 	-- resolver actionResult de forma síncrona dentro de sendCommand.
 	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
 	nextDispatchMs = math.huge
+	GlobalStorageSiK.Log.debug("WithdrawClient", "withdraw-intent mode="
+		.. tostring(current.selectionMode)
+		.. " rowKey=" .. tostring(current.rowData.rowKey)
+		.. " revision=" .. tostring(current.rowData.selectionRevision)
+		.. " count=" .. tostring(current.rowData.count)
+		.. " destination=" .. tostring(current.targetKey))
 	local sent = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
 		fullType = current.rowData.fullType,
 		-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando la fila
@@ -198,6 +216,11 @@ local function dispatchCurrent()
 		fullTypes = current.rowData.aggregateAllowed and current.rowData.fullTypes or nil,
 		dynamicSignature = current.rowData.dynamicSignature,
 		itemIds = exactItemIds,
+		selectionMode = current.selectionMode,
+		rowKey = not current.selectionTicket and current.rowData.rowKey or nil,
+		selectionRevision = not current.selectionTicket and current.rowData.selectionRevision or nil,
+		selectionTicket = current.selectionTicket,
+		selectionSequence = current.selectionSequence,
 		amount = requested,
 		targetKey = current.targetKey,
 		searchQuery = current.searchQuery or "",
@@ -242,6 +265,12 @@ function GlobalStorageSiK.WithdrawClient.cancelAll(reason)
 	local cancelledOperation = operation
 	local cancelledCurrent = current
 	local cancelledQueue = queue
+	if cancelledCurrent and cancelledCurrent.selectionTicket then
+		GlobalStorageSiK.NetClient.sendCommand("cancelWithdrawSelection", {
+			networkId = cancelledCurrent.networkId,
+			selectionTicket = cancelledCurrent.selectionTicket,
+		})
+	end
 	if operation then
 		GlobalStorageSiK.Log.warn("WithdrawClient", "operation cancelled moved="
 			.. tostring(operation.totalMoved or 0)
@@ -276,6 +305,54 @@ function GlobalStorageSiK.WithdrawClient.isPending()
 	return current ~= nil or #queue > 0
 end
 
+--- Reanuda una sola vez un gesto exact_group cuando llega el catálogo fresco
+--- solicitado expresamente tras selection_stale. No consulta páginas ni crea
+--- polling: el terminalState autoritativo es el único disparador y el timeout
+--- acotado ya gestionado por onTick cancela la espera si nunca llega.
+---@param state table|nil
+---@return boolean consumed
+function GlobalStorageSiK.WithdrawClient.onTerminalState(state)
+	if not current or current.awaitingFreshSelection ~= true or not state then return false end
+	if state.networkId ~= current.networkId then return false end
+	local freshRevision = tonumber(state.inventoryRevision)
+	local staleRevision = tonumber(current.staleSelectionRevision)
+	if not freshRevision or (staleRevision and freshRevision <= staleRevision) then return false end
+	local freshRow = nil
+	for i = 1, #(state.items or {}) do
+		local candidate = state.items[i]
+		if candidate and candidate.rowKey == current.rowData.rowKey then
+			freshRow = candidate
+			break
+		end
+	end
+	if not freshRow then
+		GlobalStorageSiK.Log.warn("WithdrawClient", "fresh selection missing",
+			"rowKey=" .. tostring(current.rowData.rowKey)
+				.. " revision=" .. tostring(freshRevision))
+		GlobalStorageSiK.WithdrawClient.cancelAll("selection_not_found")
+		return true
+	end
+	local previousExpected = current.expectedCount or 0
+	current.rowData = freshRow
+	current.selectionTicket = nil
+	current.selectionSequence = 1
+	current.remaining = nil
+	current.expectedCount = math.max(0, math.floor(tonumber(freshRow.count) or 0))
+	if operation and current.expectedCount ~= previousExpected then
+		operation.totalExpected = math.max(0,
+			(operation.totalExpected or 0) - previousExpected + current.expectedCount)
+	end
+	current.awaitingFreshSelection = false
+	current.staleSelectionRevision = nil
+	responseDeadlineMs = 0
+	nextDispatchMs = nowMs()
+	ensureTickInstalled()
+	GlobalStorageSiK.Log.debug("WithdrawClient", "fresh selection received; retrying once",
+		"rowKey=" .. tostring(freshRow.rowKey)
+			.. " revision=" .. tostring(freshRevision))
+	return true
+end
+
 ---@param rowData table
 ---@param amount number|nil
 ---@param targetKey string|nil
@@ -287,6 +364,9 @@ local function enqueueWithdraw(rowData, amount, targetKey, searchQuery, opts)
 	if #queue + (current and 1 or 0) >= MAX_QUEUED_REQUESTS then return false end
 	serial = serial + 1
 	local requested = math.floor(tonumber(amount) or 1)
+	if rowData.selectionMode == "exact_group" then
+		requested = math.max(0, math.floor(tonumber(rowData.count) or 0))
+	end
 	local openEnded = false
 	if requested <= 0 then
 		-- "Todo" trabaja contra la captura visible que inició el gesto. Conocer el
@@ -316,6 +396,7 @@ local function enqueueWithdraw(rowData, amount, targetKey, searchQuery, opts)
 		networkId = op.networkId or networkId,
 		returnItemIds = opts and opts.returnItemIds == true,
 		onComplete = opts and opts.onComplete or nil,
+		expectedCount = requested,
 	})
 	return true
 end
@@ -443,8 +524,55 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	transfer.deferInventoryPull = true
 	local moved = math.max(0, math.floor(tonumber(transfer.moved) or 0))
 	local reason = transfer.reason and tostring(transfer.reason) or nil
+	local selectionMode = transfer.selectionMode or current.selectionMode
+	if selectionMode == "exact_group" then
+		current.selectionTicket = transfer.selectionTicket
+		current.selectionSequence = math.max(1,
+			math.floor(tonumber(transfer.selectionSequence) or current.selectionSequence or 1))
+		current.remaining = math.max(0, math.floor(tonumber(transfer.ticketRemaining) or 0))
+		local selectionCount = math.max(0, math.floor(tonumber(transfer.selectionCount) or 0))
+		if selectionCount > 0 and selectionCount ~= (current.expectedCount or 0) then
+			if operation then
+				operation.totalExpected = math.max(0,
+					(operation.totalExpected or 0) - (current.expectedCount or 0) + selectionCount)
+			end
+			current.expectedCount = selectionCount
+		end
+	end
+	if reason == "selection_stale" and selectionMode == "exact_group" then
+		if (current.staleRetryCount or 0) >= 1 then
+			GlobalStorageSiK.Log.warn("WithdrawClient", "selection stale after explicit retry",
+				"rowKey=" .. tostring(current.rowData.rowKey))
+			GlobalStorageSiK.WithdrawClient.cancelAll("selection_stale")
+			return false
+		end
+		current.staleRetryCount = 1
+		current.awaitingFreshSelection = true
+		current.staleSelectionRevision = current.rowData.selectionRevision
+		current.selectionTicket = nil
+		current.selectionSequence = 1
+		responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
+		nextDispatchMs = math.huge
+		local refreshSent = GlobalStorageSiK.NetClient.sendCommand("requestItemIndex", {
+			networkId = current.networkId, searchQuery = current.searchQuery or "",
+		})
+		if not refreshSent then
+			GlobalStorageSiK.WithdrawClient.cancelAll("selection_refresh_failed")
+			return false
+		end
+		-- En SP el bypass puede entregar terminalState de forma síncrona dentro
+		-- de sendCommand; si ese snapshot confirmó que la fila ya no existe,
+		-- onTerminalState habrá cancelado y limpiado current antes de volver aquí.
+		if not current then return false end
+		GlobalStorageSiK.Log.debug("WithdrawClient", "selection stale; explicit refresh requested")
+		return true
+	end
 	current.totalMoved = (current.totalMoved or 0) + moved
-	current.itemIdOffset = (current.itemIdOffset or 1) + moved
+	if selectionMode == "exact_ids" then
+		current.itemIdOffset = (current.itemIdOffset or 1) + (current.batchRequested or 0)
+	else
+		current.itemIdOffset = (current.itemIdOffset or 1) + moved
+	end
 	if operation then
 		operation.totalMoved = (operation.totalMoved or 0) + moved
 		operation.inspected = (operation.inspected or 0) + (current.batchRequested or 0)
@@ -456,7 +584,9 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
 		end
 	end
-	if not current.all then
+	if selectionMode == "exact_ids" then
+		current.remaining = math.max(0, (current.remaining or 0) - (current.batchRequested or 0))
+	elseif selectionMode ~= "exact_group" and not current.all then
 		current.remaining = math.max(0, (current.remaining or 0) - moved)
 	end
 	-- not_found (tambien parcial) significa que la captura visible se agoto o
@@ -464,6 +594,8 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	-- fallos son terminales para la operacion completa; no martillear todas las
 	-- filas si se perdio energia, espacio, acceso o una mutacion fallo.
 	local exhausted = reason == "not_found" or reason == "partial:not_found"
+	local exactHasMore = (selectionMode == "exact_group" or selectionMode == "exact_ids")
+		and (current.remaining or 0) > 0
 	local hardFailure = (args.ok ~= true and not exhausted)
 		or (reason and string.sub(reason, 1, 8) == "partial:" and not exhausted)
 	if hardFailure then
@@ -476,9 +608,9 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		GlobalStorageSiK.WithdrawClient.cancelAll(cleanReason)
 		return false
 	end
-	local shouldContinue = args.ok == true and moved > 0 and not exhausted
-		and ((current.all)
-			or (not current.all and (current.remaining or 0) > 0))
+	local shouldContinue = exactHasMore and (args.ok == true or exhausted)
+		or (args.ok == true and moved > 0 and not exhausted
+			and ((current.all) or (not current.all and (current.remaining or 0) > 0)))
 	if shouldContinue then
 		showProgress(false)
 		nextDispatchMs = nowMs() + (operation and operation.pacing.batchDelayMs or 400)

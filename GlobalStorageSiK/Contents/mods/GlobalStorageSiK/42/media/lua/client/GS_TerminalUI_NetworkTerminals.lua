@@ -25,7 +25,6 @@ local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
 local ROW_H = TABLE_METRICS.rowHeight
 local HEADER_H = TABLE_METRICS.headerHeight
 local ROW_GAP = 6
-local POOL = 6
 -- Nombre es la PRIMERA columna (a peticion del usuario), luego
 -- coordenadas/rol/estado. El descriptor flexible permite que el mismo
 -- divisor comun de SiK_UI.Table ajuste cabecera y filas sin una geometria
@@ -128,13 +127,13 @@ end
 ---@param terminal GS_TerminalUI
 ---@param ui table
 ---@return ISPanel
-local function createTerminalRow(host, terminal, ui)
-	local row = ISPanel:new(0, 0, host.width, ROW_H)
-	row:initialise()
-	row.drawBackground = false
-	row.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	row.prerender = function(self)
+local function newTerminalTableRow(host, terminal, ui)
+	local itemRow = ISPanel:new(0, 0, host.width, ROW_H)
+	itemRow:initialise()
+	itemRow.drawBackground = false
+	itemRow.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	itemRow.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	itemRow.prerender = function(self)
 		ISPanel.prerender(self)
 		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
 		local data = self.terminalData
@@ -159,7 +158,7 @@ local function createTerminalRow(host, terminal, ui)
 	-- ir directo a un dialogo de confirmacion de baja sin mas opciones. Las
 	-- entradas ya rotas/ausentes se purgan solas (nada que configurar en una
 	-- entrada que ya no existe de verdad).
-	row.onMouseUp = function(self, x, y)
+	itemRow.onMouseUp = function(self, x, y)
 		local data = self.terminalData
 		if not data or not terminal then
 			return false
@@ -171,7 +170,39 @@ local function createTerminalRow(host, terminal, ui)
 		end
 		return true
 	end
-	return row
+	return itemRow
+end
+
+---@param row ISPanel
+---@param data table|nil
+---@param dataIndex number|nil
+local function bindTerminalRow(row, data, dataIndex)
+	row.terminalData = data
+	row.rowIndex = dataIndex
+end
+
+---@param ui table
+---@param tableW number
+local function layoutTerminalTable(ui, tableW)
+	local tableList = ui and ui.termTable
+	if not tableList then return end
+	local rows = ui.terminalRows or {}
+	local bodyH = math.max(ROW_H, #rows * ROW_H)
+	GlobalStorageSiK.TerminalScroll.resize(tableList, tableW, bodyH + 16)
+	tableList:setConfig(ROW_H, 0)
+	tableList:setDataSource(rows, true)
+	tableList:setVisible(#rows > 0)
+
+	local rect = GlobalStorageSiK.TerminalScroll.contentRect(tableList)
+	if ui.termHeader then
+		ui.termHeader:setX((tableList.x or 0) + rect.x)
+		ui.termHeader:setWidth(rect.w)
+	end
+	if ui.termEmptyLbl then
+		ui.termEmptyLbl:setVisible(#rows == 0)
+	end
+	ui.termBlockEndY = (ui.termTableY or 0) + HEADER_H + 2
+		+ (#rows > 0 and tableList:getHeight() or (ROW_H + 16)) + 8
 end
 
 --- Construye bloque de gestión de terminales.
@@ -191,37 +222,38 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	-- componente SiK_UI.Table, sin una segunda envoltura visual local.
 	ui.termBlockCard = nil
 
-	local title = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
-		x = pad, y = y + pad, text = T("IGUI_GS_NetBlockTerminals"),
+	local header = GlobalStorageSiK.SiK_UI.Controls.blockHeader(nil, {
+		x = pad, y = y + pad, w = innerW - pad * 2,
+		text = T("IGUI_GS_NetBlockTerminals"),
+		tooltip = T("IGUI_GS_NetBlockTerminals"), target = scroll,
 	})
-	ui.termBlockTitle = title
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
-	y = y + pad + FONT_HGT_SMALL + 8
+	ui.termBlockHeader = header
+	ui.termBlockTitle = header.title
+	if header.info then GlobalStorageSiK.TerminalScroll.addChild(scroll, header.info) end
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, header.title)
+	y = y + pad + header.height
 
-	ui.termTableHost = ISPanel:new(pad, y, innerW - pad * 2, HEADER_H + ROW_H + 10)
-	ui.termTableHost:initialise()
-	ui.termTableHost.drawBackground = false
-	ui.termTableHost._gsNetStatic = true
-	ui.termTableHost.clipChildren = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termTableHost)
-
-	ui.termHeader = ISPanel:new(0, 0, ui.termTableHost.width, HEADER_H)
-	ui.termHeader:initialise()
-	ui.termHeader.prerender = function(self)
+	ui.termTableY = y
+	local tableHeader = ISPanel:new(pad, y, innerW - pad * 2, HEADER_H)
+	tableHeader:initialise()
+	tableHeader.prerender = function(self)
 		ISPanel.prerender(self)
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, TERMINAL_TABLE_COLUMNS, nil, true,
 			2, UIFont.Small, TERMINAL_TABLE_OPTIONS)
 	end
 	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
-		ui.termHeader, TERMINAL_TABLE_COLUMNS, TERMINAL_TABLE_OPTIONS)
-	ui.termTableHost:addChild(ui.termHeader)
+		tableHeader, TERMINAL_TABLE_COLUMNS, TERMINAL_TABLE_OPTIONS)
+	ui.termHeader = tableHeader
+	GlobalStorageSiK.TerminalScroll.addChild(scroll, tableHeader)
 
-	ui.termRowPool = {}
-	for i = 1, POOL do
-		local row = createTerminalRow(ui.termTableHost, terminal, ui)
-		row:setVisible(false)
-		ui.termTableHost:addChild(row)
-		ui.termRowPool[i] = row
+	local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
+	ui.termTable = GlobalStorageSiK.SiK_UI.Table.createVirtual(
+		host, pad, y + HEADER_H + 2, innerW - pad * 2, ROW_H + 16,
+		ROW_H, 0, TERMINAL_TABLE_COLUMNS,
+		function() return newTerminalTableRow(host, terminal, ui) end,
+		bindTerminalRow, TERMINAL_TABLE_OPTIONS)
+	ui.termTable.onMouseWheel = function(_, del)
+		return scroll:onMouseWheel(del)
 	end
 
 	local _tpal = GlobalStorageSiK.SiK_UI.PALETTE
@@ -230,8 +262,7 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	ui.termEmptyLbl:setVisible(false)
 	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termEmptyLbl)
 
-	ui.termTableY = y
-	y = y + ui.termTableHost:getHeight() + pad
+	y = y + HEADER_H + 2 + ui.termTable:getHeight() + pad
 	ui.termBlockEndY = y
 	ui.lastTermFp = ""
 	ui.terminalRef = terminal
@@ -241,50 +272,9 @@ end
 --- Posiciona filas de terminales.
 ---@param ui table
 function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
-	local rows = ui and ui.terminalRows
-	local host = ui and ui.termTableHost
-	if not host or not rows or not ui.termRowPool then
-		return
-	end
-	local tableW = host.width or 200
-	local needed = #rows
-	local term = ui.terminalRef
-	while #ui.termRowPool < needed do
-		local row = createTerminalRow(host, term, ui)
-		row:setVisible(false)
-		host:addChild(row)
-		ui.termRowPool[#ui.termRowPool + 1] = row
-	end
-	for i = 1, #ui.termRowPool do
-		local row = ui.termRowPool[i]
-		if i <= needed then
-			row.terminalData = rows[i]
-			row.rowIndex = i
-			row:setX(0)
-			row:setY(HEADER_H + 2 + (i - 1) * ROW_H)
-			row:setWidth(tableW)
-			row:setHeight(ROW_H)
-			row:setVisible(true)
-		else
-			row.terminalData = nil
-			row:setVisible(false)
-		end
-	end
-	local bodyH = math.max(ROW_H, needed * ROW_H)
-	host:setHeight(HEADER_H + 2 + bodyH + 8)
-	host:setVisible(needed > 0)
-	if ui.termEmptyLbl then
-		ui.termEmptyLbl:setVisible(needed == 0)
-		if ui.termTableY then
-			ui.termEmptyLbl:setY(ui.termTableY + HEADER_H + 4)
-		end
-	end
-	if ui.termTableY then
-		ui.termBlockEndY = ui.termTableY + host:getHeight() + 8
-		if ui.termBlockCard and ui.termBlockY then
-			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
-		end
-	end
+	local tableList = ui and ui.termTable
+	if not tableList then return end
+	layoutTerminalTable(ui, tableList:getWidth())
 end
 
 ---@param ui table
@@ -318,7 +308,7 @@ function GlobalStorageSiK.TerminalNetworkTerminals.sync(ui, state)
 	end
 	ui.lastTermFp = fp
 	ui.terminalRows = rows
-	if not ui.termTableHost then
+	if not ui.termTable then
 		return
 	end
 	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
@@ -328,7 +318,7 @@ end
 ---@param ui table
 ---@param innerW number
 function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
-	if not ui or not ui.termTableHost then
+	if not ui or not ui.termTable then
 		return
 	end
 	local pad = 8
@@ -344,11 +334,17 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
 		if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockCard, newBlockY)
 		end
-		if ui.termBlockTitle and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockTitle) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockTitle, newBlockY + pad)
+		if ui.termBlockHeader then
+			if ui.termBlockHeader.info then
+				GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockHeader.info, newBlockY + pad)
+			end
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockHeader.title, newBlockY + pad)
 		end
-		if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termTableHost) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termTableHost, ui.termTableY)
+		if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termHeader) then
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termHeader, ui.termTableY)
+		end
+		if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termTable) then
+			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termTable, ui.termTableY + HEADER_H + 2)
 		end
 		if ui.termEmptyLbl and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termEmptyLbl) then
 			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termEmptyLbl, ui.termTableY + HEADER_H + 4)
@@ -356,14 +352,17 @@ function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
 	end
 
 	local tableW = innerW - pad * 2
-	ui.termTableHost:setWidth(tableW)
-	if ui.termHeader then
-		ui.termHeader:setWidth(tableW)
+	if ui.termBlockHeader then
+		if ui.termBlockHeader.info then ui.termBlockHeader.info:setX(pad) end
+		local titleX = pad
+		if ui.termBlockHeader.info then
+			titleX = pad + ui.termBlockHeader.info:getWidth() + ROW_GAP
+		end
+		ui.termBlockHeader.title:setX(titleX)
 	end
-	if ui.termBlockTitle then
-		ui.termBlockTitle:setX(pad)
-	end
-	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
+	ui.termTable:setX(pad)
+	ui.termTable:setY((ui.termTableY or 0) + HEADER_H + 2)
+	layoutTerminalTable(ui, tableW)
 	if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
 		ui.termBlockCard:setX(0)
 		ui.termBlockCard:setWidth(innerW)

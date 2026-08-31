@@ -34,13 +34,23 @@ local _refreshTickCounter = 0
 ---@param titleKey string
 ---@param innerW number
 ---@return number
-local function addSectionTitle(scroll, x, y, titleKey, innerW)
-	local title = T(titleKey)
-	local lbl = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
-		x = x, y = y, text = title,
-	})
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-	return y + GlobalStorageSiK.SiK_UI.Controls.metrics("standard").sectionHeight
+local function addSectionTitle(scroll, x, y, titleKey, tooltipKey, innerW)
+        local title = T(titleKey)
+        local header = GlobalStorageSiK.SiK_UI.Controls.blockHeader(nil, {
+                x = x, y = y, w = innerW - x * 2, text = title,
+                tooltip = tooltipKey and T(tooltipKey) or nil,
+        })
+        if header.info then GlobalStorageSiK.TerminalScroll.addChild(scroll, header.info) end
+        if header.title then GlobalStorageSiK.TerminalScroll.addChild(scroll, header.title) end
+        return y + header.height
+end
+
+local function addNeutralCopy(scroll, x, y, width, text)
+        local copy = GlobalStorageSiK.SiK_UI.Controls.copy(nil, {
+                x = x, y = y, w = width, text = text,
+        })
+        GlobalStorageSiK.TerminalScroll.addChild(scroll, copy)
+        return y + copy.height + BLOCK_GAP
 end
 
 local function addFeedback(scroll, x, y, width, text, kind)
@@ -212,13 +222,14 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 	-- ubicacion provisional, se movera de nuevo cuando se rediseñe a fondo
 	-- esa pestaña, pero Addons deja de ser su sitio.
 
-        y = addSectionTitle(scroll, pad, y, "IGUI_GS_AddonsSectionTitle", innerW)
-	y = addFeedback(scroll, pad, y, innerW - pad * 2,
-		T("IGUI_GS_AddonsIntro"), "info")
+        y = addSectionTitle(scroll, pad, y, "IGUI_GS_AddonsSectionTitle",
+                "IGUI_GS_AddonsIntro", innerW)
+        y = addNeutralCopy(scroll, pad, y, innerW - pad * 2,
+                T("IGUI_GS_AddonsIntro"))
 
-	if not anchor or not anchor.x then
-		y = addFeedback(scroll, pad, y, innerW - pad * 2,
-			T("IGUI_GS_AddonsNeedTerminal"), "warning")
+        if not anchor or not anchor.x then
+                y = addFeedback(scroll, pad, y, innerW - pad * 2,
+                        T("IGUI_GS_AddonsNeedTerminal"), "error")
 		GlobalStorageSiK.TerminalScroll.finish(scroll, y + pad)
 		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
 		GlobalStorageSiK.TerminalScroll.removeLeftGhostScrollBars(scroll)
@@ -226,9 +237,9 @@ function GlobalStorageSiK.TerminalAddons.refresh(panel, terminal)
 	end
 
         local defs = GlobalStorageSiK.AddonRegistry.listSorted()
-	if #defs == 0 then
-		y = addFeedback(scroll, pad, y, innerW - pad * 2,
-			T("IGUI_GS_AddonsEmpty"), "info")
+        if #defs == 0 then
+                y = addNeutralCopy(scroll, pad, y, innerW - pad * 2,
+                        T("IGUI_GS_AddonsEmpty"))
 	else
 		-- Antes aqui se apilaban, siempre visibles, la descripcion + receta +
 		-- boton instalar/desinstalar de los 4 addons a la vez (reportado:

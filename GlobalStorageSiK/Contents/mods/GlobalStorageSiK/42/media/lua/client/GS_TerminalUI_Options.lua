@@ -67,7 +67,7 @@ local function isTabUiHealthy(scroll, ui, key)
 		-- comentario historico en GS_TerminalUI_Network.lua) - live(nil) daba
 		-- SIEMPRE false, asi que esta sub-pestaña se reconstruia entera en
 		-- CADA sincronizacion en vez de solo cuando de verdad hacia falta.
-		return live(ui.termTableHost)
+		return live(ui.termTable)
 	end
 	return false
 end

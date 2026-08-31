@@ -32,6 +32,7 @@ require "GS_ZoneRefresh"
 require "GS_Network"
 
 require "GS_Index"
+require "GS_WithdrawSelectionTickets"
 require "GS_RuleSanitizer"
 require "GS_RuleCoverage"
 
@@ -2911,6 +2912,186 @@ local function handleGetItemDetails(player, args, networkId)
 	gsSendServerCommand(player, "itemDetails", detailPage)
 end
 
+local function sendWithdrawFailure(player, networkId, withdrawId, fullType, requested,
+		reason, ticketId, ticketRemaining, selectionCount)
+	gsSendServerCommand(player, "actionResult", {
+		ok = false,
+		message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "?")),
+		withdrawId = withdrawId,
+		transferOp = "withdrawItem",
+		transfer = {
+			op = "withdraw", networkId = networkId, fullType = fullType,
+			requested = requested or 0, moved = 0, reason = reason,
+			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			selectionTicket = ticketId, ticketRemaining = ticketRemaining,
+			selectionCount = selectionCount,
+		},
+	})
+end
+
+local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
+	local withdrawId = type(args.withdrawId) == "string"
+		and string.sub(args.withdrawId, 1, 96) or nil
+	local withdrawMeta = { withdrawId = withdrawId, transferOp = "withdrawItem" }
+	if not requireTerminalAccess(player, networkId, withdrawMeta) then return end
+	runLockedTransfer(player, networkId, "withdrawItem", function()
+		local targetKey = type(args.targetKey) == "string"
+			and string.sub(args.targetKey, 1, 240) or ""
+		local dest = nil
+		if targetKey ~= "" then
+			local targetReason = nil
+			dest, targetReason = GlobalStorageSiK.DepositSources.resolveExternalTarget(player, targetKey)
+			if not dest then
+				sendWithdrawFailure(player, networkId, withdrawId, nil, 0,
+					targetReason or "target_unavailable")
+				return
+			end
+		end
+
+		local selectionMode = type(args.selectionMode) == "string"
+			and string.sub(args.selectionMode, 1, 24) or nil
+		local pacingId = type(args.pacingId) == "string"
+			and string.sub(args.pacingId, 1, 96) or tostring(withdrawId or "")
+		local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw", pacingId)
+		local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
+			{ operationType = "withdraw" })
+		pacing.batchUnits = math.min(10, math.max(1, math.floor(tonumber(pacing.batchUnits) or 10)))
+		local fullType = type(args.fullType) == "string"
+			and string.sub(args.fullType, 1, 160) or nil
+		local mediaTitle = type(args.mediaTitle) == "string"
+			and string.sub(args.mediaTitle, 1, 200) or nil
+		local mediaIndex = tonumber(args.mediaIndex)
+		if mediaIndex ~= nil then
+			mediaIndex = math.floor(mediaIndex)
+			if mediaIndex < 0 or mediaIndex > 32767 then mediaIndex = nil end
+		end
+		local dynamicSignature = type(args.dynamicSignature) == "string"
+			and string.sub(args.dynamicSignature, 1, 200) or nil
+		local familyFullTypes = nil
+		local requestedItemIds = nil
+		local ticketId = type(args.selectionTicket) == "string"
+			and string.sub(args.selectionTicket, 1, 96) or nil
+		local selectionCount, ticketRemaining = nil, nil
+		local ticketBatch = nil
+
+		if selectionMode == "exact_group" then
+			local ticket, reason = nil, nil
+			local startedTicket = false
+			if not ticketId then
+				local rowKey = type(args.rowKey) == "string" and string.sub(args.rowKey, 1, 500) or nil
+				ticket, reason = GlobalStorageSiK.WithdrawSelectionTickets.start(
+					player, networkId, targetKey, pacingId, rowKey,
+					args.selectionRevision, pacing)
+				if ticket then
+					ticketId = ticket.id
+					startedTicket = true
+				end
+			else
+				ticket = true
+			end
+			if not ticket then
+				GlobalStorageSiK.Log.debug("Withdraw", "withdraw-validate mode=exact_group match=false reason="
+					.. tostring(reason) .. " moved=0")
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, 0, reason)
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+			ticketBatch, reason = GlobalStorageSiK.WithdrawSelectionTickets.take(
+				player, ticketId, networkId, targetKey, pacingId,
+				args.selectionSequence or 1, pacing.batchUnits)
+			if not ticketBatch then
+				if startedTicket then
+					GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, ticketId)
+				end
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, 0, reason, ticketId)
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+			pacing = ticketBatch.ticket.pacing or pacing
+			fullType = ticketBatch.fullType
+			requestedItemIds = ticketBatch.itemIds
+			selectionCount = ticketBatch.selectionCount
+			ticketRemaining = ticketBatch.remainingBefore
+		elseif selectionMode == "exact_ids" then
+			local seenIds = {}
+			requestedItemIds = {}
+			for i = 1, math.min(type(args.itemIds) == "table" and #args.itemIds or 0,
+				pacing.batchUnits) do
+				local itemId = tonumber(args.itemIds[i])
+				if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seenIds[itemId] then
+					seenIds[itemId] = true
+					requestedItemIds[#requestedItemIds + 1] = itemId
+				end
+			end
+			if #requestedItemIds == 0 then
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, 0, "exact_selection_required")
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+		else
+			familyFullTypes = GlobalStorageSiK.Index.sanitizeFungibleFamily(fullType, args.fullTypes)
+			if selectionMode ~= "aggregate" and type(args.itemIds) == "table" and #args.itemIds > 0 then
+				selectionMode = "exact_ids"
+				requestedItemIds = {}
+				for i = 1, math.min(#args.itemIds, pacing.batchUnits) do
+					local itemId = tonumber(args.itemIds[i])
+					if itemId and itemId >= 0 and itemId == math.floor(itemId) then
+						requestedItemIds[#requestedItemIds + 1] = itemId
+					end
+				end
+			elseif GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType) then
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, 0,
+					"exact_selection_required")
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+			selectionMode = selectionMode or "aggregate"
+		end
+
+		local requested = ticketBatch and ticketBatch.requested
+			or math.floor(tonumber(args.amount) or 1)
+		if requested <= 0 then requested = pacing.batchUnits end
+		requested = math.min(requested, pacing.batchUnits)
+		if requestedItemIds then requested = math.min(requested, #requestedItemIds) end
+		local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
+			return GlobalStorageSiK.Transfer.withdrawType(
+				player, fullType, networkId, requested, dest, mediaTitle,
+				dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes,
+				pacing.batchUnits)
+		end)
+		local ticketComplete = false
+		if ticketBatch then
+			ticketRemaining, ticketComplete = GlobalStorageSiK.WithdrawSelectionTickets.commit(
+				ticketId, ticketBatch.requested)
+		end
+		if ticketComplete or (not ticketBatch and (args.pacingFinal == true or not ok or (moved or 0) < requested)) then
+			GlobalStorageSiK.OperationPacing.release(pacingKey)
+		end
+		GlobalStorageSiK.Log.debug("Withdraw", "withdraw-validate mode=" .. tostring(selectionMode)
+			.. " match=" .. tostring((moved or 0) > 0)
+			.. " reason=" .. tostring(reason) .. " moved=" .. tostring(moved or 0))
+		if (moved or 0) > 0 then afterTransferSync(player, networkId, searchQuery) end
+		local msg = ok
+			and GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(moved or 0))
+			or GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "?"))
+		gsSendServerCommand(player, "actionResult", {
+			ok = ok, message = msg, withdrawId = withdrawId, transferOp = "withdrawItem",
+			transfer = {
+				op = "withdraw", networkId = networkId, fullType = fullType,
+				requested = requested, moved = moved or 0,
+				inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+				reason = reason, selectionMode = selectionMode,
+				selectionTicket = ticketComplete and nil or ticketId,
+				selectionSequence = ticketBatch and ticketBatch.ticket.sequence or nil,
+				ticketRemaining = ticketRemaining, selectionCount = selectionCount,
+				itemIds = args.returnItemIds == true and requested == 1 and movedItemIds or nil,
+				sourceNodeId = args.returnItemIds == true and requested == 1
+					and sourceNodeIds and sourceNodeIds[1] or nil,
+			},
+		})
+	end, withdrawMeta)
+end
+
 local function onClientCommand(module, command, player, args)
 
 	if module ~= GlobalStorageSiK.MOD_ID or not player then
@@ -2942,6 +3123,10 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "closeTerminal" then
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
+		GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player)
+
+	elseif command == "cancelWithdrawSelection" then
+		GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, args.selectionTicket)
 
 	elseif command == "identityHello" then
 		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
@@ -3819,138 +4004,7 @@ local function onClientCommand(module, command, player, args)
 		end, depositMeta)
 
 	elseif command == "withdrawItem" then
-		local withdrawId = type(args.withdrawId) == "string"
-			and string.sub(args.withdrawId, 1, 96) or nil
-		local withdrawMeta = {
-			withdrawId = withdrawId,
-			transferOp = "withdrawItem",
-		}
-		if not requireTerminalAccess(player, networkId, withdrawMeta) then
-			return
-		end
-		runLockedTransfer(player, networkId, "withdrawItem", function()
-			local dest = nil
-			if args.targetKey and args.targetKey ~= "" then
-				local targetReason = nil
-				dest, targetReason = GlobalStorageSiK.DepositSources.resolveExternalTarget(player, args.targetKey)
-				if not dest then
-					local targetMessageKey = targetReason == "network_node"
-						and "IGUI_GS_WithdrawTargetNetworkNode" or "IGUI_GS_WithdrawTargetUnavailable"
-					gsSendServerCommand(player, "actionResult", {
-						ok = false,
-						message = GlobalStorageSiK.I18n.remote(targetMessageKey),
-						transfer = { op = "withdraw", networkId = networkId, moved = 0,
-							reason = targetReason or "target_unavailable" },
-					})
-					return
-				end
-			end
-
-			local fullType = type(args.fullType) == "string"
-				and string.sub(args.fullType, 1, 160) or nil
-			-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando viene
-			-- informado, esta fila representaba SOLO las cintas VHS/radio con
-			-- este contenido exacto (ver GS_ItemSnapshot.lua) - sin esto el
-			-- servidor cogeria cualquier cinta del mismo fullType generico,
-			-- ignorando cual enseña de verdad. nil para cualquier otro item.
-			local mediaTitle = type(args.mediaTitle) == "string"
-				and string.sub(args.mediaTitle, 1, 200) or nil
-			local mediaIndex = tonumber(args.mediaIndex)
-			if mediaIndex ~= nil then
-				mediaIndex = math.floor(mediaIndex)
-				if mediaIndex < 0 or mediaIndex > 32767 then mediaIndex = nil end
-			end
-			local dynamicSignature = type(args.dynamicSignature) == "string"
-				and string.sub(args.dynamicSignature, 1, 200) or nil
-			local familyFullTypes = GlobalStorageSiK.Index.sanitizeFungibleFamily(
-				fullType, args.fullTypes)
-			local requested = math.floor(tonumber(args.amount) or 1)
-			local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw",
-				type(args.pacingId) == "string" and args.pacingId or args.withdrawId)
-			local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
-				{ operationType = "withdraw" })
-			if requested <= 0 then requested = pacing.batchUnits end
-			requested = math.min(requested, pacing.batchUnits)
-			local requestedItemIds = nil
-			if type(args.itemIds) == "table" then
-				local sanitizedItemIds = {}
-				local seenIds = {}
-				for i = 1, math.min(#args.itemIds, requested) do
-					local itemId = tonumber(args.itemIds[i])
-					if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seenIds[itemId] then
-						seenIds[itemId] = true
-						sanitizedItemIds[#sanitizedItemIds + 1] = itemId
-					end
-				end
-				if #sanitizedItemIds > 0 then requestedItemIds = sanitizedItemIds end
-			end
-			if GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType)
-				and not requestedItemIds and mediaIndex == nil then
-				gsSendServerCommand(player, "actionResult", {
-					ok = false,
-					message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawExactSelectionRequired"),
-					withdrawId = withdrawId,
-					transfer = { op = "withdraw", networkId = networkId, fullType = fullType,
-						requested = requested, moved = 0, reason = "exact_selection_required" },
-				})
-				return
-			end
-			-- El conteo completo previo duplicaba el escaneo de toda la red. Cada
-			-- petición ya es un micro-lote acotado; movemos y replicamos ese lote
-			-- antes de confirmar al cliente, que decide si queda otro.
-			local ok, reason, moved, movedItemIds, sourceNodeIds = GlobalStorageSiK.InventorySync.withBatch(function()
-				return GlobalStorageSiK.Transfer.withdrawType(
-					player, fullType, networkId, requested, dest, mediaTitle,
-					dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes,
-					pacing.batchUnits
-				)
-			end)
-			if args.pacingFinal == true or not ok or (moved or 0) < requested then
-				GlobalStorageSiK.OperationPacing.release(pacingKey)
-			end
-			GlobalStorageSiK.Log.debug("Withdraw", "operation batch",
-				"requested=" .. tostring(requested) .. " moved=" .. tostring(moved or 0)
-					.. " reason=" .. tostring(reason) .. " "
-					.. GlobalStorageSiK.OperationPacing.describe(pacing))
-
-			-- Texto vía I18n (nunca literales con acentos incrustados en el
-			-- .lua: se han visto mostrar "?" en vez de la tilde en cliente).
-			local msg
-			if ok then
-				if moved and moved > 0 and requested > 0 and moved < requested then
-					msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnPartial", tostring(moved), tostring(requested))
-				else
-					msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(moved or 0))
-				end
-			else
-				msg = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "?"))
-			end
-
-			if (moved or 0) > 0 then
-				afterTransferSync(player, networkId, searchQuery)
-			end
-			gsSendServerCommand(player, "actionResult", {
-				ok = ok,
-				message = msg,
-				withdrawId = withdrawId,
-				transfer = {
-					op = "withdraw",
-					networkId = networkId,
-					fullType = fullType,
-					requested = requested,
-					moved = moved or 0,
-					inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
-					reason = reason,
-					-- Solo la acción explícita «leer y devolver» necesita conocer
-					-- la instancia física. Las retiradas normales conservan el
-					-- payload mínimo de conteos para no aumentar tráfico masivo.
-					itemIds = args.returnItemIds == true and requested == 1
-						and movedItemIds or nil,
-					sourceNodeId = args.returnItemIds == true and requested == 1
-						and sourceNodeIds and sourceNodeIds[1] or nil,
-				},
-			})
-		end, withdrawMeta)
+		handleWithdrawItemCommand(player, args, networkId, searchQuery)
 
 	elseif command == "craftAttemptStart" then
 		-- Solo diagnostico (ver newOperationId en GS_NetworkCraftSession.lua) -
@@ -5358,6 +5412,7 @@ if Events and Events.OnPlayerDeath then
 		if not player or not GlobalStorageSiK.isAuthoritative() then
 			return
 		end
+		GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player)
 		local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.warn("Permissions", "OnPlayerDeath charName=" .. tostring(charName)

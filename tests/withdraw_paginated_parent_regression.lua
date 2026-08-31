@@ -26,24 +26,24 @@ GlobalStorageSiK = {
 	TerminalUI = {},
 	Log = { debug = function() end },
 }
-local requestedPages, sentRows = {}, nil
+local requestedPages, sentBatches = {}, {}
 GlobalStorageSiK.NetClient = {
 	sendCommand = function(command, args)
-		assert(command == "getItemDetails", "unexpected request " .. tostring(command))
-		requestedPages[#requestedPages + 1] = args.page
-		return true
+		requestedPages[#requestedPages + 1] = { command = command, args = args }
+		return false
 	end,
 }
 GlobalStorageSiK.WithdrawClient = {
 	sendWithdrawBatch = function(rows)
-		sentRows = rows
+		sentBatches[#sentBatches + 1] = rows
 		return true
 	end,
 }
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua")
 
 local parent = { rowKey = "Base.VHS_Retail", fullType = "Base.VHS_Retail", count = 34,
-	expandable = true, aggregateAllowed = false, _gsRowKind = "parent" }
+	expandable = true, aggregateAllowed = false, _gsRowKind = "parent",
+	selectionMode = "exact_group", selectionRevision = 9 }
 local displayed = { parent }
 for i = 1, 15 do
 	displayed[#displayed + 1] = { rowKey = "detail:" .. i, fullType = "Base.VHS_Retail", count = 1,
@@ -61,33 +61,20 @@ assert(#collapsed.payloadRows == 1 and collapsed.payloadRows[1] == parent,
 assert(#expanded.visualRows == 16, "ghost may show parent plus visible page only")
 assert(#collapsed.visualRows == 1, "collapsed ghost must show only its header")
 
-local terminal = { terminalState = { networkId = "net", inventoryRevision = 9 } }
-GlobalStorageSiK.TerminalUI.instance = terminal
-assert(GlobalStorageSiK.TerminalItems.deferExactWithdraw(terminal, { parent }, "player:main", "vhs"),
-	"stateful header did not start exact resolution")
-assert(#requestedPages == 1 and requestedPages[1] == 1, "first exact page was not requested")
-
-local function details(page, firstId, count, hasNext)
-	local items = {}
-	for i = 0, count - 1 do
-		items[#items + 1] = { rowKey = "detail:" .. tostring(firstId + i), fullType = parent.fullType,
-			itemIds = { firstId + i }, count = 1, _gsRowKind = "child", parentRowKey = parent.rowKey }
-	end
-	GlobalStorageSiK.TerminalItems.onDetailsReceived({
-		rowKey = parent.rowKey, networkId = "net", inventoryRevision = 9,
-		page = page, hasNext = hasNext, items = items,
-	}, true)
+assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(expanded.payloadRows),
+	"expanded semantic header was not accepted")
+assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(collapsed.payloadRows),
+	"collapsed semantic header was not accepted")
+assert(#sentBatches == 2, "both header states must reach the same withdraw boundary")
+for i = 1, 2 do
+	local row = sentBatches[i][1]
+	assert(#sentBatches[i] == 1 and row == parent,
+		"visual children must never become withdrawal payload")
+	assert(row.selectionMode == "exact_group" and row.selectionRevision == 9,
+		"semantic selector and captured revision must survive either visual state")
+	assert(not row.itemIds or #row.itemIds == 0,
+		"client pagination must not manufacture authoritative physical IDs")
 end
-
-details(1, 1, 15, true)
-assert(#requestedPages == 2 and requestedPages[2] == 2 and not sentRows,
-	"first visual page was sent instead of resolving the next page")
-details(2, 16, 15, true)
-assert(#requestedPages == 3 and requestedPages[3] == 3 and not sentRows,
-	"second visual page was sent instead of resolving the final page")
-details(3, 31, 4, false)
-assert(sentRows and #sentRows == 34, "header must yield all 34 physical IDs, not a visible page")
-for i = 1, 34 do
-	assert(sentRows[i].itemIds[1] == i, "exact ID missing or reordered at " .. tostring(i))
-end
+assert(#requestedPages == 0,
+	"dragging a semantic header must not request detail pages before withdrawal")
 print("withdraw_paginated_parent_regression: OK")

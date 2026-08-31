@@ -157,12 +157,14 @@ Support.check(suite, "sent drags release their visual state and group headers re
 	return true
 end)
 
-Support.check(suite, "stateful group header resolves exact pages without using visual payload", function()
+Support.check(suite, "stateful group header delegates one semantic selection independently of pages", function()
 	contains(dragSource, "payloadRows or { drag.rowData }", "drop does not use semantic payload")
-	contains(dragSource, "TerminalItems.deferExactWithdraw(terminal, rows, key, searchQuery)",
-		"stateful header is not resolved to exact IDs before withdrawal")
-	contains(itemsSource, "if args.hasNext then", "detail resolver stops at the first visual page")
-	contains(itemsSource, "sendWithdrawBatch(", "resolved exact rows never reach the common batch client")
+	contains(dragSource, "Las paginas son solo presentacion",
+		"group transfer still treats visual pages as transfer authority")
+	contains(dragSource, "GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1]",
+		"semantic group header does not reach the common withdrawal client")
+	excludes(dragSource, "TerminalItems.deferExactWithdraw",
+		"drag still walks visible detail pages before sending the semantic header")
 	return true
 end)
 

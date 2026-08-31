@@ -183,8 +183,8 @@ local function matchesMediaIndex(item, mediaIndex)
 end
 
 local function matchesDynamicSignature(item, dynamicSignature)
-	local _, liveSignature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
-	return liveSignature == dynamicSignature
+	local live = GlobalStorageSiK.FluidTaxonomy.inspect(item)
+	return live ~= nil and live.identityKey == dynamicSignature
 end
 
 local function capacityMetric(container, getter)

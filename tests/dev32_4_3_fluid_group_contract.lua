@@ -26,9 +26,10 @@ GlobalStorageSiK = {
 		end,
 	},
 	CategoryResolution = {
-		resolve = function(fullType, row, item)
-			local path = item and GlobalStorageSiK.FluidTaxonomy.resolve(item) or nil
-			local encoded = path and GlobalStorageSiK.NativeProduct.encodePath(path)
+		resolve = function(fullType, row, item, dynamicPath)
+			local path = dynamicPath or (item and GlobalStorageSiK.FluidTaxonomy.resolve(item) or nil)
+			local encoded = row and row.nativePath
+				or (path and GlobalStorageSiK.NativeProduct.encodePath(path))
 			return { nativePath = encoded, nativeStatus = "classified", vanillaKey = "Container",
 				effective = "native", routingIdentity = encoded, categorySource = "VANILLA" }
 		end,
@@ -98,6 +99,8 @@ GlobalStorageSiK.Network = {
 	getDefaultNetworkId = function() return "net" end,
 	getDisplayName = function() return "Network" end,
 	getLiveContainers = function() return {} end,
+	getRegistry = function() return registry end,
+	ensureRegistry = function() end,
 }
 GlobalStorageSiK.Zones = { getRegistry = function() return registry end }
 GlobalStorageSiK.Permissions = {
@@ -109,23 +112,47 @@ GlobalStorageSiK.ZoneRefresh = {}
 
 dofile(ROOT .. "GS_Index.lua")
 local rows = GlobalStorageSiK.Index.buildRows("net", {})
-assert(#rows == 1, "same container form must remain one parent row")
-local parent = rows[1]
-assert(parent.count == 3 and parent.expandable and parent.mixedVariants,
-	"mixed fluid parent must expose all exact units")
-assert(parent.nativePath == nil,
-	"mixed fluid parent must never invent a representative category")
-local page = GlobalStorageSiK.Index.buildDetailPage("net", {}, parent.rowKey, 1, 15)
-assert(page.total == 3 and #page.items == 3, "all fluid children must be returned")
-local ids, paths = {}, {}
-for i = 1, #page.items do
-	local child = page.items[i]
-	for j = 1, #(child.itemIds or {}) do ids[child.itemIds[j]] = true end
-	paths[child.nativePath] = true
+assert(#rows == 3, "different fluid shapes/content must expose distinct parent rows")
+local fuelParents, emptyParent = {}, nil
+local rowPaths = {}
+for i = 1, #rows do
+	local parent = rows[i]
+	rowPaths[#rowPaths + 1] = tostring(parent.nativePath)
+	if parent.nativePath == "native:vehicles/consumable/fuel" then
+		fuelParents[#fuelParents + 1] = parent
+	end
+	if parent.nativePath == "native:containers/liquid/empty" then emptyParent = parent end
+end
+assert(#fuelParents == 2 and fuelParents[1].rowKey ~= fuelParents[2].rowKey,
+	"different container capacities/forms must remain distinct fuel groups: count="
+		.. tostring(#fuelParents)
+		.. " paths=" .. table.concat(rowPaths, ",")
+		.. " keys=" .. tostring(fuelParents[1] and fuelParents[1].rowKey)
+		.. "/" .. tostring(fuelParents[2] and fuelParents[2].rowKey))
+assert(fuelParents[1].count == 1 and fuelParents[2].count == 1
+	and not fuelParents[1].mixedVariants and not fuelParents[2].mixedVariants,
+	"each fuel shape must retain only its canonical identity")
+assert(emptyParent and emptyParent.count == 1 and not emptyParent.mixedVariants
+	and emptyParent.rowKey ~= fuelParents[1].rowKey
+	and emptyParent.rowKey ~= fuelParents[2].rowKey,
+	"empty container identity must remain separate from fuel")
+local emptyPage = GlobalStorageSiK.Index.buildDetailPage("net", {}, emptyParent.rowKey, 1, 15)
+assert(emptyPage.total == 1 and #emptyPage.items == 1,
+	"empty group must preserve its exact physical unit")
+local ids = {}
+local pages = { emptyPage }
+for i = 1, #fuelParents do
+	local page = GlobalStorageSiK.Index.buildDetailPage("net", {}, fuelParents[i].rowKey, 1, 15)
+	assert(page.total == 1 and #page.items == 1,
+		"each fuel-shape group must preserve its exact physical unit")
+	pages[#pages + 1] = page
+end
+for _, page in ipairs(pages) do
+	for i = 1, #page.items do
+		local child = page.items[i]
+		for j = 1, #(child.itemIds or {}) do ids[child.itemIds[j]] = true end
+	end
 end
 assert(ids[101] and ids[102] and ids[103], "children must preserve exact item IDs")
-assert(paths["native:vehicles/consumable/fuel"]
-	and paths["native:containers/liquid/empty"],
-	"children must preserve their exact content/empty categories")
 
 print("dev32_4_3_fluid_group_contract: OK")

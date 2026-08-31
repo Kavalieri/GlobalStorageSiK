@@ -67,7 +67,9 @@ for i = 1, #cases do
 	assert(info.detail and info.detail.amount == info.amount
 		and info.detail.capacity == info.capacity, case.name .. " detail diverges")
 	if case.empty then
-		assert(info.stateKey == "empty", case.name .. " wrong empty identity")
+		assert(info.contentStateKey == "empty", case.name .. " wrong empty content state")
+		assert(type(info.stateKey) == "string" and info.stateKey:find("empty", 1, true),
+			case.name .. " lost shape-qualified empty identity")
 		assert(info.path and info.path.l1 == "containers" and info.path.l2 == "liquid"
 			and info.path.l3 == "empty", case.name .. " retained fuel path")
 	else

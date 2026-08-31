@@ -79,6 +79,7 @@ local function mergeLiveContainer(byType, container, nodeId)
 				literatureTitle = row.literatureTitle,
 				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
+				mediaCodes = row.mediaCodes,
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,
@@ -146,6 +147,7 @@ local function mergeNodeSnapshot(byType, node)
 				literatureTitle = row.literatureTitle,
 				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
+				mediaCodes = row.mediaCodes,
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,
@@ -213,10 +215,17 @@ local function parentKeyForRow(row)
         -- Vanilla identifica las grabaciones por el índice autoritativo del
         -- medio, no solo por el tipo físico VHSTape. Mantenerlo en la clave del
         -- padre agrupa duplicados del mismo programa sin mezclar títulos.
-        if row.mediaIndex ~= nil then
-                key = key .. "\31media:" .. tostring(row.mediaIndex)
-        end
-        return key
+	if row.mediaIndex ~= nil then
+		key = key .. "\31media:" .. tostring(row.mediaIndex)
+	end
+	-- ItemSnapshot ya separa los fluidos por identidad canónica
+	-- (forma + contenido/composición). Conservar esa identidad al compactar
+	-- evita volver a mezclar, por ejemplo, un bidón lleno y otro vacío del
+	-- mismo fullType, y mantiene exact_group limitado al grupo elegido.
+	if row.dynamicSignature ~= nil and row.dynamicSignature ~= "" then
+		key = key .. "\31dynamic:" .. tostring(row.dynamicSignature)
+	end
+	return key
 end
 
 local function detailKindForRow(row)
@@ -242,7 +251,8 @@ local function compactParentRows(detailRows)
 				gsSubKeys = detail.gsSubKeys or {}, gsSubKeysStr = detail.gsSubKeysStr or "",
                                 learnedRecipeNames = detail.learnedRecipeNames,
                                 numberOfPages = detail.numberOfPages,
-                                mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+						mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+						mediaCodes = detail.mediaCodes,
 				count = 0, locations = {}, variantSummary = {}, totalWeight = 0,
 				totalFluidAmount = 0, totalFluidCapacity = 0,
 				_variantSeen = {}, _pathSeen = {}, _detailKinds = {}, _fullTypeSeen = {},
@@ -268,6 +278,7 @@ local function compactParentRows(detailRows)
 				key = variantKey, count = 0, detailKind = detailKind,
 				fullType = detail.fullType, displayName = detail.displayName,
 				mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+				mediaCodes = detail.mediaCodes,
 				dynamicSignature = detail.dynamicSignature,
 				dynamicStateKey = detail.dynamicStateKey,
 				dynamicPercent = detail.dynamicPercent,
@@ -325,8 +336,10 @@ local function compactParentRows(detailRows)
 			parent.displayName = GlobalStorageSiK.I18n.typeDisplayName(familyFullType)
 		end
 		parent.expandable = parent.count > 1
-                parent.aggregateAllowed = parent.count == 1 or kindCount == 0
-                        or (parent._detailKinds.recorded_media and parent.mediaIndex ~= nil)
+		parent.aggregateAllowed = parent.count == 1 or kindCount == 0
+			or (parent._detailKinds.recorded_media and parent.mediaIndex ~= nil)
+		parent.selectionMode = (kindCount > 0 or parent.cosmeticVariants)
+			and "exact_group" or "aggregate"
 		parent.detailMode = parent.cosmeticVariants and kindCount == 0 and "variants" or "instances"
 		parent.mixedVariants = pathCount > 1
 		-- Un padre que mezcla rutas no inventa una categoría representativa. La
@@ -388,11 +401,13 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	end
 
 	local rows = compactParentRows(GlobalStorageSiK.ItemSnapshot.toRows(byType))
+	local selectionRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	-- La clasificación se resuelve en el proceso autoritativo al construir el
 	-- snapshot serializable, nunca desde refresh/search/sort del cliente. El
 	-- propio NativeProduct conserva una referencia por fullType/epoch, por lo
 	-- que snapshots posteriores no vuelven a invocar al clasificador.
 	for i = 1, #rows do
+		rows[i].selectionRevision = selectionRevision
 		local resolution = nil
 		if not rows[i].mixedVariants or rows[i].nativePath then
 			resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
@@ -446,12 +461,15 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 							rowKey = rowKey .. "\31item:" .. tostring(itemId),
 							parentRowKey = rowKey, fullType = row.fullType, itemId = itemId,
 							itemIds = { itemId }, aggregateAllowed = false,
+							selectionMode = "exact_ids",
+							selectionRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 							count = 1,
 							displayName = row.mediaTitle or row.displayName,
 							nodeId = node.id, zoneId = node.zoneId,
 							detailKind = detailKind, variantKey = row.variantKey,
 							mediaIndex = unit and unit.mediaIndex or row.mediaIndex,
 							mediaTitle = unit and unit.mediaTitle or row.mediaTitle,
+							mediaCodes = unit and unit.mediaCodes or row.mediaCodes,
 							dynamicSignature = row.dynamicSignature,
 							dynamicStateKey = row.dynamicStateKey,
 							dynamicPercent = unit and unit.dynamicPercent or row.dynamicPercent,
@@ -494,11 +512,14 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 					displayName = detail.displayName,
 					detailKind = recordedMediaOnly and "recorded_media" or "cosmetic_variant",
 					mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
+					mediaCodes = detail.mediaCodes,
 					nativePath = detail.nativePath,
 					nativeStatus = detail.nativePath and "classified" or nil,
 					effective = detail.nativePath and "native" or nil,
 					categoryEffective = detail.nativePath and "native" or nil,
 					aggregateAllowed = not recordedMediaOnly,
+					selectionMode = recordedMediaOnly and "exact_ids" or "exact_ids",
+					selectionRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 					fullTypes = not recordedMediaOnly and { detail.fullType } or nil,
 					count = 0, itemIds = {}, nodeIds = {}, locations = {} }
 				grouped[identity] = group
@@ -656,6 +677,48 @@ function GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	return registry._inventoryRevision[networkId] or 0
 end
 
+--- Reconstruye en autoridad el conjunto fisico de un padre. La UI nunca
+--- aporta IDs ni paginas para este selector.
+---@param networkId string
+---@param player IsoPlayer|nil
+---@param rowKey string
+---@param selectionRevision number
+---@return table|nil result
+---@return string|nil reason
+function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, selectionRevision)
+	if type(rowKey) ~= "string" or rowKey == "" then return nil, "invalid_row_key" end
+	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	if math.floor(tonumber(selectionRevision) or -1) ~= currentRevision then
+		return nil, "selection_stale"
+	end
+	local refs, seen = {}, {}
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
+			for _, row in pairs(node.itemSnapshot or {}) do
+				if parentKeyForRow(row) == rowKey then
+					for i = 1, #(row.itemIds or {}) do
+						local itemId = tonumber(row.itemIds[i])
+						if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seen[itemId] then
+							seen[itemId] = true
+							refs[#refs + 1] = { itemId = itemId, fullType = row.fullType }
+						end
+					end
+				end
+			end
+		end
+	end
+	table.sort(refs, function(a, b)
+		if a.fullType == b.fullType then return a.itemId < b.itemId end
+		return tostring(a.fullType) < tostring(b.fullType)
+	end)
+	if #refs == 0 then return nil, "not_found" end
+	return { refs = refs, count = #refs, revision = currentRevision, rowKey = rowKey }, nil
+end
+
 --- Revisión hasta la que los snapshots persistidos representan una captura
 --- completa y estable de la red. No debe adelantarse al inventoryRevision:
 --- una transferencia incrementa este último inmediatamente, mientras que el
@@ -724,7 +787,8 @@ function GlobalStorageSiK.Index.getNetworkCountsForItem(player, fullType, mediaT
 			for _, node in pairs(registry.nodes or {}) do
 				local zone = registry.zones and registry.zones[node.zoneId]
 				if zone and zone.networkId == networkId and node.membership ~= "excluded"
-						and node.enabled ~= false and node.offline ~= true then
+						and node.enabled ~= false and node.offline ~= true
+						and GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId) then
 					local snapshot = node.itemSnapshot
 					if snapshot then
 						for _, row in pairs(snapshot) do

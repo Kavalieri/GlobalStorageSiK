@@ -31,7 +31,6 @@ local ENTRY_H = CONTROL_METRICS.inputHeight
 local ROW_GAP = CONTROL_METRICS.controlGap
 local BLOCK_GAP = CONTROL_METRICS.rowGap
 local TAG_MEMBER_ROW = "_gsNetMemberRow"
-local POOL = 4
 local MEMBER_TABLE_COLUMNS = {
 	{ key = "role", titleKey = "IGUI_GS_PermColRole", width = 120, pad = 6 },
 	{ key = "name", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 160, pad = 6 },
@@ -400,14 +399,14 @@ end
 ---@param terminal GS_TerminalUI
 ---@param ui table
 ---@return ISPanel
-local function createMemberRow(host, terminal, ui)
-	local row = ISPanel:new(0, 0, 200, ROW_H)
-	row:initialise()
-	row[TAG_MEMBER_ROW] = true
-	row.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+local function newMemberTableRow(host, terminal, ui)
+	local itemRow = ISPanel:new(0, 0, 200, ROW_H)
+	itemRow:initialise()
+	itemRow[TAG_MEMBER_ROW] = true
+	itemRow.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	itemRow.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 
-	row.prerender = function(self)
+	itemRow.prerender = function(self)
 		ISPanel.prerender(self)
 		local data = self.memberData
 		if not data then return end
@@ -437,11 +436,11 @@ local function createMemberRow(host, terminal, ui)
 				pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 		end
 	end
-	row.onMouseDown = function(self, x, y)
+	itemRow.onMouseDown = function(self, x, y)
 		if self.memberData and self.memberData.kind ~= "empty" then return true end
 		return false
 	end
-	row.onMouseUp = function(self, x, y)
+	itemRow.onMouseUp = function(self, x, y)
 		local data = self.memberData
 		if not data or data.kind == "empty" or not terminal then
 			return false
@@ -450,59 +449,39 @@ local function createMemberRow(host, terminal, ui)
 		GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, perms.playerRole or "member")
 		return true
 	end
-	row.terminal = terminal
-	row.uiRef = ui
-	return row
+	itemRow.terminal = terminal
+	itemRow.uiRef = ui
+	return itemRow
+end
+
+---@param row ISPanel
+---@param data table|nil
+---@param dataIndex number|nil
+local function bindMemberRow(row, data, dataIndex)
+	row.memberData = data
+	row.rowIndex = dataIndex
+	row.stateRef = row.uiRef and row.uiRef._permStateRef or nil
 end
 
 --- Posiciona todas las filas de miembros (sin scroll interno).
 ---@param ui table
 function GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui)
-	local rows = ui and ui.memberRows
-	local host = ui and ui.permTableHost
-	if not host or not rows or not ui.memberRowPool then
-		return
-	end
-	local tableW = host.width or 200
-	local needed = math.max(1, #rows)
-	local term = ui.terminalRef
-	while #ui.memberRowPool < needed do
-		local row = createMemberRow(host, term, ui)
-		row:setVisible(false)
-		host:addChild(row)
-		ui.memberRowPool[#ui.memberRowPool + 1] = row
-	end
-	for i = 1, #ui.memberRowPool do
-		local row = ui.memberRowPool[i]
-		if i <= #rows then
-			row.memberData = rows[i]
-			row.rowIndex = i
-			row.stateRef = ui._permStateRef
-			row:setX(0)
-			row:setY(HEADER_H + 2 + (i - 1) * ROW_H)
-			row:setWidth(tableW)
-			row:setHeight(ROW_H)
-			row:setVisible(true)
-		else
-			row.memberData = nil
-			row:setVisible(false)
-		end
-	end
+	local tableList = ui and ui.memberTable
+	if not tableList then return end
+	local rows = ui.memberRows or {}
+	local data = rows
 	if #rows == 0 then
-		for i = 1, #ui.memberRowPool do
-			local row = ui.memberRowPool[i]
-			row.memberData = { kind = "empty", name = T("IGUI_GS_NoPermAccess") }
-			row.rowIndex = 1
-			row:setX(0)
-			row:setY(HEADER_H + 2)
-			row:setWidth(tableW)
-			row:setHeight(ROW_H)
-			row:setVisible(i == 1)
-		end
-		needed = 1
+		data = { { kind = "empty", name = T("IGUI_GS_NoPermAccess") } }
 	end
-	local bodyH = math.max(ROW_H, needed * ROW_H)
-	host:setHeight(HEADER_H + 2 + bodyH + 8)
+	local bodyH = math.max(ROW_H, #data * ROW_H)
+	GlobalStorageSiK.TerminalScroll.resize(tableList, ui._permRowW or tableList:getWidth(), bodyH + 16)
+	tableList:setConfig(ROW_H, 0)
+	tableList:setDataSource(data, true)
+	local rect = GlobalStorageSiK.TerminalScroll.contentRect(tableList)
+	if ui.memberTableHeader then
+		ui.memberTableHeader:setX((tableList.x or 0) + rect.x)
+		ui.memberTableHeader:setWidth(rect.w)
+	end
 end
 
 ---@param ui table
@@ -680,41 +659,40 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.terminalRef = terminal
 
 	local _ppal = GlobalStorageSiK.SiK_UI.PALETTE
-	ui.accessTableTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
-		x = pad, y = y, text = T("IGUI_GS_PermMembersTableTitle"),
+	ui.accessBlockHeader = GlobalStorageSiK.SiK_UI.Controls.blockHeader(nil, {
+		x = pad, y = y, w = rowW,
+		text = T("IGUI_GS_PermMembersTableTitle"),
+		tooltip = T("IGUI_GS_PermMembersTableTitle"), target = scroll,
 	})
-	addPermWidget(scroll, ui, ui.accessTableTitle)
-	y = y + titleH
+	ui.accessTableTitle = ui.accessBlockHeader.title
+	if ui.accessBlockHeader.info then addPermWidget(scroll, ui, ui.accessBlockHeader.info) end
+	addPermWidget(scroll, ui, ui.accessBlockHeader.title)
+	y = y + ui.accessBlockHeader.height
 
 	ui.permTableY = y
-	ui.permTableHost = ISPanel:new(pad, y, rowW, HEADER_H + ROW_H + 10)
-	ui.permTableHost:initialise()
-	ui.permTableHost.drawBackground = false
-	ui.permTableHost.clipChildren = true
-	ui.permTableHost.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	ui.permTableHost.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	addPermWidget(scroll, ui, ui.permTableHost)
-
-	ui.permTableHeader = ISPanel:new(0, 0, rowW, HEADER_H)
-	ui.permTableHeader:initialise()
-	ui.permTableHeader.prerender = function(self)
+	ui.memberTableHeader = ISPanel:new(pad, y, rowW, HEADER_H)
+	ui.memberTableHeader:initialise()
+	ui.memberTableHeader.prerender = function(self)
 		ISPanel.prerender(self)
 		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, MEMBER_TABLE_COLUMNS, nil, true,
 			2, UIFont.Small, MEMBER_TABLE_OPTIONS)
 	end
 	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
-		ui.permTableHeader, MEMBER_TABLE_COLUMNS, MEMBER_TABLE_OPTIONS)
-	ui.permTableHost:addChild(ui.permTableHeader)
+		ui.memberTableHeader, MEMBER_TABLE_COLUMNS, MEMBER_TABLE_OPTIONS)
+	addPermWidget(scroll, ui, ui.memberTableHeader)
 
-	ui.memberRowPool = {}
-	for i = 1, POOL do
-		local row = createMemberRow(ui.permTableHost, terminal, ui)
-		row:setVisible(false)
-		ui.permTableHost:addChild(row)
-		ui.memberRowPool[i] = row
+	local host = GlobalStorageSiK.TerminalScroll.childHost(scroll)
+	ui.memberTable = GlobalStorageSiK.SiK_UI.Table.createVirtual(
+		host, pad, y + HEADER_H + 2, rowW, ROW_H + 16,
+		ROW_H, 0, MEMBER_TABLE_COLUMNS,
+		function() return newMemberTableRow(host, terminal, ui) end,
+		bindMemberRow, MEMBER_TABLE_OPTIONS)
+	trackPermWidget(ui, ui.memberTable)
+	ui.memberTable.onMouseWheel = function(_, del)
+		return scroll:onMouseWheel(del)
 	end
 
-	y = y + ui.permTableHost:getHeight() + BLOCK_GAP
+	y = y + HEADER_H + 2 + ui.memberTable:getHeight() + BLOCK_GAP
 	ui.permAccessListStartY = ui.permTableY
 
 	-- Avisos de sucesion de propietario (solo visibles para el owner, ver
@@ -880,12 +858,7 @@ local function syncPermsData(scroll, terminal, ui, state)
 		GlobalStorageSiK.TerminalPermissions.refreshMemberPickCombo(ui)
 	end
 
-	if ui.permTableHost then
-		ui.permTableHost:setWidth(innerW - pad * 2)
-	end
-	if ui.permTableHeader then
-		ui.permTableHeader:setWidth(innerW - pad * 2)
-	end
+	if ui.memberTable then ui.memberTable:setWidth(innerW - pad * 2) end
 
 	local fp = permListFingerprint(perms)
 	if ui.lastPermFingerprint ~= fp or not ui.memberRows then
@@ -922,17 +895,22 @@ local function layoutPermsBlock(scroll, ui, startY)
 	}
 	ui.permsStartY = startY + 8
 
-	-- Un unico titulo visible para la tabla de miembros.
-	col:place(ui.accessTableTitle, titleH)
+	-- Una sola cabecera SiK UI visible para la tabla de miembros.
+	if ui.accessBlockHeader and ui.accessBlockHeader.info then
+		col:_set(ui.accessBlockHeader.info, pad, col.cursor, nil, nil)
+		local titleX = pad + ui.accessBlockHeader.info:getWidth() + ROW_GAP
+		col:_set(ui.accessBlockHeader.title, titleX, col.cursor, nil, nil)
+		col.cursor = col.cursor + ui.accessBlockHeader.height
+	else
+		col:place(ui.accessTableTitle, titleH)
+	end
 
-	-- Tabla de miembros: posicionar host, rellenar filas (fija altura real), leerla.
+	-- Tabla de miembros: cabecera y cuerpo virtual comparten el mismo contentRect.
 	ui.permTableY = col:y()
-	if ui.permTableHost then ui.permTableHost:setWidth(rowW) end
-	if ui.permTableHeader then ui.permTableHeader:setWidth(rowW) end
-	col:_set(ui.permTableHost, pad, col.cursor, rowW, nil)   -- X/Y/ancho (alto tras filas)
-	GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui) -- posiciona filas y fija host:height
-	local tableH = (ui.permTableHost and ui.permTableHost.getHeight and ui.permTableHost:getHeight())
-		or (HEADER_H + 2 + ROW_H + 8)
+	col:_set(ui.memberTableHeader, pad, col.cursor, rowW, HEADER_H)
+	col:_set(ui.memberTable, pad, col.cursor + HEADER_H + 2, rowW, nil)
+	GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui)
+	local tableH = HEADER_H + 2 + (ui.memberTable and ui.memberTable:getHeight() or (ROW_H + 16))
 	ui.permAccessListStartY = ui.permTableY
 	col.cursor = col.cursor + tableH + BLOCK_GAP
 
@@ -1005,8 +983,8 @@ function GlobalStorageSiK.TerminalPermissions.ensureInNetworkScroll(scroll, term
 		end
 		ui.permWidgets = {}
 		ui.permsBuilt = false
-		ui.permTableHost = nil
-		ui.memberRowPool = nil
+		ui.memberTable = nil
+		ui.memberTableHeader = nil
 	end
 	if not ui.permsBuilt then
 		GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, terminal, ui, startY)

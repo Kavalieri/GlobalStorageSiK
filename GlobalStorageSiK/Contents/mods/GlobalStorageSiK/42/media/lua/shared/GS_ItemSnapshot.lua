@@ -10,6 +10,13 @@ require "GS_I18n"
 require "GS_FluidTaxonomy"
 require "GS_NativeProduct"
 
+-- El publicador forma parte del runtime completo, pero ItemSnapshot tambien se
+-- carga aislado en harnesses y consumidores de la API shared. Intentar cargarlo
+-- sin convertirlo en una dependencia dura conserva ambos contratos.
+if not GlobalStorageSiK.DisplayCategoryPublisher then
+	pcall(require, "GS_DisplayCategoryPublisher")
+end
+
 GlobalStorageSiK.ItemSnapshot = {}
 
 -- Metadatos invariantes por fullType. La UI de PZ puede mostrar una "pila"
@@ -289,6 +296,7 @@ local function recordedMediaCodes(item)
 	end
 	return result
 end
+GlobalStorageSiK.ItemSnapshot.recordedMediaCodesFromItem = recordedMediaCodes
 
 function GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(item)
 	if not item then return {} end
@@ -401,6 +409,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- transfiere.
 	local mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
 	local mediaTitle = recordedMediaTitleFromItem(item)
+	local mediaCodes = mediaIndex ~= nil and recordedMediaCodes(item) or nil
 	local worldSprite = readWorldSprite(item)
 	local isMoveable = false
 	if instanceof then
@@ -420,6 +429,9 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	local dynamicPercent = fluid and fluid.fillPercent or nil
 	local fluidAmount, fluidCapacity = fluid and fluid.amount or nil, fluid and fluid.capacity or nil
 	local fluidState = fluid and fluid.detail or nil
+	if dynamicPath and GlobalStorageSiK.DisplayCategoryPublisher then
+		GlobalStorageSiK.DisplayCategoryPublisher.publishDynamicItem(item, dynamicPath)
+	end
 	local foodStateKey, food = foodState(item)
 	if not dynamicStateKey then dynamicStateKey = foodStateKey end
 	local conditionSignature, condition, conditionMax = conditionState(item)
@@ -487,6 +499,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			literatureTitle = literatureTitle,
 			mediaIndex = mediaIndex,
 			mediaTitle = mediaTitle,
+			mediaCodes = mediaCodes,
 			dynamicSignature = dynamicSignature,
 			dynamicStateKey = dynamicStateKey,
 			dynamicPercent = dynamicPercent,
@@ -546,6 +559,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 				conditionMax = conditionMax,
 				mediaIndex = mediaIndex,
 				mediaTitle = mediaTitle,
+				mediaCodes = mediaCodes,
 			}
 		end
 	end
@@ -594,6 +608,7 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				literatureTitle = row.literatureTitle,
 				mediaIndex = row.mediaIndex,
 				mediaTitle = row.mediaTitle,
+				mediaCodes = row.mediaCodes,
 				dynamicSignature = row.dynamicSignature,
 				dynamicStateKey = row.dynamicStateKey,
 				dynamicPercent = row.dynamicPercent,

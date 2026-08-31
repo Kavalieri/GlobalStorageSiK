@@ -26,7 +26,10 @@ GlobalStorageSiK = {
 		end,
 	},
 	I18n = { text = function(key) return key end, remote = function(key) return key end },
-	Log = { info = function() end, error = function() end, warn = function() end },
+	Log = {
+		debug = function() end, info = function() end,
+		error = function() end, warn = function() end,
+	},
 	Sandbox = { operationHaloFeedbackEnabled = function() return false end },
 	OperationPacing = {
 		resolve = function() return { batchUnits = 10, batchDelayMs = 400 } end,

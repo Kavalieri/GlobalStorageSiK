@@ -164,6 +164,7 @@ local function readB42Fluid(item)
 	if mixture then composition, compositionExact = mixtureComposition(fluid, amount) end
 	local shapeFamily, shapeKey, containerName = fluidShape(item, fluid, capacity)
 	return {
+		source = "b42",
 		fluid = fluid, amount = amount, capacity = capacity, empty = empty,
 		mixture = mixture, rawType = rawType, canonicalType = normalizeFluidId(rawType),
 		kindToken = kindToken(rawType), primaryAmount = primaryAmount,
@@ -236,6 +237,7 @@ local function readLegacyFluid(item)
 	local shapeKey = table.concat({ tostring(fullType or ""), adapter.containerName,
 		tostring(adapter.capacity) }, "\31")
 	return {
+		source = "legacy", replacement = replacement,
 		fluid = nil, amount = amount, capacity = adapter.capacity, empty = amount <= 0,
 		mixture = false, rawType = adapter.canonicalType,
 		canonicalType = normalizeFluidId(adapter.canonicalType),
@@ -326,10 +328,20 @@ local function resolveFromData(data)
 	return pathForContent(data), contentSignature(data)
 end
 
+local function identityFromData(data, content)
+	if not data then return nil end
+	return "shape=" .. tostring(data.shapeKey or "unknown")
+		.. ";content=" .. tostring(content or "unknown")
+end
+
 local function detailFromData(data)
 	if not data then return nil end
 	return {
+		source = data.source,
+		rawType = data.rawType,
 		canonicalType = data.canonicalType,
+		replacement = data.replacement,
+		legacyAdapter = data.legacyAdapter,
 		amount = data.amount,
 		capacity = data.capacity,
 		empty = data.empty,
@@ -355,6 +367,7 @@ function FluidTaxonomy.inspect(item)
 	local data = readFluid(item)
 	if not data then return nil end
 	local path, signature = resolveFromData(data)
+	local identityKey = identityFromData(data, signature)
 	local percent = nil
 	if type(data.amount) == "number" and type(data.capacity) == "number" and data.capacity > 0 then
 		percent = math.max(0, math.min(100, math.floor((data.amount / data.capacity) * 100 + 0.5)))
@@ -362,18 +375,23 @@ function FluidTaxonomy.inspect(item)
 	local stateKey = data.empty == true and "empty"
 		or (data.empty ~= false and "unknown" or contentSignature(data))
 	return {
-		path = path, signature = signature, stateKey = stateKey, fillPercent = percent,
+		path = path, categoryPath = path, signature = identityKey,
+		identityKey = identityKey, contentSignature = signature,
+		-- Todos los consumidores comparables reciben la misma identidad fisica.
+		-- El estado de contenido desnudo queda disponible solo como dato descriptivo.
+		stateKey = identityFromData(data, stateKey), contentStateKey = stateKey,
+		fillPercent = percent,
 		amount = data.amount, capacity = data.capacity, canonicalType = data.canonicalType,
-		detail = detailFromData(data),
+		source = data.source, descriptor = detailFromData(data), detail = detailFromData(data),
 	}
 end
 
 function FluidTaxonomy.stateKey(item)
 	local data = readFluid(item)
 	if not data then return nil end
-	if data.empty == true then return "empty" end
-	if data.empty ~= false then return "unknown" end
-	return contentSignature(data)
+	if data.empty == true then return identityFromData(data, "empty") end
+	if data.empty ~= false then return identityFromData(data, "unknown") end
+	return identityFromData(data, contentSignature(data))
 end
 
 function FluidTaxonomy.detail(item)

@@ -3,6 +3,13 @@
 local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
 local suite = Support.newSuite("sik_ui_controls_table_list_contract")
 
+package.loaded["ISUI/ISButton"] = true
+ISPanel = ISPanel or {
+	onMouseDown = function() return false end,
+	onMouseMove = function() return false end,
+	onMouseUp = function() return false end,
+}
+
 Support.loadClientModule(suite, "GS_SiK_UI_Metrics")
 Support.loadClientModule(suite, "GS_SiK_UI_Controls")
 Support.loadClientModule(suite, "GS_SiK_UI_List")
@@ -17,11 +24,6 @@ function getTextManager()
 		getFontHeight = function() return 12 end,
 	}
 end
-ISPanel = ISPanel or {
-	onMouseDown = function() return false end,
-	onMouseMove = function() return false end,
-	onMouseUp = function() return false end,
-}
 GlobalStorageSiK = GlobalStorageSiK or { SiK_UI = {}, I18n = {} }
 GlobalStorageSiK.SiK_UI = GlobalStorageSiK.SiK_UI or {}
 GlobalStorageSiK.SiK_UI.Table = GlobalStorageSiK.SiK_UI.Table or {}

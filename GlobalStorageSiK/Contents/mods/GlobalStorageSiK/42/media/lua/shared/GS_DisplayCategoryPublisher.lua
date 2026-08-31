@@ -6,8 +6,8 @@
 	una clave plana, estable y sin traducir en el ScriptItem para que el
 	inventario vanilla y los lectores externos reciban la misma categoría. No
 	modifica InventoryItem vivos salvo que exista una variante realmente
-	dinámica declarada. Los fluidos llenos son la única variante dinámica
-	actual: no se publica nada para un envase vacío, desconocido o mezcla.
+	dinámica declarada. Los fluidos publican sobre la instancia su ruta viva,
+	incluidos vacío y mezcla; nunca reescriben el ScriptItem global por contenido.
 ]]
 
 require "GS_CatalogManager"
@@ -64,9 +64,8 @@ function Publisher.isPublishedKey(value)
 	return type(value) == "string" and value:match("^" .. PREFIX .. "[a-z0-9_]+$") ~= nil
 end
 
---- Publica exclusivamente una variante dinámica declarada. Nunca fuerza una
---- categoría sobre un envase vacío: en ese caso el ScriptItem conserva su
---- DisplayCategory de contenedor. El caller proporciona la ruta ya resuelta
+--- Publica exclusivamente una variante dinámica declarada sobre el item vivo.
+--- El caller proporciona la ruta ya resuelta (incluidos vacío y mezcla)
 --- para no repetir getters del fluido durante el pintado de inventario.
 ---@param item InventoryItem|nil
 ---@param path table|string|nil

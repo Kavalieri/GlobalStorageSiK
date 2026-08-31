@@ -76,6 +76,13 @@ local function countRows(snapshot)
 	return count
 end
 
+local exactTooltipDetail = GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(
+	media("Base.VHSTape", 99, 214, "Woodcraft Ep. 3"))
+assert(exactTooltipDetail.mediaIndex == 214
+	and exactTooltipDetail.mediaTitle == "Woodcraft Ep. 3"
+	and exactTooltipDetail.mediaCodes[1] == "CRP=1,COO=1",
+	"exact item detail did not propagate mediaIndex/mediaTitle/mediaCodes")
+
 local vhs = rowsFor({
 	media("Base.VHSTape", 1, 214, "Woodcraft Ep. 3"),
 	media("Base.VHSTape", 2, 214, "Woodcraft Episode Three"),
@@ -86,21 +93,34 @@ local vhs = rowsFor({
 assert(countRows(vhs) == 4,
 	"media identity must be one row for index 214, one for 315 and one per unknown copy")
 local woodcraft = nil
+local exposure = nil
 local unknown = 0
 for _, row in pairs(vhs) do
 	if row.mediaIndex == 214 then woodcraft = row end
+	if row.mediaIndex == 315 then exposure = row end
 	if row.detailKind == "recorded_media" and row.mediaIndex == nil then unknown = unknown + 1 end
 end
 assert(woodcraft and woodcraft.count == 2 and woodcraft.variantKey == "media:214",
 	"same media index did not aggregate independent of presentation title")
 assert(woodcraft.displayName == "Woodcraft Ep. 3" or woodcraft.displayName == "Woodcraft Episode Three",
 	"media title was not retained as presentation")
+assert(woodcraft.mediaTitle ~= "VHS Tape" and woodcraft.mediaCodes
+	and woodcraft.mediaCodes[1] == "CRP=1,COO=1",
+	"snapshot lost the exact VHS title or training codes")
+assert(woodcraft.unitDetails[1].mediaIndex == 214
+	and woodcraft.unitDetails[1].mediaTitle ~= "VHS Tape"
+	and woodcraft.unitDetails[1].mediaCodes[1] == "CRP=1,COO=1",
+	"snapshot unit detail did not propagate exact recorded-media identity")
+assert(exposure and exposure.mediaTitle == "Exposure Survival Ep. 5"
+	and exposure.mediaCodes[1] == "DOC=1",
+	"second VHS edition lost its individual title/codes")
 assert(unknown == 2, "unknown media copies were collapsed")
 
 -- Execute the real Index contract over the exact persisted snapshot shape.
 -- This is the same direct path used by true SP (client/server flags both false).
 package.loaded["GS_ItemSnapshot"] = true
 local registry = {
+	_inventoryRevision = { media_net = 7 },
 	networks = { media_net = { id = "media_net", name = "Media Network" } },
 	zones = { media_zone = { id = "media_zone", networkId = "media_net" } },
 	nodes = {
@@ -125,6 +145,37 @@ GlobalStorageSiK.Permissions = {
 }
 dofile(shared .. "GS_Index.lua")
 package.loaded["GS_Index"] = true
+
+GlobalStorageSiK.CategoryResolution = {
+	resolve = function(_, row)
+		return {
+			nativePath = row and row.nativePath or nil,
+			nativeStatus = row and row.nativePath and "classified" or "fallback",
+			effective = row and row.nativePath and "native" or "vanilla",
+			categoryEffective = row and row.nativePath and "native" or "vanilla",
+			routingIdentity = row and row.routingIdentity or "vanilla:Entertainment",
+			categorySource = "VANILLA",
+		}
+	end,
+}
+local parentRows = GlobalStorageSiK.Index.buildRows("media_net", {})
+local woodcraftParent = nil
+for i = 1, #parentRows do
+	if parentRows[i].mediaIndex == 214 then woodcraftParent = parentRows[i] end
+end
+assert(woodcraftParent and woodcraftParent.count == 2
+	and woodcraftParent.mediaTitle ~= "VHS Tape"
+	and woodcraftParent.mediaCodes[1] == "CRP=1,COO=1",
+	"Index parent dropped exact VHS identity/presentation metadata")
+local detailPage = GlobalStorageSiK.Index.buildDetailPage(
+	"media_net", {}, woodcraftParent.rowKey, 1, 15)
+assert(detailPage.total == 1 and #detailPage.items == 1,
+	"two copies of one VHS edition must form one exact detail row")
+local woodcraftDetail = detailPage.items[1]
+assert(woodcraftDetail.count == 2 and woodcraftDetail.mediaIndex == 214
+	and woodcraftDetail.mediaTitle ~= "VHS Tape"
+	and woodcraftDetail.mediaCodes[1] == "CRP=1,COO=1",
+	"Index detail dropped mediaIndex/mediaTitle/mediaCodes")
 
 local function exactNetworkCount(mediaIndex)
 	local counts, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(

@@ -361,6 +361,14 @@ local function onServerCommand(module, command, args)
 		if inventorySync then
 			args = mergeInventorySyncState(args, previousState)
 		end
+		-- selection_stale conserva el gesto exact_group en espera de este
+		-- terminalState autoritativo. La reanudación es de una sola vez y sucede
+		-- antes de cualquier reconstrucción visual; no depende de páginas ni de
+		-- que la ventana llegue a repintarse.
+		if GlobalStorageSiK.WithdrawClient
+			and GlobalStorageSiK.WithdrawClient.onTerminalState then
+			GlobalStorageSiK.WithdrawClient.onTerminalState(args)
+		end
 		if args and args.networkId and args.inventoryRevision ~= nil
 			and (not previousState
 				or previousState.networkId ~= args.networkId

@@ -68,7 +68,7 @@ GlobalStorageSiK = {
 	end },
 	Index = { syncNodeSnapshot = function() end },
 	ItemSnapshot = { recordedMediaTitleFromItem = function() return nil end },
-	FluidTaxonomy = { resolve = function(value) return nil, value.signature end },
+	FluidTaxonomy = { inspect = function(value) return { identityKey = value.signature } end },
 	Log = { info = function(category, event, message)
 		logs[#logs + 1] = category .. " " .. event .. " " .. message
 	end },
