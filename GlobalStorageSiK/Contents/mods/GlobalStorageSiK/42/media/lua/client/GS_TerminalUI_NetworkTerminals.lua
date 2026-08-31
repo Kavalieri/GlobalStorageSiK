@@ -184,11 +184,12 @@ end
 function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y, innerW)
 	local pad = 8
 	ui.termBlockY = y
-
-	local card = GlobalStorageSiK.SiK_UI.createSectionCard(0, y, innerW, 10)
-	card._gsNetStatic = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
-	ui.termBlockCard = card
+	-- Gestión de terminales es una tabla, no una tarjeta dentro de otra tarjeta.
+	-- El antiguo createSectionCard introducía un marco/acento propio que Almacén,
+	-- Zonas y Nodos no usan, aunque compartieran drawHeader/drawTableRowBackground.
+	-- Dejar el host neutro hace que las cuatro superficies compongan el mismo
+	-- componente SiK_UI.Table, sin una segunda envoltura visual local.
+	ui.termBlockCard = nil
 
 	local title = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(nil, {
 		x = pad, y = y + pad, text = T("IGUI_GS_NetBlockTerminals"),
@@ -232,8 +233,6 @@ function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y
 	ui.termTableY = y
 	y = y + ui.termTableHost:getHeight() + pad
 	ui.termBlockEndY = y
-	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
-		0, ui.termBlockY, innerW, y - ui.termBlockY)
 	ui.lastTermFp = ""
 	ui.terminalRef = terminal
 	return y

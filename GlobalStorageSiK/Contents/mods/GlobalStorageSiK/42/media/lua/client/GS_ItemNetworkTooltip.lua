@@ -12,7 +12,6 @@ require "GS_Index"
 require "GS_ItemSnapshot"
 require "GS_Sandbox"
 require "GS_Log"
-require "GS_CategoryResolution"
 require "GS_SiK_UI_Viewport"
 
 GlobalStorageSiK.ItemNetworkTooltip = {}
@@ -46,30 +45,6 @@ local function removeOrdered(target, order, key)
 	end
 end
 
--- Cache de sesion, SOLO fullType (2026-08-23, root cause real del spam
--- "Couldn't find item" que persistia pese a las 4 rondas de cache previas -
--- ver GS_I18n.lua:cachedScriptItem): render() de ISToolTipInv corre a
--- 30-60fps SIEMPRE que el jugador mantiene el raton sobre CUALQUIER item, y
--- llamaba a ItemTaxonomy.resolve(fullType, {}) sin cache en cada uno de esos
--- fotogramas - resolve() es una funcion no trivial (varias tablas, varios
--- niveles de traduccion), no solo la consulta a ScriptManager (esa parte SI
--- ya estaba cacheada via GS_I18n.getScriptItem, por eso las rondas
--- anteriores de fix no lo detectaban con un grep de "getItem sin cache").
--- Aqui SIEMPRE se llama con row={} (nunca datos de fila reales), asi que
--- cachear unicamente por fullType es correcto para este call site concreto;
-local _categoryResolveCache = {}
-local _categoryResolveOrder = {}
-local MAX_CATEGORY_CACHE = 512
-local function getCachedCategory(fullType)
-	local cached = _categoryResolveCache[fullType]
-	if cached ~= nil then
-		return cached or nil
-	end
-	local ok, resolved = pcall(GlobalStorageSiK.CategoryResolution.resolve, fullType, nil)
-	local result = (ok and resolved) or false
-	insertBounded(_categoryResolveCache, _categoryResolveOrder, fullType, result, MAX_CATEGORY_CACHE)
-	return result or nil
-end
 local hooksInstalled = false
 
 -- BUG REAL DE ARQUITECTURA cerrado (2026-08-27, estudio real de TooltipLib -
@@ -271,21 +246,9 @@ local function truncate(text, maxW)
 	return text
 end
 
---- Interpretacion PROPIA (no la del mod "Show VHS skills in tooltip", retirado
---- por incompatibilidad real con nuestro propio parche de ISToolTipInv.render
---- Y el de "Magic Accessories" - ver installHooks mas abajo) de que skill
---- enseña un item: lee directamente los campos de script vainilla
---- SkillTrained/LvlSkillTrained/getMaxLevelTrained (misma API publica que ya
---- usa el propio juego en ISReadABook.lua para libros), sin depender de
---- ningun otro mod ni reconstruir su tabla de datos. Se excluyen
---- libros/revistas (isLiterature): vanilla YA les muestra esta info en su
---- propio tooltip nativo, duplicarla ahi no aporta nada.
----
---- BUG REAL CONFIRMADO (2026-08-14, reportado explicitamente): el comentario
---- de esta funcion siempre dijo que cubria "cintas VHS y cualquier otro item
---- moddeado con estos mismos campos", pero NUNCA fue cierto para VHS de
---- verdad - las cintas VHS NO usan getSkillTrained()/SkillBook (eso es
---- exclusivo de libros), sino un sistema completamente distinto: el item
+--- Interpretacion propia de la formacion de una cinta VHS. Los libros ya
+--- exponen sus campos SkillTrained/LvlSkillTrained en el tooltip vanilla y no
+--- se repiten aqui. Las cintas VHS no usan ese sistema: el item
 --- referencia un indice de "medio grabado" (getRecordedMediaIndex()) que
 --- apunta a una entrada del global RecMedia (definiciones de radio/TV,
 --- scripteadas), cuyas lineas de dialogo llevan "codigos" de 3 letras
@@ -297,41 +260,6 @@ end
 --- original de este enfoque). Ver getVHSTrainingLines mas abajo.
 ---@param item table|nil InventoryItem
 ---@return string[]|nil
-local function getBookSkillTrainingLines(item)
-	if not item or not item.getSkillTrained then
-		return nil
-	end
-	local okLit, isLit = pcall(function() return item.isLiterature and item:isLiterature() end)
-	if okLit and isLit then
-		return nil
-	end
-	local okKey, key = pcall(function() return item:getSkillTrained() end)
-	if not okKey or not key or key == "" then
-		return nil
-	end
-	local perkName = key
-	local okPerk, perk = pcall(function()
-		return rawget(_G, "SkillBook") and SkillBook[key] and SkillBook[key].perk
-	end)
-	if okPerk and perk and perk.getName then
-		local okName, name = pcall(function() return perk:getName() end)
-		if okName and name and name ~= "" then
-			perkName = name
-		end
-	end
-	local okLvl, lvl = pcall(function() return item:getLvlSkillTrained() end)
-	local okMax, maxLvl = pcall(function() return item:getMaxLevelTrained() end)
-	local line
-	if okLvl and lvl and lvl >= 0 and okMax and maxLvl and maxLvl >= 0 then
-		line = T("IGUI_GS_VHSSkillLineRange", perkName, tostring(lvl), tostring(maxLvl))
-	elseif okLvl and lvl and lvl >= 0 then
-		line = T("IGUI_GS_VHSSkillLine", perkName, tostring(lvl))
-	else
-		line = perkName
-	end
-	return { T("IGUI_GS_VHSSkillHeader"), line }
-end
-
 --- Trigrama -> clave getText del perk, copiado DIRECTAMENTE de
 --- shared/RadioCom/ISRadioInteractions.lua (linea Interactions.XXX =
 --- function(...) doSkill(_player, _amount, getText("IGUI_perks_..."),
@@ -385,7 +313,7 @@ local function mediaSkillNames(item)
 	return skillNames
 end
 
---- Ver comentario largo de getBookSkillTrainingLines - camino REAL para
+--- Camino REAL para
 --- cintas VHS (y cualquier otro "medio grabado" que use el mismo sistema
 --- vainilla de RecMedia, no solo items con "VHS" en el fullType). A peticion
 --- explicita: si el item ES un medio grabado correlacionado pero no enseña
@@ -440,14 +368,6 @@ end
 
 ---@param item table|nil InventoryItem
 ---@return string[]|nil
-local function getSkillTrainingLines(item)
-	local bookLines = getBookSkillTrainingLines(item)
-	if bookLines then
-		return bookLines
-	end
-	return getVHSTrainingLines(item)
-end
-
 --- Dibuja la extension de red justo debajo del tooltip de item vanilla,
 --- DENTRO del mismo render() y con el MISMO ancho que el tooltip (self.width),
 --- en vez de un panel ISToolTip flotante aparte.
@@ -464,7 +384,9 @@ end
 -- tooltip inmanejable de medio monitor de ancho - mas alla de esto, se
 -- vuelve a truncar como red de seguridad.
 local MAX_EXT_WIDTH = 520
-local TOOLTIP_GUTTER = 16
+-- Coincide con el anclaje vanilla/fallback de ISToolTipInv. No se desplaza
+-- lateralmente el tooltip al añadir contenido SiK ya medido.
+local TOOLTIP_GUTTER = 24
 
 local function withdrawDragActive()
 	return GlobalStorageSiK.TerminalWithdrawDrag
@@ -479,9 +401,12 @@ local function makeTooltipMouseTransparent(panel)
 end
 
 local function extensionMetrics(blocks, baseWidth)
-	local textManager = getTextManager()
-	local lineHgt = textManager:getFontHeight(NET_FONT)
-	local width = tonumber(baseWidth) or 0
+        local textManager = getTextManager()
+        local lineHgt = textManager:getFontHeight(NET_FONT)
+        -- ISToolTipInv puede conservar una anchura de medida de un proveedor
+        -- anterior. El anexo no hereda nunca ese rectangulo: su contrato tiene
+        -- un maximo propio y medido, para no convertir el tooltip en una pared.
+        local width = math.min(MAX_EXT_WIDTH, math.max(0, tonumber(baseWidth) or 0))
 	local height = 0
 	for i = 1, #(blocks or {}) do
 		local lines = blocks[i].lines or {}
@@ -660,7 +585,7 @@ end
 --- installHooks mas abajo).
 ---@param item InventoryItem|nil
 ---@return table[] blocks lista de { lines: string[], color: number[] }
-local function buildTooltipBlocks(item)
+local function buildTooltipBlocks(item, rowContext)
 	local blocks = {}
 	if not (item and item.getFullType) then
 		return blocks
@@ -683,29 +608,17 @@ local function buildTooltipBlocks(item)
 		and GlobalStorageSiK.RemoteItemDetail.contextForProbe
 		and GlobalStorageSiK.RemoteItemDetail.contextForProbe(item) or nil
 	local remote = remoteContext and remoteContext.detail or nil
-	local remoteIdentity = remote and remote.ok == true and remote
-		or (remoteContext and remoteContext.row) or nil
+	-- El detalle remoto describe peso/fluido/VHS, pero no sustituye la fila
+	-- autoritativa del escaneo: dicha fila contiene la categoria ya decidida.
+	-- Elegir el detalle primero perdia nativePath/routingIdentity y devolvia la
+	-- clasificacion del probe efimero (por ejemplo solo "Mobiliario").
+	local remoteIdentity = rowContext or (remoteContext and remoteContext.row)
+		or (remote and remote.ok == true and remote) or nil
 
-	-- Linea(s) de categoria detectada por nuestro motor de 3 niveles (misma
-	-- fuente unica que Almacen/Nodos/GS_Router.lua) - a peticion del usuario,
-	-- para poder ver de un vistazo que categoria/sub/detalle le asignamos a
-	-- un item SIN tener que abrir el editor de nodos. UNA LINEA POR NIVEL (no
-	-- concatenado con " - "): la caja de ancho fijo truncaba igual una unica
-	-- linea larga, perdiendo la jerarquia.
+	-- La categoria se presenta una sola vez en la fila/proyeccion comun. El
+	-- tooltip remoto conserva datos propios de la unidad, pero no recompone ni
+	-- duplica taxonomia: evita otra fuente visual y no puede degradar L1/L2/L3.
 	local lines = {}
-	local resolved = remoteIdentity and GlobalStorageSiK.CategoryResolution
-		and GlobalStorageSiK.CategoryResolution.resolve(remoteIdentity) or getCachedCategory(fullType)
-	if resolved then
-		if resolved.effective == "native" then
-			local path = GlobalStorageSiK.NativeProduct.decodePath(resolved.nativePath)
-			local view = path and GlobalStorageSiK.NativeProduct.getView(path) or nil
-			if view and view.l1Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", view.l1Label) end
-			if view and view.l2Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipSub", view.l2Label) end
-			if view and view.l3Label then lines[#lines + 1] = T("IGUI_GS_CategoryTooltipLeaf", view.l3Label) end
-		else
-			lines[#lines + 1] = T("IGUI_GS_CategoryTooltipMain", GlobalStorageSiK.CategoryResolution.label(resolved))
-		end
-	end
 
 	-- mediaTitle (2026-08-26, fix de agrupacion de VHS): si el item bajo el
 	-- raton es una cinta VHS/radio con contenido concreto, contar SOLO cintas
@@ -746,40 +659,14 @@ local function buildTooltipBlocks(item)
 
 	-- Las filas padre usan la misma sonda vanilla con contexto agregado. Las
 	-- filas hija adjuntan, bajo demanda, el snapshot exacto recibido del
-	-- servidor. Este bloque complementa DoTooltip; nunca lo sustituye.
-	if remote and remote.ok == true then
-		local exactLines = {}
-		-- Un probe VHS ya se localiza en cliente con
-		-- setRecordedMediaIndexInteger(); no repetir aqui el titulo traducido en
-		-- el idioma del proceso servidor.
-		if remote.mediaIndex == nil and remote.displayName and remote.displayName ~= "" then
-			exactLines[#exactLines + 1] = tostring(remote.displayName)
-		end
-		if type(remote.weight) == "number" then
-			exactLines[#exactLines + 1] = T("IGUI_GS_DetailWeight", string.format("%.2f", remote.weight))
-		end
-		if type(remote.condition) == "number" and type(remote.conditionMax) == "number" then
-			exactLines[#exactLines + 1] = T("IGUI_GS_FilterModeLabel") .. " "
-				.. tostring(remote.condition) .. "/" .. tostring(remote.conditionMax)
-		end
-		if type(remote.dynamicPercent) == "number" then
-			exactLines[#exactLines + 1] = tostring(remote.dynamicPercent) .. "%"
-		end
-		if remote.fluidType and type(remote.fluidAmount) == "number"
-			and type(remote.fluidCapacity) == "number" then
-			exactLines[#exactLines + 1] = T("IGUI_GS_DetailFluid",
-				tostring(remote.fluidType), string.format("%.2f", remote.fluidAmount),
-				string.format("%.2f", remote.fluidCapacity))
-		end
-		if #exactLines > 0 then
-			blocks[#blocks + 1] = { lines = exactLines, color = { 0.55, 0.85, 1, 1.0 } }
-		end
-	end
-
-	-- Bloque de skills VHS, SEPARADO del resto de informacion (a peticion del
-	-- usuario) - propio color para distinguirlo a simple vista.
+	-- servidor. El peso/estado/fluido ya los dibuja DoTooltip vanilla: no crear
+	-- un segundo anexo azul oportunista debajo del bloque SiK aceptado. El detalle
+	-- remoto se conserva solo como fuente de identidad y para VHS concretos.
+	-- Solo VHS: los libros ya describen en DoTooltip vanilla su habilidad y
+	-- rango, por lo que repetirlo en el anexo SiK añade ruido sin informacion.
+	-- La formacion de una cinta si es dato propio de su media concreta.
 	local skillLines = remote and remote.ok == true and getRemoteVHSTrainingLines(remote)
-		or (not remoteIdentity and getSkillTrainingLines(item)) or nil
+		or (not remoteIdentity and getVHSTrainingLines(item)) or nil
 	if skillLines and #skillLines > 0 then
 		blocks[#blocks + 1] = { lines = skillLines, color = { 0.55, 0.85, 1, 1.0 } }
 	end
@@ -937,7 +824,7 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		end
 		pcall(function()
 			if self.item and self.isVisible and self:isVisible() then
-				local blocks = buildTooltipBlocks(self.item)
+				local blocks = buildTooltipBlocks(self.item, self._gsRemoteRow)
 				local baseH = self.height
 				local neededW, extensionH = extensionMetrics(blocks, self.width)
 				-- Medir ANTES de fijar posicion. Si el rectangulo completo no cabe

@@ -522,17 +522,26 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "itemDetails" then
 		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}
-		local activeState = GlobalStorageSiK.Client.cachedTerminalState
+		-- Durante una transferencia visible puede diferirse la sustitucion del
+		-- snapshot global. La ventana abierta es la autoridad para decidir si
+		-- esta pagina de instancias pertenece a SU revision; el cache global es
+		-- solo el fallback cuando no hay terminal visible.
+		local visibleTerminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local activeState = visibleTerminal and visibleTerminal.terminalState
+			or GlobalStorageSiK.Client.cachedTerminalState
 		local sameNetwork = not activeState or not args or not args.networkId
 			or activeState.networkId == args.networkId
 		local sameRevision = not activeState or not args or args.inventoryRevision == nil
 			or activeState.inventoryRevision == args.inventoryRevision
-		if args and args.rowKey and sameNetwork and sameRevision then
+		local accepted = args and args.rowKey and sameNetwork and sameRevision
+		if accepted then
 			storeBounded(GlobalStorageSiK.Client.itemDetailsCache, itemDetailsOrder,
 				args.rowKey, args, MAX_ITEM_DETAIL_PAGES)
 		end
 		if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onDetailsReceived then
-			GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
+			-- Una respuesta stale no puede limpiar pending ni reconstruir la lista:
+			-- hacerlo reabre la misma consulta bajo demanda en un bucle de frames.
+			GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted == true)
 		end
 	elseif command == "itemTooltipDetail" then
 		if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.onReceived then

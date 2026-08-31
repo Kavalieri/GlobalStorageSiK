@@ -76,10 +76,16 @@ sourceFile:close()
 local tooltipStart = assert(source:find("%-%- Tooltip al pasar", 1))
 local tooltipEnd = assert(source:find("row%.onRemoteItemDetail", tooltipStart))
 local tooltipBlock = source:sub(tooltipStart, tooltipEnd - 1)
-assert(tooltipBlock:find("if data and not data._gsPager and not data._gsStale and self:isMouseOver()", 1, true) ~= nil,
-	"aggregated parent is excluded from the tooltip lifecycle")
+assert(source:find("local function pointerInsideRow(row)", 1, true) ~= nil,
+	"row hover does not use the real pointer/row rectangle")
+assert(tooltipBlock:find("if data and not data._gsPager and not data._gsStale and hovering", 1, true) ~= nil,
+	"ordinary parent/child tooltip lifecycle is not driven by passive row hover")
+assert(tooltipBlock:find("self:isMouseOver()", 1, true) == nil,
+	"tooltip lifecycle still depends on child-panel hit-testing")
 assert(tooltipBlock:find("aggregateAllowed", 1, true) == nil,
 	"tooltip lifecycle still gates aggregate parents")
+assert(tooltipBlock:find("TerminalItems.makePassiveTooltip(self._gsTooltip)", 1, true) ~= nil,
+	"row tooltip is not made mouse-transparent")
 assert(tooltipBlock:find('if data._gsRowKind == "child" then', 1, true) ~= nil
 	and tooltipBlock:find("RemoteItemDetail.activate(self, data, self.terminal)", 1, true) ~= nil,
 	"child hover is not wired to exact remote detail")

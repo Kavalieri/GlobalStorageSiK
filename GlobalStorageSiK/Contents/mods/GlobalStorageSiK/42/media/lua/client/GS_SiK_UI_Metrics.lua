@@ -8,6 +8,7 @@ require "GS_SiK_UI_Core"
 GlobalStorageSiK.SiK_UI.Metrics = GlobalStorageSiK.SiK_UI.Metrics or {}
 
 local Metrics = GlobalStorageSiK.SiK_UI.Metrics
+local CHROME = GlobalStorageSiK.SiK_UI.windowChrome()
 
 local TOKENS = {
 	space4 = 4,
@@ -17,7 +18,7 @@ local TOKENS = {
 	space16 = 16,
 	spacing = { 4, 6, 8, 12, 16 },
 	safeMargin = 16,
-	windowPadding = 14,
+	windowPadding = CHROME.horizontalPadding,
 	blockPaddingX = 8,
 	blockPaddingY = 8,
 	scrollBarWidth = 14,
@@ -33,42 +34,19 @@ local TOKENS = {
 }
 
 local PROFILES = {
-	compact = {
-		name = "compact", minWidth = 0, minHeight = 0,
+	-- El terminal tiene una sola geometria. El viewport solo lo centra y limita;
+	-- no elige una segunda interfaz ni cambia rail, iconos, margenes o controles.
+	terminal = {
+		name = "terminal",
 		window = {
-			preferredWidth = 900, preferredHeight = 600,
+			preferredWidth = 1600, preferredHeight = 900,
 			minWidth = 720, minHeight = 480,
-			maxWidth = 900, maxHeight = 700,
-			railWidth = 76, railItemHeight = 60, railIconSize = 44,
-			railPadding = 6, railGap = 4,
-			headerHeight = 48, footerHeight = 48,
-			headerCloseSize = 28, headerGap = 12,
-		},
-		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
-	},
-	standard = {
-		name = "standard", minWidth = 900, minHeight = 700,
-		window = {
-			preferredWidth = 1100, preferredHeight = 700,
-			minWidth = 720, minHeight = 480,
-			maxWidth = 1200, maxHeight = 800,
-			railWidth = 96, railItemHeight = 68, railIconSize = 52,
-			railPadding = 8, railGap = 4,
-			headerHeight = 48, footerHeight = 48,
-			headerCloseSize = 28, headerGap = 12,
-		},
-		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
-	},
-	wide = {
-		name = "wide", minWidth = 1400, minHeight = 800,
-		window = {
-			preferredWidth = 1280, preferredHeight = 800,
-			minWidth = 720, minHeight = 480,
-			maxWidth = 1320, maxHeight = 840,
-			railWidth = 104, railItemHeight = 68, railIconSize = 52,
-			railPadding = 8, railGap = 4,
-			headerHeight = 48, footerHeight = 48,
-			headerCloseSize = 28, headerGap = 12,
+			railWidth = 104, railItemHeight = 76, railIconSize = 68,
+			railPadding = 0, railGap = 0, railSlotInset = 0,
+			headerHeight = CHROME.headerHeight,
+			-- El pie del terminal solo muestra la línea de versiones. Su altura se
+			-- calcula desde la fuente y el padding del perfil; no hay reserva fija.
+			footerMinimumHeight = 0, footerLines = 1, footerPaddingY = 12, footerLineGap = 0,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 8, controlGap = 6 },
 	},
@@ -78,7 +56,7 @@ local PROFILES = {
 			preferredWidth = 860, preferredHeight = 640,
 			minWidth = 600, minHeight = 460,
 			maxWidth = 1000, maxHeight = 800,
-			railWidth = 0, headerHeight = 40, footerHeight = 24,
+			railWidth = 0, headerHeight = CHROME.headerHeight, footerHeight = 24,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
 	},
@@ -88,7 +66,7 @@ local PROFILES = {
 			preferredWidth = 1000, preferredHeight = 720,
 			minWidth = 720, minHeight = 520,
 			maxWidth = 1200, maxHeight = 860,
-			railWidth = 0, headerHeight = 40, footerHeight = 24,
+			railWidth = 0, headerHeight = CHROME.headerHeight, footerHeight = 24,
 		},
 		controls = { buttonHeight = 30, inputHeight = 30, rowGap = 6, controlGap = 6 },
 	},
@@ -121,20 +99,16 @@ function Metrics.tokens()
 end
 
 function Metrics.profile(name)
-	local selected = PROFILES[tostring(name or "standard")] or PROFILES.standard
+	local requested = tostring(name or "terminal")
+	if requested == "compact" or requested == "standard" or requested == "wide" then
+		requested = "terminal"
+	end
+	local selected = PROFILES[requested] or PROFILES.terminal
 	return copyMap(selected)
 end
 
-function Metrics.profileFor(usableW, usableH)
-	usableW = math.max(0, tonumber(usableW) or 0)
-	usableH = math.max(0, tonumber(usableH) or 0)
-	if usableW >= PROFILES.wide.minWidth and usableH >= PROFILES.wide.minHeight then
-		return "wide"
-	end
-	if usableW < PROFILES.standard.minWidth or usableH < PROFILES.standard.minHeight then
-		return "compact"
-	end
-	return "standard"
+function Metrics.profileFor(_usableW, _usableH)
+	return "terminal"
 end
 
 function Metrics.spacing(index)
@@ -145,6 +119,31 @@ function Metrics.spacing(index)
 	return TOKENS.space8
 end
 
+-- El pie del terminal contiene una única línea de versiones. Su reserva nace
+-- de la métrica de fuente disponible y del padding del perfil, sin un alto
+-- visual fijo que deje espacio vacío al cambiar escala UI.
+function Metrics.footerLayout(profileName, reservedHeight)
+	local window = Metrics.profile(profileName).window or {}
+	local lines = math.max(1, math.floor(tonumber(window.footerLines) or 1))
+	local fontH = 14
+	if getTextManager then
+		local manager = getTextManager()
+		if manager and manager.getFontHeight then
+			fontH = math.max(fontH, tonumber(manager:getFontHeight(UIFont.Small)) or fontH)
+		end
+	end
+	local paddingY = math.max(0, tonumber(window.footerPaddingY) or 0)
+	local lineGap = math.max(0, tonumber(window.footerLineGap) or 0)
+	local measured = lines * fontH + math.max(0, lines - 1) * lineGap + paddingY * 2
+	local height = math.max(tonumber(window.footerMinimumHeight) or 0, math.ceil(measured))
+	if reservedHeight then height = math.max(height, tonumber(reservedHeight) or 0) end
+	return { height = height, lineHeight = fontH, lineGap = lineGap, paddingY = paddingY }
+end
+
+function Metrics.footerHeight(profileName)
+	return Metrics.footerLayout(profileName).height
+end
+
 --- Fuente unica de rectangulos del shell. Los consumidores reciben estas
 --- cajas resueltas y no vuelven a restar cabecera, rail ni pie localmente.
 function Metrics.shellRects(profileName, width, height, blocked)
@@ -153,7 +152,7 @@ function Metrics.shellRects(profileName, width, height, blocked)
 	local w = math.max(0, math.floor(tonumber(width) or 0))
 	local h = math.max(0, math.floor(tonumber(height) or 0))
 	local headerH = math.min(h, window.headerHeight or 0)
-	local footerH = math.min(math.max(0, h - headerH), window.footerHeight or 0)
+	local footerH = math.min(math.max(0, h - headerH), Metrics.footerHeight(profileName))
 	local railW = blocked and 0 or math.min(w, window.railWidth or 0)
 	local bodyH = math.max(0, h - headerH - footerH)
 	return {
@@ -173,8 +172,9 @@ function Metrics.headerRects(profileName, width, padding)
 	local window = profile.window
 	local w = math.max(0, math.floor(tonumber(width) or 0))
 	local pad = math.max(0, math.floor(tonumber(padding) or TOKENS.windowPadding))
-	local gap = math.max(0, math.floor(window.headerGap or TOKENS.space12))
-	local closeW = math.min(window.headerCloseSize or 28, math.max(0, w - pad * 2))
+	local chrome = GlobalStorageSiK.SiK_UI.windowChrome()
+	local gap = math.max(0, math.floor(chrome.titleCloseGap or TOKENS.space12))
+	local closeW = math.min(chrome.closeButtonSize, math.max(0, w - pad * 2))
 	local closeX = math.max(pad, w - pad - closeW)
 	return {
 		title = { x = pad, y = 0, w = math.max(0, closeX - gap - pad),

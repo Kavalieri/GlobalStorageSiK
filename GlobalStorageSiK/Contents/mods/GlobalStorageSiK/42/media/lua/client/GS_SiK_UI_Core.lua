@@ -58,6 +58,39 @@ GlobalStorageSiK.SiK_UI.PALETTE = {
 	divider   = { 0.18, 0.18, 0.22 },
 }
 
+--- Chrome unico de SiK UI. Terminal, editores y modales consumen esta misma
+--- especificacion: ninguna superficie decide localmente su cabecera o X.
+--- Los valores se ajustan una vez aqui y son deliberadamente configurables.
+GlobalStorageSiK.SiK_UI.CHROME = GlobalStorageSiK.SiK_UI.CHROME or {
+        -- Token único para terminales, editores y modales. El cierre conserva
+        -- el tamaño de las ventanas SiK ya aprobadas; el terminal no reduce el
+        -- chrome para ganar contenido.
+        headerHeight = 52,
+        closeButtonSize = 40,
+        horizontalPadding = 14,
+        titleCloseGap = 12,
+}
+
+--- Contrato visual único de la envolvente de una ventana SiK.
+--- Los separadores de secciones no son bordes de la ventana: permanecen
+--- desactivados para que cabecera y pie no creen bandas horizontales. El
+--- contorno exterior, incluido el trazo superior, se pinta una única vez al
+--- final del prerender por renderWindowFrame().
+GlobalStorageSiK.SiK_UI.WINDOW_FRAME = GlobalStorageSiK.SiK_UI.WINDOW_FRAME or {
+	borderAlpha = 0.58,
+	topBorderAlpha = 0.82,
+	sectionDividerAlpha = 0,
+	footerDividerAlpha = 0,
+}
+
+function GlobalStorageSiK.SiK_UI.windowChrome()
+        return GlobalStorageSiK.SiK_UI.CHROME
+end
+
+function GlobalStorageSiK.SiK_UI.windowFrame()
+	return GlobalStorageSiK.SiK_UI.WINDOW_FRAME
+end
+
 -- Recursos propios del framework SiK_UI. Los PNG runtime son copias 64x64
 -- optimizadas; los maestros de 1254x1254 permanecen fuera del paquete en
 -- Resources/source. Un unico resolver evita rutas repetidas y permite que
@@ -965,19 +998,19 @@ function GlobalStorageSiK.SiK_UI.createCloseButton(parent, target, onClose, size
 		onClose = GlobalStorageSiK.UIDebug.wrapClick("btn:close", onClose)
 	end
 	if parent.closeBtn then
-		parent:removeChild(parent.closeBtn)
-		if parent.closeBtn.removeFromUIManager then
-			parent.closeBtn:removeFromUIManager()
-		end
-		parent.closeBtn = nil
+		-- El chrome es propiedad unica del panel. Reutilizar el boton ya hijo evita
+		-- que removeFromUIManager convierta un cierre anterior en una UI flotante.
+		return parent.closeBtn
 	end
-	local closeSize = size or math.max(getTextManager():getFontHeight(UIFont.Medium), 24)
+        local chrome = GlobalStorageSiK.SiK_UI.windowChrome()
+        local closeSize = size or chrome.closeButtonSize
 	local closeIcon = GlobalStorageSiK.SiK_UI.getIconTexture("close")
 	local btn = GlobalStorageSiK.SiK_UI.createIconButton(-1000, -1000, closeSize, closeIcon, target, onClose)
 	if btn then
 		btn:setActive(true)
 		btn:setActiveColor(0.8, 0.2, 0.2)
 		parent:addChild(btn)
+		btn._gsCloseOwner = parent
 		parent.closeBtn = btn
 		return btn
 	end
@@ -995,8 +1028,41 @@ function GlobalStorageSiK.SiK_UI.createCloseButton(parent, target, onClose, size
 		}, 0, 0)
 	end
 	parent:addChild(btn)
+	btn._gsCloseOwner = parent
 	parent.closeBtn = btn
 	return btn
+end
+
+--- Actualiza el ancho de layout de un botón. Es la única vía para controles
+--- `fullWidth`: el prerender vuelve a consultar `_sikUiMaxW`, por lo que
+--- cambiar solo `setWidth()` se perdía en el siguiente frame tras resize.
+---@param btn ISButton|nil
+---@param width number
+function GlobalStorageSiK.SiK_UI.setButtonLayoutWidth(btn, width)
+	if not btn then return end
+	width = math.max(1, math.floor(tonumber(width) or 1))
+	if btn._sikUiFullWidth then
+		btn._sikUiMaxW = width
+	end
+	if btn.width ~= width then
+		btn:setWidth(width)
+	end
+end
+
+--- Libera el chrome que pertenece a un panel antes de retirarlo del
+--- UIManager. PZ no elimina siempre los hijos registrados en una ronda
+--- anterior; dejar el botón como raíz producía la X flotante observada al
+--- cerrar/reabrir un editor.
+---@param panel ISPanel|nil
+function GlobalStorageSiK.SiK_UI.disposeWindowChrome(panel)
+	if not panel then return end
+	local btn = panel.closeBtn
+	panel.closeBtn = nil
+	if not btn then return end
+	btn:setVisible(false)
+	if btn.setCapture then btn:setCapture(false) end
+	if panel.removeChild then panel:removeChild(btn) end
+	if btn.removeFromUIManager then btn:removeFromUIManager() end
 end
 
 --- Crea el panel de peso/capacidad SiK UI.
@@ -1037,18 +1103,27 @@ end
 ---@param panel ISPanel
 function GlobalStorageSiK.SiK_UI.renderPanelBackground(panel)
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local frame = GlobalStorageSiK.SiK_UI.windowFrame()
 	local headerH = panel.headerHeight or 0
 	local bodyH = math.max(0, panel.height - headerH)
 	panel:drawRect(0, headerH, panel.width, bodyH, 0.96, pal.bgBody[1], pal.bgBody[2], pal.bgBody[3])
 	panel:drawRect(0, 0, panel.width, headerH, 0.98, pal.bgHeader[1], pal.bgHeader[2], pal.bgHeader[3])
-	panel:drawRect(0, headerH - 1, panel.width, 1, 1, 0, 0, 0)
-	panel:drawRect(0, headerH, panel.width, 1, 0.45, pal.accentLine[1], pal.accentLine[2], pal.accentLine[3])
+	if frame.sectionDividerAlpha > 0 then
+		panel:drawRect(0, headerH, panel.width, 1, frame.sectionDividerAlpha,
+			pal.accentLine[1], pal.accentLine[2], pal.accentLine[3])
+	end
 end
 
 local function resolveHeaderRects(panel)
 	if panel._sikHeaderRects then return panel._sikHeaderRects end
 	return GlobalStorageSiK.SiK_UI.Metrics.headerRects(
 		panel._sikWindowProfile or "standard", panel.width, panel.padding or 8)
+end
+
+--- Rectangulos de cabecera compartidos por terminal, editor y modal. Ningun
+--- consumidor calcula a mano la reserva de titulo, X o sus margenes.
+function GlobalStorageSiK.SiK_UI.headerRects(panel)
+	return resolveHeaderRects(panel)
 end
 
 --- Cabecera de la ventana bloqueada (texto blanco, icono GS opcional).
@@ -1065,11 +1140,27 @@ function GlobalStorageSiK.SiK_UI.renderBlockedHeader(panel)
 	end
 end
 
---- Dibuja la cabecera SiK UI con icono GS y titulo legible.
+--- Presentación viva y reutilizable del vínculo de la sesión actual.
+--- No solicita ni inventa estado: consume exclusivamente terminalState.
+---@param state table|nil
+---@return string label
+---@return table color
+function GlobalStorageSiK.SiK_UI.connectionPresentation(state)
+	state = state or {}
+	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	if state.networkId == nil or tostring(state.networkId) == "" then
+		return T("IGUI_GS_AccessTerminalUnlinked"), pal.statusDanger
+	end
+	if state.powered == false then
+		return T("IGUI_GS_PowerOff"), pal.statusWarn
+	end
+	return T("IGUI_GS_Connected"), pal.statusOk
+end
+
+--- Dibuja la cabecera SiK UI con identidad de red y estado vivo legible.
 ---@param panel GS_TerminalUI
 function GlobalStorageSiK.SiK_UI.renderHeader(panel)
 	local rects = resolveHeaderRects(panel)
-	local textX = rects.title.x
 	local state = panel.terminalState or {}
 	local title = state.networkName
 	if type(title) ~= "string" or title == "" then
@@ -1085,17 +1176,32 @@ function GlobalStorageSiK.SiK_UI.renderHeader(panel)
 	local font = UIFont.Medium
 	local tm = getTextManager()
 	local titleY = math.floor((panel.headerHeight - tm:getFontHeight(font)) / 2)
-	local visibleTitle = GlobalStorageSiK.SiK_UI.truncateText(title, rects.title.w, font)
-	panel:drawText(visibleTitle, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
-	panel:drawText(visibleTitle, textX, titleY, 1, 1, 1, 1, font)
+	-- La identidad de la red se compone una sola vez: estado y nombre viven en
+	-- la cabecera. El pie queda reservado exclusivamente a las versiones.
+	local dotSize, dotGap = 6, 8
+	local statusLabel, statusColor = GlobalStorageSiK.SiK_UI.connectionPresentation(state)
+	local suffix = " | " .. statusLabel
+	local suffixW = tm:MeasureStringX(font, suffix)
+	local textX = rects.title.x + dotSize + dotGap
+	local titleW = math.max(0, rects.title.w - dotSize - dotGap - suffixW)
+	local visibleTitle = GlobalStorageSiK.SiK_UI.truncateText(title, titleW, font)
+	local headerText = visibleTitle .. suffix
+	local dotY = titleY + math.floor((tm:getFontHeight(font) - dotSize) / 2)
+	panel:drawRect(rects.title.x, dotY, dotSize, dotSize, 1,
+		statusColor[1], statusColor[2], statusColor[3])
+	panel:drawText(headerText, textX + 1, titleY + 1, 0, 0, 0, 0.55, font)
+	panel:drawText(headerText, textX, titleY, 1, 1, 1, 1, font)
 end
 
---- Marco exterior se dibuja al final del prerender para que footer y chrome
---- no tapen sus cuatro lados durante resize.
+--- Marco exterior se dibuja en la fase final render para que hijos, footer y
+--- chrome no tapen sus cuatro lados durante resize.
 function GlobalStorageSiK.SiK_UI.renderWindowFrame(panel)
 	local border = GlobalStorageSiK.SiK_UI.PALETTE.border
+	local frame = GlobalStorageSiK.SiK_UI.windowFrame()
 	panel:drawRectBorder(0, 0, panel.width, panel.height,
-		1, border[1], border[2], border[3])
+		frame.borderAlpha, border[1], border[2], border[3])
+	panel:drawRect(0, 0, panel.width, 1,
+		frame.topBorderAlpha, border[1], border[2], border[3])
 end
 
 function GlobalStorageSiK.SiK_UI.runtimeVersionText()
@@ -1146,15 +1252,14 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 		footerX = panel.tabRail.width or 0
 	end
 	local footerW = math.max(0, panel.width - footerX)
-	local networkId = state and state.networkId or ""
-	local netName = state and state.networkName or ""
-	local label = netName ~= "" and netName or networkId
 	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	local dotSize = 6
-	local connected = T("IGUI_GS_Connected")
 	local versions = panel._sikRuntimeVersionText or GlobalStorageSiK.SiK_UI.runtimeVersionText()
 	local tm = getTextManager()
 	local pad = panel.padding or 8
+        local footerLayout = GlobalStorageSiK.SiK_UI.Metrics.footerLayout(
+                panel._sikWindowProfile or panel.layoutProfile or "standard", panel.statusFooterHeight)
+	local footerPadY = footerLayout.paddingY
+        local lineH = footerLayout.lineHeight
 	local versionsW = tm:MeasureStringX(UIFont.Small, versions)
 	-- En compacto se puede recuperar el ancho ocupado por el rail para mantener
 	-- la cadena de versiones completa; nunca se trunca ni se envuelve.
@@ -1163,29 +1268,16 @@ function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)
 		footerW = panel.width
 	end
 	panel:drawRect(footerX, y, footerW, panel.statusFooterHeight, 0.85, 0.08, 0.08, 0.08)
-	panel:drawRect(footerX, y, footerW, 1, 0.7, 0.28, 0.28, 0.28)
-	local innerW = math.max(0, footerW - pad * 2)
-	local prefix = connected
-	if label ~= "" then prefix = connected .. " | " end
-	local prefixW = tm:MeasureStringX(UIFont.Small, prefix)
-	local labelMaxW = math.max(0, innerW - dotSize - 8 - prefixW)
-	local visibleLabel = label ~= ""
-		and GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small) or ""
-	local statusText = prefix .. visibleLabel
-	local statusW = tm:MeasureStringX(UIFont.Small, statusText)
-	local statusGroupW = dotSize + 8 + statusW
-	local dotX = footerX + math.max(pad, math.floor((footerW - statusGroupW) / 2))
-	local firstLineY = y + math.max(2,
-		math.floor((panel.statusFooterHeight / 2 - FONT_HGT_SMALL) / 2))
-	local dotY = firstLineY + math.floor((FONT_HGT_SMALL - dotSize) / 2)
-	panel:drawRect(dotX, dotY, dotSize, dotSize, 1,
-		pal.statusOk[1], pal.statusOk[2], pal.statusOk[3])
-	panel:drawText(statusText, dotX + dotSize + 8, firstLineY,
-		pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small)
+	local frame = GlobalStorageSiK.SiK_UI.windowFrame()
+	if frame.footerDividerAlpha > 0 then
+		panel:drawRect(footerX, y, footerW, 1, frame.footerDividerAlpha,
+			0.28, 0.28, 0.28)
+	end
 	local versionsX = footerX + math.max(pad,
 		math.min(math.floor((footerW - versionsW) / 2), footerW - pad - versionsW))
-	local secondLineY = y + math.floor(panel.statusFooterHeight / 2)
-	panel:drawText(versions, versionsX, secondLineY,
+	local versionsY = y + math.max(footerPadY,
+		math.floor((panel.statusFooterHeight - lineH) / 2))
+	panel:drawText(versions, versionsX, versionsY,
 		pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
 end
 
@@ -1196,7 +1288,9 @@ function GlobalStorageSiK.SiK_UI.setupHeaderDrag(panel)
 	panel.moving = false
 
 	panel.onMouseDown = function(self, x, y)
-		if y >= 0 and y < self.headerHeight and x < self.width - (self.closeBtn and self.closeBtn.width or 40) then
+		local rects = GlobalStorageSiK.SiK_UI.headerRects(self)
+		local closeX = rects and rects.close and rects.close.x or self.width
+		if y >= 0 and y < self.headerHeight and x < closeX then
 			self.moving = true
 			self:setCapture(true)
 			return true
@@ -1676,11 +1770,18 @@ function GlobalStorageSiK.SiK_UI.layoutModalFrame(panel, pad)
 	if not panel then
 		return
 	end
-	pad = pad or panel.padding or 8
+	local chrome = GlobalStorageSiK.SiK_UI.windowChrome()
+	panel.headerHeight = chrome.headerHeight
+	pad = pad or panel.padding or chrome.horizontalPadding
+	panel.padding = pad
+	panel._sikHeaderRects = GlobalStorageSiK.SiK_UI.Metrics.headerRects(
+		panel._sikWindowProfile or "terminal", panel.width, pad)
 	if panel.closeBtn then
-		local sz = panel.closeBtn.width or 24
-		panel.closeBtn:setX(panel.width - pad - sz)
-		panel.closeBtn:setY(math.max(2, math.floor(((panel.headerHeight or sz) - sz) / 2)))
+		local rect = panel._sikHeaderRects.close
+		panel.closeBtn:setX(rect.x)
+		panel.closeBtn:setY(rect.y)
+		panel.closeBtn:setWidth(rect.w)
+		panel.closeBtn:setHeight(rect.h)
 		panel.closeBtn:bringToTop()
 	end
 end

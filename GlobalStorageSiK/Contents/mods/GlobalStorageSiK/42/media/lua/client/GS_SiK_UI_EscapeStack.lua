@@ -119,11 +119,15 @@ function EscapeStack.install(panel, onClose, priority)
 	local previousIsKeyConsumed = panel.isKeyConsumed
 	local previousSetVisible = panel.setVisible
 	local previousRemove = panel.removeFromUIManager
-	panel.isKeyConsumed = function(self, key)
-		local escapeKey = Keyboard and Keyboard.KEY_ESCAPE or 1
-		if key == escapeKey and EscapeStack.isTop(self) then
-			return true
-		end
+        panel.isKeyConsumed = function(self, key)
+                local escapeKey = Keyboard and Keyboard.KEY_ESCAPE or 1
+                -- El cierre puede retirar esta última capa de la pila antes de
+                -- que PZ consulte isKeyConsumed para la MISMA pulsación. Conservar
+                -- el consumo hasta el release evita que Escape cierre SiK y abra
+                -- inmediatamente el menú vanilla.
+                if key == escapeKey and (self._sikEscapeHandledOnPress or EscapeStack.isTop(self)) then
+                        return true
+                end
 		if previousIsKeyConsumed then return previousIsKeyConsumed(self, key) end
 		return false
 	end

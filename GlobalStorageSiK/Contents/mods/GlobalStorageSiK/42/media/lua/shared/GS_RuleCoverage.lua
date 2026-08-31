@@ -1,11 +1,11 @@
 --[[
-	GlobalStorageSiK - cobertura exclusiva de protocolos de rutas
+        GlobalStorageSiK - compatibilidad de protocolos de rutas
 
-	Las reservas se calculan sobre hojas nativas, nunca comparando textos. Una
-	ruta completa puede conservarse cuando algunas de sus ramas ya pertenecen a
-	otro destino: la regla nueva guarda esas ramas como exclusiones explícitas.
-	AND/NOT no se convierten aquí en reservas simples: su conjunto efectivo
-	depende de condiciones adicionales y no debe ocultar una categoría entera.
+        Las reglas de aceptación no son reservas globales: la misma categoría o
+        ítem puede configurarse en varios destinos. El Router aplica después la
+        prioridad de zona, prioridad de contenedor, afinidad y desempate estable.
+        Se conserva esta fachada para mundos que aún cargan el módulo, pero no crea
+        exclusiones ni rechaza una regla por existir en otro destino.
 ]]
 
 require "GS_NativeProduct"
@@ -115,16 +115,7 @@ end
 ---@param rules table[]|nil
 ---@return boolean
 function GlobalStorageSiK.RuleCoverage.isExactItemAvailable(fullType, rules)
-	if not fullType or fullType == "" then return false end
-	for i = 1, #(rules or {}) do
-		local rule = rules[i]
-		local condition = rule and rule.condition
-		if rule and rule.op == "OR" and condition and condition.type == "item"
-			and condition.itemType == fullType then
-			return false
-		end
-	end
-	return true
+	return fullType ~= nil and fullType ~= ""
 end
 
 ---@param rule table|nil
@@ -133,17 +124,9 @@ end
 ---@return string|nil reason
 function GlobalStorageSiK.RuleCoverage.prepareNewRule(rule, scopeRules)
 	local condition = rule and rule.condition
-	if not rule or rule.op ~= "OR" or not condition then return true, nil end
-	if condition.type == "item" then
-		return GlobalStorageSiK.RuleCoverage.isExactItemAvailable(condition.itemType, scopeRules), "item_reserved"
-	end
-	if condition.type ~= "category" then return true, nil end
-	local path = condition.nativePath or condition.value
-	if not GlobalStorageSiK.NativeProduct.decodePath(path) then return true, nil end
-	local availability = GlobalStorageSiK.RuleCoverage.categoryAvailability(path, scopeRules)
-	if availability.total == 0 or availability.available == 0 then
-		return false, "category_reserved"
-	end
-	condition.coverageExclusions = availability.excludedLeaves
+	-- Retirar los datos heredados de la antigua reserva exclusiva antes de
+	-- persistir la regla. `scopeRules` se mantiene en la firma por compatibilidad
+	-- con los llamadores de servidor y de transferencia de configuración.
+	if condition then condition.coverageExclusions = nil end
 	return true, nil
 end

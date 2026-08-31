@@ -33,18 +33,19 @@ if tokensFn then
 end
 
 if profileFn then
-	Support.check(suite, "compact standard wide profiles are complete and monotonic", function()
+	Support.check(suite, "terminal uses one canonical geometry across legacy profile names", function()
 		local compact = profileFn("compact")
 		local standard = profileFn("standard")
 		local wide = profileFn("wide")
-		assert(type(compact) == "table" and compact.name == "compact", "compact profile")
-		assert(type(standard) == "table" and standard.name == "standard", "standard profile")
-		assert(type(wide) == "table" and wide.name == "wide", "wide profile")
-		assert(compact.minWidth < standard.minWidth, "compact before standard")
-		assert(standard.minWidth < wide.minWidth, "standard before wide")
+		assert(type(compact) == "table" and compact.name == "terminal", "compact alias")
+		assert(type(standard) == "table" and standard.name == "terminal", "standard alias")
+		assert(type(wide) == "table" and wide.name == "terminal", "wide alias")
 		for _, profile in ipairs({ compact, standard, wide }) do
-			assert(type(profile.window) == "table", profile.name .. " window metrics")
-			assert(type(profile.controls) == "table", profile.name .. " control metrics")
+			assert(type(profile.window) == "table", "terminal window metrics")
+			assert(type(profile.controls) == "table", "terminal control metrics")
+			assert(profile.window.preferredWidth == compact.window.preferredWidth
+				and profile.window.preferredHeight == compact.window.preferredHeight,
+				"legacy alias selected a second terminal geometry")
 		end
 		return true
 	end)
@@ -65,8 +66,7 @@ if viewportFn then
 		assert(viewport.x == 976 and viewport.y == 16, "safe origin belongs to player 1")
 		assert(viewport.w == 928 and viewport.h == 1048, "safe inset applies on every edge")
 		assert(viewport.playerNum == 1, "player identity retained")
-		assert(viewport.profile == "standard" or viewport.profile == "compact"
-			or viewport.profile == "wide", "known responsive profile")
+		assert(viewport.profile == "terminal", "viewport selected a second terminal geometry")
 		return true
 	end)
 

@@ -311,11 +311,11 @@ local function nodeStatusInfo(node)
 		return { key = "disabled", label = T("IGUI_GS_NodeStatusDisabled"),
 			detail = T("IGUI_GS_NodeStatusDisabledTip"), r = 0.92, g = 0.75, b = 0.35 }
 	end
-	if node.membership == "auto" and node.discoveredAtMs and node.lastSeenMs
-		and node.discoveredAtMs == node.lastSeenMs then
-		return { key = "new", label = T("IGUI_GS_NodeStatusNew"),
-			detail = T("IGUI_GS_NodeStatusNewTip"), r = 0.45, g = 0.7, b = 0.95 }
-	end
+	-- "Nuevo" era una marca de primer escaneo (discoveredAtMs == lastSeenMs),
+	-- no una incidencia ni una acción pendiente. En una red existente llenaba
+	-- la columna sin aportar una decisión al jugador. Los añadidos ya se
+	-- comunican en el resumen del reescaneo; la tabla solo reserva estados para
+	-- situaciones que requieren atención o una elección explícita.
 	return { key = "ok", label = T("IGUI_GS_NodeStatusOk"), r = 0.45, g = 0.85, b = 0.45 }
 end
 
@@ -1149,17 +1149,17 @@ function GlobalStorageSiK.TerminalNodes.repositionZoneCreateButtons(scroll, ui, 
 	if ui.nodesRoomZoneBtn then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesRoomZoneBtn, pad)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesRoomZoneBtn, y)
-		ui.nodesRoomZoneBtn._sikUiMaxW = btnW
+		GlobalStorageSiK.SiK_UI.setButtonLayoutWidth(ui.nodesRoomZoneBtn, btnW)
 	end
 	if ui.nodesStructureZoneBtn then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesStructureZoneBtn, pad + btnW + gap)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesStructureZoneBtn, y)
-		ui.nodesStructureZoneBtn._sikUiMaxW = btnW
+		GlobalStorageSiK.SiK_UI.setButtonLayoutWidth(ui.nodesStructureZoneBtn, btnW)
 	end
 	if ui.nodesSelectZoneBtn then
 		GlobalStorageSiK.TerminalScroll.setContentX(scroll, ui.nodesSelectZoneBtn, pad + (btnW + gap) * 2)
 		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesSelectZoneBtn, y)
-		ui.nodesSelectZoneBtn._sikUiMaxW = btnW
+		GlobalStorageSiK.SiK_UI.setButtonLayoutWidth(ui.nodesSelectZoneBtn, btnW)
 	end
 	return y + btnH + 10
 end

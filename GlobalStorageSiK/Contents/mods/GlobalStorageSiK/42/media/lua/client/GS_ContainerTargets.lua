@@ -7,6 +7,7 @@
 
 require "GS_DepositSources"
 require "GS_I18n"
+require "GS_UIDebug"
 
 require "ISUI/ISContextMenu"
 
@@ -39,50 +40,178 @@ end
 ---@param y number
 ---@param element ISUIElement|nil
 ---@return ISInventoryPane|nil
+local function effectiveVisible(element)
+	if not element then return false end
+	local current = element
+	while current do
+		if current.isVisible and not current:isVisible() then return false end
+		current = current.parent
+	end
+	return true
+end
+
+local function debugDropTarget(message)
+	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.log then
+		GlobalStorageSiK.UIDebug.log("WithdrawDrop", message)
+	end
+end
+
+--- Busca de arriba a abajo: el último hijo dibujado es el que está visualmente
+--- encima. El pane devuelto siempre está visible en toda su cadena de padres.
+--- Itera colecciones Lua y ArrayList de PZ sin asumir el operador #. UIManager
+--- usa listas Java en varias builds: usar #children hacia que el hit-test no
+--- descendiese nunca a los ISInventoryPane vanilla durante un drag.
+local function visitChildrenReverse(element, visit)
+        local children = element and (element.childrenInOrder or element.children)
+        if not children then return nil end
+	if children.size and children.get then
+		for i = children:size() - 1, 0, -1 do
+			local found = visit(children:get(i))
+			if found then return found end
+		end
+		return nil
+	end
+	if type(children) == "table" then
+		for i = #children, 1, -1 do
+			local found = visit(children[i])
+			if found then return found end
+		end
+	end
+        return nil
+end
+
+local function isInventoryPane(element)
+        if not element then return false end
+        return element.Type == "ISInventoryPane"
+                or (element.inventory ~= nil and element.items ~= nil
+                        and element.inventoryPane == nil)
+end
+
+local function paneContainsPoint(pane, x, y)
+        if not pane or not pane.getAbsoluteX or not pane.getAbsoluteY then return false end
+        local ax, ay = pane:getAbsoluteX(), pane:getAbsoluteY()
+        local w = pane.width or (pane.getWidth and pane:getWidth()) or 0
+        local h = pane.height or (pane.getHeight and pane:getHeight()) or 0
+        return x >= ax and y >= ay and x < ax + w and y < ay + h
+end
+
 local function findInventoryPaneAt(x, y, element)
 	if not element or (element.isVisible and not element:isVisible()) then
 		return nil
 	end
-	if element.Type == "ISInventoryPane" then
-		local ax = element:getAbsoluteX()
-		local ay = element:getAbsoluteY()
-		local w = element.width or element:getWidth()
-		local h = element.height or element:getHeight()
-		if x >= ax and y >= ay and x < ax + w and y < ay + h then
-			return element
-		end
-	end
-	-- childrenInOrder es el array real de PZ (children es hash por ID, #=0)
-	local children = element.childrenInOrder
-	if children then
-		for i = 1, #children do
-			local found = findInventoryPaneAt(x, y, children[i])
-			if found then
-				return found
-			end
-		end
+	-- childrenInOrder es el array real de PZ; recorrerlo al revés preserva el
+	-- hit-test de la superficie superior cuando hay panes solapados.
+	local child = visitChildrenReverse(element, function(candidate)
+		return findInventoryPaneAt(x, y, candidate)
+	end)
+	if child then return child end
+	if isInventoryPane(element) and effectiveVisible(element) and paneContainsPoint(element, x, y) then
+		return element
 	end
 	return nil
 end
 
 --- Panel de inventario bajo el ratón.
 ---@return ISInventoryPane|nil
-function GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
+function GlobalStorageSiK.ContainerTargets.findPaneAtMouse(diagnostic, player, playerNum)
 	local mx, my = getMouseX(), getMouseY()
-	if not UIManager or not UIManager.getUI then
-		return nil
+	local uiList = UIManager and UIManager.getUI and UIManager:getUI() or nil
+	-- UIManager puede no exponer el árbol completo en todos los layouts de
+	-- inventario/mods. No abortar: el fallback por página sigue siendo una
+	-- comprobación geométrica real y no una suposición de destino.
+	local found = visitChildrenReverse({ children = uiList }, function(root)
+		return findInventoryPaneAt(mx, my, root)
+	end)
+	if found then return found end
+	-- La página de inventario puede no figurar como raíz de UIManager según el
+	-- layout/mod de inventario. Es un fallback de hit-test real, no una decisión
+	-- de destino: solo se acepta un pane que contiene el puntero.
+	local active = GlobalStorageSiK.ContainerTargets.findActivePaneAtMouse(player, mx, my, playerNum)
+	if active then return active end
+	if diagnostic then debugDropTarget("pane=nil") end
+	return nil
+end
+
+local function findPaneOnPageAtMouse(page, mx, my)
+	if not page then return nil end
+	-- En B42 el loot de vehiculo puede vivir bajo un contenedor intermedio de la
+	-- pagina y no en page.lootPane. Recorrer la pagina completa conserva el orden
+	-- visual y alcanza maleteros/containers de mods sin adivinar su campo.
+	local nested = findInventoryPaneAt(mx, my, page)
+	if nested then return nested end
+	-- Mantener el orden de dibujo base; el recorrido inverso de abajo elige el
+	-- pane superpuesto más alto (loot sobre inventario cuando un mod los solapa).
+	local candidates = { page.inventoryPane, page.lootPane }
+	if page.backpacks then
+		visitChildrenReverse({ children = page.backpacks }, function(pane)
+			candidates[#candidates + 1] = pane
+			return nil
+		end)
 	end
-	local uiList = UIManager:getUI()
-	if not uiList then
-		return nil
+	-- B42 registra los inventarios de vehiculo en paneList en algunos layouts;
+	-- no siempre cuelgan de lootPane ni del arbol children de la pagina.
+	if page.paneList and page.paneList.size and page.paneList.get then
+		for i = page.paneList:size() - 1, 0, -1 do
+			candidates[#candidates + 1] = page.paneList:get(i)
+		end
 	end
-	for i = 0, uiList:size() - 1 do
-		local found = findInventoryPaneAt(mx, my, uiList:get(i))
-		if found then
-			return found
+	-- El orden inverso elige el backpack/panel dibujado por encima.
+	for i = #candidates, 1, -1 do
+		local pane = candidates[i]
+		local nestedPane = findInventoryPaneAt(mx, my, pane)
+		if nestedPane then return nestedPane end
+		if pane and effectiveVisible(pane) and paneContainsPoint(pane, mx, my) then
+			return pane
+		end
+		-- Algunos panes vanilla de vehiculo delegan su rectangulo al host. El
+		-- hit-test propio conserva la semantica vanilla sin aceptar un pane fuera
+		-- del puntero.
+		if pane and effectiveVisible(pane)
+			and ((pane.isMouseOver and pane:isMouseOver())
+				or (pane.isPointOver and pane:isPointOver(mx, my))) then
+			return pane
 		end
 	end
 	return nil
+end
+
+function GlobalStorageSiK.ContainerTargets.findActivePaneAtMouse(player, mx, my, playerNum)
+	-- El drag conserva playerNum aunque el objeto Lua del jugador no este
+	-- disponible durante la captura. El inventario/loot sigue perteneciendo a
+	-- ese viewport y no debe descartarse antes del hit-test geometrico.
+	if playerNum == nil then
+		playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	end
+	local pages, seen = {}, {}
+	local function addPage(page)
+		if page and not seen[page] then
+			seen[page] = true
+			pages[#pages + 1] = page
+		end
+	end
+	if getPlayerInventory then
+		local ok, result = pcall(getPlayerInventory, playerNum)
+		if ok then addPage(result) end
+	end
+	-- El maletero B42 puede residir en una pagina de loot distinta de la pagina
+	-- de inventario. Depositar hacia ese panel ya funcionaba porque vanilla lo
+	-- conoce; el drag SiK no lo recorria y terminaba en pane=nil antes de enviar.
+	if getPlayerLoot then
+		local ok, result = pcall(getPlayerLoot, playerNum)
+		if ok then addPage(result) end
+	end
+	if ISInventoryPage and ISInventoryPage.players then
+		addPage(ISInventoryPage.players[playerNum])
+	end
+	for i = #pages, 1, -1 do
+		local pane = findPaneOnPageAtMouse(pages[i], mx, my)
+		if pane then return pane end
+	end
+	return nil
+end
+
+function GlobalStorageSiK.ContainerTargets.debugDropTarget(message)
+	debugDropTarget(message)
 end
 
 --- Comprueba si el contenedor puede recibir extracciones.
@@ -224,7 +353,8 @@ function GlobalStorageSiK.ContainerTargets.resolveWithdrawTarget(player)
 		return sessionTargets[player]
 	end
 
-	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse(nil, player, playerNum)
 	if not pane then
 		pane = GlobalStorageSiK.ContainerTargets.findActivePane(player)
 	end

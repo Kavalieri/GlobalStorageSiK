@@ -495,6 +495,13 @@ local function installVirtualListApi(scroll, itemHeight, padding)
 				end
 				row:setVisible(true)
 			else
+				-- Una fila virtual fuera del rango deja de representar cualquier
+				-- item. Notificar el unbind antes de ocultarla evita conservar hover,
+				-- tooltip o captura de una identidad que pertenecia a una expansion
+				-- anterior y que puede volver a la pantalla en otro slot del pool.
+				if type(self.onUpdateItem) == "function" then
+					self.onUpdateItem(row, nil, nil)
+				end
 				row.rowIndex = nil
 				row:setVisible(false)
 			end

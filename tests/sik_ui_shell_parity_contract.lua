@@ -146,6 +146,13 @@ Support.check(suite, "terminal delegates Escape exclusively to the per-player st
 	return true
 end)
 
+Support.check(suite, "wheel never leaks from a visible SiK window to world zoom", function()
+	contains(windowSource, "if handled == true then return true end",
+		"wheel capture forwards an unhandled false to world zoom")
+	contains(windowSource, "return true\n\tend", "wheel capture does not consume the fallback")
+	return true
+end)
+
 Support.check(suite, "blocked and full modes reuse the same terminal shell", function()
 	contains(api, "getInstanceForPlayer(playerNum)",
 		"blocked API does not route the shared shell by local player")
@@ -168,10 +175,10 @@ Support.check(suite, "close move and resize remember geometry per local player",
 	return true
 end)
 
-Support.check(suite, "terminal shell inventory declares all responsive variants", function()
+Support.check(suite, "terminal shell inventory declares one responsive contract", function()
 	contains(terminal, 'SurfaceInventory.get("terminal-shell")', "surface lookup")
 	contains(terminal, 'id = "terminal-shell"', "surface ID")
-	contains(terminal, 'variants = { "compact", "standard", "wide" }', "surface variants")
+	contains(terminal, 'variants = { "terminal" }', "surface variant")
 	return true
 end)
 
@@ -184,19 +191,28 @@ Support.check(suite, "header owns only title and fixed close rects", function()
 	contains(header, "state.networkName", "header must consume authoritative network display name")
 	contains(header, "state.networkId ~= nil", "linked network fallback must remain distinct from unlinked terminal")
 	contains(header, 'T("IGUI_GS_TerminalTitle")', "unlinked terminal fallback")
-	contains(header, "truncateText(title, rects.title.w", "dynamic network name must be clipped to title rect")
+	contains(header, "truncateText(title, titleW", "dynamic network name must be clipped to title rect")
 	contains(header, "resolveHeaderRects(panel)", "header bypasses its measured title rect")
 	contains(terminal, "self._sikHeaderRects.close", "close button bypasses fixed rect")
 	contains(terminal, "renderWindowFrame(self)", "frame is not restored after footer chrome")
 	return true
 end)
 
-Support.check(suite, "Connected footer key exists in English and Spanish", function()
+Support.check(suite, "Connected header key exists in English and Spanish", function()
 	local en = read(SHARED .. "Translate/EN/IG_UI.json")
 	local es = read(SHARED .. "Translate/ES/IG_UI.json")
+	local header = section(core, "function GlobalStorageSiK.SiK_UI.renderHeader(panel)",
+		"function GlobalStorageSiK.SiK_UI.runtimeVersionText()")
 	contains(en, '"IGUI_GS_Connected": "Connected"', "English Connected key")
 	contains(es, '"IGUI_GS_Connected": "Conectado"', "Spanish Connected key")
-	contains(core, 'T("IGUI_GS_Connected")', "footer consumes Connected key")
+	contains(header, "connectionPresentation(state)", "header bypasses shared live connection presentation")
+	contains(core, 'T("IGUI_GS_Connected")', "shared connection presentation consumes Connected key")
+	contains(core, 'T("IGUI_GS_PowerOff")', "shared connection presentation must expose no-power state")
+	contains(core, 'T("IGUI_GS_AccessTerminalUnlinked")', "shared connection presentation must expose unlinked state")
+	local footer = section(core, "function GlobalStorageSiK.SiK_UI.renderStatusFooter(panel, state)",
+		"function GlobalStorageSiK.SiK_UI.setupHeaderDrag(panel)")
+	excludes(footer, "networkName", "footer duplicates network identity")
+	excludes(footer, "IGUI_GS_Connected", "footer duplicates connection state")
 	return true
 end)
 
@@ -213,54 +229,62 @@ local Viewport = ui.Viewport
 local Window = ui.Window
 local Inventory = ui.SurfaceInventory
 
-Support.check(suite, "compact standard wide rails and shell chrome are canonical", function()
-	local expected = {
-		compact = { rail = 76, item = 60, icon = 44 },
-		standard = { rail = 96, item = 68, icon = 52 },
-		wide = { rail = 104, item = 68, icon = 52 },
-	}
-	for name, values in pairs(expected) do
-		local profile = Metrics.profile(name)
-		assert(profile.window.railWidth == values.rail, name .. " rail width")
-		assert(profile.window.railItemHeight == values.item, name .. " item height")
-		assert(profile.window.railIconSize == values.icon, name .. " rail icon size")
-		assert(profile.window.railGap == 4, name .. " rail gap")
-		assert(profile.window.headerHeight == 48, name .. " header height")
-		assert(profile.window.footerHeight == 48, name .. " footer height")
-	end
+Support.check(suite, "terminal footer height is measured from its visible version line", function()
+	local profile = Metrics.profile("terminal")
+	local layout = Metrics.footerLayout("terminal")
+	assert(profile.window.footerLines == 1, "terminal footer must have exactly one visible line")
+	assert(profile.window.footerMinimumHeight == 0, "terminal footer must not keep a fixed height reservation")
+	assert(layout.height == layout.lineHeight + layout.paddingY * 2,
+		"terminal footer height must derive only from font metric and profile padding")
+	return true
+end)
+
+Support.check(suite, "terminal has one canonical rail and shell chrome", function()
+	local profile = Metrics.profile("terminal")
+	assert(profile.window.railWidth == 104, "terminal rail width")
+	assert(profile.window.railItemHeight == 76, "terminal item height")
+	assert(profile.window.railIconSize == 68, "terminal rail icon size")
+	assert(profile.window.railGap == 0 and profile.window.railPadding == 0, "terminal rail fill")
+	assert(profile.window.headerHeight == 48, "terminal header height")
+	assert(Metrics.footerHeight("terminal") < 64, "terminal footer retains obsolete fixed reservation")
 	assert(Metrics.tokens().resizeHandle == 24, "shared resize handle")
 	contains(controlsSource, "resizeHandle = SiK_UI.Metrics.tokens().resizeHandle",
 		"Controls duplicates the resize handle instead of consuming Metrics")
-	contains(terminal, "SiK_UI.Metrics.tokens().resizeHandle",
-		"terminal duplicates the resize handle instead of consuming Metrics")
+	excludes(terminal, "resizeEdgeAt(me", "terminal accepts resize from a full edge")
+	contains(terminal, "Window.hitTestResizeHandle(me, x, y)",
+		"terminal bypasses the shared corner hitbox")
+	contains(terminal, "Window.renderResizeHandle(self,",
+		"terminal draws its resize grip instead of using Window chrome")
 	return true
 end)
 
 Support.check(suite, "shell rectangles and bidirectional resize share one geometry owner", function()
-	local boxes = Metrics.shellRects("standard", 1100, 700, false)
-	assert(boxes.header.h == 48 and boxes.footer.h == 48, "shell chrome rects")
-	assert(boxes.rail.w == 96 and boxes.content.x == 96, "rail/content axis")
-	assert(boxes.content.h == 604 and boxes.footer.y == 652, "body/footer partition")
+	local boxes = Metrics.shellRects("terminal", 1100, 700, false)
+	local footerH = Metrics.footerHeight("terminal")
+        assert(boxes.header.h == 48 and boxes.footer.h == footerH, "shell chrome rects")
+	assert(boxes.rail.w == 104 and boxes.content.x == 104, "rail/content axis")
+        assert(boxes.content.h == 700 - 48 - footerH and boxes.footer.y == 700 - footerH,
+                "body/footer partition")
 	local panel = {
 		x = 100, y = 100, width = 720, height = 480, playerNum = 0,
-		_sikWindowProfile = "standard", minimumWidth = 720, minimumHeight = 480,
+		_sikWindowProfile = "terminal", minimumWidth = 720, minimumHeight = 480,
 		maximumWidth = 1168, maximumHeight = 868,
 	}
 	assert(Window.resizeEdgeAt(panel, 1, 1, Metrics.tokens().resizeHandle) == "top-left",
 		"top-left handle")
 	assert(Window.resizeEdgeAt(panel, 719, 240, Metrics.tokens().resizeHandle) == "right",
 		"right handle")
-	local viewport = { x = 16, y = 16, w = 1168, h = 868, profile = "standard", playerNum = 0 }
+	assert(Window.hitTestResizeHandle(panel, 1, 1) == nil,
+		"terminal resize handle must not activate an outer edge")
+	assert(Window.hitTestResizeHandle(panel, 719, 479) == "bottom-right",
+		"terminal resize handle must activate only the common corner")
+	local viewport = { x = 16, y = 16, w = 1168, h = 868, profile = "terminal", playerNum = 0 }
 	local grown = Window.resizeDelta(panel, "bottom-right", 300, 200, viewport)
 	assert(grown.w == 1020 and grown.h == 680, "resize does not grow")
 	Support.assertWithin(grown, viewport, "bidirectional resize")
-	for _, case in ipairs({
-		{ profile = "compact", width = 720 },
-		{ profile = "standard", width = 1100 },
-		{ profile = "wide", width = 1280 },
-	}) do
+	for _, case in ipairs({ { profile = "terminal", width = 720 }, { profile = "terminal", width = 1600 } }) do
 		local header = Metrics.headerRects(case.profile, case.width, 14)
-		assert(header.close.w == 28 and header.close.h == 28, case.profile .. " fixed close")
+		assert(header.close.w == 36 and header.close.h == 36, case.profile .. " fixed close")
 		assert(header.close.x + header.close.w == case.width - 14, case.profile .. " right margin")
 		assert(header.title.x + header.title.w + header.gap <= header.close.x,
 			case.profile .. " title overlaps close")
@@ -290,11 +314,11 @@ Support.check(suite, "footer reports Core and active addon versions only in runt
 	return true
 end)
 
-Support.check(suite, "raw local-player viewports select profiles and reserve safe16", function()
+Support.check(suite, "raw local-player viewports select one terminal contract and reserve safe16", function()
 	local cases = {
-		{ raw = { x = 0, y = 0, w = 800, h = 600 }, profile = "compact" },
-		{ raw = { x = 100, y = 40, w = 1280, h = 720 }, profile = "standard" },
-		{ raw = { x = 1600, y = 0, w = 1600, h = 900 }, profile = "wide" },
+		{ raw = { x = 0, y = 0, w = 800, h = 600 } },
+		{ raw = { x = 100, y = 40, w = 1280, h = 720 } },
+		{ raw = { x = 1600, y = 0, w = 1600, h = 900 } },
 	}
 	for index, case in ipairs(cases) do
 		local playerNum = index + 2
@@ -306,21 +330,19 @@ Support.check(suite, "raw local-player viewports select profiles and reserve saf
 				return case.raw
 			end,
 		})
-		assert(viewport.x == case.raw.x + 16 and viewport.y == case.raw.y + 16,
-			case.profile .. " safe origin")
-		assert(viewport.w == case.raw.w - 32 and viewport.h == case.raw.h - 32,
-			case.profile .. " safe size")
-		assert(viewport.profile == case.profile, case.profile .. " breakpoint")
-		assert(viewport.playerNum == playerNum, case.profile .. " player identity")
+		assert(viewport.x == case.raw.x + 16 and viewport.y == case.raw.y + 16, "safe origin")
+		assert(viewport.w == case.raw.w - 32 and viewport.h == case.raw.h - 32, "safe size")
+		assert(viewport.profile == "terminal", "terminal contract")
+		assert(viewport.playerNum == playerNum, "player identity")
 	end
 	return true
 end)
 
 Support.check(suite, "window minima degrade inside every player viewport", function()
 	local viewports = {
-		{ x = 16, y = 16, w = 368, h = 248, profile = "compact", playerNum = 0 },
-		{ x = 976, y = 16, w = 928, h = 1048, profile = "standard", playerNum = 1 },
-		{ x = 16, y = 16, w = 1568, h = 868, profile = "wide", playerNum = 2 },
+		{ x = 16, y = 16, w = 368, h = 248, profile = "terminal", playerNum = 0 },
+		{ x = 976, y = 16, w = 928, h = 1048, profile = "terminal", playerNum = 1 },
+		{ x = 16, y = 16, w = 1568, h = 868, profile = "terminal", playerNum = 2 },
 	}
 	for _, viewport in ipairs(viewports) do
 		local rect = Window.resolveProfile(viewport.profile, viewport, {
@@ -332,9 +354,22 @@ Support.check(suite, "window minima degrade inside every player viewport", funct
 	return true
 end)
 
+Support.check(suite, "terminal preferred size is a safe preference at 1080p and never exceeds smaller viewports", function()
+	local fullHD = { x = 16, y = 16, w = 1888, h = 1048, profile = "terminal", playerNum = 0 }
+	local preferred = Window.resolveProfile("terminal", fullHD, nil)
+	assert(preferred.w == 1600 and preferred.h == 900, "1080p must retain the approved preferred terminal size")
+	Support.assertWithin(preferred, fullHD, "1080p preferred terminal")
+
+	local smaller = { x = 16, y = 16, w = 1248, h = 688, profile = "terminal", playerNum = 0 }
+	local constrained = Window.resolveProfile("terminal", smaller, nil)
+	assert(constrained.w == smaller.w and constrained.h == smaller.h,
+		"smaller viewport must constrain the shell instead of selecting a second layout")
+	Support.assertWithin(constrained, smaller, "smaller preferred terminal")
+end)
+
 Support.check(suite, "arbitrary resize rectangles clamp to the exact safe player viewport", function()
 	local viewport = { x = 816, y = 16, w = 768, h = 868,
-		profile = "compact", playerNum = 3 }
+		profile = "terminal", playerNum = 3 }
 	local cases = {
 		{ x = -900, y = -700, w = 2400, h = 1600 },
 		{ x = 4000, y = 2200, w = 32, h = 24 },
@@ -342,7 +377,7 @@ Support.check(suite, "arbitrary resize rectangles clamp to the exact safe player
 	}
 	for i = 1, #cases do
 		local raw = cases[i]
-		raw.profile, raw.playerNum = "compact", 3
+		raw.profile, raw.playerNum = "terminal", 3
 		local clamped = Window.clampRect(raw, viewport)
 		Support.assertWithin(clamped, viewport, "resize case " .. tostring(i))
 		assert(clamped.playerNum == 3, "resize lost local player identity")
@@ -356,7 +391,7 @@ Support.check(suite, "remembered shell geometry is isolated and clamped per play
 	local function panel(x, y, w, h, playerNum)
 		return {
 			playerNum = playerNum,
-			_sikWindowProfile = "standard",
+			_sikWindowProfile = "terminal",
 			getX = function() return x end,
 			getY = function() return y end,
 			getWidth = function() return w end,
@@ -365,8 +400,8 @@ Support.check(suite, "remembered shell geometry is isolated and clamped per play
 	end
 	Window.remember(panel(-500, -500, 1000, 700, 0), "terminal-shell", 0)
 	Window.remember(panel(1800, 200, 760, 560, 1), "terminal-shell", 1)
-	local v0 = { x = 16, y = 16, w = 928, h = 688, profile = "standard", playerNum = 0 }
-	local v1 = { x = 976, y = 16, w = 928, h = 688, profile = "standard", playerNum = 1 }
+	local v0 = { x = 16, y = 16, w = 928, h = 688, profile = "terminal", playerNum = 0 }
+	local v1 = { x = 976, y = 16, w = 928, h = 688, profile = "terminal", playerNum = 1 }
 	local r0 = Window.recall("terminal-shell", 0, v0)
 	local r1 = Window.recall("terminal-shell", 1, v1)
 	Support.assertWithin(r0, v0, "player 0 recalled shell")
@@ -383,13 +418,12 @@ Support.check(suite, "runtime surface inventory returns the terminal shell varia
 	if not Inventory.get("terminal-shell") then
 		Inventory.register({ id = "terminal-shell", pack = "terminal-contenedor",
 			owner = "GS_TerminalUI", parent = "UIManager",
-			variants = { "compact", "standard", "wide" } })
+			variants = { "terminal" } })
 	end
 	local surface = Inventory.get("terminal-shell")
 	assert(surface and surface.id == "terminal-shell", "terminal shell not inventoried")
-	assert(#surface.variants == 3, "terminal shell variants incomplete")
-	assert(surface.variants[1] == "compact" and surface.variants[2] == "standard"
-		and surface.variants[3] == "wide", "terminal shell variant order")
+	assert(#surface.variants == 1 and surface.variants[1] == "terminal",
+		"terminal shell variant contract")
 	return true
 end)
 

@@ -62,6 +62,12 @@ GlobalStorageSiK.CategoryResolution = {
 			effective = encoded and "native" or "vanilla", categoryEffective = encoded and "native" or "vanilla",
 			routingIdentity = encoded or "vanilla:Container", vanillaKey = "Container" }
 	end,
+	presentation = function(fullType, row, liveItem, knownInstancePath)
+		local resolution = GlobalStorageSiK.CategoryResolution.resolve(fullType, row, liveItem,
+			knownInstancePath)
+		return { resolution = resolution, nativePath = resolution.nativePath,
+			labels = { full = GlobalStorageSiK.CategoryResolution.label(resolution) }, color = nil }
+	end,
 	label = function(resolution)
 		return resolution and resolution.effective == "variants" and "Varias categorías"
 			or tostring(resolution and resolution.nativePath or "Container")
@@ -152,13 +158,25 @@ index = GlobalStorageSiK.NativeProduct.buildIndex({ repeated })
 assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, fuel) == 1,
 	"shared index duplicated a mixed parent for a repeated nativePath")
 
+-- El payload de una fila sin variantes puede contener `nativePaths = {}` por
+-- compatibilidad de serialización. El filtro L1/L2/L3 debe indexar entonces
+-- su única `nativePath`, igual que la fila presentada en la tabla.
+local singular = {
+	fullType = "Base.WaterBottleFull",
+	nativePath = "native:containers/liquid/water",
+	nativePaths = {},
+}
+index = GlobalStorageSiK.NativeProduct.buildIndex({ singular })
+assert(#GlobalStorageSiK.NativeProduct.rowsForPath(index, singular.nativePath) == 1,
+	"empty nativePaths hid a unique native route from category filters")
+
 -- Load only the public filtering surface with lightweight UI dependencies.
 for _, name in ipairs({
 	"ISUI/ISPanel", "ISUI/ISLabel", "ISUI/ISContextMenu", "GS_Libs", "GS_BulkFilters",
 	"GS_DepositSources", "GS_TerminalWithdrawDrag", "GS_WithdrawMenu", "GS_QuantityPrompt",
 	"GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight", "GS_ContainerTargets",
 	"GS_TerminalUI_Scroll", "GS_SiK_UI_Table", "GS_SiK_UI_Core", "GS_ItemNetworkTooltip",
-	"GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail",
+	"GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail", "GS_UIDebug",
 }) do
 	package.loaded[name] = true
 end

@@ -22,7 +22,6 @@ require "GS_NetClient"
 require "GS_NodeHighlight"
 require "GS_NodeFilters"
 require "GS_RulesUI"
-require "GS_RuleCoverage"
 require "GS_FilterEditor"
 require "GS_TerminalUI_ZoneEditor"
 require "GS_CompatMods"
@@ -111,11 +110,7 @@ function GS_NodeEditorUI:createChildren()
     -- guard para construir una sola vez (evita elementos huérfanos duplicados).
 	if self._gsChildrenBuilt then return end
 	self._gsChildrenBuilt = true
-	if not self.closeBtn then
-		self.closeBtn = GlobalStorageSiK.SiK_UI.createCloseButton(self, self, function()
-			GlobalStorageSiK.TerminalNodeEditor.close()
-		end)
-	end
+	-- SiK_UI.Window.applyEditor() posee el chrome compartido; no duplicarlo.
 end
 
 --- Actualiza título de ventana con el nombre del nodo en red.
@@ -682,17 +677,6 @@ function GS_NodeEditorUI:ensureForm()
 	-- cuando de verdad llegue la sugerencia (ver mas abajo en este fichero).
 	self._sugCardMissingData = not sugKey
 	if sugKey and sugKey ~= "" then
-		local scopeRules = {}
-		local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
-		for i = 1, #nodes do
-			local sibling = nodes[i]
-			if sibling.id ~= self.node.id and sibling.zoneId == self.node.zoneId then
-				for j = 1, #(sibling.rules or {}) do
-					scopeRules[#scopeRules + 1] = sibling.rules[j]
-				end
-			end
-		end
-		local suggestedAvailability = GlobalStorageSiK.RuleCoverage.categoryAvailability(sugKey, scopeRules)
 		local alreadyPresent = false
 		for _, rule in ipairs(self.node.rules or {}) do
 			if rule.condition and rule.condition.type == "category" then
@@ -706,7 +690,7 @@ function GS_NodeEditorUI:ensureForm()
 				end
 			end
 		end
-		if not alreadyPresent and suggestedAvailability.available > 0 then
+		if not alreadyPresent then
 			-- Rediseño (2026-08-25, protocolo de aceptación §07, "Categoría
 			-- sugerida"): pasa de etiqueta+botón sueltos a una tarjeta más,
 			-- la PRIMERA del bloque de reglas (justo encima de OR) - mismo
@@ -1459,6 +1443,7 @@ function GlobalStorageSiK.TerminalNodeEditor.close()
 	end
 	GlobalStorageSiK.SiK_UI.Window.remember(ui, "nodeEditor")
 	ui:setVisible(false)
+	GlobalStorageSiK.SiK_UI.disposeWindowChrome(ui)
 	ui:removeFromUIManager()
 	GlobalStorageSiK.TerminalNodeEditor.instance = nil
 	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then

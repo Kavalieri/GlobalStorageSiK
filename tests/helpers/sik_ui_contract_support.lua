@@ -66,8 +66,19 @@ function Support.loadClientModule(suite, moduleName)
 		Support.blocked(suite, moduleName, "module not implemented")
 		return false
 	end
-	GlobalStorageSiK = GlobalStorageSiK or {}
-	GlobalStorageSiK.SiK_UI = GlobalStorageSiK.SiK_UI or {}
+        GlobalStorageSiK = GlobalStorageSiK or {}
+        GlobalStorageSiK.SiK_UI = GlobalStorageSiK.SiK_UI or {}
+        -- Metrics consumes the framework-owned WindowChrome token.  The pure
+        -- harness stubs Core, so it supplies the same public accessor rather
+        -- than allowing a module-local geometry fallback.
+        GlobalStorageSiK.SiK_UI.CHROME = GlobalStorageSiK.SiK_UI.CHROME or {
+                headerHeight = 48,
+                closeButtonSize = 36,
+                horizontalPadding = 14,
+                titleCloseGap = 12,
+        }
+        GlobalStorageSiK.SiK_UI.windowChrome = GlobalStorageSiK.SiK_UI.windowChrome
+                or function() return GlobalStorageSiK.SiK_UI.CHROME end
 	-- Foundation modules may keep their normal PZ requires. The geometry APIs
 	-- exercised here are pure, so loading them only needs dependency sentinels;
 	-- no game object is instantiated and no PZ runtime is simulated.

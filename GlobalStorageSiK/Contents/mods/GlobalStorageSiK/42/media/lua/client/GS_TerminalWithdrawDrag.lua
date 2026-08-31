@@ -255,21 +255,15 @@ end
 
 local function normalizeVisualRows(rows, payloadRows, fallback)
 	rows = rows and #rows > 0 and rows or { fallback }
-	local selected, selectedParents = {}, {}
-	for i = 1, #payloadRows do
-		local row = payloadRows[i]
-		local key = rowIdentity(row)
-		if key then selected[key] = true end
-		if key and row._gsRowKind == "parent" then selectedParents[key] = true end
-	end
 	local out, seen = {}, {}
 	for i = 1, #rows do
 		local row = rows[i]
 		local key = rowIdentity(row)
-		local coveredChild = row and row._gsRowKind == "child" and row.parentRowKey
-			and selectedParents[row.parentRowKey]
-		if row and not row._gsPager and key and not seen[key]
-			and (selected[key] or coveredChild) then
+		-- La lista visual ya fue compuesta por buildDragState(): al arrastrar
+		-- una cabecera desplegada contiene deliberadamente padre + hijos. Filtrar
+		-- contra el payload (que solo lleva hijos exactos) eliminaba la cabecera
+		-- del ghost y hacia parecer que se movia otra seleccion.
+		if row and not row._gsPager and key and not seen[key] then
 			seen[key] = true
 			out[#out + 1] = row
 		end
@@ -290,17 +284,19 @@ end
 ---@param sourceWidget ISPanel|nil
 function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRows, visualRows, sourceWidget)
 	if not rowData or not rowData.fullType then return false end
-	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel() end
+	-- Un nuevo drag nunca hereda ghost/captura/Escape de una selección anterior.
+	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel("replaced") end
 	payloadRows = normalizePayloadRows(payloadRows, rowData)
 	visualRows = normalizeVisualRows(visualRows, payloadRows, rowData)
 	local captureOwner = sourceWidget and sourceWidget.terminal or nil
-	activeDrag = {
+        activeDrag = {
 		payloadRows = payloadRows,
 		visualRows = visualRows,
 		rowData = rowData,
 		amount = amount or 1,
-		sourceWidget = sourceWidget,
-		captureOwner = captureOwner,
+                sourceWidget = sourceWidget,
+                captureOwner = captureOwner,
+                playerNum = (captureOwner and captureOwner.playerNum) or 0,
 	}
 	-- La captura empieza solo al superar el umbral. Así el origen recibe el
 	-- mouseUp aunque el cursor ya este sobre ISInventoryPane/loot vanilla.
@@ -312,8 +308,12 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 		GlobalStorageSiK.RemoteItemDetail.deactivate(sourceWidget)
 	end
 	if sourceWidget and sourceWidget._gsTooltip then
-		sourceWidget._gsTooltip:removeFromUIManager()
-		sourceWidget._gsTooltip:setVisible(false)
+		if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.hideRowTooltip then
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(sourceWidget)
+		else
+			sourceWidget._gsTooltip:removeFromUIManager()
+			sourceWidget._gsTooltip:setVisible(false)
+		end
 	end
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = rowData
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes = {}
@@ -349,8 +349,16 @@ local function clearDrag(cancelReason)
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreview = nil
 	GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes = nil
 	destroyPreview()
-	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onInteractionFinished then
-		GlobalStorageSiK.TerminalItems.onInteractionFinished(source and source.listPanel or nil)
+	if GlobalStorageSiK.TerminalItems then
+		-- El pool puede haberse reciclado mientras la retirada esperaba respuesta.
+		-- Limpiar primero todos sus estados visuales y solo después permitir el
+		-- refresco aplazado impide que una fila inferior herede hover/tooltip.
+		if GlobalStorageSiK.TerminalItems.resetVirtualInteraction then
+			GlobalStorageSiK.TerminalItems.resetVirtualInteraction(source and source.listPanel or nil)
+		end
+		if GlobalStorageSiK.TerminalItems.onInteractionFinished then
+			GlobalStorageSiK.TerminalItems.onInteractionFinished(source and source.listPanel or nil)
+		end
 	end
 	if cancelReason then
 		logCancelled(cancelReason)
@@ -365,21 +373,42 @@ end
 
 function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	if not activeDrag then return false end
-	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
-	if not pane then return false end
+        local drag = activeDrag
+	local player = GlobalStorageSiK.NetClient.getPlayer(drag.playerNum)
+	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, drag.playerNum)
+	if not pane then
+		clearDrag("pane=nil")
+		return false
+	end
 	local container = GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
-	if not container then return false end
-	local player = GlobalStorageSiK.NetClient.getPlayer()
-	if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
+	if not container then
+		GlobalStorageSiK.ContainerTargets.debugDropTarget("container=nil")
+		clearDrag("container=nil")
+		return false
+	end
+        if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
+		GlobalStorageSiK.ContainerTargets.debugDropTarget("accessDenied")
+		clearDrag("accessDenied")
 		return false
 	end
 	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
-	if not key then return false end
-	local drag = activeDrag
-	clearDrag(nil)
+	if not key then
+		GlobalStorageSiK.ContainerTargets.debugDropTarget("key=nil")
+		clearDrag("key=nil")
+		return false
+	end
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
 	local rows = drag.payloadRows or { drag.rowData }
+	clearDrag(nil)
+	-- La cabecera sigue siendo el grupo completo, esté expandida o no. Cuando
+	-- el servidor exige selección exacta, el resolver recorre TODAS las páginas
+	-- de esa cabecera antes de encolar sus IDs en micro-lotes; nunca usa la
+	-- página visible como payload. Un hijo ya trae su ID y no se difiere.
+	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.deferExactWithdraw
+		and GlobalStorageSiK.TerminalItems.deferExactWithdraw(terminal, rows, key, searchQuery) then
+		return true
+	end
 	local sent
 	if #rows > 1 then
 		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
@@ -388,6 +417,7 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	end
 	if sent then
 		GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropSent")
+		GlobalStorageSiK.ContainerTargets.debugDropTarget("send=true")
 	else
 		logCancelled("sendRejected")
 	end
@@ -396,11 +426,16 @@ end
 
 function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 	if not activeDrag then return false end
+	if activeDrag.finishing then return false end
+	activeDrag.finishing = true
 	GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropAttempt")
-	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse()
-	local dropped = pane and GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane) or false
-	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel("invalidTarget") end
-	return dropped
+	local player = GlobalStorageSiK.NetClient.getPlayer(activeDrag.playerNum)
+	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, activeDrag.playerNum)
+	if not pane then
+		clearDrag("pane=nil")
+		return false
+	end
+	return GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 end
 
 -- Compatibilidad con el cargador anterior. Ya no instala OnTick ni monkey

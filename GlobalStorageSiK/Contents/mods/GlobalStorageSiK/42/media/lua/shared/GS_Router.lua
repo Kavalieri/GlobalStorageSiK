@@ -137,26 +137,13 @@ local function categoryRuleTier(rule, item, categorySource)
 	return categoryMatches(rule, resolved.vanillaKey) and 1 or nil
 end
 
---- Aplica las exclusiones de cobertura calculadas por el servidor a una
---- condición de categoría. La ruta base mantiene su presentación/jerarquía;
---- las hojas ya reservadas por otro destino no pueden volver a hacer match.
+--- Una categoría configurada puede existir en varios destinos. La resolución
+--- del candidato pertenece a prioridad/afinidad, no a una reserva de hojas.
 ---@param condition table
 ---@param item InventoryItem
 ---@return number|nil
 local function categoryConditionTier(condition, item)
-	local tier = categoryRuleTier(condition.nativePath or condition.value, item, condition.categorySource)
-	if not tier then return nil end
-	local exclusions = condition.coverageExclusions
-	if not exclusions or #exclusions == 0 then return tier end
-	local fullType = item and item.getFullType and item:getFullType() or nil
-	local resolved = fullType and GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item) or nil
-	if not resolved or resolved.effective ~= "native" then return tier end
-	for i = 1, #exclusions do
-		if GlobalStorageSiK.NativeProduct.pathMatches(exclusions[i], resolved.nativePath) then
-			return nil
-		end
-	end
-	return tier
+	return categoryRuleTier(condition.nativePath or condition.value, item, condition.categorySource)
 end
 
 function GlobalStorageSiK.Router.matchSpecificity(entry, item)

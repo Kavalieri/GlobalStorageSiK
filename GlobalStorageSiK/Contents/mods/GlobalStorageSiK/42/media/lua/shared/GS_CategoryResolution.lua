@@ -153,7 +153,7 @@ local function sourceCategoryKind(value)
 end
 
 local function fromAuthoritativeRow(fullType, row)
-	if type(row) ~= "table" or row.fullType ~= fullType then return nil end
+	if type(row) ~= "table" or tostring(row.fullType or "") ~= tostring(fullType or "") then return nil end
 	local effective = row.effective or row.categoryEffective
 	local nativeStatus = cleanVanillaKey(row.nativeStatus)
 	local vanillaKey = cleanVanillaKey(row.vanillaKey)
@@ -168,18 +168,18 @@ local function fromAuthoritativeRow(fullType, row)
 			categorySource = row.categorySource,
 		}
 	end
-	if not nativeStatus or not vanillaKey or not isSafeSourceCategory(vanillaKey) then return nil end
 	if effective == "native" then
 		local nativePath = GlobalStorageSiK.NativeProduct.decodePath(row.nativePath)
 		local encoded = GlobalStorageSiK.NativeProduct.encodePath(nativePath)
 		if not encoded or row.routingIdentity ~= encoded then return nil end
 		return {
-			fullType = fullType, nativeStatus = nativeStatus, nativePath = encoded,
+			fullType = fullType, nativeStatus = nativeStatus or "classified", nativePath = encoded,
 			vanillaKey = vanillaKey, effective = "native", routingIdentity = encoded,
 			labelKey = encoded, colorL1 = nativePath.l1,
-			categorySource = row.categorySource or sourceCategoryKind(vanillaKey),
+			categorySource = row.categorySource or (vanillaKey and sourceCategoryKind(vanillaKey)) or "NATIVE",
 		}
 	end
+	if not nativeStatus or not vanillaKey or not isSafeSourceCategory(vanillaKey) then return nil end
 	if effective == "vanilla" and row.nativePath == nil
 		and row.routingIdentity == "vanilla:" .. vanillaKey then
 		return {
@@ -239,16 +239,55 @@ function Resolution.resolve(fullType, row, item, knownInstancePath)
 	if type(fullType) ~= "string" or fullType == "" then
 		return buildBase(fullType, item)
 	end
-	if not item then
-		local authoritative = fromAuthoritativeRow(fullType, row)
-		if authoritative then return authoritative end
-	end
+	-- Una fila del indice ya contiene la decision autoritativa del escaneo. Se
+	-- consulta antes que un probe de tooltip: ese probe solo existe para que
+	-- vanilla pinte el objeto y no puede sustituir la ruta final del servidor.
+	local authoritative = fromAuthoritativeRow(fullType, row)
+	if authoritative then return authoritative end
 	if item then return buildBase(fullType, item, knownInstancePath) end
 	local cached = cache[fullType]
 	if cached and cached.nativeStatus ~= "pending" then return cached end
 	local resolved = buildBase(fullType, nil)
 	if resolved.nativeStatus ~= "pending" then cache[fullType] = resolved end
 	return resolved
+end
+
+-- Presentacion comun e inmutable para inventario, tooltip y filas SiK. La
+-- resolucion sigue siendo la unica autoridad; esta fachada evita que cada
+-- consumidor reconstruya etiquetas o pierda la firma dinamica de la instancia.
+function Resolution.dynamicSignature(item)
+	local signature = item and GlobalStorageSiK.FluidTaxonomy and GlobalStorageSiK.FluidTaxonomy.stateKey
+		and GlobalStorageSiK.FluidTaxonomy.stateKey(item) or nil
+	-- Los movibles pueden compartir fullType y divergir por sprite/mod-data.
+	-- Esos campos forman parte de la identidad visual, nunca se guardan ni se
+	-- mutan; solo evitan reutilizar una presentacion de otra instancia.
+	if not signature and item and item.getWorldSprite then
+		signature = item:getWorldSprite()
+	end
+	if not signature and item and item.getModData then
+		local modData = item:getModData()
+		if modData then
+			signature = modData.worldSprite or modData.sprite or modData.SpriteName
+		end
+	end
+	return signature
+end
+
+function Resolution.presentation(fullType, row, item, knownInstancePath)
+	local resolved = Resolution.resolve(fullType, row, item, knownInstancePath)
+	local path = resolved and GlobalStorageSiK.NativeProduct.decodePath(resolved.nativePath) or nil
+	local view = path and GlobalStorageSiK.NativeProduct.getView(path) or nil
+	local signature = Resolution.dynamicSignature(item)
+	return {
+		resolution = resolved,
+		nativePath = path,
+		routingIdentity = resolved and resolved.routingIdentity or nil,
+		labels = view and { l1 = view.l1Label, l2 = view.l2Label, l3 = view.l3Label,
+			full = view.fullLabel } or { full = Resolution.label(resolved) },
+		color = Resolution.color(resolved),
+		dynamicSignature = signature,
+		source = resolved and resolved.categorySource or nil,
+	}
 end
 
 ---@param value string|nil

@@ -4,9 +4,19 @@ package.loaded["GS_SiK_UI_Core"] = true
 package.loaded["ISUI/ISPanel"] = true
 
 GlobalStorageSiK = {
-	SiK_UI = {},
+	SiK_UI = {
+		CHROME = {
+			headerHeight = 48,
+			closeButtonSize = 36,
+			horizontalPadding = 14,
+			titleCloseGap = 12,
+		},
+	},
 	Log = { error = function() end, debug = function() end },
 }
+GlobalStorageSiK.SiK_UI.windowChrome = function()
+	return GlobalStorageSiK.SiK_UI.CHROME
+end
 ISPanel = {
 	prerender = function() end,
 	render = function() end,

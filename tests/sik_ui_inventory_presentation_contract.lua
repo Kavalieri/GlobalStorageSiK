@@ -25,7 +25,7 @@ end
 local terminal = read(CLIENT .. "GS_TerminalUI.lua")
 local items = read(CLIENT .. "GS_TerminalUI_Items.lua")
 local core = read(CLIENT .. "GS_SiK_UI_Core.lua")
-local i18n = read(SHARED .. "GS_I18n.lua")
+local tooltip = read(CLIENT .. "GS_ItemNetworkTooltip.lua")
 local en = read(SHARED .. "Translate/EN/IG_UI.json")
 local es = read(SHARED .. "Translate/ES/IG_UI.json")
 
@@ -48,13 +48,13 @@ Support.check(suite, "search owns one full row and filters own the following row
 	return true
 end)
 
-Support.check(suite, "category tooltip names the first level Family Familia", function()
-	contains(i18n, 'IGUI_GS_CategoryTooltipMain = "Family: {1}"',
-		"default tooltip still exposes a technical/legacy first-level label")
-	contains(en, '"IGUI_GS_CategoryTooltipMain": "Family: {1}"',
-		"English tooltip label")
-	contains(es, '"IGUI_GS_CategoryTooltipMain": "Familia: {1}"',
-		"Spanish tooltip label")
+Support.check(suite, "network tooltip does not duplicate taxonomy", function()
+	excludes(tooltip, "IGUI_GS_CategoryTooltipMain",
+		"network tooltip still renders a duplicate Family line")
+	excludes(tooltip, "IGUI_GS_CategoryTooltipSub",
+		"network tooltip still renders a duplicate Group line")
+	excludes(tooltip, "IGUI_GS_CategoryTooltipLeaf",
+		"network tooltip still renders a duplicate Detail line")
 	return true
 end)
 
@@ -64,9 +64,9 @@ Support.check(suite, "Moveable Misc fallback is presentation-only and resolves a
 	contains(items, 'projection.vanillaKey ~= "Misc"',
 		"fallback is not limited to unclassified presentation")
 	contains(items, "data.worldSprite", "fallback ignores Moveable sprite evidence")
-	contains(items, "CategoryResolution.resolve(data.fullType, nil, probe)",
+	contains(items, "CategoryResolution.presentation(data.fullType, data, probe)",
 		"fallback does not resolve the reconstructed instance")
-	contains(items, "CategoryResolution.label(resolved)",
+	contains(items, "presentation.labels.full",
 		"fallback does not expose the resolved Family path")
 	excludes(items, "row.nativePath = resolved.nativePath",
 		"presentation fallback mutates authoritative row taxonomy")
@@ -76,6 +76,18 @@ Support.check(suite, "Moveable Misc fallback is presentation-only and resolves a
 	contains(en, '"IGUI_ItemCat_GSSiK_home_leisure_collection_furnishing_storage": '
 		.. '"Home, Leisure & Collection > Furnishing > Storage"',
 		"English Moveable path is absent")
+	return true
+end)
+
+Support.check(suite, "warehouse tooltip preserves row identity for counts and media only", function()
+	contains(items, "self._gsTooltip._gsRemoteRow = data",
+		"virtualized row does not bind its authoritative identity")
+	contains(tooltip, "buildTooltipBlocks(self.item, self._gsRemoteRow)",
+		"tooltip ignores warehouse identity")
+	contains(tooltip, "local remoteIdentity = rowContext or",
+		"tooltip can lose its explicit row identity")
+	contains(tooltip, "IGUI_GS_NetworkCountLine",
+		"tooltip lost its network-specific information")
 	return true
 end)
 

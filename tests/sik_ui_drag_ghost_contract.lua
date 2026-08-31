@@ -139,8 +139,30 @@ end)
 Support.check(suite, "preview placement uses the real pointer and never becomes the drop target", function()
 	contains(dragSource, "getMouseX", "preview does not follow the real horizontal pointer")
 	contains(dragSource, "getMouseY", "preview does not follow the real vertical pointer")
-	contains(dragSource, "findPaneAtMouse()", "drop does not resolve the real pointer target")
+	contains(dragSource, "findPaneAtMouse(true, player, activeDrag.playerNum)",
+		"drop does not resolve the real pointer target in its captured viewport")
 	contains(dragSource, "setConsumeMouseEvents(false)", "preview consumes vanilla pane mouse events")
+	return true
+end)
+
+Support.check(suite, "sent drags release their visual state and group headers remain draggable", function()
+	contains(dragSource, "clearDrag(nil)", "valid drop does not clear capture and preview before send")
+	local dragStart = assert(itemsSource:find("row.onMouseMove = function", 1, true),
+		"row drag handler missing")
+	local dragEnd = assert(itemsSource:find("row.onMouseUpOutside = function", dragStart, true),
+		"row drag handler boundary missing")
+	excludes(itemsSource:sub(dragStart, dragEnd - 1),
+		"aggregateAllowed == false and not self.itemData.itemIds",
+		"group header is excluded from drag before payload construction")
+	return true
+end)
+
+Support.check(suite, "stateful group header resolves exact pages without using visual payload", function()
+	contains(dragSource, "payloadRows or { drag.rowData }", "drop does not use semantic payload")
+	contains(dragSource, "TerminalItems.deferExactWithdraw(terminal, rows, key, searchQuery)",
+		"stateful header is not resolved to exact IDs before withdrawal")
+	contains(itemsSource, "if args.hasNext then", "detail resolver stops at the first visual page")
+	contains(itemsSource, "sendWithdrawBatch(", "resolved exact rows never reach the common batch client")
 	return true
 end)
 
@@ -157,9 +179,9 @@ end)
 -- other author regressions. No widget is instantiated by these calls.
 for _, name in ipairs({
 	"ISUI/ISPanel", "ISUI/ISLabel", "ISUI/ISContextMenu", "GS_Libs", "GS_BulkFilters",
-	"GS_CatalogManager", "GS_I18n", "GS_NativeProduct", "GS_CategoryResolution",
+	"GS_CatalogManager", "GS_I18n", "GS_ItemSnapshot", "GS_NativeProduct", "GS_CategoryResolution",
 	"GS_DepositSources", "GS_TerminalWithdrawDrag", "GS_WithdrawMenu", "GS_QuantityPrompt",
-	"GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight", "GS_ContainerTargets",
+        "GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight", "GS_ContainerTargets", "GS_UIDebug",
 	"GS_TerminalUI_Scroll", "GS_SiK_UI_Table", "GS_SiK_UI_Core", "GS_ItemNetworkTooltip",
 	"GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail",
 }) do
@@ -199,7 +221,7 @@ local exact = { rowKey = "exact", fullType = "Base.Hammer", _gsRowKind = "parent
 	aggregateAllowed = true, count = 4 }
 local panel = { _lastItems = { parent, childA, childB, exact }, _expandedKeys = {} }
 
-Support.check(suite, "collapsed parent has one visible header and one aggregate payload", function()
+Support.check(suite, "collapsed parent sends one semantic header", function()
 	panel._expandedKeys.parent = nil
 	local state = build(panel, parent)
 	assert(#state.visualRows == 1 and state.visualRows[1] == parent, "collapsed ghost shape")
@@ -207,14 +229,14 @@ Support.check(suite, "collapsed parent has one visible header and one aggregate 
 	return true
 end)
 
-Support.check(suite, "expanded parent shows children but sends one aggregate payload", function()
+Support.check(suite, "expanded parent keeps visible children visual and transfers the complete parent", function()
 	panel._expandedKeys.parent = true
 	local state = build(panel, parent)
 	assert(#state.visualRows == 3, "expanded ghost omitted visible children")
 	assert(state.visualRows[1] == parent and state.visualRows[2] == childA
 		and state.visualRows[3] == childB, "expanded ghost order")
 	assert(#state.payloadRows == 1 and state.payloadRows[1] == parent,
-		"expanded parent duplicated child payloads")
+		"expanded parent payload was limited to visible paginated children")
 	return true
 end)
 
@@ -231,7 +253,8 @@ Support.check(suite, "multiselect dedupes parent child overlap without mutating 
 	local state = build(panel, parent, selection)
 	assert(#selection == before, "builder mutated caller selection")
 	assert(#state.payloadRows == 2 and state.payloadRows[1] == parent
-		and state.payloadRows[2] == exact, "parent/child or duplicate payload leaked")
+		and state.payloadRows[2] == exact,
+		"parent/child or duplicate payload leaked")
 	assert(#state.visualRows == 4, "selected expanded block plus exact row not represented")
 	return true
 end)

@@ -2716,21 +2716,8 @@ local function sanitizeRuleCondition(condition)
 				legacyValue = legacyValue,
 				categorySource = "NATIVE",
 			}
-			-- Las exclusiones solo se originan en prepareCoverageRule(). Se
-			-- conservan al copiar/editar una lista ya aceptada para no ensanchar
-			-- de nuevo una ruta parcial; cada valor se vuelve a canonicalizar y
-			-- queda acotado para que no entre payload arbitrario persistente.
-			if type(condition.coverageExclusions) == "table" then
-				local exclusions = {}
-				for i = 1, math.min(#condition.coverageExclusions, 160) do
-					local exclusion = GlobalStorageSiK.NativeProduct.encodePath(
-						GlobalStorageSiK.NativeProduct.decodePath(condition.coverageExclusions[i]))
-					if exclusion and GlobalStorageSiK.NativeProduct.pathMatches(encoded, exclusion) then
-						exclusions[#exclusions + 1] = exclusion
-					end
-				end
-				clean.coverageExclusions = exclusions
-			end
+			-- `coverageExclusions` pertenecía al modelo de reserva exclusiva.
+			-- No se acepta ni persiste: dos destinos pueden compartir una ruta.
 			return clean
 		end
 		if value == "" or GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition({
@@ -2818,11 +2805,7 @@ local function cloneRuleList(rules)
 		local rule = rules[i]
 		local condition = {}
 		for k, v in pairs(rule.condition or {}) do
-			if k == "coverageExclusions" and type(v) == "table" then
-				local copied = {}
-				for j = 1, #v do copied[j] = v[j] end
-				condition[k] = copied
-			else
+			if k ~= "coverageExclusions" then
 				condition[k] = v
 			end
 		end
@@ -3902,7 +3885,7 @@ local function onClientCommand(module, command, player, args)
 				if #sanitizedItemIds > 0 then requestedItemIds = sanitizedItemIds end
 			end
 			if GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType)
-				and not requestedItemIds then
+				and not requestedItemIds and mediaIndex == nil then
 				gsSendServerCommand(player, "actionResult", {
 					ok = false,
 					message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawExactSelectionRequired"),

@@ -46,8 +46,9 @@ GlobalStorageSiK = {
 	ContainerTargets = {
 		findPaneAtMouse = function() return destinationAvailable and {} or nil end,
 		getPaneContainer = function() return {} end,
-		canReceiveWithdraw = function() return true end,
-		keyForContainer = function() return destinationKey end,
+                canReceiveWithdraw = function() return true end,
+                keyForContainer = function() return destinationKey end,
+                debugDropTarget = function() end,
 	},
 	SiK_UI = { Viewport = { resolve = function()
 		return { x = 0, y = 0, w = 1280, h = 720 }

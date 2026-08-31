@@ -112,7 +112,11 @@ GlobalStorageSiK.ZoneRefresh = {}
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_Index.lua")
 local rows = GlobalStorageSiK.Index.buildRows("net", {})
 local byType = {}
-for _, row in ipairs(rows) do byType[row.fullType] = row end
+local vhsParents = {}
+for _, row in ipairs(rows) do
+        byType[row.fullType] = row
+        if row.fullType == "Base.VHSTape" then vhsParents[#vhsParents + 1] = row end
+end
 
 local chips = byType["Base.Crisps"] or byType["Base.Crisps2"] or byType["Base.Crisps3"]
 assert(chips and chips.count == 3 and chips.expandable and chips.aggregateAllowed, "chips family")
@@ -121,13 +125,16 @@ local chipDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, chips.rowK
 assert(chipDetails.total == 3 and #chipDetails.items == 3, "three cosmetic variants")
 assert(chipDetails.items[1].aggregateAllowed == true, "expanded cosmetic rows transfer normally")
 
-local vhs = byType["Base.VHSTape"]
-assert(vhs and vhs.count == 4 and vhs.expandable and not vhs.aggregateAllowed, "VHS parent")
-local vhsDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, vhs.rowKey, 1, 20)
-assert(vhsDetails.total == 3 and #vhsDetails.items == 3, "VHS grouped by recordedMediaIndex")
+assert(#vhsParents == 3, "VHS titles were collapsed into one generic physical-type parent")
 local woodcraft = nil
-for _, row in ipairs(vhsDetails.items) do if row.mediaIndex == 214 then woodcraft = row end end
-assert(woodcraft and woodcraft.count == 2 and #woodcraft.itemIds == 2, "two identical VHS copies")
+for _, row in ipairs(vhsParents) do if row.mediaIndex == 214 then woodcraft = row end end
+assert(woodcraft and woodcraft.count == 2 and woodcraft.expandable
+        and woodcraft.aggregateAllowed and woodcraft.displayName == "Woodcraft Ep. 3",
+        "same-title VHS copies were not exposed as one exact transferable parent")
+local vhsDetails = GlobalStorageSiK.Index.buildDetailPage("net", {}, woodcraft.rowKey, 1, 20)
+assert(vhsDetails.total == 1 and #vhsDetails.items == 1
+        and vhsDetails.items[1].count == 2 and #vhsDetails.items[1].itemIds == 2,
+        "exact VHS parent did not retain both physical copies in its detail")
 
 local petrol = byType["Base.PetrolCan"]
 assert(petrol and petrol.count == 2 and petrol.expandable and not petrol.aggregateAllowed, "fluid parent")

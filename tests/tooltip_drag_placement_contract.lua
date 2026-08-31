@@ -111,7 +111,7 @@ Support.check(suite, "production measures complete tooltip before final placemen
 end)
 
 Support.check(suite, "production prefers forward axes then inverts with canonical gutter", function()
-	contains(tooltipSource, "local TOOLTIP_GUTTER = 16")
+	contains(tooltipSource, "local TOOLTIP_GUTTER = 24")
 	contains(tooltipSource, "local forward = anchor + TOOLTIP_GUTTER")
 	contains(tooltipSource, "local backward = anchor - size - TOOLTIP_GUTTER")
 	contains(tooltipSource, "if forward + size <= high then return forward end")

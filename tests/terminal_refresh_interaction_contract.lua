@@ -71,11 +71,17 @@ contains(items, "local alpha = descriptor.stale and 0.45 or 1",
 	"stale visual reference is not attenuated")
 contains(items, "if row and not row._gsStale and row.fullType",
 	"stale rows can enter a drag payload")
-contains(items, "not data._gsPager and not data._gsStale and self:isMouseOver()",
+contains(items, "local function pointerInsideRow(row)",
+	"row hover does not use the real pointer/row rectangle")
+contains(items, "not data._gsPager and not data._gsStale and hovering",
 	"stale row can activate its remote tooltip")
+excludes(items, "not data._gsPager and not data._gsStale and self:isMouseOver()",
+	"tooltip hover still relies on child-panel hit-testing")
 
 local remoteCallback = section(items, "row.onRemoteItemDetail = function", "row.onMouseDown = function")
 contains(remoteCallback, "self.itemData._gsStale", "late remote detail can bind to a stale row")
+contains(remoteCallback, "not pointerInsideRow(self)",
+	"late remote detail can bind after the pointer left the row")
 for _, handler in ipairs({ "row.onMouseDown = function", "row.onMouseUp = function",
 	"row.onMouseDoubleClick = function", "row.onRightMouseUp = function" }) do
 	local at = assert(items:find(handler, 1, true), "missing row handler: " .. handler)

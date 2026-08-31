@@ -107,7 +107,7 @@ function GS_TerminalTabSlot:prerender()
 end
 
 function GS_TerminalTabSlot:render()
-	local inset = 3
+	local inset = self.parentRail and self.parentRail.slotInset or 0
 	local btnW = self.width - inset * 2
 	local btnH = self.height - inset * 2
 	local btnX = inset
@@ -195,6 +195,7 @@ function GS_TerminalTabRail:new(x, y, w, h, terminal, tabDefs, footerTabDef)
 	o.itemHeight = profile.window.railItemHeight
 	o.iconSize = profile.window.railIconSize
 	o.itemGap = profile.window.railGap
+	o.slotInset = profile.window.railSlotInset or 0
 	o.scrollBarWidth = 0
 	o.tabSlots = {}
 	o.flyoutLbl = nil

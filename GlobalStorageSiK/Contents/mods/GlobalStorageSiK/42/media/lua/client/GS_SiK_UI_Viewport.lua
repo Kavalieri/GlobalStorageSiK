@@ -98,9 +98,8 @@ function Viewport.resolve(playerNum, environment)
 		safeMargin = safe,
 		source = { x = source.x, y = source.y, w = source.w, h = source.h },
 	}
-	-- El breakpoint usa el viewport completo del jugador; el safe inset solo
-	-- limita la geometría resultante. Es el mismo contrato del HTML validado:
-	-- 1400x800 activa wide y Window recorta la preferencia dentro de W/H-32.
+	-- El terminal no tiene breakpoints visuales: toda resolucion usa el mismo
+	-- contrato. El viewport solo aporta limites seguros, tambien en split-screen.
 	result.profile = Metrics.profileFor(source.w, source.h)
 	return result
 end

@@ -149,15 +149,10 @@ function GS_ZoneEditorUI:calculateLayout()
 	local w = self.width
 	local h = self.height
 	local pad = self.padding
-	local closeSize = math.max(FONT_HGT_MEDIUM, 24)
-
-	if self.closeBtn then
-		self.closeBtn:setX(w - closeSize - pad)
-		self.closeBtn:setY(math.floor((self.headerHeight - closeSize) / 2))
-		self.closeBtn:setWidth(closeSize)
-		self.closeBtn:setHeight(closeSize)
-		self.closeBtn:bringToTop()
-	end
+	-- La cabecera, incluida la X, pertenece por completo al framework SiK UI.
+	-- No recalcular aqui un tamano local: editor, modales y terminal comparten
+	-- exactamente el mismo rectangulo de cierre y sus margenes.
+	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
 
 	local bodyY = self.headerHeight + pad
 	local bodyH = math.max(120, h - bodyY - pad - GlobalStorageSiK.TerminalScroll.listBottomGap())
@@ -188,22 +183,23 @@ end
 function GS_ZoneEditorUI:createChildren()
 	if self._gsChildrenBuilt then return end
 	self._gsChildrenBuilt = true
-	if not self.closeBtn then
-		self.closeBtn = GlobalStorageSiK.SiK_UI.createCloseButton(self, self, function()
-			GlobalStorageSiK.TerminalZoneEditor.close()
-		end)
-	end
+	-- El chrome se construye una sola vez por SiK_UI.Window.applyEditor().
+	-- Crear otra X aquí registraba un segundo control que PZ podía conservar
+	-- como raíz al cerrar el editor.
 end
 
 function GS_ZoneEditorUI:prerender()
 	ISPanel.prerender(self)
 	GlobalStorageSiK.SiK_UI.renderPanelBackground(self)
 	local title = T("IGUI_GS_ZoneEditorTitle") .. ": " .. (self.zone and self.zone.name or "?")
+	local titleRect = GlobalStorageSiK.SiK_UI.headerRects(self).title
+	title = GlobalStorageSiK.SiK_UI.truncateText(title, titleRect.w, UIFont.Medium)
 	local titleY = math.floor((self.headerHeight - FONT_HGT_MEDIUM) / 2)
-	self:drawText(title, self.padding + 2, titleY, 1, 1, 1, 1, UIFont.Medium)
+	self:drawText(title, titleRect.x, titleY, 1, 1, 1, 1, UIFont.Medium)
 	if self.closeBtn then
 		self.closeBtn:bringToTop()
 	end
+	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
 --- Envia el cambio de prioridad al servidor y refleja el valor localmente.
@@ -714,6 +710,7 @@ function GlobalStorageSiK.TerminalZoneEditor.close()
 	end
 	GlobalStorageSiK.SiK_UI.Window.remember(ui, "zoneEditor")
 	ui:setVisible(false)
+	GlobalStorageSiK.SiK_UI.disposeWindowChrome(ui)
 	ui:removeFromUIManager()
 	GlobalStorageSiK.TerminalZoneEditor.instance = nil
 	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then

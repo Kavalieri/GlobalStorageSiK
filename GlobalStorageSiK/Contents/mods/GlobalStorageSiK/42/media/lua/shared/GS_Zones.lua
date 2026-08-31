@@ -333,11 +333,7 @@ end
 local function cloneRule(rule)
 	local condition = {}
 	for key, value in pairs((rule and rule.condition) or {}) do
-		if key == "coverageExclusions" and type(value) == "table" then
-			local copied = {}
-			for i = 1, #value do copied[i] = value[i] end
-			condition[key] = copied
-		else
+		if key ~= "coverageExclusions" then
 			condition[key] = value
 		end
 	end

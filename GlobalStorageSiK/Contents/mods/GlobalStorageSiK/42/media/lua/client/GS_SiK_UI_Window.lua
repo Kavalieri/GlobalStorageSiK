@@ -36,7 +36,7 @@ local function resolveViewport(viewport, options)
 	local width = getCore and getCore():getScreenWidth() or 1280
 	local height = getCore and getCore():getScreenHeight() or 720
 	return { x = 0, y = 0, w = width, h = height, playerNum = playerNum,
-		profile = "standard" }
+		profile = "terminal" }
 end
 
 local function profileSpec(profileName)
@@ -55,7 +55,7 @@ end
 function Window.resolveLimits(profileName, viewport, options)
 	options = options or {}
 	viewport = resolveViewport(viewport, options)
-	profileName = profileName or viewport.profile or "standard"
+	profileName = profileName or viewport.profile or "terminal"
 	local spec = profileSpec(profileName)
 	local availableW = math.max(0, math.floor(tonumber(viewport.w) or 0))
 	local availableH = math.max(0, math.floor(tonumber(viewport.h) or 0))
@@ -78,7 +78,7 @@ end
 function Window.resolveProfile(profileName, viewport, options)
 	options = options or {}
 	viewport = resolveViewport(viewport, options)
-	profileName = profileName or viewport.profile or "standard"
+	profileName = profileName or viewport.profile or "terminal"
 	local spec = profileSpec(profileName)
 	local limits = Window.resolveLimits(profileName, viewport, options)
 	local availableW = math.max(0, math.floor(tonumber(viewport.w) or 0))
@@ -122,6 +122,71 @@ function Window.resizeEdgeAt(panel, x, y, grip)
 	return nil
 end
 
+--- Rectangulo de la única zona de redimensionado del shell SiK: esquina
+--- inferior derecha. Las aristas completas son un contrato legado separado y
+--- no deben reaparecer como una pared interactiva en el terminal.
+function Window.resizeHandleRect(panel)
+	if not panel then return nil end
+	local size = math.max(4, tonumber(SiK_UI.Metrics.tokens().resizeHandle) or 24)
+	return { x = panel.width - size, y = panel.height - size, w = size, h = size }
+end
+
+function Window.hitTestResizeHandle(panel, x, y)
+	local rect = Window.resizeHandleRect(panel)
+	if not rect then return nil end
+	if x >= rect.x and x <= rect.x + rect.w and y >= rect.y and y <= rect.y + rect.h then
+		return "bottom-right"
+	end
+	return nil
+end
+
+local function hideResizeTooltip(panel)
+	local tooltip = panel and panel._sikResizeTooltip
+	if tooltip and tooltip:isVisible() then
+		tooltip:removeFromUIManager()
+		tooltip:setVisible(false)
+	end
+end
+
+--- Dibuja y gestiona el agarre común. El consumidor no calcula hitbox,
+--- tamaño, diagonales ni ciclo del tooltip; solo solicita esta primitiva.
+function Window.renderResizeHandle(panel, suppressTooltip)
+	local rect = Window.resizeHandleRect(panel)
+	if not rect then return nil end
+	local pal = SiK_UI.PALETTE
+	for line = 0, 2 do
+		local length = 4 + line * 3
+		for step = 0, length - 1 do
+			panel:drawRect(panel.width - 3 - step * 2,
+				panel.height - 3 - (length - 1 - step) * 2,
+				2, 2, 1, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3])
+		end
+	end
+	local mouseX = getMouseX and (getMouseX() - panel:getAbsoluteX()) or -1
+	local mouseY = getMouseY and (getMouseY() - panel:getAbsoluteY()) or -1
+	if not suppressTooltip and Window.hitTestResizeHandle(panel, mouseX, mouseY) then
+		if not panel._sikResizeTooltip then
+			panel._sikResizeTooltip = ISToolTip:new()
+			panel._sikResizeTooltip:initialise()
+			panel._sikResizeTooltip:instantiate()
+			panel._sikResizeTooltip:setOwner(panel)
+		end
+		panel._sikResizeTooltip:setName(getText("IGUI_GS_ResizeDragTooltip"))
+		if not panel._sikResizeTooltip:isVisible() then
+			panel._sikResizeTooltip:setVisible(true)
+			panel._sikResizeTooltip:addToUIManager()
+		end
+	else
+		hideResizeTooltip(panel)
+	end
+	return rect
+end
+
+function Window.disposeResizeHandle(panel)
+	hideResizeTooltip(panel)
+	if panel then panel._sikResizeTooltip = nil end
+end
+
 --- Resuelve un delta de resize desde cualquier borde contra el viewport del
 --- jugador. No persiste ni reconstruye contenido; el consumidor aplica rect.
 function Window.resizeDelta(panel, edge, dx, dy, viewport)
@@ -162,7 +227,7 @@ function Window.remember(panel, key, playerNum)
 	local memoryKey = geometryKey(key, playerNum or panel.playerNum)
 	rememberedGeometry[memoryKey] = {
 		x = panel:getX(), y = panel:getY(), w = panel:getWidth(),
-		h = panel:getHeight(), profile = panel._sikWindowProfile or "standard",
+		h = panel:getHeight(), profile = panel._sikWindowProfile or "terminal",
 		playerNum = playerNum or panel.playerNum or 0,
 	}
 end
@@ -180,6 +245,26 @@ end
 function Window.installEscape(panel, onClose, priority)
 	if not panel then return end
 	SiK_UI.EscapeStack.install(panel, onClose, priority)
+end
+
+--- Cada ventana SiK es dueña de la rueda mientras el puntero esta sobre ella.
+--- Los TerminalScroll hijos reciben primero su propio evento y desplazan su
+--- contenido; esta guarda comun evita que las zonas no desplazables de una
+--- ventana visible filtren la rueda al mundo y activen el zoom del juego.
+function Window.installWheelCapture(panel)
+	if not panel or panel._sikWheelCaptureInstalled then return end
+	panel._sikWheelCaptureInstalled = true
+	local previous = panel.onMouseWheel
+	panel.onMouseWheel = function(self, del)
+		if previous then
+			local handled = previous(self, del)
+			-- ISPanel devuelve false cuando no tiene scroll propio. Ese false no
+			-- puede escapar al mundo: sobre una ventana SiK la rueda siempre se
+			-- consume, aunque el hijo no tenga nada que desplazar.
+			if handled == true then return true end
+		end
+		return true
+	end
 end
 
 function Window.layoutHeader(panel, options)
@@ -204,9 +289,10 @@ function Window.apply(panel, onClose, key, options)
 		Window.remember(target, key, playerNum)
 		if onClose then onClose(target) else defaultClose(target) end
 	end
-	panel._sikWindowProfile = options.profile or panel._sikWindowProfile or "standard"
+	panel._sikWindowProfile = options.profile or panel._sikWindowProfile or "terminal"
 	panel.playerNum = playerNum
 	panel.padding = tonumber(options.padding) or panel.padding or 14
+	Window.installWheelCapture(panel)
 	SiK_UI.setupModalPanel(panel, function() close(panel) end, panel.padding)
 	Window.installEscape(panel, close, options.escapePriority)
 	panel.resizable = options.resizable ~= false

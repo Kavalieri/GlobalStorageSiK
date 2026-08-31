@@ -57,7 +57,7 @@ if not GlobalStorageSiK.SiK_UI.SurfaceInventory.get("terminal-shell") then
 		pack = "terminal-contenedor",
 		owner = "GS_TerminalUI",
 		parent = "UIManager",
-		variants = { "compact", "standard", "wide" },
+		variants = { "terminal" },
 	})
 end
 
@@ -178,10 +178,6 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 
 local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
-local function resizeHandleSize()
-	return GlobalStorageSiK.SiK_UI.Metrics.tokens().resizeHandle
-end
-
 --- Refresca contenido de la pestaña activa (carga diferida).
 ---@param self GS_TerminalUI
 function GS_TerminalUI:refreshActiveTabContent()
@@ -266,7 +262,7 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 	o._sikWindowProfile = viewport.profile
 	o.padding = tokens.windowPadding
 	o.headerHeight = profile.window.headerHeight
-	o.statusFooterHeight = profile.window.footerHeight
+        o.statusFooterHeight = GlobalStorageSiK.SiK_UI.Metrics.footerHeight(o._sikWindowProfile)
 	local uiBg = GlobalStorageSiK.SiK_UI.PALETTE.bgHeader
 	o.backgroundColor = { r = uiBg[1], g = uiBg[2], b = uiBg[3], a = 0.98 }
 	o.borderColor = { r = 0, g = 0, b = 0, a = 1 }
@@ -304,7 +300,7 @@ function GS_TerminalUI:applyResponsiveBounds(nextX, nextY, nextW, nextH)
 	self.maximumHeight = limits.maxH
 	self._sikSafeViewport = viewport
 	self.headerHeight = profile.window.headerHeight
-	self.statusFooterHeight = profile.window.footerHeight
+        self.statusFooterHeight = GlobalStorageSiK.SiK_UI.Metrics.footerHeight(self._sikWindowProfile)
 	self:setWidth(rect.w)
 	self:setHeight(rect.h)
 	self:setX(rect.x)
@@ -335,14 +331,16 @@ end
 --- Arrastre por cabecera y redimensionado en esquina inferior derecha.
 function GS_TerminalUI:installMouseHandlers()
 	self.onMouseDown = function(me, x, y)
-		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.resizeEdgeAt(me, x, y, resizeHandleSize())
+		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.hitTestResizeHandle(me, x, y)
 		if resizeEdge then
 			me.resizing = true
 			me.resizeEdge = resizeEdge
 			me:setCapture(true)
 			return true
 		end
-		if y >= 0 and y < me.headerHeight and x < me.width - (me.closeBtn and me.closeBtn.width or 36) then
+		local headerRects = GlobalStorageSiK.SiK_UI.headerRects(me)
+		local closeX = headerRects and headerRects.close and headerRects.close.x or me.width
+		if y >= 0 and y < me.headerHeight and x < closeX then
 			me.moving = true
 			me:setCapture(true)
 			return true
@@ -426,10 +424,11 @@ function GS_TerminalUI:installMouseHandlers()
 end
 
 function GS_TerminalUI:initialise()
-        ISPanel.initialise(self)
-        self.clipChildren = true
-        self:installMouseHandlers()
-        self:setVisible(true)
+	ISPanel.initialise(self)
+	self.clipChildren = true
+	self:installMouseHandlers()
+	GlobalStorageSiK.SiK_UI.Window.installWheelCapture(self)
+	self:setVisible(true)
 	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_TerminalUI.onClose,
 		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TERMINAL)
         self:createChildren()
@@ -622,7 +621,7 @@ function GS_TerminalUI:calculateLayout()
 	local w = self.width
 	local h = self.height
 	local pad = self.padding
-	local profileName = self._sikWindowProfile or "standard"
+	local profileName = self._sikWindowProfile or "terminal"
 	local shell = GlobalStorageSiK.SiK_UI.Metrics.shellRects(
 		profileName, w, h, self.accessMode == "blocked")
 	self.headerHeight = shell.header.h
@@ -825,42 +824,6 @@ function GS_TerminalUI:prerender()
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(self)
 	end
 	GlobalStorageSiK.SiK_UI.renderStatusFooter(self, self.terminalState)
-	local grip = resizeHandleSize()
-	local gx, gy = self.width - grip, self.height - grip
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	-- Tres diagonales escalonadas con la primitiva ISUI garantizada. No usar
-	-- drawLine2: no forma parte del contrato Lua/Kahlua expuesto por vanilla.
-	for line = 0, 2 do
-		local length = 4 + line * 3
-		for step = 0, length - 1 do
-			self:drawRect(self.width - 3 - step * 2,
-				self.height - 3 - (length - 1 - step) * 2,
-				2, 2, 1, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3])
-		end
-	end
-	local mouseX = getMouseX and (getMouseX() - self:getAbsoluteX()) or -1
-	local mouseY = getMouseY and (getMouseY() - self:getAbsoluteY()) or -1
-	local overGrip = mouseX >= gx and mouseX <= self.width
-		and mouseY >= gy and mouseY <= self.height
-	if overGrip and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
-		if not self._gsResizeTooltip then
-			self._gsResizeTooltip = ISToolTip:new()
-			self._gsResizeTooltip:initialise()
-			self._gsResizeTooltip:instantiate()
-			self._gsResizeTooltip:setOwner(self)
-		end
-		self._gsResizeTooltip:setName(T("IGUI_GS_ResizeDragTooltip"))
-		if not self._gsResizeTooltip:isVisible() then
-			self._gsResizeTooltip:setVisible(true)
-			self._gsResizeTooltip:addToUIManager()
-		end
-	else
-		if self._gsResizeTooltip and self._gsResizeTooltip:isVisible() then
-			self._gsResizeTooltip:removeFromUIManager()
-			self._gsResizeTooltip:setVisible(false)
-		end
-	end
-	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
 function GS_TerminalUI:applyCapacityState(cap)
@@ -939,6 +902,11 @@ end
 
 function GS_TerminalUI:render()
 	ISPanel.render(self)
+	-- Los hijos se dibujan después de prerender(). El contorno común debe ir en
+	-- la fase final o rail, contenido y footer lo cubrirán parcialmente.
+	GlobalStorageSiK.SiK_UI.Window.renderResizeHandle(self,
+		GlobalStorageSiK.TerminalWithdrawDrag.isActive())
+	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
 function GS_TerminalUI:refreshNetworkPanel()
@@ -1118,10 +1086,7 @@ end
 function GS_TerminalUI:onClose()
 	if self._closing then return end
 	self._closing = true
-	if self._gsResizeTooltip and self._gsResizeTooltip:isVisible() then
-		self._gsResizeTooltip:removeFromUIManager()
-		self._gsResizeTooltip:setVisible(false)
-	end
+	GlobalStorageSiK.SiK_UI.Window.disposeResizeHandle(self)
 	GlobalStorageSiK.SiK_UI.Window.remember(self, "terminal-shell", self.playerNum)
 	if GlobalStorageSiK.UIDebug then GlobalStorageSiK.UIDebug.log("OPEN", "onClose()") end
 	if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == self then
@@ -1172,6 +1137,9 @@ function GS_TerminalUI:onClose()
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
 		GlobalStorageSiK.TransferQueue.clear()
 	end
+	-- El chrome compartido puede haber sido registrado por PZ como UI de raíz.
+	-- Liberarlo antes de retirar la ventana evita dejar un cierre huérfano en mundo.
+	GlobalStorageSiK.SiK_UI.disposeWindowChrome(self)
 	self:setVisible(false)
 	self:removeFromUIManager()
 	self._capacityHaloShown = nil

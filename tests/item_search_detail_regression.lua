@@ -176,16 +176,26 @@ dofile(shared .. "GS_Index.lua")
 
 local rows = GlobalStorageSiK.Index.buildRows("net", {})
 local byType = {}
-for i = 1, #rows do byType[rows[i].fullType] = rows[i] end
+local vhsByIndex = {}
+for i = 1, #rows do
+	byType[rows[i].fullType] = rows[i]
+	if rows[i].fullType == "Base.VHSTape" then
+		vhsByIndex[rows[i].mediaIndex] = rows[i]
+	end
+end
 local chips = assert(byType["Base.Crisps"], "chips parent missing")
-local vhs = assert(byType["Base.VHSTape"], "VHS parent missing")
+local vhs214 = assert(vhsByIndex[214], "VHS mediaIndex 214 parent missing")
+local vhs315 = assert(vhsByIndex[315], "VHS mediaIndex 315 parent missing")
 local fluid = assert(byType["Base.PetrolCan"], "fluid parent missing")
 
 assert(chips.variantSearchText:find("Patatas fritas - Barbacoa", 1, true),
 	"distinct unit display name is absent from parent search text")
-assert(vhs.variantSearchText:find("Woodcraft Ep. 3", 1, true)
-	and vhs.variantSearchText:find("Exposure Survival Ep. 5", 1, true),
-	"VHS titles/editions are absent from parent search text")
+assert(vhs214.variantSearchText:find("Woodcraft Ep. 3", 1, true)
+	and vhs214.variantSearchText:find("media:214", 1, true),
+	"VHS 214 title/identity is absent from its parent search text")
+assert(vhs315.variantSearchText:find("Exposure Survival Ep. 5", 1, true)
+	and vhs315.variantSearchText:find("media:315", 1, true),
+	"VHS 315 title/identity is absent from its parent search text")
 assert(fluid.variantSearchText:find("Bid", 1, true)
 	and fluid.variantSearchText:find("fluid:Base.Petrol", 1, true)
 	and fluid.variantSearchText:find("empty", 1, true),
@@ -198,8 +208,8 @@ local function expectOne(query, expected, message)
 	assert(#filtered == 1 and filtered[1] == expected, message .. ": " .. query)
 end
 expectOne("Barbacoa", chips, "unit display-name search failed")
-expectOne("Woodcraft", vhs, "VHS title search failed")
-expectOne("315", vhs, "VHS edition/index search failed")
+expectOne("Woodcraft", vhs214, "VHS title search failed")
+expectOne("315", vhs315, "VHS edition/index search failed")
 expectOne("Base.PetrolCan", fluid, "fullType search failed")
 expectOne("PetrolCan", fluid, "short fullType search failed")
 expectOne("Base.Petrol", fluid, "fluid content/state search failed")
@@ -265,7 +275,7 @@ for i = 1, #modes do
 	isClient = function() return mode.client end
 	isServer = function() return mode.server end
 	local result = GS_TerminalUI.applyItemsFilter(terminal, rows)
-	assert(#result == 1 and result[1] == vhs,
+	assert(#result == 1 and result[1] == vhs214,
 		mode.name .. " did not return the same localized VHS search result")
 end
 assert(localizedCalls == #modes and fallbackCalls == 0,

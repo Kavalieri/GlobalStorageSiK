@@ -95,8 +95,10 @@ local function showProgress(force)
 		text = text .. " " .. tostring(operation.totalMoved or 0)
 			.. "/" .. tostring(operation.totalExpected)
 	end
-	text = text .. " (" .. tostring(operation.rowsDone or 0)
-		.. "/" .. tostring(operation.rowsTotal or 0) .. ")"
+	-- Una operación puede contener grupos de títulos con varias unidades. Las
+	-- filas internas son un detalle de cola, no progreso del jugador: mostrar
+	-- ambas cifras convertía 8/34 en el engañoso "(6/28)" para VHS paginados.
+	-- El halo siempre comunica únicamente unidades físicas confirmadas.
 	pcall(function()
 		player:setHaloNote(text, 200, 220, 200, 220)
 	end)
@@ -342,6 +344,63 @@ function GlobalStorageSiK.WithdrawClient.sendWithdraw(rowData, amount, targetKey
 	return true
 end
 
+--- Un ID exacto es más estricto que cualquier selector derivado (título VHS,
+--- mediaIndex o firma dinámica): identifica una instancia física concreta que
+--- el servidor vuelve a validar. Por ello varias filas exactas del mismo
+--- fullType pueden compartir micro-lote, incluso si representan cintas con
+--- títulos distintos. Conservar sus selectores al fusionarlas haría que el
+--- servidor descartase los IDs de los otros títulos antes de compararlos.
+--- No se agrupan filas sin IDs: esas sí conservan su selector autoritativo.
+---@param rows table[]
+---@return table[]
+local function coalesceExactRows(rows)
+	local grouped, order, passthrough = {}, {}, {}
+	for i = 1, #rows do
+		local row = rows[i]
+		local ids = row and row.itemIds or nil
+		if row and row.fullType and ids and #ids > 0 then
+			local key = tostring(row.fullType)
+			local merged = grouped[key]
+			if not merged then
+				merged = {}
+				for field, value in pairs(row) do merged[field] = value end
+				merged.itemIds = {}
+				merged.count = 0
+				-- `itemIds` es ahora el único selector. No permitir que un título o
+				-- una firma de la primera fila reduzca un lote que contiene otros
+				-- IDs exactos del mismo tipo.
+				merged.mediaTitle = nil
+				merged.mediaIndex = nil
+				merged.dynamicSignature = nil
+				merged.aggregateAllowed = false
+				merged.fullTypes = nil
+				merged._gsMergedExact = true
+				grouped[key] = merged
+				order[#order + 1] = merged
+			end
+			local seen = merged._gsMergedIds or {}
+			merged._gsMergedIds = seen
+			for j = 1, #ids do
+				local itemId = ids[j]
+				if itemId ~= nil and not seen[itemId] then
+					seen[itemId] = true
+					merged.itemIds[#merged.itemIds + 1] = itemId
+				end
+			end
+			merged.count = #merged.itemIds
+		else
+			passthrough[#passthrough + 1] = row
+		end
+	end
+	local out = {}
+	for i = 1, #order do
+		order[i]._gsMergedIds = nil
+		out[#out + 1] = order[i]
+	end
+	for i = 1, #passthrough do out[#out + 1] = passthrough[i] end
+	return out
+end
+
 ---@param rows table[]
 ---@param amount number|nil
 ---@param targetKey string|nil
@@ -349,15 +408,16 @@ end
 ---@return boolean
 function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetKey, searchQuery)
 	if not rows or #rows == 0 then return false end
-	if #queue + (current and 1 or 0) + #rows > MAX_QUEUED_REQUESTS then
+	local coalescedRows = coalesceExactRows(rows)
+	if #queue + (current and 1 or 0) + #coalescedRows > MAX_QUEUED_REQUESTS then
 		GlobalStorageSiK.Log.error("WithdrawClient", "batch queue limit reached",
-			"rows=" .. tostring(#rows) .. " limit=" .. tostring(MAX_QUEUED_REQUESTS))
+			"rows=" .. tostring(#coalescedRows) .. " limit=" .. tostring(MAX_QUEUED_REQUESTS))
 		showLocalError("IGUI_GS_InternalTransferError")
 		return false
 	end
 	local okAny = false
-	for i = 1, #rows do
-		if enqueueWithdraw(rows[i], amount, targetKey, searchQuery, nil) then
+	for i = 1, #coalescedRows do
+		if enqueueWithdraw(coalescedRows[i], amount, targetKey, searchQuery, nil) then
 			okAny = true
 		end
 	end

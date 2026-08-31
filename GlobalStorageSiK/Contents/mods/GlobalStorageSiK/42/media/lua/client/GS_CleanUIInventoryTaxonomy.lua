@@ -1,5 +1,5 @@
 --[[
-	GlobalStorageSiK - Adaptador opcional CleanUI 42.19
+	GlobalStorageSiK - Adaptador opcional CleanUI
 
 	Decora exclusivamente el texto de categoria que CleanUI ya va a dibujar.
 	No sustituye su renderer, no clasifica en render y no muta items, scripts,
@@ -21,22 +21,14 @@ local function isCleanUIActive()
 	return mods:contains("CleanUI")
 end
 
-local function hasCleanUI4219Signature()
-	return type(CleanUI_getItemCategoryColor) == "function"
-		and type(CleanUI_getCachedCategoryText) == "function"
-end
-
 function Adapter.install()
 	if Adapter._installed or not isCleanUIActive() then return Adapter._installed == true end
-	if not hasCleanUI4219Signature() then
-		GlobalStorageSiK.Log.warn("CleanUITaxonomy", "adaptador desactivado: firma CleanUI 42.19 no disponible")
-		return false
-	end
 	-- CleanUI ya estaba cargado cuando Core instalo su wrapper generico: ese
 	-- wrapper soporta drawText y drawTextRight, por lo que no hace falta una
 	-- segunda capa.
 	if Projection.isRenderHookActive and Projection.isRenderHookActive() then
 		Adapter._installed = true
+		GlobalStorageSiK.Log.debug("CleanUITaxonomy", "CleanUI detectado: se usa el renderer generico compatible")
 		return true
 	end
 	if not ISInventoryPane or type(ISInventoryPane.renderdetails) ~= "function"
@@ -72,7 +64,7 @@ function Adapter.install()
 	Adapter._renderHook = wrapper
 	ISInventoryPane.renderdetails = wrapper
 	Adapter._installed = true
-	GlobalStorageSiK.Log.debug("CleanUITaxonomy", "adaptador CleanUI 42.19 instalado")
+	GlobalStorageSiK.Log.debug("CleanUITaxonomy", "adaptador CleanUI instalado")
 	return true
 end
 

@@ -132,7 +132,9 @@ end
 ---@return number nextY
 local function addStatusHeader(scroll, x, y, innerW, player)
 	local blankCount = countBlankDisksNearby(player)
-	local text = T("IGUI_GS_ProgrammingReaderInstalled") .. " · "
+	-- PZ no representa de forma fiable el separador tipográfico · en todas las
+	-- fuentes; usar ASCII visible en todas las locales.
+	local text = T("IGUI_GS_ProgrammingReaderInstalled") .. " | "
 		.. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1")
 	local feedback = GlobalStorageSiK.SiK_UI.Controls.feedback(nil, {
 		x = x, y = y, w = math.max(80, innerW - x * 2), text = text,

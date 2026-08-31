@@ -102,11 +102,6 @@ local function vanillaLabel(item)
 	return text and text ~= "" and text or key
 end
 
-local function dynamicFluidPath(item)
-	local path, signature = GlobalStorageSiK.FluidTaxonomy.resolve(item)
-	return path and GlobalStorageSiK.NativeProduct.encodePath(path) or nil, signature
-end
-
 local function queueVisibleItem(pane, item)
 	if not item then return end
 	local state = stateFor(pane)
@@ -130,36 +125,42 @@ local function queueVisibleRows(pane)
 	end
 end
 
-local function cacheBase(state, fullType, item)
-	local cached = state.baseByFullType[fullType]
+local function cachePresentation(state, fullType, item)
+	-- Un recipiente no es clasificable solo por fullType: la firma dinamica
+	-- forma parte de la clave, pero la ruta/etiqueta siempre procede de la
+	-- misma fachada que usan tooltip y filas del almacen.
+	local dynamicKey = GlobalStorageSiK.CategoryResolution.dynamicSignature(item)
+	local cacheKey = tostring(fullType) .. "\31" .. tostring(dynamicKey or "static")
+	local cached = state.baseByFullType[cacheKey]
 	if cached ~= nil then return cached or nil end
-	local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
-	local path = resolved and resolved.effective == "native" and resolved.nativePath or false
+	local presentation = GlobalStorageSiK.CategoryResolution.presentation(fullType, nil, item)
+	if not presentation or not presentation.nativePath then presentation = false end
 	if state.baseCount >= MAX_PANE_TYPES then
 		state.baseByFullType = {}
 		state.baseCount = 0
 	end
-	state.baseByFullType[fullType] = path
+	state.baseByFullType[cacheKey] = presentation
 	state.baseCount = state.baseCount + 1
-	return path or nil
+	return presentation or nil
 end
 
 local function resolveQueuedItem(pane, state, item)
 	local fullType = getFullType(item)
 	if not fullType then return end
-	local basePath = cacheBase(state, fullType, item)
-	local contentPath, fluidSignature = dynamicFluidPath(item)
-	local nativePath = contentPath or basePath
-	-- La proyeccion dinamica es estrictamente visual. Un contenedor lleno
-	-- adopta la ruta de su contenido en esta celda, pero el adaptador nunca
-	-- muta InventoryItem/ScriptItem ni deja esa ruta grabada al vaciarlo.
-	state.byItem[item] = { nativePath = nativePath, facetPath = basePath, fluidSignature = fluidSignature }
+	local presentation = cachePresentation(state, fullType, item)
+	local resolved = presentation and presentation.resolution or nil
+	local nativePath = resolved and resolved.nativePath or nil
+	local fluidSignature = presentation and presentation.dynamicSignature or nil
+	-- La proyeccion dinamica es estrictamente visual. La fachada compartida
+	-- consume la instancia real y nunca muta InventoryItem/ScriptItem.
+	state.byItem[item] = { nativePath = nativePath, presentation = presentation,
+		fluidSignature = fluidSignature }
 	local previousSignature = state.probeSignatureByItem[item]
 	state.probeSignatureByItem[item] = fluidSignature
 	if fluidSignature and fluidSignature ~= previousSignature and GlobalStorageSiK.Log and GlobalStorageSiK.Log.detail then
 		GlobalStorageSiK.Log.detail("VanillaInventoryProjection", "fluid probe",
 			"fullType=" .. fullType .. " " .. fluidSignature
-				.. " projected=" .. tostring(contentPath or basePath or "vanilla"))
+				.. " projected=" .. tostring(nativePath or "vanilla"))
 	end
 end
 
@@ -288,8 +289,10 @@ local function onTick()
 end
 
 function Projection.describeFluidForProbe(item)
-	local path, signature = dynamicFluidPath(item)
-	return { nativePath = path, signature = signature }
+	local fullType = getFullType(item)
+	local presentation = fullType and GlobalStorageSiK.CategoryResolution.presentation(fullType, nil, item) or nil
+	return { nativePath = presentation and presentation.resolution and presentation.resolution.nativePath or nil,
+		signature = presentation and presentation.dynamicSignature or nil }
 end
 
 if not Projection._tickInstalled then

@@ -207,11 +207,16 @@ function GlobalStorageSiK.NativeProduct.getView(path)
 	local cached = viewCache[key]
 	if cached then return cached end
 	metrics.presentationBuilds = metrics.presentationBuilds + 1
-	local l1Label = translated("IGUI_GS_NativeTax_" .. normalized.l1, humanize(normalized.l1))
+	-- Una ruta nativa procede del registro SiK: no puede degradar a un token
+	-- humanizado en ingles por una clave i18n ausente. `humanize` queda para
+	-- contenido ajeno sin ruta registrada; aqui usamos un fallback localizado
+	-- neutro mientras la auditoria de traducciones fuerza la clave faltante.
+	local registeredFallback = translated("IGUI_GS_NativeTax_other", "Other")
+	local l1Label = translated("IGUI_GS_NativeTax_" .. normalized.l1, registeredFallback)
 	local l2Label = normalized.l2 and translated(
-		"IGUI_GS_NativeTax_" .. normalized.l2, humanize(normalized.l2)) or nil
+		"IGUI_GS_NativeTax_" .. normalized.l2, registeredFallback) or nil
 	local l3Label = normalized.l3 and translated(
-		"IGUI_GS_NativeTax_" .. normalized.l3, humanize(normalized.l3)) or nil
+		"IGUI_GS_NativeTax_" .. normalized.l3, registeredFallback) or nil
 	local labels = { l1Label }
 	if l2Label then labels[#labels + 1] = l2Label end
 	if l3Label then labels[#labels + 1] = l3Label end
@@ -230,12 +235,14 @@ end
 ---@param row table|nil
 ---@return table projection {mode,key,fullLabel,color,nativePath,vanillaKey}
 function GlobalStorageSiK.NativeProduct.getRowProjection(row)
-	local resolved = GlobalStorageSiK.CategoryResolution
-		and GlobalStorageSiK.CategoryResolution.resolve(row and row.fullType, row, nil) or nil
+	local presentation = GlobalStorageSiK.CategoryResolution
+		and GlobalStorageSiK.CategoryResolution.presentation(row and row.fullType, row, nil,
+			row and row.nativePath) or nil
+	local resolved = presentation and presentation.resolution or nil
 	if resolved and resolved.effective == "native" then
 		return { mode = "native", key = resolved.nativePath,
-			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
-			color = GlobalStorageSiK.CategoryResolution.color(resolved), nativePath = resolved.nativePath }
+			fullLabel = presentation.labels.full, color = presentation.color,
+			nativePath = resolved.nativePath }
 	end
 	if resolved and resolved.effective == "variants" then
 		return { mode = "variants", key = resolved.routingIdentity,
@@ -274,7 +281,16 @@ function GlobalStorageSiK.NativeProduct.buildIndex(rows)
 	local index = { rows = rows or {}, byPath = {}, byL1 = {}, byL2 = {}, byL3 = {}, byFullType = {} }
 	for i = 1, #(rows or {}) do
 		local row = rows[i]
-		local sourcePaths = row.nativePaths or { row.nativePath }
+		-- El servidor puede enviar `nativePaths = {}` para una fila que tiene
+		-- una ruta única en `nativePath`. En Lua una tabla vacía es truthy, por
+		-- lo que el fallback con `or` dejaba esa fila fuera de los tres índices
+		-- de filtros aunque la tabla ya pudiera dibujar su presentación. La
+		-- fuente de verdad conserva ambas formas, pero el índice siempre recibe
+		-- al menos la ruta única cuando no hay variantes.
+		local sourcePaths = row.nativePaths
+		if type(sourcePaths) ~= "table" or #sourcePaths == 0 then
+			sourcePaths = { row.nativePath }
+		end
 		local seenPath, seenL1, seenL2, seenL3 = {}, {}, {}, {}
 		for p = 1, #sourcePaths do
 			local path = GlobalStorageSiK.NativeProduct.decodePath(sourcePaths[p])

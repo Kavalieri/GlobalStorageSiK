@@ -208,7 +208,15 @@ local function variantFamilyKey(fullType)
 end
 
 local function parentKeyForRow(row)
-	return tostring(variantFamilyKey(row.fullType) or "") .. "\31sprite:" .. tostring(row.worldSprite or "")
+        local key = tostring(variantFamilyKey(row.fullType) or "")
+                .. "\31sprite:" .. tostring(row.worldSprite or "")
+        -- Vanilla identifica las grabaciones por el índice autoritativo del
+        -- medio, no solo por el tipo físico VHSTape. Mantenerlo en la clave del
+        -- padre agrupa duplicados del mismo programa sin mezclar títulos.
+        if row.mediaIndex ~= nil then
+                key = key .. "\31media:" .. tostring(row.mediaIndex)
+        end
+        return key
 end
 
 local function detailKindForRow(row)
@@ -232,8 +240,9 @@ local function compactParentRows(detailRows)
 				displayName = detail.displayName, worldSprite = detail.worldSprite,
 				category = detail.category, subCategory = detail.subCategory,
 				gsSubKeys = detail.gsSubKeys or {}, gsSubKeysStr = detail.gsSubKeysStr or "",
-				learnedRecipeNames = detail.learnedRecipeNames,
-				numberOfPages = detail.numberOfPages,
+                                learnedRecipeNames = detail.learnedRecipeNames,
+                                numberOfPages = detail.numberOfPages,
+                                mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
 				count = 0, locations = {}, variantSummary = {}, totalWeight = 0,
 				totalFluidAmount = 0, totalFluidCapacity = 0,
 				_variantSeen = {}, _pathSeen = {}, _detailKinds = {}, _fullTypeSeen = {},
@@ -303,8 +312,8 @@ local function compactParentRows(detailRows)
 			if summary.nativePath then variantSearchParts[#variantSearchParts + 1] = summary.nativePath end
 		end
 		parent.variantSearchText = table.concat(variantSearchParts, " ")
-		if parent._detailKinds.recorded_media then
-			parent.displayName = GlobalStorageSiK.I18n.typeDisplayName(parent.fullType)
+                if parent._detailKinds.recorded_media and parent.mediaTitle then
+                        parent.displayName = parent.mediaTitle
 		end
 		parent.cosmeticVariants = fullTypeCount > 1
 		parent.fullTypes = {}
@@ -316,7 +325,8 @@ local function compactParentRows(detailRows)
 			parent.displayName = GlobalStorageSiK.I18n.typeDisplayName(familyFullType)
 		end
 		parent.expandable = parent.count > 1
-		parent.aggregateAllowed = parent.count == 1 or kindCount == 0
+                parent.aggregateAllowed = parent.count == 1 or kindCount == 0
+                        or (parent._detailKinds.recorded_media and parent.mediaIndex ~= nil)
 		parent.detailMode = parent.cosmeticVariants and kindCount == 0 and "variants" or "instances"
 		parent.mixedVariants = pathCount > 1
 		-- Un padre que mezcla rutas no inventa una categoría representativa. La

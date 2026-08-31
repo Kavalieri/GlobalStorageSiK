@@ -11,6 +11,7 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_WorldHighlight"
 require "GS_SiK_UI_EscapeStack"
+require "GS_Network"
 
 GlobalStorageSiK.ZonePicker = GlobalStorageSiK.ZonePicker or {}
 
@@ -149,12 +150,36 @@ local function clearPreviewHighlights()
 	end
 end
 
+--- Vuelve a pintar los contenedores ya adscritos a la red que se está
+--- editando. El picker no consulta ni modifica red: consume el snapshot del
+--- terminal y se actualiza solo cuando se reconstruye el preview por una
+--- acción real del jugador.
+local function highlightExistingNetworkNodes()
+	local nodes = terminalRef and terminalRef.terminalState and terminalRef.terminalState.nodes or nil
+	if type(nodes) ~= "table" or not GlobalStorageSiK.WorldHighlight
+		or not GlobalStorageSiK.Network or not GlobalStorageSiK.Network.findWorldObject then
+		return
+	end
+	for i = 1, #nodes do
+		local node = nodes[i]
+		local object = node and node.offline ~= true
+			and GlobalStorageSiK.Network.findWorldObject(node) or nil
+		if object then
+			-- Mismo verde de pertenencia de red usado por el resaltado de nodos.
+			GlobalStorageSiK.WorldHighlight.highlightObject(object, 0.35, 0.88, 0.42)
+		end
+	end
+end
+
 --- Actualiza preview visual de la selección (esquina 1 + hover + rectángulo).
 local function updatePreviewHighlights()
 	clearPreviewHighlights()
 	if not active then
 		return
 	end
+	-- Primero la pertenencia persistente; esquina, hover y rectángulo del
+	-- picker se dibujan encima para que la selección actual siga siendo clara.
+	highlightExistingNetworkNodes()
 
 	local hover = squareUnderMouse()
 	lastPreviewHover = hover

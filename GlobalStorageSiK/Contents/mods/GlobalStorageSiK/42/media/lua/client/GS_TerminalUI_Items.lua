@@ -10,6 +10,7 @@ require "ISUI/ISLabel"
 require "ISUI/ISContextMenu"
 require "GS_CatalogManager"
 require "GS_I18n"
+require "GS_ItemSnapshot"
 require "GS_NativeProduct"
 require "GS_CategoryResolution"
 require "GS_Libs"
@@ -29,6 +30,7 @@ require "GS_ItemNetworkTooltip"
 require "GS_NetworkReadAction"
 require "GS_NetClient"
 require "GS_RemoteItemDetail"
+require "GS_UIDebug"
 
 GlobalStorageSiK.TerminalItems = {}
 
@@ -36,6 +38,11 @@ local function detailPagesByRowKey()
 	local client = GlobalStorageSiK.Client
 	return client and client.itemDetailsCache or nil
 end
+
+-- Una cabecera agregada no lleva itemIds por contrato: antes de retirarla se
+-- resuelve su pagina de instancias y se envia exclusivamente la seleccion
+-- exacta. Es estado efimero de cliente, ligado a una sola operacion de drop.
+local pendingExactWithdrawByRowKey = {}
 
 local T = GlobalStorageSiK.I18n.text
 local EXPANDER_HITBOX_W = 32
@@ -63,17 +70,114 @@ function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
 	if not terminal or not row or not row.rowKey or not row.expandable then return false end
 	local state = terminal.terminalState or {}
 	if not state.networkId then return false end
-	return GlobalStorageSiK.NetClient.sendCommand("getItemDetails", {
+	local sent = GlobalStorageSiK.NetClient.sendCommand("getItemDetails", {
 		networkId = state.networkId,
 		rowKey = row.rowKey,
 		page = math.max(1, math.floor(tonumber(page) or 1)),
 		pageSize = 15,
 	})
+	return sent
 end
 
-function GlobalStorageSiK.TerminalItems.onDetailsReceived(args)
-	if not args or not args.rowKey then return end
+local function clearPendingExactWithdraw(pending)
+	if not pending then return end
+	for i = 1, #(pending.parentKeys or {}) do
+		pendingExactWithdrawByRowKey[pending.parentKeys[i]] = nil
+	end
+end
+
+-- Una revision nueva invalida cualquier pagina exacta que estuviera esperando
+-- una cabecera agregada. No hay reintentos en segundo plano: la siguiente
+-- accion explicita del jugador vuelve a pedir el detalle vigente.
+local function clearAllPendingExactWithdraws()
+	local pendings, seen = {}, {}
+	for _, pending in pairs(pendingExactWithdrawByRowKey) do
+		if pending and not seen[pending] then
+			seen[pending] = true
+			pendings[#pendings + 1] = pending
+		end
+	end
+	for i = 1, #pendings do clearPendingExactWithdraw(pendings[i]) end
+end
+
+function GlobalStorageSiK.TerminalItems.deferExactWithdraw(terminal, rows, targetKey, searchQuery)
+	if not terminal or not rows or #rows == 0 or not targetKey then return false end
+	local pending = {
+		targetKey = targetKey,
+		searchQuery = searchQuery or "",
+		rows = {},
+		parents = {},
+		parentKeys = {},
+		remaining = 0,
+		networkId = terminal.terminalState and terminal.terminalState.networkId,
+		inventoryRevision = terminal.terminalState and terminal.terminalState.inventoryRevision,
+	}
+	for i = 1, #rows do
+		local row = rows[i]
+		local needsExact = row and row.aggregateAllowed == false
+			and (not row.itemIds or #row.itemIds == 0) and row.expandable and row.rowKey
+		if needsExact then
+			pending.parents[row.rowKey] = row
+			pending.parentKeys[#pending.parentKeys + 1] = row.rowKey
+			pending.remaining = pending.remaining + 1
+		else
+			pending.rows[#pending.rows + 1] = row
+		end
+	end
+	if pending.remaining == 0 then return false end
+	for i = 1, #pending.parentKeys do
+		pendingExactWithdrawByRowKey[pending.parentKeys[i]] = pending
+	end
+	for i = 1, #pending.parentKeys do
+		local rowKey = pending.parentKeys[i]
+		if not GlobalStorageSiK.TerminalItems.requestDetails(terminal, pending.parents[rowKey], 1) then
+			clearPendingExactWithdraw(pending)
+			return false
+		end
+	end
+	return true
+end
+
+local function finishExactWithdraw(terminal, args)
+	local pending = pendingExactWithdrawByRowKey[args.rowKey]
+	if not pending then return false end
+	if pending.networkId and args.networkId and pending.networkId ~= args.networkId then
+		clearPendingExactWithdraw(pending)
+		return true
+	end
+	if pending.inventoryRevision and args.inventoryRevision
+		and pending.inventoryRevision ~= args.inventoryRevision then
+		clearPendingExactWithdraw(pending)
+		return true
+	end
+	for i = 1, #(args.items or {}) do
+		local child = args.items[i]
+		if child and child.itemIds and #child.itemIds > 0 then
+			pending.rows[#pending.rows + 1] = child
+		end
+	end
+	if args.hasNext then
+		if not GlobalStorageSiK.TerminalItems.requestDetails(terminal, pending.parents[args.rowKey], (args.page or 1) + 1) then
+			clearPendingExactWithdraw(pending)
+		end
+		return true
+	end
+	pendingExactWithdrawByRowKey[args.rowKey] = nil
+	pending.remaining = pending.remaining - 1
+	if pending.remaining > 0 then return true end
+	if #pending.rows == 0 then return true end
+	local sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(
+		pending.rows, 0, pending.targetKey, pending.searchQuery)
+	if sent then
+		GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropSent")
+	end
+	return true
+end
+
+function GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted)
+	if not args or not args.rowKey or accepted ~= true then return end
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	if terminal then finishExactWithdraw(terminal, args) end
 	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
 		local panel = terminal.itemsListPanel
 		panel._detailPending = panel._detailPending or {}
@@ -87,13 +191,123 @@ function GlobalStorageSiK.TerminalItems.getDetails(rowKey)
 	return rowKey and pages and pages[rowKey] or nil
 end
 
-local function tooltipInteractionActive(row)
-	if not row or not row._gsTooltip or not row.isMouseOver then return false end
-	local okMouse, mouseOver = pcall(function() return row:isMouseOver() end)
-	if not okMouse or not mouseOver then return false end
-	if not row._gsTooltip.isVisible then return true end
-	local okVisible, visible = pcall(function() return row._gsTooltip:isVisible() end)
-	return not okVisible or visible == true
+--- Contrato común para tooltips de filas virtualizadas: son ornamentales y
+--- nunca participan en hit-testing, captura ni diferimiento de refresh.
+function GlobalStorageSiK.TerminalItems.makePassiveTooltip(tooltip)
+	if not tooltip then return nil end
+	-- ISToolTipInv tiene envoltorio e hijo `tooltip`: ambos existen en el
+	-- arbol UI y ambos deben ser inertes. Desactivar solo el envoltorio deja
+	-- que el hijo siga robando hover a la fila virtual.
+	local function disableMouseConsumption(element)
+		if not element then return end
+		if element.javaObject and element.javaObject.setConsumeMouseEvents then
+			element.javaObject:setConsumeMouseEvents(false)
+		end
+	end
+	local function makeLuaElementPassive(element)
+		if not element then return end
+		disableMouseConsumption(element)
+		element.onMouseDown = function() return false end
+		element.onMouseUp = function() return false end
+		element.onMouseUpOutside = function() return false end
+		element.onMouseDownOutside = function() return false end
+		element.onMouseMove = function() return false end
+		element.onMouseMoveOutside = function() return false end
+		element.onRightMouseDown = function() return false end
+		element.onRightMouseUp = function() return false end
+	end
+	-- El exterior es una tabla Lua; el interior de ISToolTipInv es un objeto
+	-- Java. Solo el primero admite handlers Lua. Ambos se vuelven transparentes
+	-- al raton mediante su javaObject cuando esta disponible.
+	makeLuaElementPassive(tooltip)
+	disableMouseConsumption(tooltip.tooltip)
+	return tooltip
+end
+
+function GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+	if not row then return end
+	if GlobalStorageSiK.RemoteItemDetail then
+		GlobalStorageSiK.RemoteItemDetail.deactivate(row)
+	end
+	local tooltip = row._gsTooltip
+	if not tooltip then return end
+	tooltip:setVisible(false)
+	if row._gsTooltipAttached then
+		tooltip:removeFromUIManager()
+		row._gsTooltipAttached = nil
+	end
+end
+
+-- ISToolTipInv contiene un panel interno (`tooltip`) y un panel exterior. En
+-- una fila virtual ambos deben compartir ancla antes de hacerse visibles: tras
+-- muerte/reapertura PZ puede conservar la coordenada exterior de una vida UI
+-- previa y dibujar el anexo SiK lejos del tooltip vanilla.
+local function anchorRowTooltip(tooltip, playerNum)
+
+	if not tooltip then return end
+	local mx = getMouseX and getMouseX() or 0
+	local my = getMouseY and getMouseY() or 0
+	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum or 0)
+	local x = math.max(viewport.x, mx + 24)
+	local y = math.max(viewport.y, my + 24)
+	tooltip.followMouse = true
+	tooltip.anchorBottomLeft = nil
+	if tooltip.setX then tooltip:setX(x) end
+	if tooltip.setY then tooltip:setY(y) end
+	local inner = tooltip.tooltip
+	if inner then
+		if inner.setX then inner:setX(x) end
+		if inner.setY then inner:setY(y) end
+	end
+end
+
+local function hideVirtualRowTooltips(panel)
+	local pool = panel and panel.itemScroll and panel.itemScroll.itemPool or {}
+	for i = 1, #pool do
+		GlobalStorageSiK.TerminalItems.hideRowTooltip(pool[i])
+	end
+end
+
+--- Restablece por completo el estado transitorio del pool virtual. Es la única
+--- salida compartida tras drag, expansión y reciclado: ninguna fila puede
+--- conservar hover/captura/tooltip de una identidad o interacción anterior.
+---@param panel ISPanel|nil
+function GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
+	local pool = panel and panel.itemScroll and panel.itemScroll.itemPool or {}
+	for i = 1, #pool do
+		local row = pool[i]
+		if row then
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+			if GlobalStorageSiK.RemoteItemDetail then
+				GlobalStorageSiK.RemoteItemDetail.deactivate(row)
+			end
+			row._gsExpandPressed = nil
+			row._gsDragPending = false
+			row._gsDragAccum = 0
+			if row.setCapture then row:setCapture(false) end
+		end
+	end
+end
+
+-- Los tooltips de fila son una prolongacion visual del inventario vanilla,
+-- nunca otra capa de input. Mantener este contrato en un unico helper evita
+-- que una fila reciclada deje un ISToolTipInv capturando el expansor o drag.
+function GlobalStorageSiK.TerminalItems.showRowTooltip(row)
+	if not row or not row._gsTooltip then return false end
+	local tooltip = GlobalStorageSiK.TerminalItems.makePassiveTooltip(row._gsTooltip)
+	if not tooltip then return false end
+	anchorRowTooltip(tooltip, row.terminal and row.terminal.playerNum or 0)
+	-- Un rebuild de UIManager durante un escaneo puede dejar el tooltip visible
+	-- pero fuera de su z-order. `_gsTooltipAttached` distingue ese caso sin
+	-- reinsertarlo por frame: se recupera una sola vez al pasar de desligado a
+	-- ligado.
+	if not tooltip:isVisible() or not row._gsTooltipAttached then
+		tooltip:setVisible(true)
+		tooltip:addToUIManager()
+		tooltip:bringToTop()
+		row._gsTooltipAttached = true
+	end
+	return true
 end
 
 --- Ningun refresh recicla una fila mientras click, drag o tooltip la poseen.
@@ -107,7 +321,19 @@ function GlobalStorageSiK.TerminalItems.isInteractionActive(panel)
 	local pool = panel.itemScroll and panel.itemScroll.itemPool or {}
 	for i = 1, #pool do
 		local row = pool[i]
-		if row and (row._gsDragPending or tooltipInteractionActive(row)) then return true end
+		if row and (row._gsDragPending or row._gsExpandPressed) then
+			-- Una transferencia vanilla (incluidos los paneles de vehiculo) puede
+			-- reconstruir la lista entre mouseDown y mouseUp. Nunca retenemos una
+			-- pulsacion que ya no existe: sin boton izquierdo real, se libera todo
+			-- el estado local antes de decidir diferir un refresh.
+			local leftDown = isMouseButtonDown and isMouseButtonDown(0)
+			if leftDown then return true end
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+			row._gsExpandPressed = nil
+			row._gsDragPending = false
+			row._gsDragAccum = 0
+			if row.setCapture then row:setCapture(false) end
+		end
 	end
 	return false
 end
@@ -149,6 +375,16 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
 	-- La pagina anterior puede permanecer como referencia visual, pero se marca
 	-- stale y nunca conserva acciones/itemIds utilizables.
 	panel._detailPending = {}
+	clearAllPendingExactWithdraws()
+	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
+		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
+		and GlobalStorageSiK.TerminalWithdrawDrag.isActive()
+	if not dragging and not (isMouseButtonDown and isMouseButtonDown(0)) then
+		-- La transferencia desde/hacia un inventario vanilla no es una
+		-- interaccion de fila SiK. Al llegar su revision liberamos cualquier
+		-- captura/tooltip residual antes de que el refresh virtual recicle filas.
+		GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
+	end
 end
 
 ---@param panel ISPanel
@@ -156,6 +392,20 @@ end
 ---@return number|nil
 local function rowIdentity(row)
 	return row and (row.rowKey or row.fullType) or nil
+end
+
+-- ISToolTipInv vive como UI de raiz. Aunque sea mouse-transparent, usar
+-- isMouseOver() de la fila deja que el z-order temporal del tooltip alterne
+-- entre fila/tooltip y produzca el parpadeo observado tras expandir o soltar.
+-- El hover de una fila virtual se decide exclusivamente por su rectangulo real.
+local function pointerInsideRow(row)
+	if not row or not row.getAbsoluteX or not row.getAbsoluteY then return false end
+	local mx = getMouseX and getMouseX() or -1
+	local my = getMouseY and getMouseY() or -1
+	local x, y = row:getAbsoluteX(), row:getAbsoluteY()
+	local w = row.width or (row.getWidth and row:getWidth()) or 0
+	local h = row.height or (row.getHeight and row:getHeight()) or 0
+	return mx >= x and my >= y and mx < x + w and my < y + h
 end
 
 local function findItemIndex(panel, key)
@@ -348,7 +598,29 @@ local function itemProbe(row)
 end
 
 local MEDIA_TITLE_CACHE = {}
+
+--- El nombre base de una cinta (`VHS comercial`) describe el tipo de ítem,
+--- no su edición. Solo se acepta una identidad de RecordedMedia si difiere
+--- de ese fallback genérico de fila/tipo.
+local function isGenericRecordedMediaTitle(title, row)
+	if type(title) ~= "string" or title == "" then return true end
+	local generic = row and row.fullType and GlobalStorageSiK.I18n.typeDisplayName
+		and GlobalStorageSiK.I18n.typeDisplayName(row.fullType) or nil
+	if generic ~= nil and title == generic then return true end
+	-- Una vez resuelto, displayName y mediaTitle pasan a ser deliberadamente el
+	-- mismo título exacto. Comparar primero contra displayName lo descartaba en
+	-- el refresh siguiente y devolvía otra vez "VHS comercial".
+	if row and row.mediaTitle and title == row.mediaTitle then return false end
+	return row and title == row.displayName or false
+end
+
 local function localizedRecordedMediaTitle(row)
+	-- El snapshot autoritativo ya trae el título exacto cuando el servidor lo
+	-- conoce. Es la primera fuente: no se debe sustituir por el nombre genérico
+	-- del script ni esperar a reconstruir una sonda local para mostrarlo.
+	if row and not isGenericRecordedMediaTitle(row.mediaTitle, row) then
+		return row.mediaTitle
+	end
 	local mediaIndex = row and tonumber(row.mediaIndex)
 	if not mediaIndex or mediaIndex < 0 or mediaIndex > 32767 then return nil end
 	mediaIndex = math.floor(mediaIndex)
@@ -365,9 +637,29 @@ local function localizedRecordedMediaTitle(row)
 			return nil
 		end
 	end
-	local title = probe and GlobalStorageSiK.I18n.nameFromItemInstance
-		and GlobalStorageSiK.I18n.nameFromItemInstance(probe, row.fullType) or nil
-	MEDIA_TITLE_CACHE[mediaIndex] = title or false
+	-- MediaData es la fuente exacta de la edición en B42. Es el mismo adaptador
+	-- compartido que usa el snapshot autoritativo y el tooltip vanilla; no se
+	-- vuelve a inventar una lectura de RecordedMedia para la tabla.
+	local title = nil
+	if probe and GlobalStorageSiK.ItemSnapshot
+		and GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem then
+		local ok, value = pcall(GlobalStorageSiK.ItemSnapshot.recordedMediaTitleFromItem, probe)
+		if ok and not isGenericRecordedMediaTitle(value, row) then title = value end
+	end
+	-- Algunas implementaciones de mod no exponen MediaData pero sí actualizan
+	-- `getDisplayName()` al aplicar el índice. Mantenerlo como compatibilidad,
+	-- siempre descartando el nombre genérico del script.
+	if probe and probe.getDisplayName then
+		local ok, value = pcall(function() return probe:getDisplayName() end)
+		if not title and ok and not isGenericRecordedMediaTitle(value, row) then title = value end
+	end
+	if not title and probe and GlobalStorageSiK.I18n.nameFromItemInstance then
+		local fallback = GlobalStorageSiK.I18n.nameFromItemInstance(probe, row.fullType)
+		if not isGenericRecordedMediaTitle(fallback, row) then title = fallback end
+	end
+	-- Si RecordedMedia aún no está listo, no cacheamos el nombre genérico ni un
+	-- fallo: el siguiente refresh explícito podrá resolver la edición exacta.
+	if title then MEDIA_TITLE_CACHE[mediaIndex] = title end
 	return title
 end
 
@@ -914,9 +1206,24 @@ local function buildDisplayRows(panel, terminal, parents)
 			local displayable = detailPage and detailPage.page == wantedPage
 				and detailPage.networkId == networkId
 			if displayable then
+				panel._detailRendered = panel._detailRendered or {}
+				local renderedKey = tostring(key) .. "\31" .. tostring(wantedPage) .. "\31" .. tostring(revision)
+				if panel._detailRendered[renderedKey] ~= true
+					and GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.log then
+					panel._detailRendered[renderedKey] = true
+					GlobalStorageSiK.UIDebug.log("TerminalItems", "detailsRendered %s", tostring(key))
+				end
 				local pageStale = tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
 				for j = 1, #(detailPage.items or {}) do
 					local child = detailPage.items[j]
+					-- Las unidades llegan bajo demanda: no pasan por la localización
+					-- inicial de padres. Resolver aquí hace que el título de VHS que
+					-- ya conoce la instancia se pinte también en la fila hija.
+					local mediaTitle = localizedRecordedMediaTitle(child)
+					if mediaTitle then
+						child.mediaTitle = mediaTitle
+						child.displayName = mediaTitle
+					end
 					child._gsRowKind = "child"
 					child._gsDepth = 1
 					child.parentRowKey = key
@@ -1351,6 +1658,10 @@ local function toggleExpanded(listPanel, terminal, data)
 		listPanel._expandedKeys[key] = true
 		listPanel._detailPageByKey[key] = listPanel._detailPageByKey[key] or 1
 	end
+	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.log then
+		GlobalStorageSiK.UIDebug.log("TerminalItems", "expandToggle %s=%s", tostring(key),
+			tostring(listPanel._expandedKeys[key] == true))
+	end
 	terminal:refreshItemsTab()
 	return true
 end
@@ -1368,13 +1679,14 @@ local function presentationProjection(data)
 	-- DisplayCategory generico "Misc" aunque su instancia reconstruida tenga
 	-- una familia concreta. No se modifica snapshot, indice, routing ni red.
 	local probe = itemProbe(data)
-	local resolved = probe and GlobalStorageSiK.CategoryResolution.resolve(data.fullType, nil, probe) or nil
+	local presentation = probe and GlobalStorageSiK.CategoryResolution.presentation(data.fullType, data, probe) or nil
+	local resolved = presentation and presentation.resolution or nil
 	if resolved and resolved.effective ~= "vanilla" then
 		local fallback = {
 			mode = resolved.effective,
 			key = resolved.routingIdentity,
-			fullLabel = GlobalStorageSiK.CategoryResolution.label(resolved),
-			color = GlobalStorageSiK.CategoryResolution.color(resolved),
+			fullLabel = presentation.labels.full,
+			color = presentation.color,
 			nativePath = resolved.nativePath,
 		}
 		MOVABLE_PRESENTATION_CACHE[cacheKey] = fallback
@@ -1465,7 +1777,8 @@ function GlobalStorageSiK.TerminalItems.rowHeight()
 end
 
 --- Separa las filas que se dibujan de las que se envian al servidor.
---- Un padre desplegado dibuja su bloque, pero conserva un unico payload agregado.
+--- Un padre desplegado envia sus instancias visibles; uno colapsado solicita
+--- las instancias exactas al soltar, nunca una cabecera agregada al servidor.
 function GlobalStorageSiK.TerminalItems.buildDragState(listPanel, rowData, selectionRows)
 	local displayed = listPanel and listPanel._lastItems or {}
 	local selected = {}
@@ -1496,17 +1809,24 @@ function GlobalStorageSiK.TerminalItems.buildDragState(listPanel, rowData, selec
 			if row._gsRowKind == "child" and row.parentRowKey and selected[row.parentRowKey] then
 				coveredParents[row.parentRowKey] = true
 			else
-				addPayload(row)
-				addVisual(row)
-				if row._gsRowKind == "parent" and row.expandable and listPanel._expandedKeys
-					and listPanel._expandedKeys[key] then
-					local j = i + 1
-					while j <= #displayed and displayed[j]._gsRowKind == "child"
-						and displayed[j].parentRowKey == key do
-						addVisual(displayed[j])
-						j = j + 1
-					end
-				end
+                                addVisual(row)
+                                if row._gsRowKind == "parent" and row.expandable and listPanel._expandedKeys
+                                        and listPanel._expandedKeys[key] then
+                                        -- El fantasma representa lo que el jugador ve: cabecera y
+                                        -- únicamente los hijos de la página visible. La transferencia,
+                                        -- en cambio, conserva la identidad y el recuento TOTAL de la
+                                        -- cabecera; usar aquí los hijos paginados limitaba el movimiento
+                                        -- a las primeras 15 filas y convertía la presentación en payload.
+                                        addPayload(row)
+                                        local j = i + 1
+                                        while j <= #displayed and displayed[j]._gsRowKind == "child"
+                                                and displayed[j].parentRowKey == key do
+                                                addVisual(displayed[j])
+                                                j = j + 1
+                                        end
+                                else
+                                        addPayload(row)
+                                end
 			end
 		end
 	end
@@ -1536,7 +1856,8 @@ local function createItemRow(scroll, listPanel, terminal)
 		ISPanel.prerender(self)
 		local data = self.itemData
 		local selected = data and self.listPanel and isRowSelected(self.listPanel, rowIdentity(data))
-		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), selected)
+		local hovering = pointerInsideRow(self)
+		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, hovering, selected)
 		if data and GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			local types = GlobalStorageSiK.TerminalWithdrawDrag.activePreviewTypes
 			if types and rowIdentity(data) and types[rowIdentity(data)] then
@@ -1563,7 +1884,7 @@ local function createItemRow(scroll, listPanel, terminal)
 			local descriptor = GlobalStorageSiK.TerminalItems.describeRow(
 				data, self.listPanel, self.terminal, self._gsZoneLabel)
 			GlobalStorageSiK.TerminalItems.drawRowDescriptor(self, descriptor, {
-				rowIndex = self.rowIndex, hovered = self:isMouseOver(), selected = selected,
+				rowIndex = self.rowIndex, hovered = hovering, selected = selected,
 				drawBackground = false,
 			})
 		end
@@ -1577,7 +1898,7 @@ local function createItemRow(scroll, listPanel, terminal)
 		-- si el texto no cabe en la columna, se trunca con "..." (ver
 		-- drawText de arriba) y el detalle completo se lee en este tooltip.
 		-- Se oculta mientras hay un arrastre activo (no tapar el preview de drop).
-		if data and not data._gsPager and not data._gsStale and self:isMouseOver()
+		if data and not data._gsPager and not data._gsStale and hovering
 			and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			local tooltipKey = rowIdentity(data) or (tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or ""))
 			if not self._gsTooltip or self._gsTooltip._gsItemKey ~= tooltipKey then
@@ -1592,6 +1913,7 @@ local function createItemRow(scroll, listPanel, terminal)
 						self._gsTooltip:setOwner(self)
 						local ttPlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getSpecificPlayer(0)
 						self._gsTooltip:setCharacter(ttPlayer)
+						GlobalStorageSiK.TerminalItems.makePassiveTooltip(self._gsTooltip)
 					end
 					self._gsTooltip._gsItemKey = tooltipKey
 					local detail, loading = nil, false
@@ -1600,22 +1922,19 @@ local function createItemRow(scroll, listPanel, terminal)
 					end
 					GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, data, detail, loading)
 				elseif self._gsTooltip then
-					self._gsTooltip:removeFromUIManager()
-					self._gsTooltip:setVisible(false)
+					GlobalStorageSiK.TerminalItems.hideRowTooltip(self)
 					self._gsTooltip = nil
 				end
 			end
 			if self._gsTooltip then
-				self._gsTooltip:setVisible(true)
-				self._gsTooltip:addToUIManager()
-				self._gsTooltip:bringToTop()
+				-- La fila del almacen es la autoridad de categoria del tooltip de
+				-- esta superficie. No depender de que el WeakMap del probe sobreviva
+				-- a un reciclado virtual o a un escaneo intermedio.
+				self._gsTooltip._gsRemoteRow = data
+				GlobalStorageSiK.TerminalItems.showRowTooltip(self)
 			end
 		else
-			GlobalStorageSiK.RemoteItemDetail.deactivate(self)
-			if self._gsTooltip and self._gsTooltip:isVisible() then
-				self._gsTooltip:removeFromUIManager()
-				self._gsTooltip:setVisible(false)
-			end
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(self)
 			if self.listPanel and self.listPanel._deferredRefresh then
 				GlobalStorageSiK.TerminalItems.flushDeferredRefresh(self.listPanel)
 			end
@@ -1624,8 +1943,15 @@ local function createItemRow(scroll, listPanel, terminal)
 
 	row.onRemoteItemDetail = function(self, detail)
 		if not self._gsTooltip or not self.itemData or self.itemData._gsStale
-			or not self:isMouseOver() then return end
+			or not pointerInsideRow(self) then return end
 		if tostring(detail and detail.itemId) ~= tostring(self.itemData.itemId) then return end
+		local mediaTitle = detail and (detail.mediaTitle or detail.displayName) or nil
+		if not isGenericRecordedMediaTitle(mediaTitle, self.itemData) then
+			self.itemData.mediaTitle = mediaTitle
+			self.itemData.displayName = mediaTitle
+			local mediaIndex = tonumber(self.itemData.mediaIndex or detail.mediaIndex)
+			if mediaIndex then MEDIA_TITLE_CACHE[math.floor(mediaIndex)] = mediaTitle end
+		end
 		local probe = self._gsTooltip.item
 		if probe then
 			GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, self.itemData, detail, false)
@@ -1639,9 +1965,14 @@ local function createItemRow(scroll, listPanel, terminal)
 		end
 		if self.itemData and self.itemData._gsRowKind == "parent"
 			and self.itemData.expandable and x >= 0 and x <= EXPANDER_HITBOX_W then
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(self)
+			if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.log then
+				GlobalStorageSiK.UIDebug.log("TerminalItems", "expandDown %s", tostring(rowIdentity(self.itemData)))
+			end
 			self._gsExpandPressed = true
 			self._gsDragPending = false
 			self._gsDragAccum = 0
+			self:setCapture(true)
 			return true
 		end
 		self._gsExpandPressed = nil
@@ -1658,14 +1989,14 @@ local function createItemRow(scroll, listPanel, terminal)
 		if not self._gsDragPending or not self.itemData or not self.terminal then
 			return false
 		end
-		if self.itemData._gsPager
-			or (self.itemData.aggregateAllowed == false and not self.itemData.itemIds) then
+		if self.itemData._gsPager then
 			self._gsDragPending = false
 			return false
 		end
 		self._gsDragAccum = (self._gsDragAccum or 0) + math.abs(dx or 0) + math.abs(dy or 0)
 		if self._gsDragAccum >= DRAG_THRESHOLD then
 			self._gsDragPending = false
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(self)
 			local selection = getSelectedRows(self.listPanel)
 			local rowSelected = isRowSelected(self.listPanel, rowIdentity(self.itemData))
 			local multiDrag = #selection > 1 and self.itemData and rowSelected
@@ -1684,7 +2015,14 @@ local function createItemRow(scroll, listPanel, terminal)
 	end
 	row.onMouseMoveOutside = row.onMouseMove
 	row.onMouseUpOutside = function(self, x, y)
-		self._gsExpandPressed = nil
+		if self._gsExpandPressed then
+			self:setCapture(false)
+			self._gsExpandPressed = nil
+			self._gsDragPending = false
+			local toggled = toggleExpanded(self.listPanel, self.terminal, self.itemData)
+			GlobalStorageSiK.TerminalItems.onInteractionFinished(self.listPanel)
+			return toggled
+		end
 		self._gsDragPending = false
 		if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
@@ -1699,11 +2037,14 @@ local function createItemRow(scroll, listPanel, terminal)
 			return GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 		end
 		if self._gsExpandPressed then
+			self:setCapture(false)
 			self._gsExpandPressed = nil
 			self._gsDragPending = false
 			if self.itemData and self.itemData._gsRowKind == "parent"
-				and self.itemData.expandable and x >= 0 and x <= EXPANDER_HITBOX_W then
-				return toggleExpanded(self.listPanel, self.terminal, self.itemData)
+				and self.itemData.expandable then
+				local toggled = toggleExpanded(self.listPanel, self.terminal, self.itemData)
+				GlobalStorageSiK.TerminalItems.onInteractionFinished(self.listPanel)
+				return toggled
 			end
 			GlobalStorageSiK.TerminalItems.onInteractionFinished(self.listPanel)
 			return true
@@ -1746,6 +2087,7 @@ local function createItemRow(scroll, listPanel, terminal)
 		if self.itemData and self.itemData._gsStale then return true end
 		if self.itemData and self.listPanel and self.terminal then
 			if self.itemData._gsPager then return true end
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(self)
 			if not isRowSelected(self.listPanel, rowIdentity(self.itemData)) then
 				selectSingleRow(self.listPanel, rowIdentity(self.itemData), self.rowIndex)
 			end
@@ -1761,6 +2103,16 @@ end
 ---@param row ISPanel
 ---@param data table|nil
 local function updateItemRow(row, data)
+	if rowIdentity(row.itemData) ~= rowIdentity(data) then
+		GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+		-- Una fila del pool no puede heredar la pulsación, captura ni acumulación
+		-- de drag de la identidad que ocupaba antes. Ese estado residual explicaba
+		-- el parpadeo tras expandir, colapsar o completar varios arrastres.
+		row._gsExpandPressed = nil
+		row._gsDragPending = false
+		row._gsDragAccum = 0
+		if row.setCapture then row:setCapture(false) end
+	end
 	row.itemData = data
 	row._gsZoneLabel = data and resolveZoneLabel(row.terminal, data) or nil
 end
@@ -1856,6 +2208,9 @@ local function disposeItemScroll(panel)
 	if not panel or not panel.itemScroll then
 		return
 	end
+	for _, row in ipairs(panel.itemScroll.itemPool or {}) do
+		GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+	end
 	panel:removeChild(panel.itemScroll)
 	if panel.itemScroll.removeFromUIManager then
 		panel.itemScroll:removeFromUIManager()
@@ -1948,6 +2303,10 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 		return false
 	end
 	panel._deferredRefresh = nil
+	-- El refresh puede recrear/elevar el scroll durante un escaneo. Retirar el
+	-- tooltip antes evita que una superficie top-level quede detras del terminal;
+	-- el hover activo lo vuelve a mostrar una vez reinsertada la fila correcta.
+	hideVirtualRowTooltips(panel)
 
 	items = items or {}
 	-- El servidor conserva mediaIndex como identidad estable; cada cliente
@@ -1982,16 +2341,23 @@ function GlobalStorageSiK.TerminalItems.refresh(panel, terminal, items)
 		panel.columnHeader:setWidth(rect.w)
 	end
 
-        if #items == 0 then
+	if #items == 0 then
+		-- `items` llega ya filtrado; la red real vive en terminalState.items.
+		-- Nunca indicar que se cree una zona si esta existe y el filtro activo no
+		-- devuelve filas: son dos estados operativos distintos.
+		local allItems = terminal and terminal.terminalState and terminal.terminalState.items or {}
+		local emptyKey = #allItems > 0 and "IGUI_GS_NoFilterMatches" or "IGUI_GS_NoItems"
+		local emptyText = T(emptyKey)
 		if panel.itemScroll and panel.itemScroll.setDataSource then
 			panel.itemScroll:setDataSource({}, false)
 			panel._itemsScrollOffset = 0
 		end
-                if panel.emptyLbl then
+		if panel.emptyLbl then
+			panel.emptyLbl:setName(emptyText)
 			panel.emptyLbl:setVisible(true)
 		else
 			local _epal = GlobalStorageSiK.SiK_UI.PALETTE
-			panel.emptyLbl = ISLabel:new(10, HEADER_H + 8, FONT_HGT_SMALL, T("IGUI_GS_NoItems"), _epal.textMuted[1], _epal.textMuted[2], _epal.textMuted[3], 1, UIFont.Small, true)
+			panel.emptyLbl = ISLabel:new(10, HEADER_H + 8, FONT_HGT_SMALL, emptyText, _epal.textMuted[1], _epal.textMuted[2], _epal.textMuted[3], 1, UIFont.Small, true)
 			panel.emptyLbl:initialise()
 			panel:addChild(panel.emptyLbl)
 		end

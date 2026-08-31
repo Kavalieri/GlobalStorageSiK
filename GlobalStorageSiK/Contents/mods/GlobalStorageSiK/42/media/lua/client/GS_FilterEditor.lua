@@ -15,7 +15,6 @@ require "GS_SiK_UI_Core"
 require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Config"
 require "GS_RulesUI"
-require "GS_RuleCoverage"
 require "GS_SiK_UI_Controls"
 
 GlobalStorageSiK.FilterEditor = {}
@@ -117,12 +116,6 @@ local function searchItems(query)
 		end
 	end
 	return results
-end
-
-local function categoryIsAvailable(target, key)
-	local availability = GlobalStorageSiK.RuleCoverage.categoryAvailability(
-		key, target and target.scopeRules)
-	return availability.available > 0
 end
 
 function GS_FilterEditorUI:initialise()
@@ -252,9 +245,10 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catMainCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catMainCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catMainCombo)
-	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "", function(key)
-		return categoryIsAvailable(self.target, key)
-	end)
+	-- El catálogo de reglas es de autoría, no un inventario de reservas. Dos
+	-- destinos pueden aceptar exactamente la misma ruta; prioridad y afinidad
+	-- resuelven el destino cuando se deposite el objeto.
+	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "")
 	self:addChild(self.catMainCombo)
 	y = y + ENTRY_H + 8
 
@@ -266,9 +260,7 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catSubCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catSubCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catSubCombo)
-	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {}, function(key)
-		return categoryIsAvailable(self.target, key)
-	end)
+	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {})
 	self:addChild(self.catSubCombo)
 	y = y + ENTRY_H + 8
 
@@ -280,26 +272,18 @@ function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
 	self.catLeafCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
 	self.catLeafCombo:initialise()
 	GlobalStorageSiK.SiK_UI.styleComboBox(self.catLeafCombo)
-	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "", function(key)
-		return categoryIsAvailable(self.target, key)
-	end)
+	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "")
 	self:addChild(self.catLeafCombo)
 
 	self.catMainCombo.onChange = function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
-		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {}, function(key)
-			return categoryIsAvailable(self.target, key)
-		end)
-		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "", function(key)
-			return categoryIsAvailable(self.target, key)
-		end)
+		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {})
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "")
 	end
 	self.catSubCombo.onChange = function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
 		local subKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
-		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "", function(key)
-			return categoryIsAvailable(self.target, key)
-		end)
+		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "")
 	end
 	y = y + ENTRY_H + 4
 	return y
@@ -446,13 +430,9 @@ function GS_FilterEditorUI:refreshItemResults()
 	end
 	local query = self.itemSearchEntry and self.itemSearchEntry:getText() or ""
 	local searched = searchItems(query)
-	local results = {}
-	for i = 1, #searched do
-		if GlobalStorageSiK.RuleCoverage.isExactItemAvailable(searched[i].fullType,
-			self.target and self.target.scopeRules) then
-			results[#results + 1] = searched[i]
-		end
-	end
+	-- Una regla de ítem exacto tampoco reserva el ítem para un único destino.
+	-- Mostrar todos los resultados evita que el editor contradiga el routing.
+	local results = searched
 	local innerW = self.itemResultsHost.width
 	local ry = 0
 	for i = 1, #results do
