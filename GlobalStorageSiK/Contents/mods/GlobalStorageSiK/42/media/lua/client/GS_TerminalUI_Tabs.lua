@@ -56,6 +56,7 @@ local function navigationOptions(terminal, items)
 	return {
 		placement = "left", activeKey = terminal.activeTabKey or "items",
 		items = items, extent = profile.window.railWidth,
+		contentPadding = 12,
 		iconOnly = true, itemExtent = profile.window.railItemHeight,
 		iconSize = profile.window.railItemHeight, iconFit = "fill", iconPadding = 0,
 		barPadding = profile.window.railPadding, itemGap = profile.window.railGap,
@@ -244,14 +245,17 @@ function GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, defi
 	def.key = key
 	terminal.dynamicTabDefs = terminal.dynamicTabDefs or {}
 	terminal.dynamicTabDefByKey = terminal.dynamicTabDefByKey or {}
+	local changed = false
 	if visible then
 		if not terminal.dynamicTabDefByKey[key] then
 			terminal.dynamicTabDefByKey[key] = def
 			terminal.dynamicTabDefs[#terminal.dynamicTabDefs + 1] = def
+			changed = true
 		end
 	else
 		if not terminal.dynamicTabDefByKey[key] then return true end
 		terminal.dynamicTabDefByKey[key] = nil
+		changed = true
 		for index = #terminal.dynamicTabDefs, 1, -1 do
 			if terminal.dynamicTabDefs[index].key == key then
 				table.remove(terminal.dynamicTabDefs, index)
@@ -259,6 +263,10 @@ function GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, defi
 			end
 		end
 		if terminal.activeTabKey == key and terminal.activateTab then terminal:activateTab("items") end
+	end
+	if not changed then
+		syncNavigationSelection(terminal)
+		return true
 	end
 	local navigation = terminal.navigationContainer.navigation
 	navigation:setItems(navigationItems(terminal))

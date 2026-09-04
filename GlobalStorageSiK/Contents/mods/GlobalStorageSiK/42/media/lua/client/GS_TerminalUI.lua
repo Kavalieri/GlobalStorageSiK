@@ -557,22 +557,9 @@ function GS_TerminalUI:calculateLayout()
 		or UI.Layout.resolveRect(fallbackBounds, nil, 1)
 	local innerW, innerH = contentBounds.w, contentBounds.h
 
-	local tabPanels = { self.networkPanel, self.configPanel, self.itemsPanel, self.addonsPanel, self.blockedPanel }
-	if self.extraTabs then
-		for _, entry in pairs(self.extraTabs) do
-			if entry.panel then
-				tabPanels[#tabPanels + 1] = entry.panel
-			end
-		end
-	end
-	for i = 1, #tabPanels do
-		local panel = tabPanels[i]
-		if panel then
-			panel:setX(0)
-			panel:setWidth(innerW)
-			panel:setHeight(innerH)
-		end
-	end
+	-- Navigation owns the one common content area and the exact bounds of
+	-- every selectable surface inside it.  Rewriting panel geometry here used
+	-- to erase its 12 px inset and made fixed and dynamic tabs diverge.
 
 	local activeLayoutTab = blockedMode and "blocked" or (self.activeTabKey or "items")
 	if activeLayoutTab == "blocked" and self.blockedPanel and self._gsBuiltTabs and self._gsBuiltTabs.blocked

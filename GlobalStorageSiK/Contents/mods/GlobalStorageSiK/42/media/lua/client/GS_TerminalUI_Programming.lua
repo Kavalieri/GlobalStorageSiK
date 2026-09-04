@@ -56,11 +56,6 @@ local function programReadiness(player, id)
 	return known == true, disk == true
 end
 
-local function hasProgrammedDiskNearby(player, outputItem)
-	if not player or not outputItem or not GlobalStorageSiK.CraftUtils.findItemTypeNearby then return false end
-	return GlobalStorageSiK.CraftUtils.findItemTypeNearby(player, outputItem) ~= nil
-end
-
 function Programming.context(terminal)
 	local player = playerFor(terminal)
 	local blankCount = countBlankDisksNearby(player)
@@ -71,24 +66,22 @@ function Programming.context(terminal)
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
 		local known, hasDisk = programReadiness(player, id)
 		local ready = known and hasDisk
-		local completed = hasProgrammedDiskNearby(player, def.outputItem)
 		local recording = Programming.recordingProgramId == id
-		local statusKey = recording and "IGUI_GS_ProgrammingButton"
-			or (completed and "IGUI_GS_ProgramDiskSuccess")
-			or (ready and "IGUI_GS_ProgrammingReady")
-			or (not known and "IGUI_GS_ProgrammingNeedsBook" or "IGUI_GS_ProgrammingNeedsBlankDisk")
-		local tone = recording and "warning" or ((completed or ready) and "success" or "warning")
-		local requirement = not known and T("IGUI_GS_ProgrammingNeedsBook")
+		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
+		local requirement = not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName)
 			or (not hasDisk and T("IGUI_GS_ProgrammingNeedsBlankDisk") or "")
+		local status = recording and T("IGUI_GS_ProgrammingButton")
+			or (ready and T("IGUI_GS_ProgrammingReady") or "")
+		local tone = recording and "warning" or (ready and "success" or "warning")
 		local title = T(def.menuTextKey or id)
 		cards[#cards + 1] = {
 			variant = "process", title = title,
 			description = def.descKey and T(def.descKey) or "", icon = def.iconPath,
-			requirement = requirement, actionLabel = title,
-			status = T(statusKey), statusTone = tone,
-			locked = not ready or recording, tooltip = T(statusKey),
+			requirement = requirement, actionLabel = T("IGUI_GS_ProgrammingButton"),
+			status = status, statusTone = tone,
+			locked = not ready or recording, tooltip = requirement ~= "" and requirement or status,
 			payload = { programId = id, state = recording and "recording"
-				or (completed and "completed") or (ready and "available") or "unknown" },
+				or (ready and "available") or "unknown" },
 		}
 	end
 	return {

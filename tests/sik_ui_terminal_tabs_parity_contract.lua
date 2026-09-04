@@ -176,6 +176,10 @@ local admin = read(CLIENT .. "GS_AdminDashboard.lua")
 local addons = read(CLIENT .. "GS_TerminalUI_Addons.lua")
 local programming = read(CLIENT .. "GS_TerminalUI_Programming.lua")
 local extensions = read(CLIENT .. "GS_TerminalUI_Extensions.lua")
+local frameworkNavigation = read("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Navigation.lua")
+local frameworkTable = read("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Table.lua")
+local frameworkCard = read("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Card.lua")
+local frameworkFactories = read("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Factories.lua")
 local terminalApi = read(CLIENT .. "GSSiK_API_Terminal.lua")
 local craft = read("addons/GSSiK_Addon_Craft/Contents/mods/GSSiK_Addon_Craft/42/media/lua/client/GSSiK_Addon_Craft_TerminalUI.lua")
 local builder = read("addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_TerminalUI.lua")
@@ -260,6 +264,46 @@ Support.check(suite, "runtime rail fills each 76 px cell with the product icon",
 	contains(tabs, "iconSize = 76", "product rail does not request the full cell extent")
 	contains(tabs, 'iconFit = "fill"', "product rail leaves forbidden inner icon margins")
 	contains(tabs, "iconPadding = 0", "product rail adds forbidden icon padding")
+	return true
+end)
+
+Support.check(suite, "tabs select surfaces inside one common content container", function()
+	contains(frameworkNavigation, "mountedContents = {}",
+		"Navigation has no common surface registry")
+	contains(frameworkNavigation, "if self.contentHost then return self.contentHost end",
+		"Navigation still creates a physical host per tab")
+	excludes(frameworkNavigation, "host.panel:setVisible(active)",
+		"tab selection still swaps destination containers")
+	contains(frameworkNavigation, "panel:setVisible(contentKey == key)",
+		"tab selection does not swap child surfaces in the common area")
+	contains(tabs, "contentPadding = 12",
+		"main Window does not reserve the validated tab-content margin")
+	excludes(terminal, "panel:setWidth(innerW)",
+		"product code overwrites framework-owned content geometry")
+	return true
+end)
+
+Support.check(suite, "Table consumes its Block rectangle without creating another Block geometry", function()
+	excludes(frameworkTable, "Metrics.blockRects(self.w, self.h",
+		"Table still applies Block padding to its private widget root")
+	contains(frameworkTable, "w = math.max(0, self.w - gutter), h = self.h",
+		"Table does not reserve only its own right scrollbar")
+	return true
+end)
+
+Support.check(suite, "product blocks and cards consume the framework visual standard", function()
+	contains(frameworkCard, "instance.header = SiK.UI.Controls.blockHeader(panel, {",
+		"Card has no canonical title and informational help header")
+	contains(frameworkCard, "infoSpec.tooltip or options.tooltip or self.data.description or self.data.title",
+		"Card help cannot follow its dynamic content")
+	excludes(frameworkFactories, "options.background = props.background",
+		"declarative product blocks can override the framework background")
+	excludes(frameworkFactories, "options.border = props.border",
+		"declarative product blocks can override the framework border")
+	excludes(frameworkFactories, "options.paddingX = props.paddingX",
+		"declarative product blocks can compensate horizontal padding")
+	excludes(frameworkFactories, "options.paddingY = props.paddingY",
+		"declarative product blocks can compensate vertical padding")
 	return true
 end)
 
@@ -358,6 +402,10 @@ Support.check(suite, "Addons Programming blocked and remote states keep their ow
 	contains(addons, "UI.SurfaceHost.mount", "Addon declarative surface owner missing")
 	contains(programming, 'KNOWN_PROGRAM_ORDER = { "network", "uninstall", "driveinstall", "craft", "builder", "tablet" }',
 		"Programming Core order differs from HTML")
+	contains(programming, "IGUI_GS_ProgrammingRecipeRequirement",
+		"Programming does not show the named magazine requirement")
+	excludes(programming, "hasProgrammedDiskNearby",
+		"a crafted inventory object is still presented as an installed/completed state")
 	contains(tabs, 'applyAccessMode(terminal, mode, blockedState)', "blocked state router missing")
 	contains(blockedApi, "ui = GS_TerminalUI:new", "blocked uses another shell")
 	contains(blockedPanel, "UI.Block.create({", "blocked compositions bypass the shared Block")
