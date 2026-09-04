@@ -77,9 +77,9 @@ local refreshFunction = assert(terminalSource:match(
 	"refreshFromState function missing")
 assert(refreshFunction:find("self.terminalState = state or prev", 1, true),
 	"fresh terminalState is not committed before rendering")
-assert(refreshFunction:find('if tab == "items" then', 1, true)
+assert(refreshFunction:find('if tab == "items" and inventoryChanged and not builtNow then', 1, true)
 	and refreshFunction:find("self:refreshItemsTab()", 1, true),
-	"open Warehouse is not refreshed when the authoritative state arrives")
+	"changed authoritative Warehouse state is not refreshed in the existing surface")
 assert(itemsSource:find("local updated, updateReason = surface:refresh(snapshot)", 1, true),
 	"Warehouse refresh does not update the existing declarative surface")
 assert(not itemsSource:find("function GlobalStorageSiK.TerminalItems.refreshSection", 1, true)
@@ -98,7 +98,7 @@ assert(clientSource:find("elseif uiVisible then", 1, true)
 	"accepted terminalState is not sent to the already-visible terminal")
 assert(apiSource:find("if ui then", 1, true)
 	and apiSource:find("applyTerminalState(ui, state)", 1, true)
-	and apiSource:find("pcall(ui.refreshFromState, ui, state)", 1, true),
+	and apiSource:find("pcall(ui.refreshFromState, ui, pendingState)", 1, true),
 	"TerminalUI.show does not reuse and refresh its existing instance")
 local showReuseStart = assert(apiSource:find("if ui then", 1, true))
 local showReuseEnd = assert(apiSource:find("return", showReuseStart, true))

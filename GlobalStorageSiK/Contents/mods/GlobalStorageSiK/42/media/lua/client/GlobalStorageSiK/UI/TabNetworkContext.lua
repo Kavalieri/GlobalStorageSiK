@@ -71,7 +71,7 @@ end
 function TabNetworkContext.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal" end
 	local context = { terminal = terminal, nodes = {}, zones = {}, categories = {},
-		sortColumn = nil, sortDirection = "asc", disposed = false }
+		rowsByKey = {}, sortColumn = nil, sortDirection = "asc", disposed = false }
 
 	context.actions = {
 		["network.create-room"] = function()
@@ -85,7 +85,8 @@ function TabNetworkContext.create(terminal)
 		end,
 		["network.activate-row"] = function(envelope)
 			local payload = semantic(envelope)
-			return GlobalStorageSiK.TerminalNodes.activateRow(terminal, payload.item,
+			return GlobalStorageSiK.TerminalNodes.activateRow(terminal,
+				context.rowsByKey[payload.rowKey],
 				context.nodes, context.categories)
 		end,
 		["network.rescan"] = function()
@@ -99,6 +100,15 @@ function TabNetworkContext.create(terminal)
 		self.nodes, self.zones, self.categories = state.nodes or {}, state.zones or {}, state.categories or {}
 		local model = GlobalStorageSiK.TerminalNodes.presentationModel(self.nodes, self.zones,
 			self.sortColumn, self.sortDirection)
+		self.rowsByKey = {}
+		for index = 1, #(model.rows or {}) do
+			local row = model.rows[index]
+			if row and row.id ~= nil then self.rowsByKey[row.id] = row end
+			for childIndex = 1, #(row and row.children or {}) do
+				local child = row.children[childIndex]
+				if child and child.id ~= nil then self.rowsByKey[child.id] = child end
+			end
+		end
 		self.scanRunning, self.rescanFeedback, self.scanProgress = rescanState(state)
 		local permissions = state.permissions or {}
 		local role = permissions.playerRole or permissions.role or "member"

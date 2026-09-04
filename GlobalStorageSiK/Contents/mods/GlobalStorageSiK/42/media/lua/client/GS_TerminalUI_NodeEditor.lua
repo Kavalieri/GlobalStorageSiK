@@ -795,7 +795,8 @@ function GS_NodeEditorUI:ensureForm()
 			UI.Scroll.addChild(scroll, andBtn)
 			cy = cy + CONTROL_METRICS.buttonHeight + cardPad
 
-			sugCard:setBounds(cardX, cardTop, cardW, cy - cardTop)
+			UI.Layout.apply(sugCard, { x = cardX, y = cardTop,
+				w = cardW, h = cy - cardTop })
 			y = cy + 8
 		end
 	end
@@ -1046,7 +1047,8 @@ function GS_NodeEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 	self._ruleAddBtns[op] = addBtn
 	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
 
-	card:setBounds(cardX, cardTop, cardW, cy - cardTop)
+	UI.Layout.apply(card, { x = cardX, y = cardTop,
+		w = cardW, h = cy - cardTop })
 	y = cy + 8
 	return y
 end

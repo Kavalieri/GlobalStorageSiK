@@ -66,6 +66,8 @@ local tree, reason = SiK.UI.buildSurface(parent, artifact, {
 assert(tree, reason)
 
 local collection = assert(tree.nodes["options-palette-options"], "palette collection missing")
+assert(collection.panel and collection.childParent == collection.panel,
+	"palette cards must have one real collection parent")
 for _, id in ipairs({ "options-network-block", "options-operational-block",
 	"options-resources-block", "options-palette-block", "options-terminals-block",
 	"options-members-block" }) do
@@ -87,6 +89,10 @@ local fourth = collection.cards[4].panel
 assert(fourth.y - (first.y + first.height) == 8, "palette rows lost the canonical 8 px gap")
 assert(collection.contentHeight == first.height * 2 + 8,
 	"six palette cards must remain two symmetric rows")
+assert(collection.panel.height >= collection.contentHeight,
+	"palette collection hitbox must contain its lower row")
+assert(collection.cards[6].panel.parent == collection.panel,
+	"lower palette row must be parented inside the collection")
 
 for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	local tableView = assert(tree.nodes[id], "options table missing: " .. id)

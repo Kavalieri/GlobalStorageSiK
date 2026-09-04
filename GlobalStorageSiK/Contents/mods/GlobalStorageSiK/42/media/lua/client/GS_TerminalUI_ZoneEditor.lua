@@ -599,7 +599,8 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 	UI.Scroll.addChild(scroll, addBtn)
 	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
 
-	card:setBounds(pad, cardTop, innerW - pad, cy - cardTop)
+	UI.Layout.apply(card, { x = pad, y = cardTop,
+		w = innerW - pad, h = cy - cardTop })
 	y = cy + 8
 	return y
 end

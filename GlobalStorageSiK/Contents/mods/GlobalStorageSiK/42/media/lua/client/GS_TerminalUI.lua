@@ -500,15 +500,15 @@ function GS_TerminalUI:createChildren()
 	-- "Addons" sigue como pestaña fija de PIE (footerTabDef, mas abajo), sin
 	-- relacion de orden con este array: insertar aqui no la desplaza.
 	local tabDefs = {
-		{ key = "items", titleKey = "IGUI_GS_TabWarehouse", panelField = "itemsPanel", iconPath = "media/ui/GS/GS_TabWarehouse.png" },
-		{ key = "network", titleKey = "IGUI_GS_TabNetwork", panelField = "networkPanel", iconPath = "media/ui/GS/GS_TabNetwork.png" },
-		{ key = "config", titleKey = "IGUI_GS_TabConfig", panelField = "configPanel", iconPath = "media/ui/GS/GS_TabConfig.png" },
+		{ key = "items", titleKey = "IGUI_GS_TabWarehouse", panelField = "itemsPanel", iconPath = "media/ui/GS/sik-rail-warehouse.png" },
+		{ key = "network", titleKey = "IGUI_GS_TabNetwork", panelField = "networkPanel", iconPath = "media/ui/GS/sik-rail-network.png" },
+		{ key = "config", titleKey = "IGUI_GS_TabConfig", panelField = "configPanel", iconPath = "media/ui/GS/sik-rail-config.png" },
 	}
 	self.footerTabDef = {
 		key = "addons",
 		titleKey = "IGUI_GS_TabAddons",
 		panelField = "addonsPanel",
-		iconPath = "media/ui/GS/GS_TabAddons.png",
+		iconPath = "media/ui/GS/sik-rail-addons.png",
 	}
 	GlobalStorageSiK.TerminalTabs.build(self, tabDefs)
 	if self.navigationContainer then self.navigationContainer:ensureContentHost("blocked") end

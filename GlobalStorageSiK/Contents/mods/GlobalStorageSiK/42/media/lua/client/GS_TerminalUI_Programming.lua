@@ -134,7 +134,7 @@ GlobalStorageSiK.TerminalExtensions.registerDefinition("programming", {
 	builder = SiK.UI.SurfaceHost.mount,
 	contextFactory = Programming.context,
 	titleKey = "IGUI_GS_TabProgramming",
-	iconPath = "media/ui/GS/GS_TabProgramming.png",
+	iconPath = "media/ui/GS/sik-rail-programming.png",
 	panelField = "programmingPanel",
 	isVisible = isVisible,
 	refreshIntervalMs = 1000,

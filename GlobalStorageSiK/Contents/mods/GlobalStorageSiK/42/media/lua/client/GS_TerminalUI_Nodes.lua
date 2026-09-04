@@ -229,9 +229,6 @@ function Nodes.activateRow(terminal, row, allNodes, categories)
 	if GlobalStorageSiK.NodeHighlight then
 		GlobalStorageSiK.NodeHighlight.highlightNode(node, allNodes or {})
 	end
-	local state = terminal.terminalState or {}
-	local role = state.permissions and state.permissions.playerRole or "member"
-	if role == "member" then return false, "permission_denied" end
 	if terminal.canEditNetworkConfig and not terminal:canEditNetworkConfig(true) then
 		return false, "permission_denied"
 	end
