@@ -330,7 +330,8 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	-- podia instalar un addon aunque el servidor le fuera a dejar. Se ajusta
 	-- al mismo nivel que el resto de herramientas de gestion (zonas,
 	-- contenedores): admin O propietario.
-	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
+	if GlobalStorageSiK.Permissions.shouldEnforce()
+		and not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerInstallAddonsMsg")
 	end
 	local key = GlobalStorageSiK.Addons.anchorKey(anchor)
@@ -422,7 +423,8 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	end
 	-- Mismo criterio y mismo bug real que install() arriba - admin O
 	-- propietario, no solo propietario.
-	if not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
+	if GlobalStorageSiK.Permissions.shouldEnforce()
+		and not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_OnlyOwnerRemoveAddonsMsg")
 	end
 	if not GlobalStorageSiK.Addons.hasRequiredSkill(player) then

@@ -191,9 +191,12 @@ local function createStaticBlock(scroll, y, width, height, title, tooltip)
 	return assert(UI.Block.create({
 		parent = cardHost(scroll), x = CONTENT_PAD, y = y,
 		w = width, h = height, title = title, variant = "section",
-		contentHost = true,
 		tooltip = tooltip,
 	}))
+end
+
+local function blockChildArea(block)
+	return block.panel, block:getContentRect()
 end
 
 local function addIntroCard(scroll, y, width, state)
@@ -203,14 +206,15 @@ local function addIntroCard(scroll, y, width, state)
 	local lh = FONT_HGT_SMALL + LINE_GAP
 	local height = 16 + #message * lh + 8 + #hint * lh
 	local card = createStaticBlock(scroll, y, width, height)
+	local body, content = blockChildArea(card)
 	local bodyY = 0
-	local copy = UI.Controls.copyText(card.content, {
-		x = 0, y = bodyY, w = card.content.width,
+	local copy = UI.Controls.copyText(body, {
+		x = content.x, y = content.y + bodyY, w = content.w,
 		text = table.concat(message, "\n"), tone = "text",
 	})
 	bodyY = bodyY + copy.height + 8
-	UI.Controls.copyText(card.content, {
-		x = 0, y = bodyY, w = card.content.width,
+	UI.Controls.copyText(body, {
+		x = content.x, y = content.y + bodyY, w = content.w,
 		text = table.concat(hint, "\n"), tone = "success",
 	})
 	return height
@@ -289,12 +293,12 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	local card = createStaticBlock(scroll, y, cardW, 1000,
 		T("IGUI_GS_InstallReaderCardTitle"),
 		T("IGUI_GS_BlockedApproachReader"))
-	local body = card.content
+	local body, content = blockChildArea(card)
 	local rowY = 0
 	for i = 1, #lines do
 		local spec = lines[i]
 		local row = UI.Controls.requirementRow(body, {
-			x = 0, y = rowY, w = body.width, text = spec.text,
+			x = content.x, y = content.y + rowY, w = content.w, text = spec.text,
 			texture = resolveReqIcon(spec), state = spec.ok,
 		})
 		rowY = rowY + row.height + gap
@@ -315,12 +319,12 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	-- "Conseguir PC" (validar requisitos, esperar el tiempo de crafteo,
 	-- añadir el resultado al inventario) en vez de mandar al jugador al menú
 	-- vanilla a craftear 3 piezas por separado.
-	local installBtnW = body.width
+	local installBtnW = content.w
 	if not status.hasReader then
-		installBtnW = math.floor((body.width - gap) / 2)
+		installBtnW = math.floor((content.w - gap) / 2)
 	end
 	local primaryActions = assert(UI.ActionGroup.create({
-		parent = body, x = 0, y = btnY, w = body.width, h = CRAFT_BTN_H,
+		parent = body, x = content.x, y = content.y + btnY, w = content.w, h = CRAFT_BTN_H,
 		mode = "equal", gap = gap, padding = 0,
 	}))
 
@@ -378,14 +382,14 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		card.panel.buildReaderBtn = buildReaderBtn
 		primaryActions:add(buildReaderBtn, { width = installBtnW, height = CRAFT_BTN_H })
 	end
-	primaryActions:reflow({ x = 0, y = btnY, w = body.width, h = CRAFT_BTN_H })
+	primaryActions:reflow({ x = content.x, y = content.y + btnY, w = content.w, h = CRAFT_BTN_H })
 	card.panel.primaryActions = primaryActions
 
 	local contentBottom = btnY + CRAFT_BTN_H
 	if showPcBtn then
 		local pcY = contentBottom + gap
 		local pcBtn = UI.Controls.button(body, {
-			x = 0, y = pcY, w = body.width, h = CRAFT_BTN_H,
+			x = content.x, y = content.y + pcY, w = content.w, h = CRAFT_BTN_H,
 			text = T("IGUI_GS_PCAcquireOpenBtn"), onClick = function()
 				GlobalStorageSiK.PCAcquireUI.show(
 					GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer(),
@@ -595,14 +599,15 @@ local function rebuildContentBody(terminal)
 		local card = createStaticBlock(scroll, y, cardW, cardH,
 			T("IGUI_GS_RecoverAccessTitle"),
 			T("IGUI_GS_PermSuccessionHint"))
+		local body, content = blockChildArea(card)
 		local actions = assert(UI.ActionGroup.create({
-			parent = card.content, x = 0, y = 0, w = card.content.width, h = contentH,
+			parent = body, x = content.x, y = content.y, w = content.w, h = contentH,
 			mode = "stack", gap = gap, padding = 0,
 		}))
 		if claimEligible then
 			local claimNetworkId = terminal.blockedState.networkId
 			local claimButton = UI.Controls.button(actions.panel, {
-				x = 0, y = 0, w = card.content.width, h = CRAFT_BTN_H,
+				x = 0, y = 0, w = content.w, h = CRAFT_BTN_H,
 				text = T("IGUI_GS_ClaimOwnershipButton"), onClick = function()
 					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and claimNetworkId then
 						GlobalStorageSiK.NetClient.sendCommand("reclaimOwnership", { networkId = claimNetworkId })
@@ -614,7 +619,7 @@ local function rebuildContentBody(terminal)
 		if recoverEligible then
 			local recoverNetworkId = terminal.blockedState.networkId
 			local recoverButton = UI.Controls.button(actions.panel, {
-				x = 0, y = 0, w = card.content.width, h = CRAFT_BTN_H,
+				x = 0, y = 0, w = content.w, h = CRAFT_BTN_H,
 				text = T("IGUI_GS_RecoverRoleButton"), onClick = function()
 					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and recoverNetworkId then
 						GlobalStorageSiK.NetClient.sendCommand("recoverOwnRole", { networkId = recoverNetworkId })
@@ -623,7 +628,7 @@ local function rebuildContentBody(terminal)
 			})
 			actions:add(recoverButton, { height = CRAFT_BTN_H, grow = 0 })
 		end
-		actions:reflow({ x = 0, y = 0, w = card.content.width, h = contentH })
+		actions:reflow({ x = content.x, y = content.y, w = content.w, h = contentH })
 		card.panel.actions = actions
 		y = y + cardH + CARD_GAP
 	end
@@ -678,8 +683,9 @@ local function rebuildContentBody(terminal)
 		local cardH = 16 + CONTROL_METRICS.rowHeight + 8 + #netLines * lh
 		local card = createStaticBlock(scroll, y, cardW, cardH,
 			T("IGUI_GS_YourNetworksTitle"), networksText)
-		UI.Controls.copyText(card.content, {
-			x = 0, y = 0, w = card.content.width,
+		local body, content = blockChildArea(card)
+		UI.Controls.copyText(body, {
+			x = content.x, y = content.y, w = content.w,
 			text = table.concat(netLines, "\n"), tone = "textMuted",
 		})
 		y = y + cardH + CARD_GAP

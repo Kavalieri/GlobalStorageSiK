@@ -363,8 +363,10 @@ Support.check(suite, "Addons Programming blocked and remote states keep their ow
 	contains(blockedPanel, "UI.Block.create({", "blocked compositions bypass the shared Block")
 	contains(blockedPanel, 'variant = "section"',
 		"blocked titled blocks do not select the canonical section treatment")
-	contains(blockedPanel, "contentHost = true",
-		"blocked compositions do not request the framework content host")
+	excludes(blockedPanel, "contentHost = true",
+		"blocked compositions retain the removed duplicate content host")
+	contains(blockedPanel, "block:getContentRect()",
+		"blocked compositions do not consume the Block-owned content rectangle")
 	for _, forbidden in ipairs({ "drawRect(", "drawRectBorder(", "ISLabel:new(" }) do
 		excludes(blockedPanel, forbidden,
 			"blocked panel retains product-painted card chrome " .. forbidden)

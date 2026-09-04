@@ -18,9 +18,12 @@ assert(not string.find(addons, "UI.Card.create", 1, true),
 assert(string.find(blocked, "UI.Block.create", 1, true)
 	and string.find(addons, "UI.Block.create", 1, true),
 	"both composite consumers must originate in the shared Block primitive")
-assert(string.find(blocked, "contentHost = true", 1, true)
-	and string.find(addons, "contentHost = true", 1, true),
-	"composite consumers must request the explicit Block content host")
+assert(not string.find(blocked, "contentHost = true", 1, true)
+	and not string.find(addons, "contentHost = true", 1, true),
+	"Block children must not be separated from their container by a duplicate content host")
+assert(string.find(blocked, "block:getContentRect()", 1, true)
+	and string.find(addons, "card:getContentRect()", 1, true),
+	"manual composite consumers must place direct children in the Block content rectangle")
 assert(string.find(block, "function BlockInstance:reflow", 1, true),
 	"Block must expose the common compositional reflow contract")
 assert(not string.find(blocked, "btn:setTooltip", 1, true)

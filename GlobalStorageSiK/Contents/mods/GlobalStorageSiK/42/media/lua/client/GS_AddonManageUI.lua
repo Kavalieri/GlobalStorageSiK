@@ -110,16 +110,17 @@ end
 local function addRequirementCard(owner, y, width, title, rows)
 	local card = assert(UI.Block.create({
 		parent = owner, x = owner.padding, y = y, w = width, h = 1000,
-		title = title, variant = "section", contentHost = true,
+		title = title, variant = "section",
 		playerNum = owner.playerNum,
 	}))
 	owner._sikCards = owner._sikCards or {}
 	owner._sikCards[#owner._sikCards + 1] = card
+	local content = card:getContentRect()
 	local rowY = 0
 	for index = 1, #rows do
 		local spec = rows[index]
-		local row = UI.Controls.requirementRow(card.content, {
-			x = 0, y = rowY, w = card.content.width,
+		local row = UI.Controls.requirementRow(card.panel, {
+			x = content.x, y = content.y + rowY, w = content.w,
 			text = spec.text, texture = requirementTexture(spec),
 			state = spec.ok, playerNum = owner.playerNum,
 		})
