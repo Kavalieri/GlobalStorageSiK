@@ -1,9 +1,9 @@
 name=GSSiK Addon - Craft
 id=GSSiK_Addon_Craft
-description=Build 42.20+ v1.0.10-dev1.5. Craftea con toda tu red GS desde su interfaz compatible preferida; la cocina en red se habilita cuando su integracion esta disponible. Requiere Global Storage SiK.
+description=Build 42.20+ v1.0.10-dev1.6. Craftea con toda tu red GS desde su interfaz compatible preferida; la cocina en red se habilita cuando su integracion esta disponible. Requiere Global Storage SiK.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.0.10-dev1.5
+modversion=1.0.10-dev1.6
 versionMin=42.20.0
 require=SiKUIFramework,GlobalStorageSiK
