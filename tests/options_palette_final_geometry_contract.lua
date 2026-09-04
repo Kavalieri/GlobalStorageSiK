@@ -61,7 +61,10 @@ local tree, reason = SiK.UI.buildSurface(parent, artifact, {
 		["options.admin.access.title"] = "Añadir acceso",
 		["options.admin.access.add"] = "Añadir",
 	},
-	actions = actions, tableOptions = {},
+	actions = actions, tableOptions = {
+		["options-terminals-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
+		["options-members-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
+	},
 })
 assert(tree, reason)
 
@@ -97,6 +100,11 @@ assert(collection.cards[6].panel.parent == collection.panel,
 for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	local tableView = assert(tree.nodes[id], "options table missing: " .. id)
 	assert(tableView._sikUiComponent == "table", "options data degraded outside SiK Table: " .. id)
+	assert(tableView.block.panel.drawBackground == false
+		and tableView.block.panel.borderColor.a == 0,
+		"embedded options table painted a second frame: " .. id)
+	assert(tableView:getHeight() == tableView:getRequiredHeight(),
+		"options table retained unexplained space below its real rows: " .. id)
 	local row = assert(tableView.list.pool[1], "options representative row missing: " .. id)
 	local paints = {}
 	row.drawRect = function(_, x, y, w, h)

@@ -77,15 +77,13 @@ end
 ---@param titleText string
 ---@param tooltip string
 ---@param target any
-local function addBlockInfoBtn(scroll, pad, y, titleText, tooltip, target)
-	local titleW = getTextManager():MeasureStringX(UIFont.Small, titleText)
-	local btn = UI.Controls.iconButton(nil, {
-		x = pad + titleW + 6, y = y - math.floor((INFO_BTN_SIZE - FONT_HGT_SMALL) / 2),
-		w = INFO_BTN_SIZE, h = INFO_BTN_SIZE, icon = "sik.info.24",
-		text = "", tooltip = tooltip, payload = target,
+local function createInfoSectionTitle(scroll, pad, y, width, titleText, tooltip, target)
+	local title = UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, w = width, h = INFO_BTN_SIZE,
+		text = titleText, info = { tooltip = tooltip, payload = target },
 	})
-	UI.Scroll.addChild(scroll, btn)
-	return btn
+	UI.Scroll.addChild(scroll, title)
+	return title
 end
 
 -- fullWidth=true, mismo motivo que GS_TerminalUI_NodeEditor.lua.
@@ -335,12 +333,11 @@ function GS_ZoneEditorUI:ensureForm()
 
 	-- Mismo esqueleto de frase pedagogica que GS_TerminalUI_NodeEditor.lua
 	-- (solo cambia "zona" por "contenedor") - texto largo, envuelto linea a
-	-- linea con wrapTextLines (regla 7, CLAUDE.md): una sola ISLabel se
+	-- linea con wrapTextLines: una sola ISLabel se
 	-- saldria del ancho del panel.
-	self.priorityLbl = createSectionLabel(pad, y, T("IGUI_GS_ZonePriorityLabel"))
-	UI.Scroll.addChild(scroll, self.priorityLbl)
-	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_ZonePriorityLabel"), T("IGUI_GS_ZonePriorityHint"), scroll)
-	y = y + FONT_HGT_SMALL + 4
+	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
+		T("IGUI_GS_ZonePriorityLabel"), T("IGUI_GS_ZonePriorityHint"), scroll)
+	y = y + INFO_BTN_SIZE + 4
 
 	self.priorityEntry = createField(tostring((self.zone and self.zone.priority) or 50),
 		pad, y, contentW, true)
@@ -362,10 +359,9 @@ function GS_ZoneEditorUI:ensureForm()
 	-- "Plantilla" (aplicar categorías/filtros/prioridad copiados a toda la
 	-- zona de una vez), ahora cubierta por "Extender a la zona" desde el
 	-- propio editor de contenedor (ver GS_TerminalUI_NodeEditor.lua).
-	self.rulesTitleLbl = createSectionLabel(pad, y, T("IGUI_GS_ZoneRulesTitle"))
-	UI.Scroll.addChild(scroll, self.rulesTitleLbl)
-	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
-	y = y + FONT_HGT_SMALL + 8
+	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
+		T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
+	y = y + INFO_BTN_SIZE + 8
 
 	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
 		self.zone and self.zone.rules, contentW, UIFont.Small,

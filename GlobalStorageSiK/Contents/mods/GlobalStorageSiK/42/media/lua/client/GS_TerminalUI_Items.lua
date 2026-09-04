@@ -1119,6 +1119,10 @@ local function buildDisplayRows(panel, terminal, parents)
 		local parent = parents[i]
 		local key = rowIdentity(parent)
 		liveParents[key] = true
+		-- Every aggregate is a hierarchy root, including aggregates with one
+		-- physical item.  Keep the disclosure affordance and lazy detail path
+		-- identical instead of changing the row contract with the item count.
+		parent.expandable = true
 		parent._gsRowKind = "parent"
 		parent._gsDepth = 0
 		out[#out + 1] = parent

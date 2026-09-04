@@ -43,6 +43,10 @@ for index = 1, #files do
 	contains(source, "UI.Controls.field", name .. " delegates editable fields")
 	contains(source, "UI.Controls.panel", name .. " delegates transparent child hosts")
 	contains(source, "UI.Controls.sectionTitle", name .. " delegates section headings")
+	contains(source, "local function createInfoSectionTitle",
+		name .. " composes help through the canonical Info then Title control")
+	excludes(source, "local function addBlockInfoBtn",
+		name .. " must not append a local info button after the title")
 	contains(source, "UI.Controls.button", name .. " delegates actions")
 	contains(source, "UI.Container.create", name .. " delegates generic accented containers")
 	contains(source, "local function createSectionCard", name .. " keeps one product composition adapter")

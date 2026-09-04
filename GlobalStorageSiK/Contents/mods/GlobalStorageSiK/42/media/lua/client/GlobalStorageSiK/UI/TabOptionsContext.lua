@@ -370,8 +370,8 @@ function TabOptionsContext.create(terminal)
 				["options.admin.access.add"] = text("IGUI_GS_AddMember"),
 			},
 			tableOptions = {
-				["options-terminals-table"] = { rowHeight = 32 },
-				["options-members-table"] = { rowHeight = 32 },
+				["options-terminals-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
+				["options-members-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
 			},
 			actions = self.actions, playerNum = terminal.playerNum or 0,
 		}

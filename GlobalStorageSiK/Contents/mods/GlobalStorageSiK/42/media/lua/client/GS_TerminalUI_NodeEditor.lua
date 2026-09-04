@@ -44,15 +44,13 @@ local INFO_BTN_SIZE = 24
 ---@param titleText string
 ---@param tooltip string
 ---@param target any
-local function addBlockInfoBtn(scroll, pad, y, titleText, tooltip, target)
-	local titleW = getTextManager():MeasureStringX(UIFont.Small, titleText)
-	local btn = UI.Controls.iconButton(nil, {
-		x = pad + titleW + 6, y = y - math.floor((INFO_BTN_SIZE - FONT_HGT_SMALL) / 2),
-		w = INFO_BTN_SIZE, h = INFO_BTN_SIZE, icon = "sik.info.24",
-		text = "", tooltip = tooltip, payload = target,
+local function createInfoSectionTitle(scroll, pad, y, width, titleText, tooltip, target)
+	local title = UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, w = width, h = INFO_BTN_SIZE,
+		text = titleText, info = { tooltip = tooltip, payload = target },
 	})
-	UI.Scroll.addChild(scroll, btn)
-	return btn
+	UI.Scroll.addChild(scroll, title)
+	return title
 end
 local CONTENTS_TAG = "_gsNodeEditorContents"
 
@@ -603,10 +601,9 @@ function GS_NodeEditorUI:ensureForm()
 	-- movida a ser el SEGUNDO campo (justo tras el nombre), antes quedaba
 	-- despues de todo el protocolo de reglas. Mismo esqueleto de frase que
 	-- GS_TerminalUI_ZoneEditor.lua (solo cambia "contenedor"/"zona") -────
-	self.priorityLbl = createSectionLabel(pad, y, T("IGUI_GS_NodePriorityLabel"))
-	UI.Scroll.addChild(scroll, self.priorityLbl)
-	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_NodePriorityLabel"), T("IGUI_GS_NodePriorityHint"), scroll)
-	y = y + FONT_HGT_SMALL + 4
+	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
+		T("IGUI_GS_NodePriorityLabel"), T("IGUI_GS_NodePriorityHint"), scroll)
+	y = y + INFO_BTN_SIZE + 4
 
 	self.priorityEntry = createField(tostring(editPriority), pad, y, contentW, true)
 	UI.Scroll.addChild(scroll, self.priorityEntry)
@@ -674,10 +671,9 @@ function GS_NodeEditorUI:ensureForm()
 	-- GlobalStorageSiK.Router.matchSpecificity) - abrir este editor migra el
 	-- contenedor al nuevo modelo (mismo patron ya usado para canonicalizar
 	-- categorias legacy en setNode, mas abajo).
-	self.rulesTitleLbl = createSectionLabel(pad, y, T("IGUI_GS_NodeRulesTitle"))
-	UI.Scroll.addChild(scroll, self.rulesTitleLbl)
-	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_NodeRulesTitle"), T("IGUI_GS_NodeRulesHint"), scroll)
-	y = y + FONT_HGT_SMALL + 8
+	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
+		T("IGUI_GS_NodeRulesTitle"), T("IGUI_GS_NodeRulesHint"), scroll)
+	y = y + INFO_BTN_SIZE + 8
 
 	-- Resumen legible: se recalcula en rebuildRuleChips, aqui solo se reserva
 	-- el hueco con el texto inicial para calcular su altura real (regla 7,

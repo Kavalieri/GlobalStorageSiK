@@ -45,6 +45,9 @@ for _, id in ipairs({ "network-root", "network-rescan-block" }) do
 end
 local tableView = assert(tree.nodes["network-table"])
 assert(tableView._sikUiComponent == "table", "Red rows must use the SiK Table")
+assert(tableView.block.panel.drawBackground == false
+	and tableView.block.panel.borderColor.a == 0,
+	"embedded Red table must not paint a second frame inside its Block")
 local row = assert(tableView.list.pool[1], "representative Red row was not mounted")
 local paints = {}
 row.drawRect = function(_, x, y, w, h)
