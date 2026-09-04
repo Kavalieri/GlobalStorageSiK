@@ -29,7 +29,7 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local CONTROL_METRICS = UI.Controls.metrics("editor")
 local PALETTE = UI.Theme.palette()
 local PAD = 10
-local INFO_BTN_SIZE = FONT_HGT_SMALL
+local INFO_BTN_SIZE = 24
 
 -- Conserva los rectangulos aprobados del editor y deja a SiK.UI la
 -- construccion, el chrome y el lifecycle de las hojas visibles.
@@ -80,8 +80,9 @@ end
 local function addBlockInfoBtn(scroll, pad, y, titleText, tooltip, target)
 	local titleW = getTextManager():MeasureStringX(UIFont.Small, titleText)
 	local btn = UI.Controls.iconButton(nil, {
-		x = pad + titleW + 6, y = y, w = INFO_BTN_SIZE, h = INFO_BTN_SIZE,
-		text = "?", tooltip = tooltip, payload = target,
+		x = pad + titleW + 6, y = y - math.floor((INFO_BTN_SIZE - FONT_HGT_SMALL) / 2),
+		w = INFO_BTN_SIZE, h = INFO_BTN_SIZE, icon = "sik.info.24",
+		text = "", tooltip = tooltip, payload = target,
 	})
 	UI.Scroll.addChild(scroll, btn)
 	return btn
@@ -222,6 +223,7 @@ function GS_ZoneEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	UI.Window.applyEditor(self, {
 		geometryKey = "zoneEditor",
+		geometryVersion = 2,
 		title = T("IGUI_GS_ZoneEditorTitle"),
 		padding = PAD,
 		onReflow = function() self:calculateLayout() end,
@@ -302,6 +304,7 @@ function GS_ZoneEditorUI:ensureForm()
 	local pad = 8
 	local y = pad
 	local innerW = UI.Scroll.contentWidth(scroll)
+	local contentW = math.max(1, innerW - pad * 2)
 
 	-- ── Linea informativa (dev26, ronda 3): cuantos contenedores tiene esta
 	-- zona - ver zoneContainerCount arriba para por que NO intenta sumar
@@ -310,12 +313,12 @@ function GS_ZoneEditorUI:ensureForm()
 	-- GS_TerminalUI_NodeEditor.lua - el bloque de informacion siempre
 	-- precede al campo editable, en las dos ventanas).
 	local zContainerCount = zoneContainerCount(self.zone, self.terminal)
-	self.statsLbl = createText(nil, pad, y, innerW,
+	self.statsLbl = createText(nil, pad, y, contentW,
 		T("IGUI_GS_ZoneStatsLine", zContainerCount), PALETTE.textMuted)
 	UI.Scroll.addChild(scroll, self.statsLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.occupancyLbl = createText(nil, pad, y, innerW,
+	self.occupancyLbl = createText(nil, pad, y, contentW,
 		occupancyLabelText(self.capacityInfo), PALETTE.textMuted)
 	UI.Scroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
@@ -326,7 +329,7 @@ function GS_ZoneEditorUI:ensureForm()
 
 	-- Nombre y prioridad ya NO tienen cada uno su propio "Aplicar": un solo
 	-- clic en "Aplicar cambios" (mas abajo) manda ambos juntos - ver applyAll.
-	self.nameEntry = createField(self.zone and self.zone.name or "", pad, y, innerW, false)
+	self.nameEntry = createField(self.zone and self.zone.name or "", pad, y, contentW, false)
 	UI.Scroll.addChild(scroll, self.nameEntry)
 	y = y + CONTROL_METRICS.inputHeight + 12
 
@@ -340,11 +343,11 @@ function GS_ZoneEditorUI:ensureForm()
 	y = y + FONT_HGT_SMALL + 4
 
 	self.priorityEntry = createField(tostring((self.zone and self.zone.priority) or 50),
-		pad, y, innerW, true)
+		pad, y, contentW, true)
 	UI.Scroll.addChild(scroll, self.priorityEntry)
 	y = y + CONTROL_METRICS.inputHeight + 4
 
-	local presetW = math.floor((innerW - 8) / 3)
+	local presetW = math.floor((contentW - 8) / 3)
 	self.priorityPresetHighBtn = createBtn(pad, y, presetW, T("IGUI_GS_NodePriorityPresetHigh"), scroll, function() self:applyPriority(10) end)
 	UI.Scroll.addChild(scroll, self.priorityPresetHighBtn)
 	self.priorityPresetNormalBtn = createBtn(pad + presetW + 4, y, presetW, T("IGUI_GS_NodePriorityPresetNormal"), scroll, function() self:applyPriority(50) end)
@@ -365,9 +368,9 @@ function GS_ZoneEditorUI:ensureForm()
 	y = y + FONT_HGT_SMALL + 8
 
 	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
-		self.zone and self.zone.rules, innerW - pad, UIFont.Small,
+		self.zone and self.zone.rules, contentW, UIFont.Small,
 		PALETTE.textSecondary)
-	local summaryHost = createHost(nil, pad, y, innerW - pad,
+	local summaryHost = createHost(nil, pad, y, contentW,
 		summaryLayout.lineCount * (FONT_HGT_SMALL + 2))
 	UI.Scroll.addChild(scroll, summaryHost)
 	addSummaryRuns(summaryHost, summaryLayout)
@@ -375,7 +378,7 @@ function GS_ZoneEditorUI:ensureForm()
 	y = y + 6
 
 	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
-		y = self:buildRuleSection(scroll, pad, innerW, y, op)
+		y = self:buildRuleSection(scroll, pad, contentW, y, op)
 	end
 	y = y + 6
 	-- Firma del numero de reglas usada para dimensionar tarjetas/hosts en
@@ -389,7 +392,7 @@ function GS_ZoneEditorUI:ensureForm()
 	-- Aplicar/Excluir/Eliminar agrupados al final, mismo criterio que el
 	-- editor de contenedor - antes Aplicar/Excluir vivian arriba, separados
 	-- de Eliminar por todo el bloque de protocolo.
-	self.applyAllBtn = createBtn(pad, y, innerW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
+	self.applyAllBtn = createBtn(pad, y, contentW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
 		self:applyAll()
 	end)
 	UI.Scroll.addChild(scroll, self.applyAllBtn)
@@ -399,7 +402,7 @@ function GS_ZoneEditorUI:ensureForm()
 		and self.terminal.terminalState.permissions and self.terminal.terminalState.permissions.myRole
 	if role == "owner" or role == "admin" then
 		self.rescanZoneBtn = createProductButton(
-			pad, y, innerW, CONTROL_METRICS.buttonHeight,
+			pad, y, contentW, CONTROL_METRICS.buttonHeight,
 			T("IGUI_GS_ZoneCtxRescan"), scroll, function()
 				if self.zone and self.terminal and self.terminal.onRescanZone then
 					self.terminal:onRescanZone(self.zone.id)
@@ -417,7 +420,7 @@ function GS_ZoneEditorUI:ensureForm()
 	local zoneExcluded = self.zone and self.zone.enabled == false
 	local zoneMembLabel = zoneExcluded and T("IGUI_GS_ZoneBtnInclude") or T("IGUI_GS_ZoneBtnExclude")
 	local zoneMembActiveColor = (not zoneExcluded) and PALETTE.statusDanger or nil
-	self.zoneMembBtn = createProductButton(pad, y, innerW,
+	self.zoneMembBtn = createProductButton(pad, y, contentW,
 		CONTROL_METRICS.buttonHeight, zoneMembLabel, scroll, function()
 		if self.zone and self.zone.enabled == false then
 			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = true })
@@ -429,7 +432,7 @@ function GS_ZoneEditorUI:ensureForm()
 	UI.Scroll.addChild(scroll, self.zoneMembBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 6
 
-	self.deleteBtn = createProductButton(pad, y, innerW,
+	self.deleteBtn = createProductButton(pad, y, contentW,
 		CONTROL_METRICS.buttonHeight, T("IGUI_GS_DeleteZone"), scroll, function()
 		self:confirmDelete()
 	end, PALETTE.statusDanger, true)
@@ -525,11 +528,11 @@ end
 --- scroll que GS_TerminalUI_NodeEditor.lua (dev26 ronda 4).
 ---@param scroll table
 ---@param pad number
----@param innerW number
+---@param contentW number
 ---@param y number
 ---@param op string "OR"|"AND"|"NOT"
 ---@return number newY
-function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
+function GS_ZoneEditorUI:buildRuleSection(scroll, pad, contentW, y, op)
 	local rules = (self.zone and self.zone.rules) or {}
 	local count = 0
 	for i = 1, #rules do
@@ -544,14 +547,14 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 	local cardTop = y
 	local cy = y + cardPad
 	local cx = pad + cardPad + 4
-	local innerContentW = innerW - pad - cardPad * 2 - 4
+	local innerContentW = contentW - cardPad * 2 - 4
 	local color = RULE_OP_COLOR[op]
 
 	-- Tarjeta de fondo insertada ANTES que su contenido, redimensionada al
 	-- final con el alto real (mismo patron que GS_TerminalUI_NodeEditor.lua
 	-- y GS_TerminalUI_NetworkZones.lua) - si se insertara despues, taparia
 	-- el titulo/chips/boton en vez de quedar detras.
-	local card = createSectionCard(scroll, pad, cardTop, innerW - pad, 10, color)
+	local card = createSectionCard(scroll, pad, cardTop, contentW, 10, color)
 	UI.Scroll.addChild(scroll, card)
 	self._ruleCards = self._ruleCards or {}
 	self._ruleCards[op] = card
@@ -600,7 +603,7 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
 
 	UI.Layout.apply(card, { x = pad, y = cardTop,
-		w = innerW - pad, h = cy - cardTop })
+		w = contentW, h = cy - cardTop })
 	y = cy + 8
 	return y
 end

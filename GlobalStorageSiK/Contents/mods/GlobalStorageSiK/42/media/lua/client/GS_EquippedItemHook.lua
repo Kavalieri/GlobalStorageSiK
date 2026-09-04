@@ -4,7 +4,8 @@
 	Fecha: 2025-06-24
 
 	Patrón sidebar hover (ancla zoneBtn en B42).
-	- Logo Workshop: icon.png → media/ui/Sidebar/{48..128}/GS_Off|On_{size}.png
+	- Apertura Core: media/ui/GS/Launcher/sik-mainbutton-{48..128}.png
+	- Admin: media/ui/GS/Launcher/sik-mainbutton-admin-{48..128}.png
 	- Cabecera: media/ui/GS/GS_Logo_{24,32,48}.png (SiK.UI Window)
 ]]
 
@@ -107,13 +108,13 @@ local function requestTerminalOpen()
 	end
 end
 
---- Carga icono sidebar pre-dimensionado para la celda del popup.
+--- Carga el derivado canonico ya preparado para la celda cuadrada del popup.
 ---@param textureWidth number
----@param onState boolean
+---@param adminVariant boolean
 ---@return Texture|nil
-local function loadSidebarIcon(textureWidth, onState)
-	local state = onState and "On" or "Off"
-	return getTexture("media/ui/Sidebar/" .. textureWidth .. "/GS_" .. state .. "_" .. textureWidth .. ".png")
+local function loadSidebarIcon(textureWidth, adminVariant)
+	local suffix = adminVariant and "-admin-" or "-"
+	return getTexture("media/ui/GS/Launcher/sik-mainbutton" .. suffix .. textureWidth .. ".png")
 end
 
 GS_InventorySidebarPopup = GS_InventorySidebarPopup or {}
@@ -129,18 +130,17 @@ function GS_InventorySidebarPopup:new(x, y, width, height, chr)
 	o.chr = chr
 	o.playerNum = chr and chr:getPlayerNum() or 0
 	o.TEXTURE_WIDTH = textureWidth
-	o.TEXTURE_HEIGHT = textureWidth * 0.75
+	o.TEXTURE_HEIGHT = textureWidth
 	o.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
 	o.borderColor = { r = 0, g = 0, b = 0, a = 0 }
 	o.gsIcon = loadSidebarIcon(textureWidth, false)
-	o.gsIconOn = loadSidebarIcon(textureWidth, true) or o.gsIcon
+	o.gsAdminIcon = loadSidebarIcon(textureWidth, true) or o.gsIcon
 	o.isStaff = isPlayerStaff(chr)
 	local function mountProductButton(anchor, spec)
 		return UI.Controls.iconButton(anchor, {
 			x = spec.x, y = 0, w = textureWidth, h = o.TEXTURE_HEIGHT,
-			chrome = false, iconFit = "fill", iconPadding = 0,
+			chrome = false, iconFit = "square", iconSize = textureWidth, iconPadding = 0,
 			icon = spec.asset, tooltip = spec.tooltip, playerNum = o.playerNum,
-			iconProvider = spec.iconProvider, iconTintProvider = spec.iconTintProvider,
 			onClick = spec.action,
 		})
 	end
@@ -152,22 +152,16 @@ function GS_InventorySidebarPopup:new(x, y, width, height, chr)
 		end,
 		mount = function(anchor, spec)
 			spec.x = textureWidth
-			spec.iconProvider = function() return isTerminalOpen() and o.gsIconOn or o.gsIcon end
 			return mountProductButton(anchor, spec)
 		end,
 		unmount = function(control) if control and control.dispose then control:dispose() end end,
 	})
 	o.terminalButton = o.terminalExtension:mount(o)
 	o.staffExtension = UI.Menu.sideMenuExtension({
-		asset = o.gsIcon, tooltip = T("IGUI_GS_AdminDashboardTooltip"),
+		asset = o.gsAdminIcon, tooltip = T("IGUI_GS_AdminDashboardTooltip"),
 		action = function() GlobalStorageSiK.AdminDashboard.show(); return true end,
 		mount = function(anchor, spec)
 			spec.x = textureWidth * 2
-			spec.iconTintProvider = function()
-				local active = GlobalStorageSiK.AdminDashboard.instance ~= nil
-				return active and { r = 1, g = 0.55, b = 0.15, a = 1 }
-					or { r = 0.85, g = 0.35, b = 0.15, a = 1 }
-			end
 			return mountProductButton(anchor, spec)
 		end,
 		unmount = function(control) if control and control.dispose then control:dispose() end end,
@@ -194,11 +188,11 @@ function GS_InventorySidebarPopup:new(x, y, width, height, chr)
 	end
 	function o:reloadIcons()
 		self.gsIcon = loadSidebarIcon(self.TEXTURE_WIDTH, false)
-		self.gsIconOn = loadSidebarIcon(self.TEXTURE_WIDTH, true) or self.gsIcon
+		self.gsAdminIcon = loadSidebarIcon(self.TEXTURE_WIDTH, true) or self.gsIcon
 		if self.terminalExtension then self.terminalExtension.asset = self.gsIcon end
-		if self.staffExtension then self.staffExtension.asset = self.gsIcon end
+		if self.staffExtension then self.staffExtension.asset = self.gsAdminIcon end
 		self.terminalButton:setTexture(self.gsIcon)
-		self.staffButton:setTexture(self.gsIcon)
+		self.staffButton:setTexture(self.gsAdminIcon)
 	end
 	function o:setSidebarGeometry(nextWidth, nextHeight, staff)
 		self.TEXTURE_WIDTH, self.TEXTURE_HEIGHT = nextWidth, nextHeight
@@ -233,7 +227,7 @@ function GS_SidebarPatch.updatePopupGeometry(panel)
 	end
 
 	local textureWidth = getTextureWidth()
-	local textureHeight = textureWidth * 0.75
+	local textureHeight = textureWidth
 	panel.gsInventoryPopup:setX(panel:getAbsoluteX() + anchor:getX())
 	panel.gsInventoryPopup:setY(panel:getAbsoluteY() + anchor:getY())
 	panel.gsInventoryPopup:setSidebarGeometry(textureWidth, textureHeight,
@@ -255,7 +249,7 @@ function GS_SidebarPatch.ensurePopup(panel)
 
 	if not panel.gsInventoryPopup then
 		local textureWidth = getTextureWidth()
-		local textureHeight = textureWidth * 0.75
+		local textureHeight = textureWidth
 		local absX = panel:getAbsoluteX() + anchor:getX()
 		local absY = panel:getAbsoluteY() + anchor:getY()
 		panel.gsInventoryPopup = GS_InventorySidebarPopup:new(absX, absY, textureWidth * 2, textureHeight, panel.chr)

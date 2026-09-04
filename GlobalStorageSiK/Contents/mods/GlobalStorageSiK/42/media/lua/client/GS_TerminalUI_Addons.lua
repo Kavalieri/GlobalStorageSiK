@@ -157,6 +157,7 @@ function AddonsTab.context(terminal)
 					variant = "feature", title = cardTitle(def, installedDef),
 					icon = cardIcon(def, installedDef), status = label,
 					statusTone = tone, tooltip = tooltip, locked = locked,
+					tooltipPlacement = { anchor = "pointer" },
 					payload = { addonId = def.id },
 				}
 			end

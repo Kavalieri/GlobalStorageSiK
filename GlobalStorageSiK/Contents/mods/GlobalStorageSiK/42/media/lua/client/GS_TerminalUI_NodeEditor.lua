@@ -33,7 +33,7 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local CONTROL_METRICS = UI.Controls.metrics("editor")
 local PALETTE = UI.Theme.palette()
 local PAD = 10
-local INFO_BTN_SIZE = FONT_HGT_SMALL
+local INFO_BTN_SIZE = 24
 
 --- Coloca un boton "?" con el control de ayuda de SiK.UI.
 --- justo despues de un titulo de bloque ya creado, con el texto largo que
@@ -47,8 +47,9 @@ local INFO_BTN_SIZE = FONT_HGT_SMALL
 local function addBlockInfoBtn(scroll, pad, y, titleText, tooltip, target)
 	local titleW = getTextManager():MeasureStringX(UIFont.Small, titleText)
 	local btn = UI.Controls.iconButton(nil, {
-		x = pad + titleW + 6, y = y, w = INFO_BTN_SIZE, h = INFO_BTN_SIZE,
-		text = "?", tooltip = tooltip, payload = target,
+		x = pad + titleW + 6, y = y - math.floor((INFO_BTN_SIZE - FONT_HGT_SMALL) / 2),
+		w = INFO_BTN_SIZE, h = INFO_BTN_SIZE, icon = "sik.info.24",
+		text = "", tooltip = tooltip, payload = target,
 	})
 	UI.Scroll.addChild(scroll, btn)
 	return btn
@@ -154,6 +155,7 @@ function GS_NodeEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	UI.Window.applyEditor(self, {
 		geometryKey = "nodeEditor",
+		geometryVersion = 2,
 		title = T("IGUI_GS_NodeEditorTitle"),
 		padding = PAD,
 		onReflow = function() self:calculateLayout() end,
@@ -511,6 +513,7 @@ function GS_NodeEditorUI:ensureForm()
 	local pad = 8
 	local y = pad
 	local innerW = UI.Scroll.contentWidth(scroll)
+	local contentW = math.max(1, innerW - pad * 2)
 	local isExcluded       = node.membership == "excluded"
 
 	-- Usar estado de edición pendiente si existe (sobrevive a rebuildForm)
@@ -537,47 +540,48 @@ function GS_NodeEditorUI:ensureForm()
 	-- nivel de UN contenedor en el mod, solo agregada de red completa (ver
 	-- GS_NetworkCapacity.lua) - queda para una ronda dedicada aparte.
 	local itemCount, typeCount = nodeItemStats(self.node)
-	self.statsLbl = createText(nil, pad, y, innerW,
+	self.statsLbl = createText(nil, pad, y, contentW,
 		T("IGUI_GS_NodeStatsLine", itemCount, typeCount), PALETTE.textMuted)
 	UI.Scroll.addChild(scroll, self.statsLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.occupancyLbl = createText(nil, pad, y, innerW,
+	self.occupancyLbl = createText(nil, pad, y, contentW,
 		occupancyLabelText(nodeCapacityInfo(node)), PALETTE.textMuted)
 	UI.Scroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
 	if node.offline == true then
 		local recoveryBody = T("IGUI_GS_NodeRecoveryBody")
-		local bodyLines = UI.Controls.wrapText(recoveryBody, innerW - 16, UIFont.Small)
-		local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(node.rules or {}, innerW - 16,
+		local recoveryW = math.max(1, contentW - 16)
+		local bodyLines = UI.Controls.wrapText(recoveryBody, recoveryW, UIFont.Small)
+		local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(node.rules or {}, recoveryW,
 			UIFont.Small, PALETTE.textSecondary)
 		local cardH = FONT_HGT_SMALL + (#bodyLines + summaryLayout.lineCount) * (FONT_HGT_SMALL + 2)
 			+ CONTROL_METRICS.buttonHeight * 2 + 28
-                local card = createSectionCard(scroll, pad, y, innerW - pad, cardH,
+		local card = createSectionCard(scroll, pad, y, contentW, cardH,
 			PALETTE.statusDanger)
 		UI.Scroll.addChild(scroll, card)
 		local cy = y + 8
-		local title = createText(nil, pad + 8, cy, innerW - 16,
+		local title = createText(nil, pad + 8, cy, recoveryW,
 			T("IGUI_GS_NodeRecoveryTitle"), { 0.92, 0.35, 0.3, 1 })
 		UI.Scroll.addChild(scroll, title); cy = cy + FONT_HGT_SMALL + 3
 		for _, line in ipairs(bodyLines) do
-			local label = createText(nil, pad + 8, cy, innerW - 16, line,
+			local label = createText(nil, pad + 8, cy, recoveryW, line,
 				{ 0.72, 0.74, 0.78, 1 })
 			UI.Scroll.addChild(scroll, label); cy = cy + FONT_HGT_SMALL + 2
 		end
-		self.recoverySummaryHost = createHost(nil, pad + 8, cy, innerW - 16,
+		self.recoverySummaryHost = createHost(nil, pad + 8, cy, recoveryW,
 			math.max(FONT_HGT_SMALL, summaryLayout.lineCount * (FONT_HGT_SMALL + 2)))
 		UI.Scroll.addChild(scroll, self.recoverySummaryHost)
 		addSummaryRuns(self.recoverySummaryHost, summaryLayout, 0)
 		cy = cy + self.recoverySummaryHost.height + 2
-		self.recoveryTransferBtn = createBtn(pad + 8, cy + 3, innerW - pad - 16, T("IGUI_GS_NodeBtnTransferConfig"), scroll, function()
+		self.recoveryTransferBtn = createBtn(pad + 8, cy + 3, recoveryW, T("IGUI_GS_NodeBtnTransferConfig"), scroll, function()
 			self:requestConfigTransferProposal()
 		end)
 		UI.Controls.setTooltip(self.recoveryTransferBtn, T("IGUI_GS_NodeTransferConfigTip"))
 		UI.Scroll.addChild(scroll, self.recoveryTransferBtn)
 		self.recoveryRemoveBtn = createProductButton(
 			pad + 8, cy + CONTROL_METRICS.buttonHeight + 7,
-			innerW - pad - 16, CONTROL_METRICS.buttonHeight,
+			recoveryW, CONTROL_METRICS.buttonHeight,
 			T("IGUI_GS_NodeBtnRemove"), scroll, function()
 			self:confirmRemoveFromNetwork()
 		end, PALETTE.statusDanger, true)
@@ -591,7 +595,7 @@ function GS_NodeEditorUI:ensureForm()
 	UI.Scroll.addChild(scroll, self.nameLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.nameEntry = createField(editName, pad, y, innerW, false)
+	self.nameEntry = createField(editName, pad, y, contentW, false)
 	UI.Scroll.addChild(scroll, self.nameEntry)
 	y = y + CONTROL_METRICS.inputHeight + 12
 
@@ -604,7 +608,7 @@ function GS_NodeEditorUI:ensureForm()
 	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_NodePriorityLabel"), T("IGUI_GS_NodePriorityHint"), scroll)
 	y = y + FONT_HGT_SMALL + 4
 
-	self.priorityEntry = createField(tostring(editPriority), pad, y, innerW, true)
+	self.priorityEntry = createField(tostring(editPriority), pad, y, contentW, true)
 	UI.Scroll.addChild(scroll, self.priorityEntry)
 	y = y + CONTROL_METRICS.inputHeight + 4
 
@@ -617,7 +621,7 @@ function GS_NodeEditorUI:ensureForm()
 		if self.priorityEntry then self.priorityEntry:setText(tostring(n)) end
 		self:applyField("priority", n)
 	end
-	local presetW = math.floor((innerW - 8) / 3)
+	local presetW = math.floor((contentW - 8) / 3)
 	self.priorityPresetHighBtn = createBtn(pad, y, presetW, T("IGUI_GS_NodePriorityPresetHigh"), scroll, function() applyPriorityValue(10) end)
 	UI.Scroll.addChild(scroll, self.priorityPresetHighBtn)
 	self.priorityPresetNormalBtn = createBtn(pad + presetW + 4, y, presetW, T("IGUI_GS_NodePriorityPresetNormal"), scroll, function() applyPriorityValue(50) end)
@@ -635,25 +639,25 @@ function GS_NodeEditorUI:ensureForm()
 	local zone = findZoneById(self.terminal, self.node.zoneId)
 	if zone and zone.rules and #zone.rules > 0 then
 		local inheritedLines = UI.Controls.wrapText(
-			T("IGUI_GS_NodeInheritedFromZone", zone.name or "?"), innerW, UIFont.Small)
+			T("IGUI_GS_NodeInheritedFromZone", zone.name or "?"), contentW, UIFont.Small)
 		local inheritedNeutral = { 0.6, 0.63, 0.67 }
 		local inheritedLayout = GlobalStorageSiK.RulesUI.layoutSummary(
-			zone.rules, innerW - pad, UIFont.Small, inheritedNeutral)
+			zone.rules, contentW, UIFont.Small, inheritedNeutral)
 		local hostH = (#inheritedLines + inheritedLayout.lineCount)
 			* (FONT_HGT_SMALL + 2)
-		self.inheritedZoneHost = createHost(nil, pad, y, innerW - pad, hostH)
+		self.inheritedZoneHost = createHost(nil, pad, y, contentW, hostH)
 		UI.Scroll.addChild(scroll, self.inheritedZoneHost)
 		local iy = 0
 		for i, line in ipairs(inheritedLines) do
 			local r, g, b = 0.6, 0.63, 0.67
 			if i == 1 then r, g, b = 0.55, 0.75, 0.95 end
-			createText(self.inheritedZoneHost, 0, iy, innerW - pad, line,
+			createText(self.inheritedZoneHost, 0, iy, contentW, line,
 				{ r, g, b, 1 })
 			iy = iy + FONT_HGT_SMALL + 2
 		end
 		addSummaryRuns(self.inheritedZoneHost, inheritedLayout, iy)
 		y = y + hostH + 4
-		self.editZoneFromNodeBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeInheritedEditZoneBtn"), scroll, function()
+		self.editZoneFromNodeBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeInheritedEditZoneBtn"), scroll, function()
 			local zoneNodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
 			GlobalStorageSiK.TerminalZoneEditor.open(self.terminal, zone, zoneNodes)
 		end)
@@ -679,7 +683,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- el hueco con el texto inicial para calcular su altura real (regla 7,
 	-- CLAUDE.md: texto de longitud variable, nunca ISLabel de una sola linea).
 	self._rulesSummaryY = y
-	local summaryW = innerW - pad
+	local summaryW = contentW
 	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(self.node.rules,
 		summaryW, UIFont.Small, PALETTE.textSecondary)
 	self.rulesSummaryHost = createHost(nil, pad, y, summaryW,
@@ -736,7 +740,7 @@ function GS_NodeEditorUI:ensureForm()
 			}, pal.textMuted)
 			local cardPad = 8
 			local cardX = pad
-			local cardW = innerW - pad
+			local cardW = contentW
 			local cardTop = y
 			local cy = cardTop + cardPad
 			local cx = pad + cardPad + 4
@@ -802,7 +806,7 @@ function GS_NodeEditorUI:ensureForm()
 	end
 
 	for _, op in ipairs(RULE_OPS) do
-		y = self:buildRuleSection(scroll, pad, innerW, y, op)
+		y = self:buildRuleSection(scroll, pad, contentW, y, op)
 	end
 	-- Firma del numero de reglas usada para dimensionar tarjetas/hosts en
 	-- ESTE build (ver syncFormButtons) - dev26 ronda 4quater: anadir una
@@ -819,7 +823,7 @@ function GS_NodeEditorUI:ensureForm()
 	UI.Scroll.addChild(scroll, self.notesLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.notesEntry = createField(editNotes, pad, y, innerW, false)
+	self.notesEntry = createField(editNotes, pad, y, contentW, false)
 	UI.Controls.setTooltip(self.notesEntry, T("IGUI_GS_NodeNotesHint"))
 	UI.Scroll.addChild(scroll, self.notesEntry)
 	y = y + CONTROL_METRICS.inputHeight + 8
@@ -835,8 +839,8 @@ function GS_NodeEditorUI:ensureForm()
 	local templateStatus = template
 		and T("IGUI_GS_NodeConfigTemplateReadyRules", template.sourceName or "?", #(template.rules or {}), template.priority or 50)
 		or T("IGUI_GS_NodeConfigTemplateEmpty")
-	local statusText = UI.Controls.truncateText(templateStatus, innerW, UIFont.Small)
-	self.configTemplateStatusLbl = createText(nil, pad, y, innerW,
+	local statusText = UI.Controls.truncateText(templateStatus, contentW, UIFont.Small)
+	self.configTemplateStatusLbl = createText(nil, pad, y, contentW,
 		statusText, PALETTE.textMuted)
 	UI.Scroll.addChild(scroll, self.configTemplateStatusLbl)
 	y = y + FONT_HGT_SMALL + 6
@@ -845,7 +849,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- completo: 3 botones apretados en una sola fila truncaban su texto
 	-- (createButton se ajusta al ancho pasado pero nunca lo supera).
 	local templateGap = 4
-	local templateBtnW = math.floor((innerW - templateGap) / 2)
+	local templateBtnW = math.floor((contentW - templateGap) / 2)
 	self.copyConfigBtn = createBtn(pad, y, templateBtnW, T("IGUI_GS_NodeConfigCopy"), scroll, function()
 		self:copyConfigTemplate()
 	end)
@@ -863,7 +867,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- antigua seccion "Plantilla" del editor de ZONA (ya retirada) - aplica
 	-- el protocolo de aceptacion de ESTE contenedor a todos los demas de su
 	-- misma zona, con confirmacion previa. Nunca toca la prioridad.
-	self.extendToZoneBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeConfigExtendToZone"), scroll, function()
+	self.extendToZoneBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeConfigExtendToZone"), scroll, function()
 		self:confirmExtendToZone()
 	end)
 	UI.Controls.setTooltip(self.extendToZoneBtn, T("IGUI_GS_NodeConfigExtendToZoneTooltip"))
@@ -874,7 +878,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- Antes cada campo tenia su propio "Aplicar"; si el jugador cambiaba
 	-- varios y solo pulsaba uno, los demas quedaban sin guardar - un solo
 	-- boton que manda TODO junto en un unico updateNode evita ese riesgo.
-	self.applyAllBtn = createBtn(pad, y, innerW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
+	self.applyAllBtn = createBtn(pad, y, contentW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
 		if not self.node then return end
 		local name = self.nameEntry and self.nameEntry:getText() or ""
 		local notes = self.notesEntry and self.notesEntry:getText() or ""
@@ -910,7 +914,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- cuando la accion es excluir - al volver a incluir el boton se queda en
 	-- su estilo normal, no tiene sentido pintar de peligro una accion segura.
 	local membActiveColor = (not isExcluded) and PALETTE.statusDanger or nil
-	self.membBtn = createProductButton(pad, y, innerW,
+	self.membBtn = createProductButton(pad, y, contentW,
 		CONTROL_METRICS.buttonHeight, membLabel, scroll, function()
 		if self.node and self.node.membership == "excluded" then
 			self:requestNodeUpdate({ enabled = true, membership = "active" })
@@ -922,7 +926,7 @@ function GS_NodeEditorUI:ensureForm()
 	UI.Scroll.addChild(scroll, self.membBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 6
 
-	self.removeBtn = createProductButton(pad, y, innerW,
+	self.removeBtn = createProductButton(pad, y, contentW,
 		CONTROL_METRICS.buttonHeight,
 		T("IGUI_GS_NodeBtnRemove"), scroll, function()
 			self:confirmRemoveFromNetwork()
@@ -931,7 +935,7 @@ function GS_NodeEditorUI:ensureForm()
 	UI.Scroll.addChild(scroll, self.removeBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 6
 	if node and node.offline == true then
-		self.rebindBtn = createBtn(pad, y, innerW, T("IGUI_GS_NodeBtnRebind"), scroll, function()
+		self.rebindBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeBtnRebind"), scroll, function()
 			self:requestRebindProposal()
 		end)
 		UI.Controls.setTooltip(self.rebindBtn, T("IGUI_GS_NodeRebindTooltip"))
@@ -946,7 +950,7 @@ function GS_NodeEditorUI:ensureForm()
 				local candidate = self._rebindCandidates[i]
 				local label = T("IGUI_GS_NodeRebindCandidate", candidate.name or "?",
 					candidate.x or "?", candidate.y or "?", candidate.z or "?")
-				local choiceBtn = createBtn(pad, y, innerW, label, scroll, function()
+				local choiceBtn = createBtn(pad, y, contentW, label, scroll, function()
 					self:requestRebindProposal(candidate.nodeId)
 				end)
 				UI.Controls.setTooltip(choiceBtn, T("IGUI_GS_NodeRebindCandidateTooltip"))
@@ -982,11 +986,11 @@ end
 --- regla <op>".
 ---@param scroll table
 ---@param pad number
----@param innerW number
+---@param contentW number
 ---@param y number
 ---@param op string "OR"|"AND"|"NOT"
 ---@return number newY
-function GS_NodeEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
+function GS_NodeEditorUI:buildRuleSection(scroll, pad, contentW, y, op)
 	local rules = (self.node and self.node.rules) or {}
 	local count = 0
 	for i = 1, #rules do
@@ -999,7 +1003,7 @@ function GS_NodeEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 
 	local cardPad = 8
 	local cardX = pad
-	local cardW = innerW - pad
+	local cardW = contentW
 	local cardTop = y
 	local cy = y + cardPad
 	local cx = pad + cardPad + 4
@@ -1221,6 +1225,7 @@ function GS_NodeEditorUI:refreshContents()
 	local scroll = self.editorScroll
 	local savedOffset = UI.Scroll.getScrollOffset(scroll)
 	local innerW = UI.Scroll.contentWidth(scroll)
+	local contentW = math.max(1, innerW - 16)
 
 	self:ensureContentsHost()
 	if not self.contentsHost then
@@ -1229,12 +1234,12 @@ function GS_NodeEditorUI:refreshContents()
 
 	self.contentsHost:setX(8)
 	self.contentsHost:setY(self._contentsStartY or 0)
-	self.contentsHost:setWidth(innerW)
+	self.contentsHost:setWidth(contentW)
 	self:clearContentsHost()
 	self:syncFormButtons()
 
 	local yEnd = GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(
-		self.contentsHost, self.terminal, self.node, 0, 8, innerW, { plainHost = true }
+		self.contentsHost, self.terminal, self.node, 0, 8, contentW, { plainHost = true }
 	)
 
 	self.contentsHost:setHeight(math.max(40, yEnd + 4))
@@ -1339,7 +1344,8 @@ function GS_NodeEditorUI:ensureContentsHost()
 	end
 	local pad = 8
 	local innerW = UI.Scroll.contentWidth(scroll)
-	self.contentsHost = createHost(nil, pad, self._contentsStartY or 0, innerW, 40)
+	local contentW = math.max(1, innerW - pad * 2)
+	self.contentsHost = createHost(nil, pad, self._contentsStartY or 0, contentW, 40)
 	self.contentsHost.clipChildren = false
 	UI.Scroll.addChild(scroll, self.contentsHost)
 end

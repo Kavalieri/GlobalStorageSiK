@@ -234,9 +234,12 @@ check("sidebar creates framework controls once", popup ~= nil
 	and controlCalls.panel == 1 and controlCalls.iconButton == 2
 	and #popup.children == 2)
 check("sidebar initial geometry preserves vanilla anchor slot", popup.x == 110
-	and popup.y == 220 and popup.width == 96 and popup.height == 36
-	and terminalButton.x == 48 and terminalButton.width == 48
-	and staffButton.x == 96 and staffButton.visible == false)
+	and popup.y == 220 and popup.width == 96 and popup.height == 48
+	and terminalButton.x == 48 and terminalButton.width == 48 and terminalButton.height == 48
+	and terminalButton.options.iconFit == "square" and terminalButton.options.iconPadding == 0
+	and terminalButton.texture.path == "media/ui/GS/Launcher/sik-mainbutton-48.png"
+	and staffButton.x == 96 and staffButton.height == 48 and staffButton.visible == false
+	and staffButton.texture.path == "media/ui/GS/Launcher/sik-mainbutton-admin-48.png")
 check("sidebar forwards its anchor slot to vanilla", popup:onMouseDown(24) == true
 	and anchorCalls == 1 and popup:onMouseDown(50) == false)
 check("sidebar owns exactly one active refresh handler", tickAdds == 1
@@ -279,7 +282,7 @@ check("sidebar lifecycle tracks host visibility without duplicate handlers",
 staff = true
 equipped:checkSidebarSizeOption()
 check("sidebar geometry reserves staff slot only when visible", originalCalls.size == 1
-	and popup.width == 144 and popup.height == 36 and popup.isStaff == true
+	and popup.width == 144 and popup.height == 48 and popup.isStaff == true
 	and terminalButton.x == 48 and staffButton.x == 96 and staffButton.visible == true)
 check("sidebar preserves vanilla lifecycle forwarding", originalCalls.initialise == 1
 	and originalCalls.prerender == 1)
