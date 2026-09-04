@@ -347,7 +347,7 @@
                       "id": "options-terminals-table",
                       "type": "table",
                       "variant": "interactive",
-                      "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "layout": { "mode": "column", "base": [], "overrides": [] },
                       "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.terminals" } }],
                       "actions": [{ "event": "activate", "actionId": "options.open-terminal" }],
                       "columns": [
@@ -376,7 +376,7 @@
                       "id": "options-members-table",
                       "type": "table",
                       "variant": "interactive",
-                      "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "layout": { "mode": "column", "base": [], "overrides": [] },
                       "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.members" } }],
                       "actions": [{ "event": "activate", "actionId": "options.open-member" }],
                       "columns": [

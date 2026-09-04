@@ -1285,6 +1285,14 @@ local function requireAdminAccess(player, networkId, resultMeta)
 	if not requireMemberAccess(player, networkId, resultMeta) then
 		return false
 	end
+	-- En SP real no existe una jerarquia multiusuario que aplicar: shouldEnforce()
+	-- es false y canAccess() ya concede el nivel member por ese mismo contrato.
+	-- El segundo escalon no puede volver a exigir un registro admin/owner que
+	-- solo tiene sentido en MP, o acciones autoritativas como instalar addons
+	-- quedan rechazadas aunque el jugador sea el unico propietario posible.
+	if not GlobalStorageSiK.Permissions.shouldEnforce() then
+		return true
+	end
 	-- El rango de staff del servidor ya NO concede bypass aqui (deuda tecnica
 	-- cerrada 2026-08-22, ver comentario de isServerStaff en GS_Permissions.lua).
 	if GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then
@@ -1314,6 +1322,9 @@ end
 local function requireOwnerAccess(player, networkId, resultMeta)
 	if not requireMemberAccess(player, networkId, resultMeta) then
 		return false
+	end
+	if not GlobalStorageSiK.Permissions.shouldEnforce() then
+		return true
 	end
 	if GlobalStorageSiK.Permissions.isOwnerPlayer(player, networkId) then
 		return true

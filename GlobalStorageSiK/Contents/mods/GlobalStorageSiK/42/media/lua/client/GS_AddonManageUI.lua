@@ -165,6 +165,36 @@ local function ingredientSignature(player, def)
 	return table.concat(parts, ",")
 end
 
+--- Huella de cada requisito visible de instalación. El booleano final de
+--- canInstall no basta: si faltan dos requisitos, obtener uno mantiene false y
+--- no permite saber qué fila debe repintarse.
+---@param player IsoPlayer|nil
+---@param def table
+---@param networkId string|nil
+---@param anchor table|nil
+---@return string
+local function installRequirementSignature(player, def, networkId, anchor)
+	if not player or not player.getInventory then return "invalid" end
+	local inv = player:getInventory()
+	local moduleCount = 0
+	local moduleTypes = addonModuleItemTypes(def.id)
+	for i = 1, #moduleTypes do
+		if moduleTypes[i] then
+			moduleCount = moduleCount + (inv:getItemCountRecurse(moduleTypes[i]) or 0)
+		end
+	end
+	local diskCount = 0
+	if def.installDiskItem and def.installDiskItem ~= "" then
+		diskCount = inv:getItemCountRecurse(def.installDiskItem) or 0
+	end
+	local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(player, networkId, anchor)
+	local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+	local skillHave = GlobalStorageSiK.CraftUtils.getElectricityLevel(player)
+	return table.concat({ tostring(hasReader == true), tostring(moduleCount),
+		tostring(diskCount), tostring(playerKnowsMagazine(player, def.id)),
+		tostring(requiredSkill), tostring(skillHave) }, ",")
+end
+
 --- Firma corta del estado actual, para no reconstruir si no cambio nada
 --- (mismo motivo que GS_ReaderAcquireUI/GS_PCAcquireUI: evita que la
 --- ventana "salte" con cada tick de refresco si nada cambio de verdad).
@@ -182,7 +212,10 @@ local function statusSignature(player, def, networkId, anchor, installed)
 	local uninstallDiskItem = GlobalStorageSiK.Addons.uninstallDiskItem()
 	local hasUninstallDisk = uninstallDiskItem and player and player:getInventory()
 		and (player:getInventory():getItemCountRecurse(uninstallDiskItem) or 0) >= 1
-	return string.format("%s|%s|%s|%s|%s|%s", tostring(modActive), tostring(isInstalled), tostring(knowsMag), tostring(canInstall), tostring(hasUninstallDisk), ingredientSignature(player, def))
+	return table.concat({ tostring(modActive), tostring(isInstalled),
+		tostring(knowsMag), tostring(canInstall), tostring(hasUninstallDisk),
+		ingredientSignature(player, def),
+		installRequirementSignature(player, def, networkId, anchor) }, "|")
 end
 
 function GS_AddonManageUI:initialise()
