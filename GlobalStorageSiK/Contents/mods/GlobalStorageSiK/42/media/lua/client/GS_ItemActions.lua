@@ -7,6 +7,7 @@
 
 require "GS_I18n"
 require "GS_NetClient"
+require "GS_UI_Feedback"
 require "GS_TerminalUI_Api"
 require "GS_TerminalAccess"
 require "GS_PlayerUtils"
@@ -25,7 +26,7 @@ require "GS_DiskProgramming"
 require "TimedActions/GS_ProgramDiskAction"
 require "TimedActions/GS_AddonInstallAction"
 require "TimedActions/ISTimedActionQueue"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Network"
 require "GS_Addons"
 require "ISUI/ISContextMenu"
@@ -91,7 +92,8 @@ end
 ---@return string
 local function moduleTierLabel(def)
 	local names, seen = {}, {}
-	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+	local ok, _, moduleTypes = GSSiK.API.Addon.moduleItemTypes(def.id)
+	if not ok then moduleTypes = {} end
 	for i = 1, #moduleTypes do
 		local fullType = moduleTypes[i]
 		if fullType and fullType ~= "" and not seen[fullType] then
@@ -173,7 +175,8 @@ local function hasAnyModuleTier(player, addonDef)
 	if not inv then
 		return false
 	end
-	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(addonDef)
+	local ok, _, moduleTypes = GSSiK.API.Addon.moduleItemTypes(addonDef.id)
+	if not ok then moduleTypes = {} end
 	for i = 1, #moduleTypes do
 		if moduleTypes[i] and (inv:getItemCountRecurse(moduleTypes[i]) or 0) >= 1 then
 			return true
@@ -216,7 +219,8 @@ local function buildInstallChecklistTooltip(player, addonDef, hasTerminalNear, n
 	local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(player, nid, anchor)
 	local readerLabel = (readerType and GlobalStorageSiK.I18n.typeDisplayName
 		and GlobalStorageSiK.I18n.typeDisplayName(readerType)) or T("IGUI_GS_AddonReaderTitle")
-	local knowsMag = player and GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(player, addonDef.id)
+	local knowsOk, _, knowsMag = GSSiK.API.Addon.playerKnowsMagazine(player, addonDef.id)
+	knowsMag = player ~= nil and knowsOk == true and knowsMag == true
 	local magazineLabel = (addonDef.magazineType and GlobalStorageSiK.I18n.typeDisplayName
 		and GlobalStorageSiK.I18n.typeDisplayName(addonDef.magazineType)) or T("IGUI_GS_AddonStatusNeedMagazine")
 
@@ -242,7 +246,10 @@ end
 --- labelKey es la clave de traducción del texto del menú contextual.
 GlobalStorageSiK.ItemActions._tabletItemLabels = GlobalStorageSiK.ItemActions._tabletItemLabels or {}
 GlobalStorageSiK.ItemActions._tabletItemActions = GlobalStorageSiK.ItemActions._tabletItemActions or {}
+GlobalStorageSiK.ItemActions._tabletItemGenerations = GlobalStorageSiK.ItemActions._tabletItemGenerations or {}
+GlobalStorageSiK.ItemActions._generation = tonumber(GlobalStorageSiK.ItemActions._generation) or 0
 GlobalStorageSiK.ItemActions._providers = GlobalStorageSiK.ItemActions._providers or {}
+GlobalStorageSiK.ItemActions._providerGenerations = GlobalStorageSiK.ItemActions._providerGenerations or {}
 local MAX_PROVIDERS = 32
 local MAX_PROVIDER_ACTIONS = 16
 
@@ -251,11 +258,25 @@ local MAX_PROVIDER_ACTIONS = 16
 ---@param onUse function|nil
 function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey, onUse)
 	if not fullType or not labelKey then
-		return
+		return false, nil
 	end
+	GlobalStorageSiK.ItemActions._generation = GlobalStorageSiK.ItemActions._generation + 1
+	local generation = GlobalStorageSiK.ItemActions._generation
 	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = labelKey
 	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] =
 		type(onUse) == "function" and onUse or GlobalStorageSiK.ItemActions.onUseTerminalTablet
+	GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] = generation
+	return true, generation
+end
+
+function GlobalStorageSiK.ItemActions.removeTabletItemIfGeneration(fullType, generation)
+	if GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] ~= generation then
+		return false
+	end
+	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = nil
+	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] = nil
+	GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] = nil
+	return true
 end
 
 --- Registro neutral de acciones propietarias de addons. Core solo valida,
@@ -279,6 +300,18 @@ function GlobalStorageSiK.ItemActions.registerProvider(def)
 			or type(action.labelKey) ~= "string" or action.labelKey == "" then return false end
 	end
 	GlobalStorageSiK.ItemActions._providers[def.id] = def
+	GlobalStorageSiK.ItemActions._generation = GlobalStorageSiK.ItemActions._generation + 1
+	local generation = GlobalStorageSiK.ItemActions._generation
+	GlobalStorageSiK.ItemActions._providerGenerations[def.id] = generation
+	return true, generation
+end
+
+function GlobalStorageSiK.ItemActions.removeProviderIfGeneration(providerId, generation)
+	if GlobalStorageSiK.ItemActions._providerGenerations[providerId] ~= generation then
+		return false
+	end
+	GlobalStorageSiK.ItemActions._providers[providerId] = nil
+	GlobalStorageSiK.ItemActions._providerGenerations[providerId] = nil
 	return true
 end
 
@@ -553,15 +586,18 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 						local freshRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
 						local freshTarget = GlobalStorageSiK.TerminalAccess.findNearestKnownComputer(p, freshRange)
 						if not freshTarget then
-							if p and p.setHaloNote then
-								p:setHaloNote(T("IGUI_GS_InstallReaderComputerNoneShort"), 220, 180, 100, 300)
+							if p then
+								GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_InstallReaderComputerNoneShort"),
+									220, 180, 100, 300, { tone = "warning" })
 							end
 							return
 						end
 						if freshTarget.alreadyInstalled then
-							if p and p.setHaloNote then
+							if p then
 								local keyLabel = GlobalStorageSiK.KeyBinding and GlobalStorageSiK.KeyBinding.getKeyLabel and GlobalStorageSiK.KeyBinding.getKeyLabel() or "F9"
-								p:setHaloNote(T("IGUI_GS_InstallReaderAlreadyInstalled", keyLabel), 220, 180, 100, 300)
+								GlobalStorageSiK.UIFeedback.halo(p,
+									T("IGUI_GS_InstallReaderAlreadyInstalled", keyLabel),
+									220, 180, 100, 300, { tone = "warning" })
 							end
 							return
 						end
@@ -612,14 +648,16 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 						local knows = GlobalStorageSiK.DiskProgramming.knowsProgram(player, id)
 						local option = sub:addOption(T(def.menuTextKey), player, function(p)
 							if not GlobalStorageSiK.DiskProgramming.knowsProgram(p, id) then
-								if p and p.setHaloNote then
-									p:setHaloNote(T("IGUI_GS_ProgramDiskFailBook"), 220, 180, 100, 300)
+								if p then
+									GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailBook"),
+										220, 180, 100, 300, { tone = "warning" })
 								end
 								return
 							end
 							if not GlobalStorageSiK.DiskProgramming.terminalInRange(p) then
-								if p and p.setHaloNote then
-									p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+								if p then
+									GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+										220, 180, 100, 300, { tone = "warning" })
 								end
 								return
 							end
@@ -665,7 +703,9 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 			-- Lector como ADDON en un terminal YA EXISTENTE - exactamente el
 			-- mismo caso que Craft/Builder/Antena, nunca deberia haberse
 			-- excluido. Sin esto, ese disquete no ofrecia ninguna opcion.
-			for _, addonDef in ipairs(GlobalStorageSiK.AddonRegistry.listSorted()) do
+			local listed, _, addonDefinitions = GSSiK.API.Addon.list()
+			if not listed then addonDefinitions = {} end
+			for _, addonDef in ipairs(addonDefinitions) do
 				if addonDef.installDiskItem == first:getFullType() and player then
 					local sub = ensureSub()
 					if sub then
@@ -698,18 +738,22 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 							-- hasRequiredInstallItems) SOLO podia ver la disquetera
 							-- en el inventario, nunca instalada como addon en la
 							-- red ya detectada.
-							local canInstall = GlobalStorageSiK.AddonRegistry.canInstallModule(player, addonId, nid, anchor)
+							local policyOk, _, canInstall = GSSiK.API.Addon.canInstall(player, addonId, nid, anchor)
+							canInstall = policyOk == true and canInstall == true
 							local option = sub:addOption(T("IGUI_GS_InstallAddonMenu", peripheralLabel), player, function(p)
 								local freshTarget, freshNid, freshAnchor = resolveNearbyNetworkContext(p)
 								if not freshTarget then
-									if p and p.setHaloNote then
-										p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+									if p then
+										GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+											220, 180, 100, 300, { tone = "warning" })
 									end
 									return
 								end
-								if not GlobalStorageSiK.AddonRegistry.canInstallModule(p, addonId, freshNid, freshAnchor) then
-									if p and p.setHaloNote then
-										p:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+								local freshPolicyOk, _, freshCanInstall = GSSiK.API.Addon.canInstall(p, addonId, freshNid, freshAnchor)
+								if not freshPolicyOk or not freshCanInstall then
+									if p then
+										GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_CraftMissing"),
+											220, 180, 100, 300, { tone = "warning" })
 									end
 									return
 								end
@@ -757,8 +801,8 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 					installed = installed or {}
 					local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(player, nid, anchor)
 					for addonId, _ in pairs(installed) do
-						local addonDef = GlobalStorageSiK.AddonRegistry.get(addonId)
-						if addonDef then
+						local definitionOk, _, addonDef = GSSiK.API.Addon.get(addonId)
+						if definitionOk and addonDef then
 							local sub = ensureSub()
 							if sub then
 								local peripheralLabel = moduleTierLabel(addonDef)
@@ -769,21 +813,25 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 								local option = sub:addOption(T("IGUI_GS_UninstallAddonMenu", peripheralLabel), player, function(p)
 									local freshTarget, freshNid, freshAnchor = resolveNearbyNetworkContext(p)
 									if not freshTarget or not freshNid then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end
 									if not GlobalStorageSiK.Addons.hasReaderAvailable(p, freshNid, freshAnchor) then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_NeedReaderNetworkOrInventoryMsg"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p,
+												T("IGUI_GS_NeedReaderNetworkOrInventoryMsg"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end
 									local requiredSkillFresh = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
 									if requiredSkillFresh > 0 and GlobalStorageSiK.CraftUtils.getElectricityLevel(p) < requiredSkillFresh then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_CraftMissing"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end

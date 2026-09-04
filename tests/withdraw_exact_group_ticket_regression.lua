@@ -19,6 +19,8 @@ local registry = {
 local function row(ids, mediaIndex)
 	return {
 		fullType = "Base.VHS_Retail", mediaIndex = mediaIndex,
+		name = "VHS: Woodcraft Ep. 3", displayName = "VHS: Woodcraft Ep. 3",
+		mediaTitle = "VHS: Woodcraft Ep. 3",
 		itemIds = ids, count = #ids,
 	}
 end

@@ -11,10 +11,11 @@
 	  escopeta) usa el mismo limite honesto ya documentado (§3.4) - nunca
 	  revolver/subfusil por nombre.
 	- Municion: AmmoType real sobre un item que NO es el arma en si.
-	NO cubre todavia piezas de arma ni explosivos - sin una señal publica
+	NO cubre todavia piezas de arma ni explosivos generales - sin una señal publica
 	confirmada y fiable sobre el script item para distinguirlos (evita
 	inventar heuristicas de nombre, confianza 0 segun §6) - quedan
-	pendientes de un getter/tag confirmado en una ronda posterior.
+	pendientes de un getter/tag confirmado en una ronda posterior. La unica
+	excepcion exacta curada es Base.Matches, anclada al fullType real.
 ]]
 
 require "GS_NativeClassifierApi"
@@ -40,6 +41,13 @@ local MELEE_CATEGORY_TO_L3 = {
 ---@return table|nil attributes
 ---@return table|nil evidence
 local function classifyCombat(fullType, si)
+	if fullType == "Base.Matches" then
+		return
+			{ l1 = "combat", l2 = "explosive", l3 = "incendiary" },
+			{ fireSource = true },
+			{},
+			U.evidence("exact_fulltype_incendiary", 100)
+	end
 	if not si then return nil end
 
 	-- Cuerpo a cuerpo: WeaponCategory es un Set - un arma puede tener mas de

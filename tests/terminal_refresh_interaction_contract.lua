@@ -25,6 +25,12 @@ end
 local items = read("GS_TerminalUI_Items.lua")
 local drag = read("GS_TerminalWithdrawDrag.lua")
 local terminal = read("GS_TerminalUI.lua")
+local terminalApi = read("GS_TerminalUI_Api.lua")
+local terminalTabs = read("GS_TerminalUI_Tabs.lua")
+local frameworkPath = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Table.lua"
+local frameworkHandle = assert(io.open(frameworkPath, "rb"), frameworkPath)
+local frameworkTable = frameworkHandle:read("*a")
+frameworkHandle:close()
 local serverHandle = assert(io.open(SERVER_ROOT .. "GS_Server.lua", "rb"), "GS_Server.lua")
 local server = serverHandle:read("*a")
 serverHandle:close()
@@ -39,6 +45,27 @@ contains(terminal, "state.searchQuery", "search query is not restored")
 contains(terminal, "_mainCategoryFilterKey", "Family filter state missing")
 contains(terminal, "_subCategoryFilterKey", "Group filter state missing")
 contains(terminal, "_leafCategoryFilterKey", "Detail filter state missing")
+
+-- Opening and changing tabs are demand-driven. The shell reaches UIManager
+-- before the first heavy surface refresh, queued snapshots coalesce in one
+-- slot, and ordinary tab activation never walks the complete widget tree.
+local show = section(terminalApi, "function GlobalStorageSiK.TerminalUI.show(state)",
+	"function GlobalStorageSiK.TerminalUI.showBlocked")
+local addAt = assert(show:find("ui:addToUIManager()", 1, true), "shell is never made visible")
+local stateAt = assert(show:find("applyTerminalState(ui, state, true)", 1, true),
+	"first state is not deferred")
+assert(addAt < stateAt, "heavy state is applied before the shell reaches UIManager")
+contains(terminalApi, "ui._gsPendingTerminalState = state", "latest state is not coalesced")
+contains(terminalApi, "if ui._gsTerminalRefreshQueued then return end",
+	"multiple refresh ticks can be queued")
+contains(terminalApi, 'UIDebug.action("shell_visible"', "shell timing diagnostic missing")
+contains(terminalApi, 'UIDebug.action("state_refresh"', "state timing diagnostic missing")
+local activation = section(terminalTabs, "function GlobalStorageSiK.TerminalTabs.activate",
+	"function GlobalStorageSiK.TerminalTabs.applyAccessMode")
+excludes(activation, "syncTree", "tab activation performs a global scroll traversal")
+excludes(activation, "dumpTree", "tab activation performs a diagnostic tree traversal")
+excludes(activation, "checkOverlaps", "tab activation performs an overlap traversal")
+contains(activation, 'UIDebug.action("tab_activate"', "tab timing diagnostic missing")
 
 -- A refresh cannot recycle the row owning click/drag/tooltip. It is queued
 -- once and flushed after cancel/drop through the same explicit API.
@@ -64,30 +91,53 @@ contains(items,
 	"local pageStale = tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)",
 	"detail page is not compared with the current inventory revision")
 contains(items, "child._gsStale = pageStale", "stale child is not marked")
-contains(items, "hasNext = detailPage.hasNext, _gsStale = pageStale",
-	"stale pager is not marked")
+contains(items, "disabled = pending or pageStale",
+	"external pager is not disabled while its page is stale or pending")
+contains(frameworkTable, "state.disabled = type(externalState)",
+	"framework pagination does not consume neutral disabled state")
+contains(frameworkTable, "if current and current.disabled then return nil",
+	"framework pager can emit a request while disabled")
 contains(items, "stale = data._gsStale == true", "stale state is not passed to rendering")
-contains(items, "local alpha = descriptor.stale and 0.45 or 1",
+contains(items, "descriptor.alpha = descriptor.stale and 0.45 or 1",
 	"stale visual reference is not attenuated")
+contains(frameworkTable, "a = numberOr(color.a or color[4], 1) * descriptor.alpha",
+	"framework table does not apply row attenuation to its canonical cell renderer")
 contains(items, "if row and not row._gsStale and row.fullType",
 	"stale rows can enter a drag payload")
 contains(items, "local function pointerInsideRow(row)",
 	"row hover does not use the real pointer/row rectangle")
-contains(items, "not data._gsPager and not data._gsStale and hovering",
+local tooltipRender = section(items, "local function afterRenderFrameworkRow",
+	"local function itemRowAdapter")
+contains(tooltipRender, "if not data._gsStale and hovering",
 	"stale row can activate its remote tooltip")
+contains(tooltipRender, "TerminalWithdrawDrag.isActive()",
+	"active drag does not suppress row tooltip interaction")
 excludes(items, "not data._gsPager and not data._gsStale and self:isMouseOver()",
 	"tooltip hover still relies on child-panel hit-testing")
 
-local remoteCallback = section(items, "row.onRemoteItemDetail = function", "row.onMouseDown = function")
-contains(remoteCallback, "self.itemData._gsStale", "late remote detail can bind to a stale row")
-contains(remoteCallback, "not pointerInsideRow(self)",
+local remoteCallback = section(items, "local function updateRemoteMediaTitle",
+	"local function updateFrameworkRow")
+contains(remoteCallback, "row.itemData._gsStale", "late remote detail can bind to a stale row")
+contains(remoteCallback, "not pointerInsideRow(row)",
 	"late remote detail can bind after the pointer left the row")
-for _, handler in ipairs({ "row.onMouseDown = function", "row.onMouseUp = function",
-	"row.onMouseDoubleClick = function", "row.onRightMouseUp = function" }) do
-	local at = assert(items:find(handler, 1, true), "missing row handler: " .. handler)
-	local guard = assert(items:find("self.itemData._gsStale", at, true),
-		"stale guard missing after " .. handler)
-	assert(guard - at < 180, "stale guard is too late to protect " .. handler)
+contains(remoteCallback, "detail and detail.itemId",
+	"late remote detail lacks exact response identity")
+contains(remoteCallback, "row.itemData.itemId",
+	"late remote detail lacks current-row identity")
+local rowAdapter = section(items, "local function itemRowAdapter", "local function splitDisplayRows")
+local staleHandlers = {
+	{ marker = "onMouseDown = function", guard = "if data._gsStale then return true end" },
+	{ marker = "onMouseUp = function", guard = "if data._gsStale then return true end" },
+	{ marker = "onDoubleClick = function", guard = "if data._gsStale then return true end" },
+	{ marker = "onRightClick = function", guard = "if data._gsStale then return true end" },
+}
+for i = 1, #staleHandlers do
+	local handler = staleHandlers[i]
+	local at = assert(rowAdapter:find(handler.marker, 1, true),
+		"missing declarative row handler: " .. handler.marker)
+	local guard = assert(rowAdapter:find(handler.guard, at, true),
+		"stale guard missing after " .. handler.marker)
+	assert(guard - at < 220, "stale guard is too late to protect " .. handler.marker)
 end
 
 -- Server snapshots are coherent by revision. A scan that crosses a mutation

@@ -52,7 +52,9 @@ end
 
 local examples = {}
 for _, case in ipairs(GlobalStorageSiK.NativeTaxonomyGroundTruth.cases or {}) do
-	if case.fullType and case.expectedL1 and case.expectedL2 then
+	-- Runtime-only corrective anchors remain part of the executable corpus but
+	-- cannot mutate a visual master already approved and frozen by Kava.
+	if case.includeInTaxonomyPreview ~= false and case.fullType and case.expectedL1 and case.expectedL2 then
 		local l3 = type(case.expectedL3) == "string" and case.expectedL3 or nil
 		local key = pathKey(case.expectedL1, case.expectedL2, l3)
 		if not examples[key] then examples[key] = case.fullType end

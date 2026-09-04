@@ -6,7 +6,7 @@
 ]]
 
 require "GS_Network"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Permissions"
 require "GS_I18n"
 require "GS_Log"
@@ -19,6 +19,24 @@ require "GS_Sandbox"
 require "GS_ReaderAddon"
 
 GlobalStorageSiK.Addons = {}
+
+local AddonAPI = GSSiK.API.Addon
+
+local function addonDefinition(addonId)
+	local ok, _, definition = AddonAPI.get(addonId)
+	if ok then return definition end
+	return nil
+end
+
+local function addonIsActive(addonId)
+	local ok, _, active = AddonAPI.isActive(addonId)
+	return ok == true and active == true
+end
+
+local function playerKnowsMagazine(player, addonId)
+	local ok, _, known = AddonAPI.playerKnowsMagazine(player, addonId)
+	return ok == true and known == true
+end
 
 ---@param anchor table|nil
 ---@return string|nil
@@ -151,7 +169,7 @@ end
 ---@param anchor table|nil
 ---@return boolean
 function GlobalStorageSiK.Addons.canUseAddon(addonId, networkId, anchor)
-	if not addonId or not GlobalStorageSiK.AddonRegistry.isModActive(addonId) then
+	if not addonId or not addonIsActive(addonId) then
 		return false
 	end
 	local nid = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
@@ -287,14 +305,14 @@ end
 ---@return boolean ok
 ---@return string message
 function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
-	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
+	local def = addonDefinition(addonId)
 	if not def then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonUnknownMsg")
 	end
-	if not GlobalStorageSiK.AddonRegistry.isModActive(addonId) then
+	if not addonIsActive(addonId) then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonModInactiveMsg")
 	end
-	if not GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(player, addonId) then
+	if not playerKnowsMagazine(player, addonId) then
 		-- Antes texto fijo en español, se le mostraba literal a cualquier
 		-- jugador sea cual sea su idioma (reportado: un jugador ingles vio
 		-- este mensaje en español). GS_I18n.text() ya se usa asi en servidor
@@ -326,10 +344,13 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	-- universal en el inventario principal (autoridad de servidor, no basta
 	-- con lo que ya valida el cliente), y el disquete propio del addon si
 	-- lo define (se conserva, no se consume aqui abajo).
-	local hasItems, itemsReason = GlobalStorageSiK.AddonRegistry.hasRequiredInstallItems(player, def, networkId, anchor)
-	if not hasItems then
+	local policyOk, _, hasItems, itemsReason = AddonAPI.canInstall(player, addonId, networkId, anchor)
+	if not policyOk or not hasItems then
 		if itemsReason == "reader" then
 			return false, GlobalStorageSiK.I18n.remote("IGUI_GS_NeedReaderMainInventoryMsg")
+		end
+		if itemsReason == "module" then
+			return false, GlobalStorageSiK.I18n.remote("IGUI_GS_MissingModuleMsg")
 		end
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_MissingInstallDiskMsg")
 	end
@@ -342,7 +363,8 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 	-- instalo para poder devolver el mismo tier al retirar, y para que
 	-- quien consulte el rango de la red sepa que tier esta activo.
 	local moduleItem, moduleItemType = nil, nil
-	local candidateTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+	local typesOk, _, candidateTypes = AddonAPI.moduleItemTypes(addonId)
+	if not typesOk then candidateTypes = {} end
 	for i = 1, #candidateTypes do
 		if candidateTypes[i] then
 			local found = inv:getFirstTypeRecurse(candidateTypes[i])
@@ -394,7 +416,7 @@ end
 ---@return boolean ok
 ---@return string message
 function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
-	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
+	local def = addonDefinition(addonId)
 	if not def then
 		return false, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonUnknownMsg")
 	end

@@ -9,6 +9,7 @@
 require "TimedActions/ISBaseTimedAction"
 require "GS_NetClient"
 require "GS_PCAcquire"
+require "GS_UI_Feedback"
 require "GS_Sandbox"
 
 GS_AcquirePCAction = ISBaseTimedAction:derive("GS_AcquirePCAction")
@@ -40,8 +41,10 @@ end
 --- interrumpe, avisar localmente sin esperar respuesta de red.
 function GS_AcquirePCAction:stop()
 	ISBaseTimedAction.stop(self)
-	if not self._performed and self.character and self.character.setHaloNote then
-		self.character:setHaloNote(GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"), 220, 180, 100, 300)
+	if not self._performed and self.character then
+		GlobalStorageSiK.UIFeedback.halo(self.character,
+			GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"),
+			220, 180, 100, 300, { tone = "warning", channel = "timed-action" })
 	end
 end
 

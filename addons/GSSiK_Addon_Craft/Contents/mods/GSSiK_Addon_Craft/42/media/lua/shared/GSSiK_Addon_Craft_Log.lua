@@ -8,22 +8,18 @@
 ]]
 
 require "GSSiK_Addon_Craft_Sandbox"
-pcall(require, "GS_DebugRelay")
+local API = require "GSSiK_API"
+local Diagnostics = API.Diagnostics
 
 GSSiK_Addon_Craft = GSSiK_Addon_Craft or {}
 GSSiK_Addon_Craft.Log = GSSiK_Addon_Craft.Log or {}
 
 local detailNoticeShown = false
 
-local function relay()
-	return GlobalStorageSiK and GlobalStorageSiK.DebugRelay or nil
-end
-
 local function requestRelay()
-	local r = relay()
-	if r and isClient and isClient() and not (isServer and isServer())
+	if isClient and isClient() and not (isServer and isServer())
 		and GSSiK_Addon_Craft.Sandbox.isDebugMode() then
-		r.requestClientSubscription("Craft")
+		Diagnostics.subscribe("Craft")
 	end
 end
 
@@ -49,18 +45,18 @@ function GSSiK_Addon_Craft.Log.debug(category, message)
 		return
 	end
 	requestRelay()
-	local r = relay()
-	local origin = r and r.processTag() or "?"
+	local _, _, origin = Diagnostics.processTag()
+	origin = origin or "?"
 	local level = category == "Operations" and "DETAIL" or "DEBUG"
 	if level == "DETAIL" and not detailNoticeShown then
 		detailNoticeShown = true
 		local notice = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Craft:SYSTEM][Operations] DETAIL sublog enabled; high-volume output may fill console.txt; use only for targeted diagnostics"
 		print(notice)
-		if r then r.emit(notice) end
+		Diagnostics.emit(notice)
 	end
 	local line = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Craft:" .. level .. "][" .. tostring(category) .. "] " .. tostring(message)
 	print(line)
-	if r then r.emit(line) end
+	Diagnostics.emit(line)
 end
 
 if Events and Events.OnCreatePlayer then

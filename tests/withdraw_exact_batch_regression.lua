@@ -1,7 +1,6 @@
--- Exact instances may have different RecordedMedia titles, but once their
--- itemIds are known the client must pack them into the configured micro-batch.
--- This protects the expanded/paginated VHS drag path without changing its
--- visual ghost (which is owned by TerminalItems).
+-- A manual exact selection may contain different RecordedMedia titles. Once
+-- their itemIds are known the client packs them into the configured physical
+-- micro-batch; this is deliberately not a semantic VHS group.
 
 for _, name in ipairs({
 	"GS_NetClient", "GS_I18n", "GS_Log", "GS_PlayerUtils", "GS_Sandbox", "GS_OperationPacing",
@@ -42,6 +41,7 @@ GlobalStorageSiK = {
 	Client = { activeNetworkId = "network" },
 }
 
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_WithdrawClient.lua")
 
 local rows = {}
@@ -87,28 +87,47 @@ respond(8)
 
 assert(tick == nil, "completed exact batch left an OnTick handler installed")
 
--- The same batcher receives an unexpanded group header.  Its visible pages
--- are deliberately absent here: count is the complete semantic group, so 34
--- physical units must become 10/10/10/4 without item-by-item requests.
-local parent = { fullType = "Base.VHS", count = 34, aggregateAllowed = true }
+-- The same batcher receives one exact VHS group header. Its visible pages are
+-- deliberately absent: all 34 units share title and media identity, so the
+-- semantic selection must become 10/10/10/4 without item-by-item requests.
+local parent = {
+	rowKey = "Base.VHS_Retail\31sprite:\31media:214",
+	fullType = "Base.VHS_Retail", count = 34,
+	name = "VHS: Woodcraft Ep. 3", displayName = "VHS: Woodcraft Ep. 3",
+	mediaTitle = "VHS: Woodcraft Ep. 3", mediaIndex = 214,
+	selectionMode = "exact_group", selectionRevision = 9,
+}
 assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch({ parent }, 0, "player:main", "vhs"),
 	"semantic group header was not queued")
 tick()
 assert(#sent == 4 and sent[4].amount == 10 and #sent[4].itemIds == 0,
 	"first header micro-batch must request ten semantic units")
-respond(10)
+local function respondGroup(moved, remaining, sequence)
+	local request = sent[#sent]
+	assert(request, "no semantic request in flight")
+	GlobalStorageSiK.WithdrawClient.onActionResult({
+		ok = true,
+		withdrawId = request.withdrawId,
+		transfer = {
+			op = "withdraw", moved = moved, selectionMode = "exact_group",
+			selectionTicket = "ticket-media-214", selectionSequence = sequence,
+			selectionCount = 34, ticketRemaining = remaining,
+		},
+	})
+end
+respondGroup(10, 24, 2)
 now = 1200
 tick()
 assert(#sent == 5 and sent[5].amount == 10, "second header micro-batch must request ten units")
-respond(10)
+respondGroup(10, 14, 3)
 now = 1600
 tick()
 assert(#sent == 6 and sent[6].amount == 10, "third header micro-batch must request ten units")
-respond(10)
+respondGroup(10, 4, 4)
 now = 2000
 tick()
 assert(#sent == 7 and sent[7].amount == 4, "final header micro-batch must request four units")
-respond(4)
+respondGroup(4, 0, 5)
 assert(tick == nil, "semantic group completion left an OnTick handler installed")
 
 local source = assert(io.open("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_WithdrawClient.lua", "r")):read("*a")

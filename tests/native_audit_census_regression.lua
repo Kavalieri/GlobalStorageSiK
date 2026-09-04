@@ -7,12 +7,17 @@ package.loaded["GS_NativeTaxonomyRegistry"] = true
 package.loaded["GS_NativeClassifier"] = true
 package.loaded["GS_AddonRegistry"] = true
 package.loaded["GS_NativeClassifierUtils"] = true
+package.loaded["GSSiK_API"] = true
 
 GlobalStorageSiK = {
 	NativeClassifierUtils = {
 		bodyLocation = function() return nil end,
 	},
 }
+GSSiK = { API = { Addon = {
+	list = function() return true, nil, {} end,
+	moduleItemTypes = function() return true, nil, {} end,
+} } }
 
 local function assertEqual(actual, expected, message)
 	if actual ~= expected then

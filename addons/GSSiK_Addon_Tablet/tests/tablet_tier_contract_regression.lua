@@ -1,27 +1,23 @@
--- Contract regression for Tablet 0.0.2.17-dev1.
+-- Contract regression for Tablet tier registration through the public API.
 -- Pure Lua 5.1: product registration is captured through neutral Core stubs.
 
 package.path = package.path .. ";./Contents/mods/GSSiK_Addon_Tablet/42/media/lua/shared/?.lua"
 
 local registeredAddon = nil
-local registeredProvider = nil
 
 SandboxVars = { GSSiK_Addon_Tablet = {} }
-GlobalStorageSiK = {
-	Sandbox = { requireRecipeBooks = function() return false end },
-	DiskProgramming = { registerProgram = function() end },
-	AddonRegistry = {
-		register = function(definition) registeredAddon = definition end,
+GSSiK = {
+	API = {
+		Addon = {
+			register = function(definition)
+				registeredAddon = definition
+				return true, "registered"
+			end,
+		},
 	},
-	TerminalAccess = {
-		registerWirelessProvider = function(provider) registeredProvider = provider end,
-	},
-	Addons = {},
 }
 
-package.preload["GS_AddonRegistry"] = function() return GlobalStorageSiK.AddonRegistry end
-package.preload["GS_DiskProgramming"] = function() return GlobalStorageSiK.DiskProgramming end
-package.preload["GS_Sandbox"] = function() return GlobalStorageSiK.Sandbox end
+package.preload["GSSiK_API"] = function() return GSSiK.API end
 
 dofile("Contents/mods/GSSiK_Addon_Tablet/42/media/lua/shared/GSSiK_Addon_Tablet_Register.lua")
 

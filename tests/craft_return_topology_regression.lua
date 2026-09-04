@@ -26,6 +26,7 @@ local required = {
 	"GS_Log", "GS_InventorySync", "GS_Deposit", "GS_Transfer",
 }
 for i = 1, #required do package.loaded[required[i]] = true end
+package.loaded["GSSiK_API"] = true
 
 local inventory = { items = {} }
 local source = { items = {} }
@@ -70,6 +71,11 @@ GlobalStorageSiK = {
 	},
 	Transfer = { depositItem = function() deposits = deposits + 1; return true end },
 }
+GSSiK = { API = { Addon = {
+	isActive = function(addonId)
+		return addonId == "Craft", nil, addonId == "Craft"
+	end,
+} } }
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_NetworkCraftSession.lua")
 

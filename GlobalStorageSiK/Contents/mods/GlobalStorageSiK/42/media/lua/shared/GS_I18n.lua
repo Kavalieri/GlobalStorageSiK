@@ -1436,6 +1436,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
 		.. "\1" .. tostring(row.nativePath or "") .. "\1" .. tostring(row.variantSearchText or "")
+		.. "\1" .. tostring(row.mediaTitle or "")
 	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
@@ -1490,6 +1491,10 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		addPart(locCat)
 	end
 	addPart(row.displayName)
+	-- `mediaTitle` es identidad visible por instancia, no el nombre generico
+	-- del ScriptItem. Se incluye de forma explicita sin cambiar la precedencia
+	-- global de itemDisplayName para fungibles y Moveables.
+	addPart(row.mediaTitle)
 	addPart(row.category)
 	addPart(row.subCategory)
 	for i = 1, #(row.variantSummary or {}) do

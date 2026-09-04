@@ -31,7 +31,7 @@ end
 
 for _, name in ipairs({
 	"GS_Sandbox", "GS_Network", "GS_TerminalAccess", "GS_PlayerUtils",
-	"GS_UIDebug", "GS_Log", "GS_SiK_UI_Window",
+	"GS_UIDebug", "GS_Log",
 }) do
 	package.loaded[name] = true
 end
@@ -46,11 +46,12 @@ GlobalStorageSiK = {
 	Network = {},
 	TerminalAccess = {},
 	PlayerUtils = { resolve = function(value) return value or defaultPlayer end },
-	SiK_UI = {
-		Viewport = { resolve = function() return { profile = "standard" } end },
-		Window = { recall = function() return nil end, resolveProfile = function() return {} end },
-	},
 	NetClient = {},
+}
+package.loaded["GS_UI_Framework"] = {
+	Viewport = { resolve = function() return { x = 0, y = 0, w = 1280, h = 720 } end },
+	Metrics = { profile = function() return { name = "terminal" } end },
+	Window = { resolveBounds = function() return { x = 0, y = 0, w = 960, h = 640 } end },
 }
 
 function GlobalStorageSiK.NetClient.sendCommand(command, args)
@@ -208,10 +209,18 @@ check("ItemActions keeps exact fullType callbacks with a compatible default", fu
 		"GS_DiskProgramming", "TimedActions/GS_ProgramDiskAction",
 		"TimedActions/GS_AddonInstallAction", "TimedActions/ISTimedActionQueue",
 		"GS_AddonRegistry", "GS_Network", "GS_Addons", "ISUI/ISContextMenu",
-		"ISUI/ISInventoryPaneContextMenu",
+		"ISUI/ISInventoryPaneContextMenu", "GSSiK_API",
 	}) do
 		package.loaded[name] = true
 	end
+	GSSiK = { API = { Addon = {
+		moduleItemTypes = function() return true, nil, {} end,
+		playerKnowsMagazine = function() return true, nil, false end,
+		list = function() return true, nil, {} end,
+		get = function() return false, "ERR_NOT_FOUND", nil end,
+		canInstall = function() return true, nil, false end,
+	} } }
+	dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 	GlobalStorageSiK.I18n = { text = function(key) return key end }
 	Events = { OnPreFillInventoryObjectContextMenu = { Add = function() end } }
 	dofile(coreClient .. "GS_ItemActions.lua")
@@ -234,10 +243,14 @@ check("ItemActions keeps exact fullType callbacks with a compatible default", fu
 	contains(source, "or GlobalStorageSiK.ItemActions.onUseTerminalTablet",
 		"menu lost default callback fallback")
 	local registrations = read(tabletClient .. "GSSiK_Addon_Tablet_Client.lua")
+	contains(registrations, "API.ItemActions.registerTablet({",
+		"Tablet client bypasses the public ItemActions API")
+	assert(registrations:find("GlobalStorageSiK", 1, true) == nil,
+		"Tablet client reaches private Core ItemActions internals")
 	for _, fullTypeSymbol in ipairs({
 		"ITEM_TABLET", "ITEM_TABLET_CRAFT", "ITEM_TABLET_BUILDER", "ITEM_TABLET_MASTER",
 	}) do
-		contains(registrations, "registerTabletItem(GSSiK_Addon_Tablet." .. fullTypeSymbol,
+		contains(registrations, "registerTablet(GSSiK_Addon_Tablet." .. fullTypeSymbol,
 			"Tablet client does not register " .. fullTypeSymbol)
 	end
 end)

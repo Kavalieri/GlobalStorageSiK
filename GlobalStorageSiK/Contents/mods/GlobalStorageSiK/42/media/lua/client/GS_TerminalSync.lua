@@ -6,6 +6,7 @@
 ]]
 
 require "GS_NetClient"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalSync = GlobalStorageSiK.TerminalSync or {}
 
@@ -109,9 +110,8 @@ function GlobalStorageSiK.TerminalSync.beginManagedTransfer(owner, networkId, se
 	end
 	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	local panel = ui and ui.itemsListPanel
-	if panel and panel.itemScroll and GlobalStorageSiK.TerminalScroll
-		and GlobalStorageSiK.TerminalScroll.getScrollOffset then
-		panel._itemsScrollOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(panel.itemScroll)
+	if panel and panel.itemTable and panel.itemTable.getScrollOffset then
+		panel._itemsScrollOffset = panel.itemTable:getScrollOffset()
 	end
 	_managedTransfer = {
 		owner = owner,

@@ -23,20 +23,16 @@
 	vía que se salta esto, y solo para staff, de forma explícita y auditada.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
-require "ISUI/ISComboBox"
+require "GS_UI_Feedback"
+
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_Table"
-require "GS_SiK_UI_Window"
-require "GS_TerminalUI_Scroll"
 require "GS_TerminalUI_Extensions"
 require "GS_AdminDashboard_Audit"
 require "GS_AdminDashboard_Corpus"
+
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.AdminDashboard = GlobalStorageSiK.AdminDashboard or {}
 GlobalStorageSiK.AdminDashboard.instance = nil
@@ -44,11 +40,11 @@ GlobalStorageSiK.AdminDashboard.instance = nil
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
-local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics()
+local CONTROL_METRICS = UI.Controls.metrics("staff")
 local PAD = 14
 local LINE_GAP = 4
 local BTN_H = CONTROL_METRICS.buttonHeight
-local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
+local TABLE_METRICS = UI.Table.metrics()
 local ROW_H = TABLE_METRICS.rowHeight
 local ROW_GAP = 4
 local ENTRY_H = CONTROL_METRICS.inputHeight
@@ -71,6 +67,13 @@ local ADMIN_MEMBER_TABLE_COLUMNS = {
 -- El ScrollableRegion ya entrega el contentRect útil; la tabla no reserva una
 -- segunda vez el scrollbar a la derecha.
 local ADMIN_MEMBER_TABLE_OPTIONS = { left = 0, right = 0 }
+
+local function createButton(x, y, w, h, text, onClick, danger)
+	return UI.Controls.button(nil, {
+		x = x, y = y, w = w, h = h, text = text,
+		onClick = onClick, danger = danger == true, fullWidth = true,
+	})
+end
 
 local function staffActionCallback(action, dashboard)
 	return function()
@@ -105,9 +108,22 @@ local function memberLabel(m)
 	return name .. " (" .. account .. ")"
 end
 
--- relativeAge() vive en GlobalStorageSiK.SiK_UI (GS_SiK_UI_Core.lua)
--- - compartida con GS_TerminalUI_Permissions.lua, no duplicar aqui.
-local relativeAge = GlobalStorageSiK.SiK_UI.relativeAge
+local function relativeAge(tsMs)
+	tsMs = tonumber(tsMs) or 0
+	if tsMs <= 0 then return "?" end
+	local nowTs = getTimestampMs and tonumber(getTimestampMs()) or 0
+	if nowTs <= 0 then return "?" end
+	local deltaMs = nowTs - tsMs
+	if deltaMs < -5000 then return "?" end
+	local deltaS = math.max(0, math.floor(deltaMs / 1000))
+	if deltaS < 2 then return T("IGUI_GS_AdminAgeNow") end
+	if deltaS < 60 then return T("IGUI_GS_AdminAgeSeconds", deltaS) end
+	if deltaS < 3600 then return T("IGUI_GS_AdminAgeMinutes", math.floor(deltaS / 60)) end
+	if deltaS < 86400 then return T("IGUI_GS_AdminAgeHours", math.floor(deltaS / 3600)) end
+	return T("IGUI_GS_AdminAgeDays", math.floor(deltaS / 86400))
+end
+
+GlobalStorageSiK.AdminDashboard.relativeAge = relativeAge
 
 --- Columna "Conexion" de un miembro: 3 estados posibles, nunca solo 2 -
 --- "Desconectado" no tiene sentido para alguien fallecido (pedido explicito
@@ -117,22 +133,36 @@ local relativeAge = GlobalStorageSiK.SiK_UI.relativeAge
 ---@param m table
 ---@return string text, number r, number g, number b
 local function connectionLabel(m)
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
+	local ok = UI.Theme.color("success")
+	local warn = UI.Theme.color("warning")
 	if m.online then
-		return T("IGUI_GS_AdminOnline"), pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
+		return T("IGUI_GS_AdminOnline"), ok.r, ok.g, ok.b
 	end
 	if m.role == GlobalStorageSiK.Permissions.ROLE_DEAD then
-		return T("IGUI_GS_AdminDeathDetected", relativeAge(m.diedAt)), pal.statusWarn[1], pal.statusWarn[2], pal.statusWarn[3]
+		return T("IGUI_GS_AdminDeathDetected", relativeAge(m.diedAt)), warn.r, warn.g, warn.b
 	end
 	return T("IGUI_GS_AdminOffline", relativeAge(m.lastSeenAt)), 0.6, 0.63, 0.66
+end
+
+-- La tabla comun recibe datos semanticos; ella es la unica propietaria del
+-- chrome, columnas, truncado, hover, clipping y resize. Admin no vuelve a
+-- pintar una segunda implementacion local de esas piezas.
+ADMIN_MEMBER_TABLE_COLUMNS[1].value = function(member)
+	return {
+		text = "[" .. roleLabel(member and member.role) .. "] " .. memberLabel(member),
+		color = UI.Theme.color("text"),
+	}
+end
+ADMIN_MEMBER_TABLE_COLUMNS[2].value = function(member)
+	local text, r, g, b = connectionLabel(member or {})
+	return { text = text, color = { r, g, b } }
 end
 
 -- ============================================================================
 -- Modal pequeño: historial de auditoria de UNA red (solo lectura).
 -- ============================================================================
-GS_AdminHistoryUI = ISPanel:derive("GS_AdminHistoryUI")
+GS_AdminHistoryUI = UI.Window.derive("GS_AdminHistoryUI")
 
-local HISTORY_RESIZE_GRAB = 14
 local HISTORY_MIN_W = 420
 local HISTORY_MIN_H = 320
 -- Cuantas entradas recientes copia "Copiar reciente" al portapapeles (pedido
@@ -142,74 +172,29 @@ local HISTORY_MIN_H = 320
 -- real, asi que 100 ya cubre TODO el historial disponible de cualquier red).
 local HISTORY_COPY_COUNT = 100
 
---- Redimensionado en esquina inferior derecha, arrastre por cabecera - mismo
---- patron ya usado en GS_TerminalUI.lua/NodeEditor/ZoneEditor (2026-08-26,
---- primera vez que se aplica a una ventana del panel de soporte, pedido
---- explicito: "la ventana de staff/historial debe ser tambien
---- redimensionable").
-function GS_AdminHistoryUI:installMouseHandlers()
-	self.onMouseDown = function(me, x, y)
-		if x >= me.width - HISTORY_RESIZE_GRAB and y >= me.height - HISTORY_RESIZE_GRAB then
-			me.resizing = true
-			me:setCapture(true)
-			return true
-		end
-		if y >= 0 and y < me.headerHeight and x < me.width - 36 then
-			me.moving = true
-			me:setCapture(true)
-			return true
-		end
-		return ISPanel.onMouseDown(me, x, y)
-	end
-	self.onMouseUp = function(me, x, y)
-		if me.resizing or me.moving then
-			me.resizing = false
-			me.moving = false
-			me:setCapture(false)
-			me:refreshEvents()
-			return true
-		end
-		return ISPanel.onMouseUp(me, x, y)
-	end
-	self.onMouseUpOutside = self.onMouseUp
-	self.onMouseMove = function(me, dx, dy)
-		if me.resizing then
-			me:setWidth(math.max(me.minimumWidth, me.width + dx))
-			me:setHeight(math.max(me.minimumHeight, me.height + dy))
-			GlobalStorageSiK.TerminalScroll.resize(me.eventScroll,
-				me.width - PAD * 2, me.height - me.scrollTopY - PAD)
-			return true
-		end
-		if me.moving then
-			me:setX(me.x + dx)
-			me:setY(me.y + dy)
-			return true
-		end
-		return ISPanel.onMouseMove(me, dx, dy)
-	end
-	self.onMouseMoveOutside = self.onMouseMove
-end
-
 function GS_AdminHistoryUI:initialise()
-	ISPanel.initialise(self)
-	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminHistoryUI.destroy,
-		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.MODAL)
-	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
-	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
+	UI.Window.callBase(self, "initialise")
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	self.minimumWidth = HISTORY_MIN_W
-	self.minimumHeight = HISTORY_MIN_H
-	self.resizable = true
-	self.resizing = false
-	self.moving = false
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
-	local title = ISLabel:new(PAD, PAD, FONT_HGT_MEDIUM, T("IGUI_GS_AdminHistoryTitle"),
-		0.95, 0.75, 0.6, 1, UIFont.Medium, true)
-	title:initialise()
-	self:addChild(title)
+	UI.Modal.apply(self, {
+		kind = "task", title = T("IGUI_GS_AdminHistoryTitle"),
+		playerNum = self.playerNum or 0, x = self.x, y = self.y,
+		width = self.width, height = self.height, minWidth = HISTORY_MIN_W,
+		minHeight = HISTORY_MIN_H, headerHeight = self.headerHeight,
+		padding = PAD, resizable = true,
+		onResize = function()
+			if self.eventScroll then
+				UI.Scroll.resize(self.eventScroll,
+					self.width - PAD * 2, self.height - self.scrollTopY - PAD)
+			end
+		end,
+		onResizeEnd = function()
+			if self.eventScroll then self:refreshEvents() end
+		end,
+		onClose = function()
+			GlobalStorageSiK.AdminDashboard.historyInstance = nil
+		end,
+	})
 	local scrollY = self.headerHeight + 4
 	-- Identificar la red en la propia cabecera (pedido explicito 2026-08-22:
 	-- "por si nos hacen capturas, poder ver a que red pertenece ese
@@ -217,11 +202,12 @@ function GS_AdminHistoryUI:initialise()
 	-- proyecto: texto de longitud variable siempre con wrap real).
 	if self.networkLabel and self.networkLabel ~= "" then
 		local labelW = self.width - PAD * 2
-		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(self.networkLabel, labelW, UIFont.Small)) do
-			local netLbl = ISLabel:new(PAD, scrollY, FONT_HGT_SMALL, line, 0.65, 0.68, 0.72, 1, UIFont.Small, true)
-			netLbl:initialise()
-			self:addChild(netLbl)
-			scrollY = scrollY + FONT_HGT_SMALL + 2
+                for _, line in ipairs(UI.Controls.wrapText(self.networkLabel, labelW, UIFont.Small)) do
+                        UI.Controls.copyText(self, {
+                                x = PAD, y = scrollY, w = labelW, text = line,
+                                tone = "textMuted", font = UIFont.Small, lineGap = 2,
+                        })
+                        scrollY = scrollY + FONT_HGT_SMALL + 2
 		end
 		scrollY = scrollY + 4
 	end
@@ -229,30 +215,27 @@ function GS_AdminHistoryUI:initialise()
 	-- reciente al portapapeles y borrarlo si se quiere empezar de cero -
 	-- ninguna de las dos toca redes/permisos, solo el registro de auditoria.
 	local actionBtnW = math.floor((self.width - PAD * 2 - 8) / 2)
-	self.copyBtn = GlobalStorageSiK.SiK_UI.createButton(
-		PAD, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryCopy"), self, function()
+	self.copyBtn = createButton(
+		PAD, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryCopy"), function()
 			self:onCopyRecent()
 		end)
 	self:addChild(self.copyBtn)
-	self.clearBtn = GlobalStorageSiK.SiK_UI.createButton(
-		PAD + actionBtnW + 8, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryClear"), self, function()
+	self.clearBtn = createButton(
+		PAD + actionBtnW + 8, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryClear"), function()
 			self:onClearHistory()
-		end)
-	GlobalStorageSiK.SiK_UI.applyDangerButton(self.clearBtn)
+		end, true)
 	self:addChild(self.clearBtn)
 	scrollY = scrollY + BTN_H + LINE_GAP
 	self.scrollTopY = scrollY
-	self.eventScroll = GlobalStorageSiK.TerminalScroll.create(
+	self.eventScroll = UI.Scroll.create(
 		self, PAD, scrollY, self.width - PAD * 2, self.height - scrollY - PAD)
-	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(self.eventScroll, function()
+	UI.Scroll.setOnContentRectChanged(self.eventScroll, function()
 		if self._historyRelayout then return end
 		self._historyRelayout = true
 		self:refreshEvents()
 		self._historyRelayout = false
 	end)
 	self:refreshEvents()
-	self:installMouseHandlers()
-	GlobalStorageSiK.SiK_UI.centerModal(self)
 end
 
 --- Copia al portapapeles las HISTORY_COPY_COUNT entradas mas recientes (ya
@@ -270,8 +253,9 @@ function GS_AdminHistoryUI:onCopyRecent()
 	end
 	Clipboard.setClipboard(table.concat(lines, "\n"))
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer and GlobalStorageSiK.NetClient.getPlayer()
-	if player and player.setHaloNote then
-		player:setHaloNote(T("IGUI_GS_AdminHistoryCopied", count), 180, 220, 160, 350)
+	if player then
+		GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_AdminHistoryCopied", count),
+			180, 220, 160, 350, { tone = "success" })
 	end
 end
 
@@ -289,49 +273,51 @@ function GS_AdminHistoryUI:onClearHistory()
 end
 
 function GS_AdminHistoryUI:destroy()
-	GlobalStorageSiK.AdminDashboard.historyInstance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then self:removeFromUIManager() end
+	UI.Modal.close(self, "destroy")
 end
 
 function GS_AdminHistoryUI:onKeyRelease(key)
 	if key == Keyboard.KEY_ESCAPE then self:destroy(); return true end
-	return ISPanel.onKeyRelease(self, key)
+	return UI.Window.callBase(self, "onKeyRelease", key)
 end
 
 ---@param events table[]
 function GS_AdminHistoryUI:refreshEvents()
 	local scroll = self.eventScroll
-	GlobalStorageSiK.TerminalScroll.clear(scroll)
-	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	UI.Scroll.clear(scroll)
+	local w = UI.Scroll.contentWidth(scroll)
 	local y = 4
 	local events = self.events or {}
 	if #events == 0 then
-		local lbl = ISLabel:new(6, y, FONT_HGT_SMALL, T("IGUI_GS_AdminHistoryEmpty"), 0.6, 0.63, 0.66, 1, UIFont.Small, true)
-		lbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-		y = y + FONT_HGT_SMALL + LINE_GAP
+                UI.Controls.copyText(UI.Scroll.childHost(scroll), {
+                        x = 6, y = y, w = math.max(1, w - 12),
+                        text = T("IGUI_GS_AdminHistoryEmpty"), tone = "textMuted",
+                        font = UIFont.Small, lineGap = 2,
+                })
+                y = y + FONT_HGT_SMALL + LINE_GAP
 	else
 		-- Mas reciente primero.
 		for i = #events, 1, -1 do
 			local ev = events[i]
 			local header = relativeAge(ev.ts) .. " - " .. tostring(ev.type)
-			local hLbl = ISLabel:new(6, y, FONT_HGT_SMALL, header, 0.85, 0.75, 0.6, 1, UIFont.Small, true)
-			hLbl:initialise()
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, hLbl)
-			y = y + FONT_HGT_SMALL + 2
-			local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(ev.detail or "", w - 12, UIFont.Small)
+                        UI.Controls.copyText(UI.Scroll.childHost(scroll), {
+                                x = 6, y = y, w = math.max(1, w - 12), text = header,
+                                tone = "warning", font = UIFont.Small, lineGap = 2,
+                        })
+                        y = y + FONT_HGT_SMALL + 2
+			local lines = UI.Controls.wrapText(ev.detail or "", w - 12, UIFont.Small)
 			for j = 1, #lines do
-				local lbl = ISLabel:new(12, y, FONT_HGT_SMALL, lines[j], 0.78, 0.8, 0.84, 1, UIFont.Small, true)
-				lbl:initialise()
-				GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-				y = y + FONT_HGT_SMALL + 2
+                                UI.Controls.copyText(UI.Scroll.childHost(scroll), {
+                                        x = 12, y = y, w = math.max(1, w - 18), text = lines[j],
+                                        tone = "text", font = UIFont.Small, lineGap = 2,
+                                })
+                                y = y + FONT_HGT_SMALL + 2
 			end
 			y = y + ROW_GAP
 		end
 	end
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y)
-	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
+	UI.Scroll.setContentHeight(scroll, y)
+	UI.Scroll.ensureScrollBars(scroll)
 end
 
 ---@param events table[]
@@ -345,12 +331,14 @@ function GlobalStorageSiK.AdminDashboard.showHistory(events, networkLabel, netwo
 	-- Tamano por defecto ampliado (2026-08-26, pedido explicito: "debe ser
 	-- mas grande") - sigue redimensionable a mano por si hace falta mas.
 	local w, h = math.min(720, sw - 60), math.min(760, sh - 60)
-	local ui = GS_AdminHistoryUI:new((sw - w) / 2, (sh - h) / 2, w, h)
-	ui.events = events or {}
+        local ui = GS_AdminHistoryUI:new((sw - w) / 2, (sh - h) / 2, w, h)
+        local dashboard = GlobalStorageSiK.AdminDashboard.instance
+        ui.playerNum = dashboard and dashboard.playerNum or 0
+        ui.events = events or {}
 	ui.networkLabel = networkLabel or ""
 	ui.networkId = networkId
 	ui:initialise()
-	ui:addToUIManager()
+	UI.Modal.show(ui)
 	GlobalStorageSiK.AdminDashboard.historyInstance = ui
 end
 
@@ -359,62 +347,62 @@ end
 -- Mismo patron visual que GS_TerminalUI_MemberEditor.lua, pero las acciones
 -- van contra los comandos admin* (staff), no los del propietario normal.
 -- ============================================================================
-GS_AdminMemberEditorUI = ISPanel:derive("GS_AdminMemberEditorUI")
+GS_AdminMemberEditorUI = UI.Window.derive("GS_AdminMemberEditorUI")
 
 function GS_AdminMemberEditorUI:initialise()
-	ISPanel.initialise(self)
-	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminMemberEditorUI.destroy,
-		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.MODAL)
-	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
-	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
+	UI.Window.callBase(self, "initialise")
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
+	UI.Modal.apply(self, {
+		kind = "compact", title = T("IGUI_GS_AdminMemberEditorTitle"),
+		playerNum = self.playerNum or 0, x = self.x, y = self.y,
+		width = self.width, height = self.height, headerHeight = self.headerHeight,
+		padding = PAD, resizable = false,
+		onClose = function()
+			GlobalStorageSiK.AdminDashboard.memberEditorInstance = nil
+		end,
+	})
 	self:buildLayout()
 end
 
 function GS_AdminMemberEditorUI:destroy()
-	GlobalStorageSiK.AdminDashboard.memberEditorInstance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then self:removeFromUIManager() end
+	UI.Modal.close(self, "destroy")
 end
 
 function GS_AdminMemberEditorUI:onKeyRelease(key)
 	if key == Keyboard.KEY_ESCAPE then self:destroy(); return true end
-	return ISPanel.onKeyRelease(self, key)
+	return UI.Window.callBase(self, "onKeyRelease", key)
 end
 
 function GS_AdminMemberEditorUI:buildLayout()
 	local pad = PAD
-	local y = pad
+	local y = self.headerHeight + 4
 	local textW = self.width - pad * 2
 	local m = self.member
-
-	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_AdminMemberEditorTitle"))
-	self:addChild(title)
-	y = y + FONT_HGT_MEDIUM + LINE_GAP
 
 	-- El rol es la unica fuente de verdad, incluido "muerto" (ROLE_DEAD, ver
 	-- GS_Permissions.lua) - ya no hace falta un sufijo aparte basado en
 	-- diedAt, roleLabel(m.role) ya dice "Muerto"/"Dead" por si solo.
-	local isDead = (m.role == GlobalStorageSiK.Permissions.ROLE_DEAD)
-	local nameText = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
-	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(nameText, textW, UIFont.Small)) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.78, 0.82, 0.88, 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
+        local isDead = (m.role == GlobalStorageSiK.Permissions.ROLE_DEAD)
+        local nameText = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
+        for _, line in ipairs(UI.Controls.wrapText(nameText, textW, UIFont.Small)) do
+                UI.Controls.copyText(self, {
+                        x = pad, y = y, w = textW, text = line,
+                        tone = "text", font = UIFont.Small, lineGap = 2,
+                })
+                y = y + FONT_HGT_SMALL + 2
+        end
 	-- Conexion: a nivel informativo unicamente (pedido explicito 2026-08-22),
 	-- nunca se usa para inferir ni marcar nada automaticamente - solo ayuda a
 	-- staff a diagnosticar un caso "colgado" (diedAt nunca llegado a marcar
 	-- por un crash, desconexion sucia, etc.).
-	local seenText, sr, sg, sb = connectionLabel(m)
-	local seenLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, seenText, sr, sg, sb, 1, UIFont.Small, true)
-	seenLbl:initialise()
-	self:addChild(seenLbl)
+        local seenText = connectionLabel(m)
+        UI.Controls.copyText(self, {
+                x = pad, y = y, w = textW, text = seenText,
+                tone = m.online and "success"
+                        or (isDead and "warning" or "textMuted"),
+                font = UIFont.Small, lineGap = 2,
+        })
 	y = y + FONT_HGT_SMALL + LINE_GAP + 4
 
 	local dashboard = self.dashboard
@@ -425,55 +413,55 @@ function GS_AdminMemberEditorUI:buildLayout()
 		-- Un miembro fallecido no admite ninguna accion desde aqui (nada de
 		-- marcado manual, ver rechazo explicito 2026-08-22) - de solo lectura,
 		-- se conserva unicamente como registro consultable/auditable.
-		local hint = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AdminMemberEditorDeadHint"),
-			0.6, 0.63, 0.66, 1, UIFont.Small, true)
-		hint:initialise()
-		self:addChild(hint)
+                UI.Controls.copyText(self, {
+                        x = pad, y = y, w = textW,
+                        text = T("IGUI_GS_AdminMemberEditorDeadHint"),
+                        tone = "textMuted", font = UIFont.Small, lineGap = 2,
+                })
 		y = y + FONT_HGT_SMALL + ROW_GAP
 	elseif not isOwnerRow then
 		local toggleTo = (m.role == "admin") and "member" or "admin"
-		local roleBtn = GlobalStorageSiK.SiK_UI.createButton(
+		local roleBtn = createButton(
 			pad, y, btnW, BTN_H, T(toggleTo == "admin" and "IGUI_GS_AdminMakeAdmin" or "IGUI_GS_AdminMakeMember"),
-			self, function()
+			function()
 				dashboard:onSetMemberRole(m.id, toggleTo)
 				self:destroy()
 			end)
 		self:addChild(roleBtn)
 		y = y + BTN_H + ROW_GAP
 
-		local ownerBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, btnW, BTN_H, T("IGUI_GS_AdminSetOwner"), self, function()
+		local ownerBtn = createButton(
+			pad, y, btnW, BTN_H, T("IGUI_GS_AdminSetOwner"), function()
 				dashboard:onSetOwner(m.id)
 				self:destroy()
 			end)
 		self:addChild(ownerBtn)
 		y = y + BTN_H + ROW_GAP
 
-		local removeBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, btnW, BTN_H, T("IGUI_GS_AdminRemoveMember"), self, function()
+		local removeBtn = createButton(
+			pad, y, btnW, BTN_H, T("IGUI_GS_AdminRemoveMember"), function()
 				dashboard:onRemoveMember(m.id)
 				self:destroy()
-			end)
-		GlobalStorageSiK.SiK_UI.applyDangerButton(removeBtn)
+			end, true)
 		self:addChild(removeBtn)
 		y = y + BTN_H + ROW_GAP
 	else
-		local hint = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AdminMemberEditorOwnerHint"),
-			0.6, 0.63, 0.66, 1, UIFont.Small, true)
-		hint:initialise()
-		self:addChild(hint)
+                UI.Controls.copyText(self, {
+                        x = pad, y = y, w = textW,
+                        text = T("IGUI_GS_AdminMemberEditorOwnerHint"),
+                        tone = "textMuted", font = UIFont.Small, lineGap = 2,
+                })
 		y = y + FONT_HGT_SMALL + ROW_GAP
 	end
 
-	local closeBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, btnW, BTN_H, T("IGUI_GS_Close"), self, function()
+	local closeBtn = createButton(
+		pad, y, btnW, BTN_H, T("IGUI_GS_Close"), function()
 			self:destroy()
 		end)
 	self:addChild(closeBtn)
 	y = y + BTN_H + pad
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.centerModal(self)
+	self:setSize(self.width, y)
 end
 
 ---@param dashboard table
@@ -482,21 +470,21 @@ function GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
 	if GlobalStorageSiK.AdminDashboard.memberEditorInstance then
 		GlobalStorageSiK.AdminDashboard.memberEditorInstance:destroy()
 	end
-	local w = GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W
-	local ui = GS_AdminMemberEditorUI:new(0, 0, w, 100)
-	ui.dashboard = dashboard
+        local w = UI.Modal.STANDARD_MODAL_W
+        local ui = GS_AdminMemberEditorUI:new(0, 0, w, 100)
+        ui.playerNum = dashboard and dashboard.playerNum or 0
+        ui.dashboard = dashboard
 	ui.member = member
 	ui:initialise()
-	ui:addToUIManager()
+	UI.Modal.show(ui)
 	GlobalStorageSiK.AdminDashboard.memberEditorInstance = ui
 end
 
 -- ============================================================================
 -- Ventana principal.
 -- ============================================================================
-GS_AdminDashboardUI = ISPanel:derive("GS_AdminDashboardUI")
+GS_AdminDashboardUI = UI.Window.derive("GS_AdminDashboardUI")
 
-local ADMIN_RESIZE_GRAB = 14
 local ADMIN_MIN_W = 720
 local ADMIN_MIN_H = 520
 
@@ -522,65 +510,6 @@ local ADMIN_MIN_H = 520
 --- el ultimo delta (que pudo caer dentro de la ventana de debounce) nunca se
 --- pierda.
 local ADMIN_REFLOW_DEBOUNCE_MS = 100
-function GS_AdminDashboardUI:installMouseHandlers()
-	self.onMouseDown = function(me, x, y)
-		local resizeEdge = GlobalStorageSiK.SiK_UI.Window.resizeEdgeAt(me, x, y, ADMIN_RESIZE_GRAB)
-		if resizeEdge then
-			me.resizing = true
-			me.resizeEdge = resizeEdge
-			me._lastReflowMs = nil
-			me:setCapture(true)
-			return true
-		end
-		if y >= 0 and y < me.headerHeight and x < me.width - 36 then
-			me.moving = true
-			me:setCapture(true)
-			return true
-		end
-		return ISPanel.onMouseDown(me, x, y)
-	end
-	self.onMouseUp = function(me, x, y)
-		if me.resizing then
-			me.resizing = false
-			me.resizeEdge = nil
-			me:setCapture(false)
-			me:rebuildAfterResize()
-			return true
-		end
-		if me.moving then
-			me.moving = false
-			me:setCapture(false)
-			return true
-		end
-		return ISPanel.onMouseUp(me, x, y)
-	end
-	self.onMouseUpOutside = self.onMouseUp
-	self.onMouseMove = function(me, dx, dy)
-		if me.resizing then
-			local rect = GlobalStorageSiK.SiK_UI.Window.resizeDelta(me, me.resizeEdge, dx, dy)
-			if rect then
-				me:setX(rect.x); me:setY(rect.y); me:setWidth(rect.w); me:setHeight(rect.h)
-			end
-			local nowMs = getTimestampMs and getTimestampMs() or 0
-			if not me._lastReflowMs or (nowMs - me._lastReflowMs) >= ADMIN_REFLOW_DEBOUNCE_MS then
-				me._lastReflowMs = nowMs
-				me:rebuildAfterResize()
-			end
-			return true
-		end
-		if me.moving then
-			local viewport = GlobalStorageSiK.SiK_UI.Window.safeRect(me.playerNum or 0)
-			local rect = GlobalStorageSiK.SiK_UI.Window.resolveProfile("staff", viewport, {
-				x = me.x + dx, y = me.y + dy, width = me.width, height = me.height,
-				playerNum = me.playerNum or 0,
-			})
-			me:setX(rect.x); me:setY(rect.y)
-			return true
-		end
-		return ISPanel.onMouseMove(me, dx, dy)
-	end
-	self.onMouseMoveOutside = self.onMouseMove
-end
 
 --- Reconstruye el marco entero al tamano nuevo (ver comentario de
 --- installMouseHandlers) conservando posicion en pantalla - buildStaticFrame
@@ -588,7 +517,7 @@ end
 --- que aqui se restaura la posicion previa despues para no "saltar" al
 --- centro cada vez que se suelta el asa de redimensionado.
 function GS_AdminDashboardUI:rebuildAfterResize()
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, self.padding)
+	UI.Window.reflow(self)
 	local textW = math.max(240, self.width - PAD * 2)
 	local tabW = math.floor((textW - 8) / 2)
 	if self.staffTabNetworkBtn then self.staffTabNetworkBtn:setWidth(tabW) end
@@ -600,7 +529,7 @@ function GS_AdminDashboardUI:rebuildAfterResize()
 	if self.historyBtn then self.historyBtn:setX(PAD + halfW + 8); self.historyBtn:setWidth(halfW) end
 	local staffMinW = 0
 	for i = 1, #(self.staffActionButtons or {}) do
-		GlobalStorageSiK.SiK_UI.fitButtonToLabel(self.staffActionButtons[i])
+		UI.Controls.fitButtonToContent(self.staffActionButtons[i])
 		staffMinW = math.max(staffMinW, self.staffActionButtons[i]:getWidth())
 	end
 	-- El numero de filas forma parte de la geometria creada por buildStaticFrame.
@@ -613,7 +542,7 @@ function GS_AdminDashboardUI:rebuildAfterResize()
 		button:setX(PAD + column * (halfW + 8))
 		button:setWidth(staffColumns == 2 and halfW or textW)
 	end
-	if self.addMemberBtn then GlobalStorageSiK.SiK_UI.fitButtonToLabel(self.addMemberBtn) end
+	if self.addMemberBtn then UI.Controls.fitButtonToContent(self.addMemberBtn) end
 	local addBtnW = self.addMemberBtn and math.min(textW, math.max(90, self.addMemberBtn:getWidth())) or 90
 	if self.addMemberCombo then self.addMemberCombo:setWidth(math.max(100, textW - addBtnW - 8)) end
 	if self.addMemberBtn then
@@ -621,23 +550,23 @@ function GS_AdminDashboardUI:rebuildAfterResize()
 		self.addMemberBtn:setWidth(addBtnW)
 	end
 
-	local hintLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
+	local hintLines = UI.Controls.wrapText(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
 	local hintPool = self.dashboardHintLabels or {}
 	local hintH = math.max(1, #hintPool) * (FONT_HGT_SMALL + 2) + ROW_GAP
 	local memberTop = self.memberScrollTopY or (self.memberScroll and self.memberScroll:getY()) or 200
 	local memberH = math.max(3 * (ROW_H + ROW_GAP), self.height - memberTop - BTN_H - hintH - PAD - ROW_GAP)
 	if self.memberScroll then
-		GlobalStorageSiK.TerminalScroll.resize(self.memberScroll, textW, memberH)
+		UI.Scroll.resize(self.memberScroll, textW, memberH)
 	end
 	local actionsY = memberTop + memberH + ROW_GAP
 	if self.releaseBtn then self.releaseBtn:setY(actionsY); self.releaseBtn:setWidth(halfW) end
 	if self.deleteBtn then self.deleteBtn:setX(PAD + halfW + 8); self.deleteBtn:setY(actionsY); self.deleteBtn:setWidth(halfW) end
 	local hintY = actionsY + BTN_H + ROW_GAP
-	for i = 1, #hintPool do
-		local label = hintPool[i]
-		label:setY(hintY)
-		label:setName(hintLines[i] or (i == #hintPool and table.concat(hintLines, " ") or ""))
-		label:setVisible((hintLines[i] or "") ~= "")
+        for i = 1, #hintPool do
+                local label = hintPool[i]
+                label:setY(hintY)
+                label:setText(hintLines[i] or (i == #hintPool and table.concat(hintLines, " ") or ""))
+                label:setVisible((hintLines[i] or "") ~= "")
 		hintY = hintY + FONT_HGT_SMALL + 2
 	end
 	if self._members then self:refreshMemberPanel(self._members) end
@@ -670,29 +599,44 @@ function GS_AdminDashboardUI:layoutTaxonomyTab()
 end
 
 function GS_AdminDashboardUI:initialise()
-	ISPanel.initialise(self)
-	GlobalStorageSiK.SiK_UI.Window.installEscape(self, GS_AdminDashboardUI.destroy,
-		GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.STAFF)
-	self.backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.98 }
-	self.borderColor = { r = 0.55, g = 0.3, b = 0.2, a = 0.95 }
+	UI.Window.callBase(self, "initialise")
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	self._sikWindowProfile = "staff"
-	local limits = GlobalStorageSiK.SiK_UI.Window.resolveLimits("staff", nil, {
-		playerNum = self.playerNum or 0, minWidth = ADMIN_MIN_W, minHeight = ADMIN_MIN_H,
-	})
-	self.minimumWidth = limits.minW
-	self.minimumHeight = limits.minH
-	self.maximumWidth = limits.maxW
-	self.maximumHeight = limits.maxH
-	self.resizable = true
-	self.resizing = false
-	self.moving = false
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
-	self:buildStaticFrame()
-	self:installMouseHandlers()
+	UI.Window.apply(self, {
+		profile = "staff", title = T("IGUI_GS_AdminDashboardTitle"),
+		playerNum = self.playerNum or 0, x = self.x, y = self.y,
+		width = self.width, height = self.height,
+		minWidth = ADMIN_MIN_W, minHeight = ADMIN_MIN_H,
+		headerHeight = self.headerHeight, padding = PAD, resizable = true,
+		focusPriority = UI.FocusStack.PRIORITY.STAFF,
+		onResize = function()
+			local nowMs = getTimestampMs and getTimestampMs() or 0
+			if not self._lastReflowMs or (nowMs - self._lastReflowMs) >= ADMIN_REFLOW_DEBOUNCE_MS then
+				self._lastReflowMs = nowMs
+				self:rebuildAfterResize()
+			end
+		end,
+		onResizeEnd = function()
+			self._lastReflowMs = nil
+			self:rebuildAfterResize()
+		end,
+                onClose = function()
+                        GlobalStorageSiK.AdminDashboard.instance = nil
+                        if self._relativeAgeBinding then
+                                self._relativeAgeBinding:dispose()
+                                self._relativeAgeBinding = nil
+                        end
+                        if self.memberTableBlock then
+				self.memberTableBlock:dispose()
+				self.memberTableBlock = nil
+			end
+		end,
+        })
+        self._relativeAgeBinding = UI.Lifecycle.bindVisibleRefresh(self, {
+                intervalTicks = 15,
+                refresh = function() self:refreshRelativeAges() end,
+        })
+        self:buildStaticFrame()
 	self:requestNetworkList()
 	self:requestOnlinePlayers()
 end
@@ -700,22 +644,21 @@ end
 --- Mantiene vivo el texto relativo de las dos suites mientras la ventana
 --- permanece abierta. Solo reconstruye el bloque cuyo texto cambia y como
 --- maximo una vez por segundo; no envia ninguna peticion de red.
-function GS_AdminDashboardUI:prerender()
-	ISPanel.prerender(self)
-	local nowMs = getTimestampMs and tonumber(getTimestampMs()) or 0
+function GS_AdminDashboardUI:refreshRelativeAges()
+        local nowMs = getTimestampMs and tonumber(getTimestampMs()) or 0
 	if nowMs <= 0 then return end
 	if self._lastTaxonomyAgeRefreshMs and (nowMs - self._lastTaxonomyAgeRefreshMs) < 1000 then return end
 	self._lastTaxonomyAgeRefreshMs = nowMs
 
 	if self._nativeAuditLastReport then
-		local auditText = GlobalStorageSiK.SiK_UI.relativeAge(self._nativeAuditFinishedAtMs)
+		local auditText = relativeAge(self._nativeAuditFinishedAtMs)
 		if auditText ~= self._nativeAuditFinishedAtText then
 			self._nativeAuditFinishedAtText = auditText
 			GlobalStorageSiK.AdminDashboardAudit.refreshSummary(self)
 		end
 	end
 	if self._nativeCorpusLastReport then
-		local corpusText = GlobalStorageSiK.SiK_UI.relativeAge(self._nativeCorpusFinishedAtMs)
+		local corpusText = relativeAge(self._nativeCorpusFinishedAtMs)
 		if corpusText ~= self._nativeCorpusFinishedAtText then
 			self._nativeCorpusFinishedAtText = corpusText
 			GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(self)
@@ -724,11 +667,7 @@ function GS_AdminDashboardUI:prerender()
 end
 
 function GS_AdminDashboardUI:destroy()
-	GlobalStorageSiK.AdminDashboard.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
-	end
+	self:close("destroy")
 end
 
 function GS_AdminDashboardUI:onKeyRelease(key)
@@ -736,7 +675,7 @@ function GS_AdminDashboardUI:onKeyRelease(key)
 		self:destroy()
 		return true
 	end
-	return ISPanel.onKeyRelease(self, key)
+	return UI.Window.callBase(self, "onKeyRelease", key)
 end
 
 function GS_AdminDashboardUI:requestNetworkList()
@@ -781,12 +720,12 @@ end
 
 ---@param players table[]
 function GS_AdminDashboardUI:refreshOnlinePlayersCombo()
-	if not self.addMemberCombo then return end
+        if not self.addMemberCombo then return end
 	local prevSelected = self._addMemberOptions and self.addMemberCombo.selected
 		and self._addMemberOptions[self.addMemberCombo.selected]
 	local prevCharacterId = prevSelected and prevSelected.characterId
-	self.addMemberCombo:clear()
-	self._addMemberOptions = {}
+        self._addMemberOptions = {}
+        local comboItems = {}
 	local currentIds = {}
 	for i = 1, #(self._members or {}) do
 		local m = self._members[i]
@@ -796,25 +735,28 @@ function GS_AdminDashboardUI:refreshOnlinePlayersCombo()
 	local newSelected = 1
 	for i = 1, #players do
 		local p = players[i]
-		if p.characterId and not currentIds[p.characterId] then
-			self._addMemberOptions[#self._addMemberOptions + 1] = p
-			self.addMemberCombo:addOption(memberLabel({ displayName = p.name, username = p.username }))
-			if p.characterId == prevCharacterId then newSelected = #self._addMemberOptions end
-		end
-	end
-	if #self._addMemberOptions == 0 then
-		self.addMemberCombo:addOption(T("IGUI_GS_AdminNoOnlinePlayers"))
-		self._addMemberOptions[1] = nil
-	end
-	self.addMemberCombo.selected = newSelected
+                if p.characterId and not currentIds[p.characterId] then
+                        self._addMemberOptions[#self._addMemberOptions + 1] = p
+                        comboItems[#comboItems + 1] = {
+                                text = memberLabel({ displayName = p.name, username = p.username }),
+                                value = p.characterId,
+                        }
+                        if p.characterId == prevCharacterId then newSelected = #self._addMemberOptions end
+                end
+        end
+        if #self._addMemberOptions == 0 then
+                comboItems[1] = { text = T("IGUI_GS_AdminNoOnlinePlayers"), value = "" }
+                self._addMemberOptions[1] = nil
+        end
+        self.addMemberCombo:setItems(comboItems, newSelected)
 	if self.addMemberBtn then
 		local hasOptions = #self._addMemberOptions > 0
 		-- _sikUiLocked (auditoria de botones, 2026-08-26): aspecto atenuado
 		-- del proyecto en vez de la textura gris generica de setEnable.
 		self.addMemberBtn._sikUiLocked = not hasOptions
 		self.addMemberBtn:setEnable(hasOptions)
-		if not hasOptions and self.addMemberBtn.setTooltip then
-			self.addMemberBtn:setTooltip(T("IGUI_GS_AdminNoPlayersOnline"))
+		if not hasOptions then
+			UI.Controls.setTooltip(self.addMemberBtn, T("IGUI_GS_AdminNoPlayersOnline"))
 		end
 	end
 end
@@ -863,29 +805,23 @@ end
 function GS_AdminDashboardUI:buildStaticFrame()
 	local pad = PAD
 	local textW = self.width - pad * 2
-	local y = pad
+	local y = self.headerHeight + 4
 	self._networkTabWidgets = {}
 	self._networkBaseY = {}
 	self._taxonomyTabWidgets = {}
-
-	local title = ISLabel:new(pad, y, FONT_HGT_MEDIUM, T("IGUI_GS_AdminDashboardTitle"),
-		0.95, 0.75, 0.6, 1, UIFont.Medium, true)
-	title:initialise()
-	self:addChild(title)
-	y = self.headerHeight + 4
 
 	-- dev22: pestañas del panel de staff (Soporte de redes / Taxonomia) -
 	-- controlador pequeño y explicito, 2 botones que alternan visibilidad de
 	-- los widgets ya construidos (ver selectStaffTab arriba), nunca
 	-- reconstruyen ni destruyen nada.
 	local tabW = math.floor((textW - 8) / 2)
-	self.staffTabNetworkBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, tabW, BTN_H, T("IGUI_GS_AdminTabNetwork"), self, function()
+	self.staffTabNetworkBtn = createButton(
+		pad, y, tabW, BTN_H, T("IGUI_GS_AdminTabNetwork"), function()
 			self:selectStaffTab("network")
 		end)
 	self:addChild(self.staffTabNetworkBtn)
-	self.staffTabTaxonomyBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + tabW + 8, y, tabW, BTN_H, T("IGUI_GS_AdminTabTaxonomy"), self, function()
+	self.staffTabTaxonomyBtn = createButton(
+		pad + tabW + 8, y, tabW, BTN_H, T("IGUI_GS_AdminTabTaxonomy"), function()
 			self:selectStaffTab("taxonomy")
 		end)
 	self:addChild(self.staffTabTaxonomyBtn)
@@ -897,22 +833,22 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local taxonomyTabY = y
 	self._taxonomyTabY = taxonomyTabY
 
-	self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
-	self.networkCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.networkCombo)
-	self.networkCombo.onChange = function() self:onComboChanged() end
-	self:addChild(self.networkCombo)
+        self.networkCombo = UI.Controls.combo(self, {
+                x = pad, y = y, w = textW, h = ENTRY_H,
+                onChange = function() self:onComboChanged() end,
+        })
 	trackNetworkTabWidget(self, self.networkCombo)
 	y = y + ENTRY_H + LINE_GAP + 2
 
-	self.infoLbls = {}
-	self._infoStartY = y
-	for i = 1, INFO_LINE_COUNT do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, "", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
-		lbl:initialise()
-		lbl:setVisible(false)
-		self:addChild(lbl)
-		trackNetworkTabWidget(self, lbl)
+        self.infoLbls = {}
+        self._infoStartY = y
+        for i = 1, INFO_LINE_COUNT do
+                local lbl = UI.Controls.copyText(self, {
+                        x = pad, y = y, w = textW, text = "",
+                        tone = "text", font = UIFont.Small, lineGap = 2,
+                })
+                lbl:setVisible(false)
+                trackNetworkTabWidget(self, lbl)
 		self.infoLbls[i] = lbl
 	end
 	local infoLineH = FONT_HGT_SMALL + 2
@@ -921,16 +857,16 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	y = y + LINE_GAP + 4
 
 	local reloadW = math.floor(textW / 2) - 4
-	self.reloadBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, reloadW, BTN_H, T("IGUI_GS_AdminReload"), self, function()
+	self.reloadBtn = createButton(
+		pad, y, reloadW, BTN_H, T("IGUI_GS_AdminReload"), function()
 			self:requestNetworkList()
 			if self._selectedNetworkId then self:requestMembers(self._selectedNetworkId) end
 		end)
 	self:addChild(self.reloadBtn)
 	trackNetworkTabWidget(self, self.reloadBtn)
 
-	self.historyBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + reloadW + 8, y, reloadW, BTN_H, T("IGUI_GS_AdminHistoryButton"), self, function()
+	self.historyBtn = createButton(
+		pad + reloadW + 8, y, reloadW, BTN_H, T("IGUI_GS_AdminHistoryButton"), function()
 			self:requestHistory()
 		end)
 	self:addChild(self.historyBtn)
@@ -960,8 +896,9 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	local staffActions = GlobalStorageSiK.TerminalExtensions.getStaffActions()
 	self.staffActionButtons = {}
 	if #staffActions > 0 then
-		local toolsTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AdminInternalTests"))
-		self:addChild(toolsTitle)
+		local toolsTitle = UI.Controls.sectionTitle(self, {
+			x = pad, y = y, w = textW, text = T("IGUI_GS_AdminInternalTests"),
+		})
 		trackNetworkTabWidget(self, toolsTitle)
 		y = y + FONT_HGT_SMALL + LINE_GAP
 
@@ -970,10 +907,10 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		local actionMinW = 0
 		for i = 1, #staffActions do
 			local action = staffActions[i]
-			local actionBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad, y, textW, BTN_H, T(action.labelKey), self,
+			local actionBtn = createButton(
+				pad, y, textW, BTN_H, T(action.labelKey),
 				staffActionCallback(action, self))
-			GlobalStorageSiK.SiK_UI.fitButtonToLabel(actionBtn)
+			UI.Controls.fitButtonToContent(actionBtn)
 			actionMinW = math.max(actionMinW, actionBtn:getWidth())
 			self:addChild(actionBtn)
 			trackNetworkTabWidget(self, actionBtn)
@@ -992,7 +929,7 @@ function GS_AdminDashboardUI:buildStaticFrame()
 		y = y + actionRows * (BTN_H + LINE_GAP) + 6
 	end
 
-	self.membersTitle = GlobalStorageSiK.SiK_UI.Controls.sectionTitle(self, {
+	self.membersTitle = UI.Controls.sectionTitle(self, {
 		x = pad, y = y, text = T("IGUI_GS_AdminMembersTitle"),
 	})
 	trackNetworkTabWidget(self, self.membersTitle)
@@ -1001,18 +938,17 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	-- Añadir miembro (pedido explicito 2026-08-22): desplegable de jugadores
 	-- CONECTADOS ahora mismo, sin facción - el staff gestiona cualquier red.
 	local addBtnW = 90
-	self.addMemberCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
-	self.addMemberCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.addMemberCombo)
-	self:addChild(self.addMemberCombo)
+        self.addMemberCombo = UI.Controls.combo(self, {
+                x = pad, y = y, w = textW, h = ENTRY_H,
+        })
 	trackNetworkTabWidget(self, self.addMemberCombo)
-	self.addMemberBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + textW - addBtnW, y, addBtnW, ENTRY_H, T("IGUI_GS_AdminAddMember"), self, function()
+	self.addMemberBtn = createButton(
+		pad + textW - addBtnW, y, addBtnW, ENTRY_H, T("IGUI_GS_AdminAddMember"), function()
 			self:onAddMember()
 		end)
 	self:addChild(self.addMemberBtn)
 	trackNetworkTabWidget(self, self.addMemberBtn)
-	GlobalStorageSiK.SiK_UI.fitButtonToLabel(self.addMemberBtn)
+	UI.Controls.fitButtonToContent(self.addMemberBtn)
 	addBtnW = math.min(textW, math.max(90, self.addMemberBtn:getWidth()))
 	self.addMemberCombo:setWidth(math.max(100, textW - addBtnW - 8))
 	self.addMemberBtn:setX(pad + textW - addBtnW)
@@ -1022,12 +958,12 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	-- Texto de longitud variable SIEMPRE con wrap real (regla del proyecto) -
 	-- antes era un ISLabel de una sola linea y se salia/cortaba por el borde
 	-- de la ventana (confirmado en pruebas reales).
-	local hintLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
+	local hintLines = UI.Controls.wrapText(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
 	local actionsH = BTN_H + ROW_GAP
 	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
 	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
-	self.memberScroll = GlobalStorageSiK.TerminalScroll.create(self, pad, y, textW, memberH)
-	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(self.memberScroll, function()
+	self.memberScroll = UI.Scroll.create(self, pad, y, textW, memberH)
+	UI.Scroll.setOnContentRectChanged(self.memberScroll, function()
 		if self._memberRelayout then return end
 		self._memberRelayout = true
 		self:refreshMemberPanel(self._members)
@@ -1037,28 +973,28 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	trackNetworkTabWidget(self, self.memberScroll)
 	local actionsY = y + memberH + ROW_GAP
 
-	self.releaseBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminReleaseOwnership"), self, function()
+	self.releaseBtn = createButton(
+		pad, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminReleaseOwnership"), function()
 			self:onReleaseOwnership()
-		end, nil, true)
+		end)
 	self:addChild(self.releaseBtn)
 	trackNetworkTabWidget(self, self.releaseBtn)
 
-	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), self, function()
+	self.deleteBtn = createButton(
+		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), function()
 			self:onDeleteNetworkConfirm()
-		end, nil, true)
-	GlobalStorageSiK.SiK_UI.applyDangerButton(self.deleteBtn)
+		end, true)
 	self:addChild(self.deleteBtn)
 	trackNetworkTabWidget(self, self.deleteBtn)
 
 	local hintY = actionsY + BTN_H + ROW_GAP
-	self.dashboardHintLabels = {}
-	for _, line in ipairs(hintLines) do
-		local hintLbl = ISLabel:new(pad, hintY, FONT_HGT_SMALL, line, 0.55, 0.57, 0.6, 1, UIFont.Small, true)
-		hintLbl:initialise()
-		self:addChild(hintLbl)
-		trackNetworkTabWidget(self, hintLbl)
+        self.dashboardHintLabels = {}
+        for _, line in ipairs(hintLines) do
+                local hintLbl = UI.Controls.copyText(self, {
+                        x = pad, y = hintY, w = textW, text = line,
+                        tone = "textMuted", font = UIFont.Small, lineGap = 2,
+                })
+                trackNetworkTabWidget(self, hintLbl)
 		self.dashboardHintLabels[#self.dashboardHintLabels + 1] = hintLbl
 		hintY = hintY + FONT_HGT_SMALL + 2
 	end
@@ -1072,7 +1008,6 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	end
 
 	self:refreshInfoLines()
-	GlobalStorageSiK.SiK_UI.centerModal(self)
 	-- dev22: recuerda la pestaña activa SOLO durante la sesion de la ventana
 	-- (pedido explicito de sistemas, no hace falta persistirla) - por
 	-- defecto "network" en la apertura inicial, conservada tras un resize
@@ -1082,17 +1017,21 @@ end
 
 ---@param networks table[]
 function GS_AdminDashboardUI:refreshNetworkList(networks)
-	self._networks = networks or {}
-	local selectedIndex = nil
-	local prevSelectedId = self._selectedNetworkId
-	self.networkCombo:clear()
-	for i = 1, #self._networks do
-		local net = self._networks[i]
-		-- net.label ya incluye "(cuenta del propietario)" o "(VACANTE)" y el
-		-- id interno, construido en adminListNetworks - no duplicar aqui.
-		self.networkCombo:addOption(net.label or net.networkId or "?")
-		if net.networkId == prevSelectedId then selectedIndex = i end
-	end
+        self._networks = networks or {}
+        local selectedIndex = nil
+        local prevSelectedId = self._selectedNetworkId
+        local comboItems = {}
+        for i = 1, #self._networks do
+                local net = self._networks[i]
+                -- net.label ya incluye "(cuenta del propietario)" o "(VACANTE)" y el
+                -- id interno, construido en adminListNetworks - no duplicar aqui.
+                comboItems[#comboItems + 1] = {
+                        text = net.label or net.networkId or "?",
+                        value = net.networkId,
+                }
+                if net.networkId == prevSelectedId then selectedIndex = i end
+        end
+        self.networkCombo:setItems(comboItems, selectedIndex or 1)
 	if #self._networks == 0 then
 		self._selectedNetworkId = nil
 		self._selectedNetwork = nil
@@ -1100,8 +1039,7 @@ function GS_AdminDashboardUI:refreshNetworkList(networks)
 		self:refreshMemberPanel({})
 		return
 	end
-	self.networkCombo.selected = selectedIndex or 1
-	self:onComboChanged()
+        self:onComboChanged()
 end
 
 function GS_AdminDashboardUI:onComboChanged()
@@ -1139,7 +1077,7 @@ function GS_AdminDashboardUI:refreshInfoLines()
 	local lines = {}
 	local textW = math.max(120, self.width - PAD * 2)
 	for i = 1, #sourceLines do
-		local wrapped = GlobalStorageSiK.SiK_UI.wrapTextLines(sourceLines[i], textW, UIFont.Small)
+		local wrapped = UI.Controls.wrapText(sourceLines[i], textW, UIFont.Small)
 		for j = 1, #wrapped do
 			if #lines < INFO_LINE_COUNT then lines[#lines + 1] = wrapped[j] end
 		end
@@ -1149,7 +1087,7 @@ function GS_AdminDashboardUI:refreshInfoLines()
 	for i = 1, INFO_LINE_COUNT do
 		local label = self.infoLbls[i]
 		label:setY((self._infoStartY or label:getY()) + (i - 1) * lineH)
-		label:setName(lines[i] or "")
+                label:setText(lines[i] or "")
 		label:setVisible(lines[i] ~= nil)
 	end
 	local infoEndY = (self._infoStartY or 0) + visibleCount * lineH
@@ -1166,7 +1104,7 @@ function GS_AdminDashboardUI:refreshInfoLines()
 		local hintH = math.max(1, #(self.dashboardHintLabels or {})) * (FONT_HGT_SMALL + 2) + ROW_GAP
 		local memberH = math.max(3 * (ROW_H + ROW_GAP),
 			self.height - self.memberScrollTopY - BTN_H - hintH - PAD - ROW_GAP)
-		GlobalStorageSiK.TerminalScroll.resize(self.memberScroll,
+		UI.Scroll.resize(self.memberScroll,
 			math.max(120, self.width - PAD * 2), memberH)
 		local actionsY = self.memberScrollTopY + memberH + ROW_GAP
 		local textW = math.max(120, self.width - PAD * 2)
@@ -1190,67 +1128,39 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 	self._members = members or {}
 	self:refreshOnlinePlayersCombo()
 	local scroll = self.memberScroll
-	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll)
-	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(w, ADMIN_MEMBER_TABLE_COLUMNS, ADMIN_MEMBER_TABLE_OPTIONS)
-	local nameMaxW = cols[1].width - cols[1].pad * 2
-	local seenX = cols[2].finish - cols[2].pad
-	local headerMetrics = GlobalStorageSiK.SiK_UI.Table.metrics()
-	local header = ISPanel:new(0, 0, w, headerMetrics.headerHeight)
-	header:initialise()
-	header.drawBackground = false
-	header.prerender = function(target)
-		ISPanel.prerender(target)
-		GlobalStorageSiK.SiK_UI.Table.drawHeader(target, ADMIN_MEMBER_TABLE_COLUMNS,
-			 nil, true, 2, UIFont.Small, ADMIN_MEMBER_TABLE_OPTIONS)
-	end
-	GlobalStorageSiK.SiK_UI.Table.attachHeaderResize(
-		header, ADMIN_MEMBER_TABLE_COLUMNS, ADMIN_MEMBER_TABLE_OPTIONS)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, header)
-	local y = headerMetrics.headerHeight + 2
-	local dashboard = self
-	if #self._members == 0 then
-		local lbl = ISLabel:new(6, y, FONT_HGT_SMALL, T("IGUI_GS_AdminNoMembers"), 0.6, 0.63, 0.66, 1, UIFont.Small, true)
-		lbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, lbl)
-		y = y + FONT_HGT_SMALL + LINE_GAP
-	end
-	for i = 1, #self._members do
-		local m = self._members[i]
-		local row = ISPanel:new(0, y, w, ROW_H)
-		row:initialise()
-		row.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-		row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-		row.memberData = m
-		row.prerender = function(self)
-			ISPanel.prerender(self)
-			GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, i, self:isMouseOver(), false)
-			-- Rol como fuente unica de verdad (incluido "Muerto" = ROLE_DEAD, ver
-			-- GS_Permissions.lua). Columna de conexion aparte, puramente
-			-- informativa (pedido explicito 2026-08-22, nunca se infiere ni se
-			-- marca nada desde aqui): "Conectado" en verde para quien sigue en
-			-- linea ahora mismo, "Desconectado hace X" para el resto.
-			local label = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
-			local yMid = math.floor((self.height - FONT_HGT_SMALL) / 2)
-			self:drawText(GlobalStorageSiK.SiK_UI.truncateText(label, nameMaxW, UIFont.Small),
-				cols[1].x + cols[1].pad, yMid, 0.85, 0.87, 0.9, 1, UIFont.Small)
-			local seenText, sr, sg, sb = connectionLabel(m)
-			self:drawTextRight(GlobalStorageSiK.SiK_UI.truncateText(seenText, COL_SEEN_W, UIFont.Small),
-				seenX, yMid, sr, sg, sb, 1, UIFont.Small)
+	if not scroll then return end
+	local w = UI.Scroll.contentWidth(scroll)
+	local tableHeight = math.max(ROW_H + TABLE_METRICS.headerHeight + 48, scroll.height or 0)
+	if not self.memberTableBlock or self.memberTableBlock.disposed then
+		local dashboard = self
+		local tableInstance, reason = UI.Table.create({
+			parent = UI.Scroll.childHost(scroll),
+			x = 0, y = 0, w = w,
+			h = tableHeight,
+			title = T("IGUI_GS_AdminMembersTitle"),
+			tooltip = T("IGUI_GS_AdminMembersTitle"),
+			emptyText = T("IGUI_GS_AdminNoMembers"),
+			columns = ADMIN_MEMBER_TABLE_COLUMNS,
+			left = ADMIN_MEMBER_TABLE_OPTIONS.left,
+			right = ADMIN_MEMBER_TABLE_OPTIONS.right,
+			onRowClick = function(context)
+				local member = context.item
+				if not member then return false end
+				GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
+				return true
+			end,
+		})
+		if not tableInstance then
+			error("SiK.UI.Table.create(staff.members): " .. tostring(reason))
 		end
-		row.onMouseDown = function(self) return self.memberData ~= nil end
-		row.onMouseUp = function(self)
-			if not self.memberData then return false end
-			GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, self.memberData)
-			return true
-		end
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row)
-		y = y + ROW_H + ROW_GAP
+		self.memberTableBlock = tableInstance
 	end
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y)
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
-	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
+	self.memberTableBlock:layout({
+		x = 0, y = 0, w = w, h = tableHeight,
+		rows = self._members, preserveOffset = true,
+	})
+	UI.Scroll.setContentHeight(scroll, self.memberTableBlock:getHeight())
+	UI.Scroll.ensureScrollBars(scroll)
 end
 
 function GS_AdminDashboardUI:onSetMemberRole(characterId, role)
@@ -1285,8 +1195,9 @@ end
 function GS_AdminDashboardUI:onReleaseOwnership()
 	if not self._selectedNetworkId then
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-		if player and player.setHaloNote then
-			player:setHaloNote(T("IGUI_GS_AdminNoNetworkSelected"), 220, 180, 100, 300)
+		if player then
+			GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_AdminNoNetworkSelected"),
+				220, 180, 100, 300, { tone = "warning" })
 		end
 		return
 	end
@@ -1303,20 +1214,25 @@ end
 function GS_AdminDashboardUI:onDeleteNetworkConfirm()
 	if not self._selectedNetworkId then
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-		if player and player.setHaloNote then
-			player:setHaloNote(T("IGUI_GS_AdminNoNetworkSelected"), 220, 180, 100, 300)
+		if player then
+			GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_AdminNoNetworkSelected"),
+				220, 180, 100, 300, { tone = "warning" })
 		end
 		return
 	end
 	local networkId = self._selectedNetworkId
 	local dashboard = self
-	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_AdminDeleteNetworkConfirm", networkId), function()
-		if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-			GlobalStorageSiK.NetClient.sendCommand("adminDeleteNetwork", { networkId = networkId, confirm = true })
-		end
-		dashboard._selectedNetworkId = nil
-		dashboard._selectedNetwork = nil
-	end)
+	UI.Modal.confirm({
+		message = T("IGUI_GS_AdminDeleteNetworkConfirm", networkId),
+		playerNum = self.playerNum or 0,
+		onAccept = function()
+			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
+				GlobalStorageSiK.NetClient.sendCommand("adminDeleteNetwork", { networkId = networkId, confirm = true })
+			end
+			dashboard._selectedNetworkId = nil
+			dashboard._selectedNetwork = nil
+		end,
+	})
 end
 
 --- Reenganchado desde GS_Client.lua al recibir cada comando del servidor.
@@ -1420,14 +1336,14 @@ function GlobalStorageSiK.AdminDashboard.show()
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer() or nil
 	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-	local viewport = GlobalStorageSiK.SiK_UI.Window.safeRect(playerNum)
-	local rect = GlobalStorageSiK.SiK_UI.Window.resolveProfile("staff", viewport, {
-		width = WINDOW_W, height = WINDOW_H, playerNum = playerNum,
+	local rect = UI.Window.resolveBounds({
+		profile = "staff", width = WINDOW_W, height = WINDOW_H,
+		playerNum = playerNum, minWidth = ADMIN_MIN_W, minHeight = ADMIN_MIN_H,
 	})
 	local ui = GS_AdminDashboardUI:new(rect.x, rect.y, rect.w, rect.h)
 	ui.playerNum = playerNum
 	ui:initialise()
-	ui:addToUIManager()
+	ui:show()
 	GlobalStorageSiK.AdminDashboard.instance = ui
 	requestLatestTaxonomySummaries()
 end

@@ -95,11 +95,47 @@ local function mergeDistinctTypes(job, state)
 	end
 end
 
-local function markProgress(job, now, phase)
+local function progressStatus(job)
+	local total = #(job and job.zones or {})
+	local completed = math.max(0, (job and job.zoneIndex or 1) - 1)
+	local fraction = 0
+	local state = job and job.zoneState or nil
+	local zone = job and job.zones and job.zones[job.zoneIndex] or nil
+	if state and zone then
+		if state.phase == "snapshots" then
+			local tasks = math.max(1, #(state.containerTasks or {}))
+			fraction = 0.70 + 0.30 * math.min(1,
+				math.max(0, ((tonumber(state.taskIndex) or 1) - 1) / tasks))
+		else
+			local squares = math.max(1,
+				((tonumber(zone.x2) or 0) - (tonumber(zone.x1) or 0) + 1)
+				* ((tonumber(zone.y2) or 0) - (tonumber(zone.y1) or 0) + 1)
+				* ((tonumber(zone.zMax) or tonumber(zone.z) or 0)
+					- (tonumber(zone.zMin) or tonumber(zone.z) or 0) + 1))
+			fraction = 0.70 * math.min(1,
+				math.max(0, (tonumber(state.metrics and state.metrics.squaresVisited) or 0) / squares))
+		end
+	end
+	return {
+		state = "RUNNING", phase = job and job.phase or "preparing",
+		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
+		zonesDone = completed, zonesTotal = total,
+		progressDone = math.min(total, completed + fraction), progressTotal = total,
+		startedMs = job and job.startedMs or 0,
+		lastProgressMs = job and job.lastProgressMs or 0,
+		failedZones = job and job.totals and job.totals.failedZones or 0,
+	}
+end
 
+local function markProgress(job, now, phase)
 	job.lastProgressMs = now
 	job.phase = phase or job.phase or "preparing"
-
+	if now - (job.lastUiProgressMs or 0) >= 250
+		and GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanProgress then
+		job.lastUiProgressMs = now
+		GlobalStorageSiK.Server.onNetworkScanProgress(job.networkId,
+			progressStatus(job), job.watchers)
+	end
 end
 
 local function currentZone(job)
@@ -372,6 +408,10 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 	removeTerminalStateOrder(networkId)
 	if opts.background ~= true then addWatcher(job, player, opts.searchQuery) end
 	jobs[networkId] = job
+	-- Publicar el 0% real antes del primer lote. Sin este estado inicial la
+	-- cabecera conservaba una barra vacia hasta el primer umbral de 250 ms y,
+	-- con una sola zona, el siguiente estado visible podia saltar ya al 70%.
+	if opts.background ~= true then markProgress(job, job.startedMs, "preparing") end
 	ensureTickInstalled()
 	GlobalStorageSiK.Log.info("ZoneScanJob", "start network=" .. tostring(networkId)
 		.. " zones=" .. tostring(#zones) .. " scope=" .. tostring(opts.zoneId or "network"))
@@ -397,18 +437,7 @@ function GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
 
 	local job = networkId and jobs[networkId] or nil
 	if not job then return terminalStates[networkId] or { state = "IDLE" } end
-	local zone = currentZone(job)
-	return {
-		state = "RUNNING",
-		phase = job.phase or "preparing",
-		zoneId = zone and zone.id or nil,
-		zoneName = zone and zone.name or nil,
-		zonesDone = math.max(0, (job.zoneIndex or 1) - 1),
-		zonesTotal = #(job.zones or {}),
-		startedMs = job.startedMs or 0,
-		lastProgressMs = job.lastProgressMs or 0,
-		failedZones = job.totals and job.totals.failedZones or 0,
-	}
+	return progressStatus(job)
 
 end
 

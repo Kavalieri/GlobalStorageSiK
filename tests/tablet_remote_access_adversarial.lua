@@ -10,6 +10,7 @@ for _, name in ipairs({
 }) do
 	package.loaded[name] = true
 end
+package.loaded["GSSiK_API"] = true
 
 SandboxVars = { GlobalStorageSiK = { AccessHysteresisTiles = 1 } }
 local antennaByNetwork = {}
@@ -109,6 +110,25 @@ GlobalStorageSiK.Addons.canUseTabletWireless = function(networkId)
 		or itemType == "GSSiK_Addon_Tablet.GS_WifiAntenna_T3"
 end
 
+GSSiK = { API = {
+	Installation = {
+		isInstalled = function(networkId)
+			return true, nil, antennaByNetwork[networkId] ~= nil
+		end,
+		get = function(networkId)
+			local itemType = antennaByNetwork[networkId]
+			return itemType ~= nil, itemType and nil or "not_installed",
+				itemType and { itemType = itemType } or nil
+		end,
+	},
+	Access = {
+		registerProvider = function(definition)
+			GlobalStorageSiK.TerminalAccess.registerWirelessProvider(definition)
+			return true, nil, { dispose = function() end }
+		end,
+	},
+} }
+
 local tabletShared = "addons/GSSiK_Addon_Tablet/Contents/mods/GSSiK_Addon_Tablet/42/media/lua/shared/"
 dofile(tabletShared .. "GSSiK_Addon_Tablet_Access.lua")
 
@@ -181,8 +201,9 @@ check("wireless providers are replaced by id instead of duplicated", function()
 		local provider = GlobalStorageSiK.TerminalAccess._wirelessProviders[i]
 		if provider.id == "contract-dedupe" then found = provider end
 	end
-	assert(found == second and found.capabilities.replacement == true,
-		"same provider id did not replace its definition")
+	assert(found ~= second and found.hasAccess == second.hasAccess
+		and found.capabilities.replacement == true,
+		"same provider id did not replace its owned defensive definition")
 end)
 
 check("evaluateWireless uses only active same-floor authoritative anchors", function()

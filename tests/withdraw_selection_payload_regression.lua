@@ -39,12 +39,15 @@ GlobalStorageSiK = {
 	TerminalUI = { instance = { terminalState = { networkId = "net" } } },
 }
 
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 local path = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_WithdrawClient.lua"
 dofile(path)
 
 local group = {
 	rowKey = "Base.VHS_Retail\31sprite:\31media:214",
 	fullType = "Base.VHS_Retail", count = 34,
+	name = "VHS: Woodcraft Ep. 3", displayName = "VHS: Woodcraft Ep. 3",
+	mediaTitle = "VHS: Woodcraft Ep. 3", mediaIndex = 214,
 	selectionMode = "exact_group", selectionRevision = 9,
 }
 assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch({ group }),

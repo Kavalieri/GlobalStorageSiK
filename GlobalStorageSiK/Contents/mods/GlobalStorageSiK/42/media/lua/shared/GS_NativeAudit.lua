@@ -17,7 +17,7 @@
 require "GS_CatalogManager"
 require "GS_NativeTaxonomyRegistry"
 require "GS_NativeClassifier"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_NativeClassifierUtils"
 
 GlobalStorageSiK.NativeAudit = GlobalStorageSiK.NativeAudit or {}
@@ -515,11 +515,12 @@ function GlobalStorageSiK.NativeAudit.run()
 		report.ownItems.expectedExactMappings = exactCount
 		report.ownItems.foundExactMappings = foundCount
 
-		if GlobalStorageSiK.AddonRegistry and GlobalStorageSiK.AddonRegistry.listSorted then
-			local defs = GlobalStorageSiK.AddonRegistry.listSorted()
+		local listed, _, defs = GSSiK.API.Addon.list()
+		if listed then
 			for i = 1, #defs do
 				local def = defs[i]
-				local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+				local typesOk, _, moduleTypes = GSSiK.API.Addon.moduleItemTypes(def.id)
+				if not typesOk then moduleTypes = {} end
 				for j = 1, #moduleTypes do
 					local ft = moduleTypes[j]
 					if ft and ft ~= "" and not exact[ft] then

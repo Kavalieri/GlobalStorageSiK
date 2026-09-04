@@ -10,9 +10,10 @@ require "GS_NetClient"
 require "GS_I18n"
 require "GS_Index"
 require "GS_ItemSnapshot"
+require "GS_RecordedMedia"
 require "GS_Sandbox"
 require "GS_Log"
-require "GS_SiK_UI_Viewport"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.ItemNetworkTooltip = {}
 
@@ -240,8 +241,8 @@ local LINE_PAD = 4
 ---@param maxW number
 ---@return string
 local function truncate(text, maxW)
-	if GlobalStorageSiK.SiK_UI and GlobalStorageSiK.SiK_UI.truncateText then
-		return GlobalStorageSiK.SiK_UI.truncateText(text, maxW, NET_FONT)
+	if UI.Controls and UI.Controls.truncateText then
+		return UI.Controls.truncateText(text, maxW, NET_FONT)
 	end
 	return text
 end
@@ -266,20 +267,6 @@ end
 --- Perks...) end) - fuente unica de verdad vainilla, no una copia de otro
 --- mod. Solo trigramas de SKILL (Interactions tambien tiene ANG/BOR/END/...
 --- para stats como hambre/animo, deliberadamente fuera de este mapa).
-local VHS_TRIGRAM_TO_PERK_KEY = {
-	SPR = "IGUI_perks_Sprinting", LFT = "IGUI_perks_Lightfooted", NIM = "IGUI_perks_Nimble",
-	SNE = "IGUI_perks_Sneaking", BAA = "IGUI_perks_Axe", BUA = "IGUI_perks_Blunt",
-	CRP = "IGUI_perks_Carpentry", COO = "IGUI_perks_Cooking", FRM = "IGUI_perks_Farming",
-	DOC = "IGUI_perks_Doctor", ELC = "IGUI_perks_Electricity", MTL = "IGUI_perks_MetalWelding",
-	FKN = "IGUI_perks_FlintKnapping", CRV = "IGUI_perks_Carving", AIM = "IGUI_perks_Aiming",
-	REL = "IGUI_perks_Reloading", FIS = "IGUI_perks_Fishing", TRA = "IGUI_perks_Trapping",
-	FOR = "IGUI_perks_Foraging", TAI = "IGUI_perks_Tailoring", MEC = "IGUI_perks_Mechanics",
-	CMB = "IGUI_perks_Combat", SPE = "IGUI_perks_Spear", SBU = "IGUI_perks_SmallBlunt",
-	LBA = "IGUI_perks_LongBlade", SBA = "IGUI_perks_SmallBlade", MAS = "IGUI_perks_Masonry",
-	POT = "IGUI_perks_Pottery", BLA = "IGUI_perks_Blacksmith", GLA = "IGUI_perks_Glassmaking",
-	HUS = "IGUI_perks_Husbandry", BUT = "IGUI_perks_Butchering", TRK = "IGUI_perks_Tracking",
-}
-
 --- Lee solo la MediaData de la cinta bajo el raton. Evita construir/retener un
 --- indice de TODO RecMedia en el primer hover y usa las mismas lineas reales
 --- que vanilla reproduce. getLine recibe int, no el short problematico de
@@ -292,24 +279,18 @@ local function mediaSkillNames(item)
 	end
 	local okCount, count = pcall(function() return mediaData:getLineCount() end)
 	if not okCount or type(count) ~= "number" then return nil end
-	local skillNames, seen = {}, {}
+	local allCodes = {}
 	for i = 0, math.max(0, math.floor(count) - 1) do
 		local okLine, line = pcall(function() return mediaData:getLine(i) end)
-		local okCodes, codes = false, nil
+		local okCodes, lineCodes = false, nil
 		if okLine and line and line.getCodes then
-			okCodes, codes = pcall(function() return line:getCodes() end)
+			okCodes, lineCodes = pcall(function() return line:getCodes() end)
 		end
-		if okCodes and codes then
-			for segment in tostring(codes):gmatch("[^,]+") do
-				local trigram = segment:match("^%u+")
-				local perkKey = trigram and VHS_TRIGRAM_TO_PERK_KEY[trigram]
-				if perkKey and not seen[perkKey] then
-					seen[perkKey] = true
-					skillNames[#skillNames + 1] = getText(perkKey)
-				end
-			end
-		end
+		if okCodes and lineCodes then allCodes[#allCodes + 1] = tostring(lineCodes) end
 	end
+	local perkKeys = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(allCodes)
+	local skillNames = {}
+	for i = 1, #(perkKeys or {}) do skillNames[#skillNames + 1] = getText(perkKeys[i]) end
 	return skillNames
 end
 
@@ -347,17 +328,9 @@ end
 
 local function getRemoteVHSTrainingLines(detail)
 	if not detail or detail.mediaIndex == nil or type(detail.mediaCodes) ~= "table" then return nil end
-	local skillNames, seen = {}, {}
-	for i = 1, math.min(#detail.mediaCodes, 64) do
-		for segment in tostring(detail.mediaCodes[i]):gmatch("[^,]+") do
-			local trigram = segment:match("^%u+")
-			local perkKey = trigram and VHS_TRIGRAM_TO_PERK_KEY[trigram]
-			if perkKey and not seen[perkKey] then
-				seen[perkKey] = true
-				skillNames[#skillNames + 1] = getText(perkKey)
-			end
-		end
-	end
+	local perkKeys = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(detail.mediaCodes)
+	local skillNames = {}
+	for i = 1, #(perkKeys or {}) do skillNames[#skillNames + 1] = getText(perkKeys[i]) end
 	if #skillNames == 0 then
 		return { T("IGUI_GS_VHSSkillHeader"), T("IGUI_GS_VHSNothingToLearn") }
 	end
@@ -433,7 +406,7 @@ end
 --- dibuja; el tooltip vanilla mantiene su propio placement.
 local function placeMeasuredTooltip(panel, item, width, totalHeight)
 	local playerNum = playerNumForItem(item)
-	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
+	local viewport = UI.Viewport.resolve(playerNum)
 	local right = viewport.x + viewport.w
 	local bottom = viewport.y + viewport.h
 	-- Los tooltips fijos y los anclados por menú/joypad ya fueron colocados por
@@ -470,20 +443,24 @@ end
 ---@param colorRGB number[]|nil  {r,g,b} del texto (por defecto, el amarillo de red)
 ---@return number boxH  alto real dibujado, para poder apilar el siguiente bloque
 local function drawNetworkExtension(tr, lines, yOffset, colorRGB)
-	local textManager = getTextManager()
-	local lineHgt = textManager:getFontHeight(NET_FONT)
 	colorRGB = colorRGB or { 0.9, 0.85, 0.4 }
-
 	local boxW = tr.width
-	local boxH = (#lines * lineHgt) + LINE_PAD * 2
 	local y = tr.height + 2 + (yOffset or 0)
 	local innerW = math.max(20, boxW - 16)
-	tr:drawRect(0, y, boxW, boxH, 0.85, 0.05, 0.05, 0.05)
-	tr:drawRectBorder(0, y, boxW, boxH, 0.6, 0.9, 0.9, 1)
+	local fitted = {}
 	for i = 1, #lines do
-		tr:drawText(truncate(lines[i], innerW), 8, y + LINE_PAD + (i - 1) * lineHgt, colorRGB[1], colorRGB[2], colorRGB[3], 1, NET_FONT)
+		fitted[i] = truncate(lines[i], innerW)
 	end
-	return boxH
+	local measured = UI.Tooltip.renderSection(tr, {
+		lines = fitted,
+		lineColor = colorRGB,
+		backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.85 },
+		borderColor = { r = 0.9, g = 0.9, b = 1, a = 0.6 },
+		paddingX = 8,
+		paddingY = LINE_PAD,
+		font = NET_FONT,
+	}, 0, y, boxW)
+	return measured and measured.height or 0
 end
 
 --- Pista narrativa "hay que encontrarlo" del GS_SolderingIron (2026-08-25,
@@ -494,7 +471,7 @@ end
 --- DESACTIVADA (el caso por defecto) - si esta activada, el tooltip estatico
 --- normal (Tooltip_GS_SolderingIron en Tooltip.json) ya es una descripcion
 --- corta sin alusiones, no hace falta añadir nada mas.
---- Envuelto con SiK_UI.wrapTextLines (si esta cargado) para no
+--- Envuelto con Controls.wrapText para no
 --- depender de que la traduccion de cada idioma quepa en una sola linea del
 --- ancho fijo de drawNetworkExtension - mismo criterio que el resto de la UI
 --- del mod para texto de longitud variable (ver CLAUDE.md regla 7).
@@ -511,8 +488,8 @@ local function getSolderingIronLoreLines(fullType)
 		return nil
 	end
 	local text = T("IGUI_GS_SolderingIronFindHint")
-	if GlobalStorageSiK.SiK_UI and GlobalStorageSiK.SiK_UI.wrapTextLines then
-		return GlobalStorageSiK.SiK_UI.wrapTextLines(text, SOLDERING_LORE_MAX_W, NET_FONT)
+	if UI.Controls and UI.Controls.wrapText then
+		return UI.Controls.wrapText(text, SOLDERING_LORE_MAX_W, NET_FONT)
 	end
 	return { text }
 end
@@ -558,7 +535,7 @@ local function safeFallbackRender(self)
 	if not placeMeasuredTooltip(self, self.item, tw, th) then
 		-- Ultimo guardarrail solo para el tooltip vanilla minimo. Nunca se
 		-- ensancha ni se añade el anexo cuando no existe una posicion segura.
-		local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNumForItem(self.item))
+		local viewport = UI.Viewport.resolve(playerNumForItem(self.item))
 		self:setX(math.max(viewport.x, math.min(mx, viewport.x + viewport.w - tw)))
 		self:setY(math.max(viewport.y, math.min(my, viewport.y + viewport.h - th)))
 	end
@@ -566,8 +543,10 @@ local function safeFallbackRender(self)
 	self.tooltip:setY(self:getY())
 	self:setWidth(tw)
 	self:setHeight(th)
-	self:drawRect(0, 0, self.width, self.height, self.backgroundColor.a, self.backgroundColor.r, self.backgroundColor.g, self.backgroundColor.b)
-	self:drawRectBorder(0, 0, self.width, self.height, self.borderColor.a, self.borderColor.r, self.borderColor.g, self.borderColor.b)
+	UI.Tooltip.renderFrame(self, 0, 0, self.width, self.height, {
+		backgroundColor = self.backgroundColor,
+		borderColor = self.borderColor,
+	})
 	if self.item then self.item:DoTooltip(self.tooltip) end
 end
 
@@ -614,6 +593,15 @@ local function buildTooltipBlocks(item, rowContext)
 	-- clasificacion del probe efimero (por ejemplo solo "Mobiliario").
 	local remoteIdentity = rowContext or (remoteContext and remoteContext.row)
 		or (remote and remote.ok == true and remote) or nil
+	-- Para una fila remota, el item bajo el ratón puede ser sólo el tipo de
+	-- script. La misma sonda indexada que proyecta su nombre en Almacén permite
+	-- a RecMedia exponer las enseñanzas vanilla de ESA edición concreta.
+	local mediaProbe = item
+	if remoteIdentity and GlobalStorageSiK.TerminalItems
+		and GlobalStorageSiK.TerminalItems.probeForRow then
+		local ok, probe = pcall(GlobalStorageSiK.TerminalItems.probeForRow, remoteIdentity)
+		if ok and probe then mediaProbe = probe end
+	end
 
 	-- La categoria se presenta una sola vez en la fila/proyeccion comun. El
 	-- tooltip remoto conserva datos propios de la unidad, pero no recompone ni
@@ -649,8 +637,10 @@ local function buildTooltipBlocks(item, rowContext)
 		mediaDetail = { mediaIndex = remoteIdentity.mediaIndex,
 			mediaCodes = remoteIdentity.mediaCodes }
 	end
-	local skillLines = mediaDetail and getRemoteVHSTrainingLines(mediaDetail)
-		or getVHSTrainingLines(item) or nil
+	-- La sonda vanilla es la autoridad. Los códigos recibidos son únicamente un
+	-- acelerador/fallback cuando RecMedia aún no puede materializar la instancia.
+	local skillLines = getVHSTrainingLines(mediaProbe)
+		or (mediaDetail and getRemoteVHSTrainingLines(mediaDetail) or nil)
 	if skillLines and #skillLines > 0 then
 		blocks[#blocks + 1] = { lines = skillLines, color = { 0.55, 0.85, 1, 1.0 } }
 	end

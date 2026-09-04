@@ -24,27 +24,33 @@ end
 
 local terminal = read(CLIENT .. "GS_TerminalUI.lua")
 local items = read(CLIENT .. "GS_TerminalUI_Items.lua")
-local core = read(CLIENT .. "GS_SiK_UI_Core.lua")
+local controls = read(Support.frameworkPath("Controls.lua"))
+local warehouseArtifact = read(CLIENT .. "GlobalStorageSiK/UI/Generated/TabWarehouse.lua")
 local tooltip = read(CLIENT .. "GS_ItemNetworkTooltip.lua")
 local en = read(SHARED .. "Translate/EN/IG_UI.json")
 local es = read(SHARED .. "Translate/ES/IG_UI.json")
 
 Support.check(suite, "search owns one full row and filters own the following row", function()
-	contains(terminal, "local searchW = math.max(80, contentW - btnW - gap)",
-		"search does not consume the full content row")
-	contains(terminal, "{ widget = searchWidget,", "search widget missing from row")
-	contains(terminal, "{ widget = self.searchBtn,", "search action missing from row")
-	contains(terminal, "{ widget = self.mainCategoryFilterCombo, weight = 1",
-		"Family filter is not in the independent equal row")
-	contains(terminal, "{ widget = self.subCategoryFilterCombo,  weight = 1",
-		"Group filter is not in the independent equal row")
-	contains(terminal, "{ widget = self.leafCategoryFilterCombo, weight = 1",
-		"Detail filter is not in the independent equal row")
+	contains(warehouseArtifact, '["id"] = "warehouse-search-form"',
+		"generated Warehouse has no independent search form")
+	contains(warehouseArtifact, '["id"] = "warehouse-filter-form"',
+		"generated Warehouse has no independent filter form")
+	contains(warehouseArtifact, '["id"] = "warehouse-family-filter"',
+		"generated Warehouse lost the Family filter")
+	contains(warehouseArtifact, '["id"] = "warehouse-group-filter"',
+		"generated Warehouse lost the Group filter")
+	contains(warehouseArtifact, '["id"] = "warehouse-detail-filter"',
+		"generated Warehouse lost the Detail filter")
+	excludes(terminal, "self.searchBox:setBounds", "terminal shell still paints Warehouse search geometry")
+	excludes(terminal, "mainCategoryFilterCombo:setBounds", "terminal shell still paints Warehouse filters")
 	excludes(terminal, "searchSpacer", "invisible search reservation returned")
 	excludes(terminal, "searchGapWidget", "invisible search reservation returned")
-	contains(core, "local entryW = math.max(0, w - entryX)",
-		"search entry does not retain its full stable width")
-	excludes(core, "clearReservation", "clear action still reserves layout width")
+	contains(controls, "panel.width - buttonW - metrics.controlGap",
+		"public search does not reserve exactly one action and one gap")
+	contains(controls, "self.action:setX(width - actionW)",
+		"public search action does not remain anchored at the right")
+	contains(controls, "self.entry:setWidth(math.max(1, width - actionW - metrics.controlGap))",
+		"public search entry does not reflow from current bounds")
 	return true
 end)
 
@@ -80,7 +86,7 @@ Support.check(suite, "Moveable Misc fallback is presentation-only and resolves a
 end)
 
 Support.check(suite, "warehouse tooltip preserves row identity for counts and media only", function()
-	contains(items, "self._gsTooltip._gsRemoteRow = data",
+	contains(items, "row._gsTooltip._gsRemoteRow = data",
 		"virtualized row does not bind its authoritative identity")
 	contains(tooltip, "buildTooltipBlocks(self.item, self._gsRemoteRow)",
 		"tooltip ignores warehouse identity")

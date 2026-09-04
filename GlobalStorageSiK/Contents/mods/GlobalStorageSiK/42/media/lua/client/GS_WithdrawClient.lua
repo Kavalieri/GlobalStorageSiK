@@ -10,6 +10,7 @@ require "GS_I18n"
 require "GS_Log"
 require "GS_PlayerUtils"
 require "GS_Sandbox"
+require "GS_UI_Feedback"
 require "GS_OperationPacing"
 
 GlobalStorageSiK.WithdrawClient = {}
@@ -74,9 +75,10 @@ end
 
 local function showLocalError(key)
 	local player = GlobalStorageSiK.NetClient.getPlayer()
-	if player and player.setHaloNote then
+	if player then
 		pcall(function()
-			player:setHaloNote(GlobalStorageSiK.I18n.text(key), 255, 120, 120, 250)
+			GlobalStorageSiK.UIFeedback.halo(player, GlobalStorageSiK.I18n.text(key),
+				255, 120, 120, 250, { tone = "danger", channel = "withdraw" })
 		end)
 	end
 end
@@ -89,7 +91,7 @@ local function showProgress(force)
 	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
 	operation.lastProgressMs = now
 	local player = GlobalStorageSiK.NetClient.getPlayer()
-	if not player or not player.setHaloNote then return end
+	if not player then return end
 	local text = GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawPending")
 	if (operation.totalExpected or 0) > 0 then
 		text = text .. " " .. tostring(operation.totalMoved or 0)
@@ -100,7 +102,8 @@ local function showProgress(force)
 	-- ambas cifras convertía 8/34 en el engañoso "(6/28)" para VHS paginados.
 	-- El halo siempre comunica únicamente unidades físicas confirmadas.
 	pcall(function()
-		player:setHaloNote(text, 200, 220, 200, 220)
+		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 220, 200, 220,
+			{ channel = "withdraw-progress", dedupeKey = text, throttleMs = 1000 })
 	end)
 end
 
@@ -181,8 +184,11 @@ local function dispatchCurrent()
 	if not current then return end
 	current.sequence = current.sequence + 1
 	local batchUnits = operation and operation.pacing and operation.pacing.batchUnits or 10
-	local requested = current.all and batchUnits
-		or math.min(current.remaining or 1, batchUnits)
+	local ticketHasBoundedRemainder = current.selectionMode == "exact_group"
+		and current.selectionTicket ~= nil and current.remaining ~= nil
+	local requested = ticketHasBoundedRemainder
+		and math.min(current.remaining, batchUnits)
+		or (current.all and batchUnits or math.min(current.remaining or 1, batchUnits))
 	current.batchRequested = requested
 	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
 	local exactItemIds = {}
@@ -609,8 +615,8 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		return false
 	end
 	local shouldContinue = exactHasMore and (args.ok == true or exhausted)
-		or (args.ok == true and moved > 0 and not exhausted
-			and ((current.all) or (not current.all and (current.remaining or 0) > 0)))
+		or (selectionMode ~= "exact_group" and args.ok == true and moved > 0 and not exhausted
+				and ((current.all) or (not current.all and (current.remaining or 0) > 0)))
 	if shouldContinue then
 		showProgress(false)
 		nextDispatchMs = nowMs() + (operation and operation.pacing.batchDelayMs or 400)

@@ -9,6 +9,7 @@ require "GS_Utils"
 require "GS_Network"
 require "GS_Log"
 require "GS_NetClient"
+require "GS_UI_Feedback"
 require "GS_RemoteItemDetail"
 require "GS_Debug"
 require "GS_NetTrace"
@@ -52,9 +53,9 @@ local function showMessage(text, failed)
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 	if player and text then
 		if failed then
-			player:setHaloNote(tostring(text), 235, 90, 90, 600)
+			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 235, 90, 90, 600, { tone = "danger" })
 		else
-			player:setHaloNote(tostring(text), 220, 220, 220, 300)
+			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 220, 220, 220, 300)
 		end
 	end
 end
@@ -149,7 +150,17 @@ local function onServerCommand(module, command, args)
 		GlobalStorageSiK.NetTrace.logClientRecv(command, args)
 	end
 
-	if command == "actionResult" then
+	if command == "scanProgress" then
+		local playerNum = tonumber(args and args.playerNum) or 0
+		local ui = terminalUiForPlayer(playerNum)
+		if ui and ui.terminalState and args
+			and ui.terminalState.networkId == args.networkId then
+			ui.terminalState.scanActive = true
+			ui.terminalState.scanStatus = args
+			if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+		end
+		return
+	elseif command == "actionResult" then
 		-- El servidor envía la clave (+ args) en vez del texto ya resuelto,
 		-- para que cada cliente lo traduzca a SU propio idioma en vez de
 		-- heredar el idioma configurado en el proceso del servidor - ver
@@ -188,7 +199,10 @@ local function onServerCommand(module, command, args)
 			end
 			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 			if ui and args.jobState == "running" and ui.onRedistributeStarted then
-				ui:onRedistributeStarted(resolvedMessage)
+				ui:onRedistributeStarted(resolvedMessage, {
+					phase = args.progressPhase, checked = args.progressChecked,
+					total = args.progressTotal, moved = args.progressMoved,
+				})
 			elseif ui and ui.onRedistributeFinished then
 				-- Compatibilidad: una respuesta final de una version anterior del
 				-- servidor no llevaba jobState y se interpreta como finalizada.
@@ -208,6 +222,10 @@ local function onServerCommand(module, command, args)
 				ui.terminalState.scanStatus.reasonCode = args.reasonCode or ui.terminalState.scanStatus.reasonCode
 				ui.terminalState.scanStatus.failedZones = args.failedZones or ui.terminalState.scanStatus.failedZones or 0
 				ui.terminalState.scanStatus.snapshotCertified = args.snapshotCertified == true
+				if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+				if scanState ~= "RUNNING" and args.ok == false and ui.setHeaderTransient then
+					ui:setHeaderTransient(resolvedMessage, "danger", 5200)
+				end
 				if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
 					GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
 				end
@@ -647,9 +665,11 @@ local function onServerCommand(module, command, args)
 			-- Aviso SIEMPRE (antes solo en modo "new" - unirse a una red ya
 			-- existente se quedaba sin ningún mensaje de confirmación, un
 			-- vacío informativo tras una acción que sí tuvo éxito).
-			if player and player.setHaloNote then
+			if player then
 				local msgKey = args.mode == "new" and "IGUI_GS_TerminalInstalledNew" or "IGUI_GS_TerminalInstalledJoined"
-				player:setHaloNote(GlobalStorageSiK.I18n.text(msgKey, args.networkId), 180, 220, 160, 350)
+				GlobalStorageSiK.UIFeedback.halo(player,
+					GlobalStorageSiK.I18n.text(msgKey, args.networkId), 180, 220, 160, 350,
+					{ tone = "success" })
 			end
 			-- Refrescar lista de redes para que el estado del selector (suspendido/activo) sea correcto.
 			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
@@ -831,8 +851,8 @@ local function onServerCommand(module, command, args)
 				tostring(args.unclassified), tostring(args.invalidPath), tostring(args.fileName))
 			GlobalStorageSiK.Log.info("NativeAudit", msg)
 			local player = GlobalStorageSiK.NetClient.getPlayer()
-			if player and player.setHaloNote then
-				player:setHaloNote(msg, 220, 220, 220, 600)
+			if player then
+				GlobalStorageSiK.UIFeedback.halo(player, msg, 220, 220, 220, 600)
 			end
 		end
 		-- Tanto una ejecucion nueva como la copia cacheada solicitada al abrir
@@ -874,6 +894,10 @@ function GlobalStorageSiK.Client.registerTransientCleanup(key, handler)
 	end
 	transientCleanupHandlers[key] = handler
 	return true
+end
+
+if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.UIFeedback.installCleanup then
+	GlobalStorageSiK.UIFeedback.installCleanup()
 end
 
 function GlobalStorageSiK.Client.clearTransientCaches(playerNum)

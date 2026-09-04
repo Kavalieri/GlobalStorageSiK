@@ -28,6 +28,240 @@ GlobalStorageSiK.AddonRegistry._defs = GlobalStorageSiK.AddonRegistry._defs or {
 
 GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL = 5
 
+GlobalStorageSiK.AddonRegistry.MAX_ADDONS = 32
+
+GlobalStorageSiK.AddonRegistry._generation =
+	GlobalStorageSiK.AddonRegistry._generation or 0
+
+-- Estado acotado de observabilidad del bootstrap. No escribe log por si solo:
+-- el consumidor decide cuando exponerlo bajo su categoria de debug. Se conserva
+-- aunque una definicion falle antes del commit, que es precisamente el caso que
+-- antes dejaba una bahia vacia sin causa verificable.
+GlobalStorageSiK.AddonRegistry._registrationDiagnostics =
+	GlobalStorageSiK.AddonRegistry._registrationDiagnostics or {
+		sequence = 0,
+		byId = {},
+		invalid = {},
+	}
+
+local SCALAR_FIELDS = {
+	"id", "modId", "itemType", "magazineType", "installDiskItem",
+	"moduleRecipeName", "moduleSkillLevel", "moduleCraftTime", "iconPath",
+	"titleKey", "descKey", "workshopId",
+}
+
+local function validString(value, limit, pattern)
+	if type(value) ~= "string" or value == "" or #value > limit then return false end
+	return pattern == nil or string.match(value, pattern) ~= nil
+end
+
+local function copyStringArray(source, limit, valueLimit)
+	if type(source) ~= "table" or #source < 1 or #source > limit then
+		return nil, "ERR_SCHEMA"
+	end
+	local copy, seen = {}, {}
+	for index = 1, #source do
+		local value = source[index]
+		if not validString(value, valueLimit) or seen[value] then return nil, "ERR_SCHEMA" end
+		seen[value] = true
+		copy[index] = value
+	end
+	return copy, nil
+end
+
+local function copyIngredients(source)
+	if source == nil then return nil, nil end
+	if type(source) ~= "table" or #source > 16 then return nil, "ERR_SCHEMA" end
+	local copy = {}
+	for index = 1, #source do
+		local row = source[index]
+		local count = row and tonumber(row.count)
+		if type(row) ~= "table" or not validString(row.item, 128)
+			or not count or count ~= math.floor(count) or count < 1 or count > 100 then
+			return nil, "ERR_SCHEMA"
+		end
+		copy[index] = { item = row.item, count = count }
+	end
+	return copy, nil
+end
+
+local function copyTiers(source, recipes)
+	if source == nil then return nil, nil end
+	if type(source) ~= "table" or #source > 8 then return nil, "ERR_SCHEMA" end
+	local copy, seen = {}, {}
+	for index = 1, #source do
+		local row = source[index]
+		if type(row) ~= "table" or not validString(row.item, 128)
+			or not validString(row.recipeName, 192) or seen[row.item]
+			or not recipes[row.recipeName] then return nil, "ERR_SCHEMA" end
+		seen[row.item] = true
+		copy[index] = { item = row.item, recipeName = row.recipeName }
+	end
+	return copy, nil
+end
+
+local function copyDiskProgram(source)
+	if source == nil then return nil end
+	local copy = {}
+	for key, value in pairs(source) do
+		if type(value) == "string" then copy[key] = value end
+	end
+	return copy
+end
+
+local function containsValue(values, expected)
+	for index = 1, #values do
+		if values[index] == expected then return true end
+	end
+	return false
+end
+
+function GlobalStorageSiK.AddonRegistry._prepareDefinition(def)
+	if type(def) ~= "table" then return false, "ERR_SCHEMA", nil end
+	if not validString(def.id, 64, "^[A-Za-z0-9_.%-]+$")
+		or not validString(def.modId, 96, "^[A-Za-z0-9_.%-]+$")
+		or not validString(def.itemType, 128)
+		or not validString(def.magazineType, 128)
+		or not validString(def.moduleRecipeName, 192) then
+		return false, "ERR_SCHEMA", nil
+	end
+	local recipes, recipeError = copyStringArray(def.recipeNames, 32, 192)
+	if not recipes or not containsValue(recipes, def.moduleRecipeName) then
+		return false, recipeError or "ERR_SCHEMA", nil
+	end
+	local moduleTypes = nil
+	if def.moduleItemTypes ~= nil then
+		moduleTypes = copyStringArray(def.moduleItemTypes, 8, 128)
+		if not moduleTypes or not containsValue(moduleTypes, def.itemType) then
+			return false, "ERR_SCHEMA", nil
+		end
+	end
+	local ingredients, ingredientError = copyIngredients(def.moduleIngredients)
+	if ingredientError then return false, ingredientError, nil end
+	local recipeSet = {}
+	for index = 1, #recipes do recipeSet[recipes[index]] = true end
+	local tiers, tierError = copyTiers(def.tierItems, recipeSet)
+	if tierError then return false, tierError, nil end
+	local skill = tonumber(def.moduleSkillLevel
+		or GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL)
+	local craftTime = tonumber(def.moduleCraftTime or 1)
+	if not skill or skill ~= math.floor(skill) or skill < 0 or skill > 10
+		or not craftTime or craftTime ~= math.floor(craftTime)
+		or craftTime < 1 or craftTime > 36000 then
+		return false, "ERR_SCHEMA", nil
+	end
+	if def.installDiskItem ~= nil and not validString(def.installDiskItem, 128) then
+		return false, "ERR_SCHEMA", nil
+	end
+	if def.iconPath ~= nil and (not validString(def.iconPath, 256)
+		or string.find(def.iconPath, "..", 1, true)
+		or string.sub(def.iconPath, 1, 1) == "/"
+		or string.find(def.iconPath, ":", 1, true)) then
+		return false, "ERR_SCHEMA", nil
+	end
+	for _, field in ipairs({ "titleKey", "descKey" }) do
+		if def[field] ~= nil and not validString(def[field], 128) then
+			return false, "ERR_SCHEMA", nil
+		end
+	end
+	if def.workshopId ~= nil and not validString(def.workshopId, 20, "^%d+$") then
+		return false, "ERR_SCHEMA", nil
+	end
+	if def.resolveRecipeBookRequirement ~= nil
+		and type(def.resolveRecipeBookRequirement) ~= "function" then
+		return false, "ERR_SCHEMA", nil
+	end
+	local prepared = {}
+	for index = 1, #SCALAR_FIELDS do
+		local field = SCALAR_FIELDS[index]
+		prepared[field] = def[field]
+	end
+	prepared.moduleSkillLevel, prepared.moduleCraftTime = skill, craftTime
+	prepared.recipeNames, prepared.moduleItemTypes = recipes, moduleTypes
+	prepared.moduleIngredients, prepared.tierItems = ingredients, tiers
+	prepared.diskProgram = copyDiskProgram(def.diskProgram)
+	prepared.resolveRecipeBookRequirement = def.resolveRecipeBookRequirement
+	return true, "OK", prepared
+end
+
+function GlobalStorageSiK.AddonRegistry._allocateGeneration()
+	local generation = (GlobalStorageSiK.AddonRegistry._generation or 0) + 1
+	if generation > 2147483647 then generation = 1 end
+	GlobalStorageSiK.AddonRegistry._generation = generation
+	return generation
+end
+
+function GlobalStorageSiK.AddonRegistry._commitPrepared(prepared, generation)
+	local previous = GlobalStorageSiK.AddonRegistry._defs[prepared.id]
+	prepared._generation = generation
+	GlobalStorageSiK.AddonRegistry._defs[prepared.id] = prepared
+	return previous
+end
+
+function GlobalStorageSiK.AddonRegistry._removeIfGeneration(addonId, generation)
+	local current = GlobalStorageSiK.AddonRegistry._defs[addonId]
+	if not current or current._generation ~= generation then return false, nil end
+	GlobalStorageSiK.AddonRegistry._defs[addonId] = nil
+	return true, current
+end
+
+function GlobalStorageSiK.AddonRegistry._count()
+	local count = 0
+	for _ in pairs(GlobalStorageSiK.AddonRegistry._defs) do count = count + 1 end
+	return count
+end
+
+function GlobalStorageSiK.AddonRegistry._recordRegistrationAttempt(def, ok, code)
+	local diagnostics = GlobalStorageSiK.AddonRegistry._registrationDiagnostics
+	diagnostics.sequence = (diagnostics.sequence or 0) + 1
+	local row = {
+		sequence = diagnostics.sequence,
+		id = type(def) == "table" and tostring(def.id or "") or "",
+		modId = type(def) == "table" and tostring(def.modId or "") or "",
+		registered = ok == true,
+		code = tostring(code or (ok == true and "OK" or "ERR_UNKNOWN")),
+	}
+	if row.id ~= "" then
+		diagnostics.byId[row.id] = row
+	else
+		local invalid = diagnostics.invalid
+		invalid[#invalid + 1] = row
+		if #invalid > 8 then table.remove(invalid, 1) end
+	end
+	return row
+end
+
+function GlobalStorageSiK.AddonRegistry._registrationDiagnosticSnapshot()
+	local diagnostics = GlobalStorageSiK.AddonRegistry._registrationDiagnostics
+	local rows = {}
+	for _, row in pairs(diagnostics.byId or {}) do
+		rows[#rows + 1] = {
+			sequence = row.sequence, id = row.id, modId = row.modId,
+			registered = row.registered == true, code = row.code,
+		}
+	end
+	table.sort(rows, function(a, b)
+		if a.sequence == b.sequence then return a.id < b.id end
+		return a.sequence < b.sequence
+	end)
+	for index = 1, #(diagnostics.invalid or {}) do
+		local row = diagnostics.invalid[index]
+		rows[#rows + 1] = {
+			sequence = row.sequence, id = row.id, modId = row.modId,
+			registered = row.registered == true, code = row.code,
+		}
+	end
+	return rows
+end
+
+function GlobalStorageSiK.AddonRegistry._publicCopy(def)
+	if type(def) ~= "table" then return nil end
+	local ok, _, copy = GlobalStorageSiK.AddonRegistry._prepareDefinition(def)
+	if not ok then return nil end
+	copy.resolveRecipeBookRequirement = nil
+	return copy
+end
+
 
 
 --- Registra un addon disponible (llamado por cada mod addon al cargar shared).
@@ -44,49 +278,14 @@ GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL = 5
 ---@return boolean
 
 function GlobalStorageSiK.AddonRegistry.register(def)
-
-	if not def or not def.id or def.id == "" then
-
-		return false
-
-	end
-
-	if not def.modId or def.modId == "" then
-
-		return false
-
-	end
-
-	if not def.itemType or def.itemType == "" then
-
-		return false
-
-	end
-
-	if not def.magazineType or def.magazineType == "" then
-
-		return false
-
-	end
-
-	if not def.recipeNames or #def.recipeNames == 0 then
-
-		return false
-
-	end
-
-	if not def.moduleRecipeName or def.moduleRecipeName == "" then
-
-		return false
-
-	end
-
-	def.moduleSkillLevel = def.moduleSkillLevel or GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL
-
-	GlobalStorageSiK.AddonRegistry._defs[def.id] = def
-
+	local ok, _, prepared = GlobalStorageSiK.AddonRegistry._prepareDefinition(def)
+	if not ok then return false end
+	local current = GlobalStorageSiK.AddonRegistry._defs[prepared.id]
+	if current == nil and GlobalStorageSiK.AddonRegistry._count()
+		>= GlobalStorageSiK.AddonRegistry.MAX_ADDONS then return false end
+	GlobalStorageSiK.AddonRegistry._commitPrepared(prepared,
+		GlobalStorageSiK.AddonRegistry._allocateGeneration())
 	return true
-
 end
 
 
@@ -199,13 +398,15 @@ function GlobalStorageSiK.AddonRegistry.isModActive(addonId)
 
 	end
 
-	if not getActivatedMods then
-
-		return true
-
-	end
-
-	return getActivatedMods():contains(def.modId) == true
+	-- A definition only reaches this registry by executing the addon's own
+	-- shared registration file in this Lua runtime. That is authoritative
+	-- evidence of availability. getActivatedMods() is useful in local SP, but a
+	-- dedicated-server client can expose an incomplete selected-mod list while
+	-- it is already running the addon's shared files; treating that list as
+	-- stronger evidence hid Craft/Builder from the terminal.
+	-- There is no dynamic addon unload inside a PZ session, so a registered
+	-- definition remains the safe canonical answer for this runtime.
+	return true
 
 end
 

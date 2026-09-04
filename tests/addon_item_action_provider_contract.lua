@@ -26,6 +26,8 @@ end
 local core = read(CORE .. "client/GS_ItemActions.lua")
 local coreClient = read(CORE .. "client/GS_Client.lua")
 local craftSession = read(CORE .. "client/GS_NetworkCraftSession.lua")
+local apiClient = read(CORE .. "client/GSSiK_API_Client.lua")
+local workSession = read(CORE .. "client/GSSiK_API_WorkSession.lua")
 local server = read(CORE .. "server/GS_Server.lua")
 local warehouse = read(CORE .. "client/GS_TerminalUI_Items.lua")
 local craftRegister = read(CRAFT .. "client/GSSiK_Addon_Craft_Client.lua")
@@ -50,6 +52,17 @@ contains(handcraftOpen, 'opener(player, nil, "*", false, recipe, itemString)',
 contains(buildOpen, 'opener(player, nil, "*", false, recipe, itemString)',
 	"build opener does not preserve the B42 six-argument signature")
 
+-- Addons consume the public WorkSession facade; the private CraftSession
+-- remains the owner of the existing six-argument vanilla opener.
+contains(workSession, "function Public.openHandcraft(addonId, mode, recipe, itemString)",
+	"public WorkSession handcraft signature drops owner/recipe/filter")
+contains(workSession, 'return openWith(addonId, "openHandcraft", mode, recipe, itemString)',
+	"public WorkSession does not delegate to the existing handcraft session")
+contains(workSession, "function Public.openBuild(addonId, mode, recipe, itemString)",
+	"public WorkSession build signature drops owner/recipe/filter")
+contains(workSession, 'return openWith(addonId, "openBuild", mode, recipe, itemString)',
+	"public WorkSession does not delegate to the existing build session")
+
 contains(core, "function GlobalStorageSiK.ItemActions.registerProvider(def)",
 	"neutral provider API missing")
 for _, field in ipairs({ "id", "addonId", "capabilities", "actions", "appliesTo", "buildRequest" }) do
@@ -58,6 +71,18 @@ end
 assert(core:find("def.executeRequest", 1, true) or core:find("def.execute", 1, true),
 	"provider execution callback is not validated")
 contains(core, "registerProvider", "Core never enumerates registered providers")
+contains(apiClient, "function ItemActions.registerProvider(definition)",
+	"public ItemActions provider API missing")
+contains(apiClient, "local prepared = copyProviderDefinition(definition)",
+	"public ItemActions does not take a defensive provider copy")
+contains(apiClient, "actionRegistration(prepared.id, generation",
+	"public ItemActions does not return a generation-safe registration")
+for _, field in ipairs({ "id", "addonId", "capabilities", "actions", "appliesTo", "buildRequest" }) do
+	contains(apiClient, "definition." .. field, "public provider field is not validated")
+end
+assert(apiClient:find("definition.executeRequest", 1, true)
+	or apiClient:find("definition.execute", 1, true),
+	"public provider execution callback is not validated")
 
 local providerOptions = section(core,
 	"function GlobalStorageSiK.ItemActions.addProviderOptions", "function GlobalStorageSiK.ItemActions.onTransferOne")
@@ -80,16 +105,24 @@ contains(warehouse, "ItemActions.addProviderOptions(cm, player, providerRows, {"
 
 for _, addon in ipairs({
 	{ name = "Craft", register = craftRegister, requiredActions = { "reload", "refill", "craft" },
-		publicCalls = { "CraftSession.begin", "openNetworkCraft" },
+		providerCall = 'terminal:openNetworkCraft("vanilla", recipe, itemString)',
+		openerSignature = "function TerminalModule.openCraft(terminal, mode, recipe, itemString)",
+		sessionOpen = 'Session.openHandcraft("Craft", mode, recipe, itemString)',
 		installedKey = "Craft", translations = { craftEn, craftEs },
 		translationKeys = { "IGUI_GS_ItemActionReload", "IGUI_GS_ItemActionRefill", "IGUI_GS_CraftOpenVanilla" } },
 	{ name = "Builder", register = builderRegister, requiredActions = { "craft" },
-		publicCalls = { "CraftSession.begin", "openNetworkBuild" },
+		providerCall = 'TerminalModule.openBuild(terminal, "vanilla", nil, itemString)',
+		openerSignature = "function TerminalModule.openBuild(terminal, mode, recipe, itemString)",
+		sessionOpen = 'Session.openBuild("Builder", mode, recipe, itemString)',
 		installedKey = "Builder", translations = { builderEn, builderEs },
 		translationKeys = { "IGUI_GS_CraftOpenBuildVanilla" } },
 }) do
-	contains(addon.register, "ItemActions.registerProvider({",
+	contains(addon.register, "API.ItemActions.registerProvider({",
 		addon.name .. " does not own its provider")
+	contains(addon.register, 'local API = require "GSSiK_API_Client"',
+		addon.name .. " does not consume the public client API")
+	contains(addon.register, "local Session = API.WorkSession",
+		addon.name .. " does not consume public WorkSession")
 	contains(addon.register, 'addonId = "' .. addon.name .. '"',
 		addon.name .. " provider identity")
 	contains(addon.register, "capabilities =", addon.name .. " capabilities missing")
@@ -103,17 +136,23 @@ for _, addon in ipairs({
 		contains(addon.register, addon.requiredActions[i], addon.name
 			.. " omits required action " .. addon.requiredActions[i])
 	end
-	for i = 1, #addon.publicCalls do
-		contains(addon.register, addon.publicCalls[i], addon.name
-			.. " execution bypasses existing CraftSession authority")
-	end
+	contains(addon.register, addon.providerCall,
+		addon.name .. " provider does not propagate its exact request")
+	contains(addon.register, addon.openerSignature,
+		addon.name .. " terminal opener drops provider args")
+	contains(addon.register, "Session.begin({",
+		addon.name .. " terminal opener bypasses WorkSession begin")
+	contains(addon.register, addon.sessionOpen,
+		addon.name .. " terminal opener bypasses public WorkSession authority")
 	excludes(addon.register, "sendClientCommand", addon.name
 		.. " invents a parallel network protocol")
+	excludes(addon.register, "GlobalStorageSiK", addon.name
+		.. " reaches into private Core internals")
 	local terminalGuard = section(addon.register, "local function providerTerminal", "local function ")
 	contains(terminalGuard,
 		"if not terminal.getIsVisible or terminal:getIsVisible() ~= true then return nil end",
 		addon.name .. " provider accepts a terminal not proven visible")
-	contains(terminalGuard, 'installed["' .. addon.installedKey .. '"]',
+	contains(terminalGuard, 'Terminal.isAddonInstalled(terminal, "' .. addon.installedKey .. '")',
 		addon.name .. " provider does not require its installed addon")
 	for i = 1, #addon.translationKeys do
 		local quoted = '"' .. addon.translationKeys[i] .. '"'
@@ -137,10 +176,10 @@ contains(bowlStructure, "getScriptManager():getItem(fullType)",
 contains(bowlStructure, "script:hasTag(divideIntoBowlsTag)",
 	"bowl refill guesses by fullType instead of the structural tag")
 
-local craftProvider = section(craftRegister, "GlobalStorageSiK.ItemActions.registerProvider({",
-	"function GS_TerminalUI:openNetworkCraft")
-local builderProvider = section(builderRegister, "GlobalStorageSiK.ItemActions.registerProvider({",
-	"function GS_TerminalUI:openNetworkBuild")
+local craftProvider = section(craftRegister, "API.ItemActions.registerProvider({",
+	"function TerminalModule.openCraft")
+local builderProvider = section(builderRegister, "API.ItemActions.registerProvider({",
+	"function TerminalModule.openBuild")
 contains(craftRegister, 'request.recipeName = "RefillBlowTorch"',
 	"blowtorch reload does not select the exact recipe")
 contains(craftProvider, 'local itemString = not recipe and request.inputFullType and ("!" .. request.inputFullType) or nil',
@@ -157,14 +196,14 @@ for _, providerSource in ipairs({ craftProvider, builderProvider }) do
 	excludes(providerSource, "perform", "provider autoexecutes an action")
 end
 
-contains(craftRegister, "function GS_TerminalUI:openNetworkCraft(mode, recipe, itemString)",
+contains(craftRegister, "function TerminalModule.openCraft(terminal, mode, recipe, itemString)",
 	"terminal Craft signature drops provider args")
-contains(craftRegister, "CraftSession.openHandcraft(mode, recipe, itemString)",
-	"terminal Craft does not propagate recipe/filter")
-contains(builderRegister, "function GS_TerminalUI:openNetworkBuild(mode, recipe, itemString)",
+contains(craftRegister, 'Session.openHandcraft("Craft", mode, recipe, itemString)',
+	"terminal Craft does not propagate recipe/filter through public WorkSession")
+contains(builderRegister, "function TerminalModule.openBuild(terminal, mode, recipe, itemString)",
 	"terminal Builder signature drops provider args")
-contains(builderRegister, "CraftSession.openBuild(mode, recipe, itemString)",
-	"terminal Builder does not propagate recipe/filter")
+contains(builderRegister, 'Session.openBuild("Builder", mode, recipe, itemString)',
+	"terminal Builder does not propagate recipe/filter through public WorkSession")
 excludes(craftRegister, "_gsPreferredItemAction", "Craft retained dead preferred action state")
 excludes(builderRegister, "_gsPreferredItemAction", "Builder retained dead preferred action state")
 

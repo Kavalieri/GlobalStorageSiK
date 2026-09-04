@@ -5,7 +5,7 @@
 for _, name in ipairs({
 	"ISUI/ISPanel", "ISUI/ISButton", "ISUI/ISLabel", "ISUI/ISComboBox", "ISUI/ISScrollingListBox",
 	"ISUI/ISContextMenu", "GS_CatalogManager", "GS_I18n", "GS_ItemSnapshot", "GS_NativeProduct",
-	"GS_CategoryResolution", "GS_Libs", "GS_BulkFilters", "GS_DepositSources", "GS_WithdrawClient", "GS_TerminalWithdrawDrag",
+	"GS_RecordedMedia", "GS_CategoryResolution", "GS_Libs", "GS_BulkFilters", "GS_DepositSources", "GS_WithdrawClient", "GS_TerminalWithdrawDrag",
 	"GS_WithdrawMenu", "GS_QuantityPrompt", "GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight",
 	"GS_ContainerTargets", "GS_TerminalUI_Scroll", "GS_SiK_UI_Table", "GS_SiK_UI_Core",
 	"GS_ItemNetworkTooltip", "GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail", "GS_UIDebug",
@@ -22,10 +22,14 @@ ISContextMenu = {}
 
 GlobalStorageSiK = {
 	I18n = { text = function(key) return key end },
-	SiK_UI = { Table = { metrics = function() return { rowHeight = 40, headerHeight = 28 } end } },
 	TerminalUI = {},
 	Log = { debug = function() end },
 }
+package.loaded["GS_UI_Framework"] = {
+	Table = { metrics = function() return { rowHeight = 40, headerHeight = 28 } end },
+}
+package.loaded["GlobalStorageSiK/UI/Generated/TabWarehouse"] = {}
+package.loaded["GlobalStorageSiK/UI/TabWarehouseContext"] = { create = function() return nil end }
 local requestedPages, sentBatches = {}, {}
 GlobalStorageSiK.NetClient = {
 	sendCommand = function(command, args)
@@ -39,14 +43,19 @@ GlobalStorageSiK.WithdrawClient = {
 		return true
 	end,
 }
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua")
 
-local parent = { rowKey = "Base.VHS_Retail", fullType = "Base.VHS_Retail", count = 34,
+local mediaRowKey = "Base.VHS_Retail\31sprite:\31media:214"
+local mediaName = "VHS: Woodcraft Ep. 3"
+local parent = { rowKey = mediaRowKey, fullType = "Base.VHS_Retail", count = 34,
+	name = mediaName, displayName = mediaName, mediaTitle = mediaName, mediaIndex = 214,
 	expandable = true, aggregateAllowed = false, _gsRowKind = "parent",
 	selectionMode = "exact_group", selectionRevision = 9 }
 local displayed = { parent }
 for i = 1, 15 do
 	displayed[#displayed + 1] = { rowKey = "detail:" .. i, fullType = "Base.VHS_Retail", count = 1,
+		name = mediaName, displayName = mediaName, mediaTitle = mediaName, mediaIndex = 214,
 		_gsRowKind = "child", parentRowKey = parent.rowKey }
 end
 local expanded = GlobalStorageSiK.TerminalItems.buildDragState(
@@ -60,6 +69,10 @@ assert(#collapsed.payloadRows == 1 and collapsed.payloadRows[1] == parent,
 	"collapsed header must send the same semantic parent")
 assert(#expanded.visualRows == 16, "ghost may show parent plus visible page only")
 assert(#collapsed.visualRows == 1, "collapsed ghost must show only its header")
+for i = 1, #expanded.visualRows do
+	assert(expanded.visualRows[i].displayName == mediaName,
+		"every visible copy must retain the original exact VHS name")
+end
 
 assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(expanded.payloadRows),
 	"expanded semantic header was not accepted")

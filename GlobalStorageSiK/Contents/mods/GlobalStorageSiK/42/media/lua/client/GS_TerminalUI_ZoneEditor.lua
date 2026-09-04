@@ -11,41 +11,60 @@
 	sigue siendo mucho más simple: sin listado de contenido de contenedor.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISButton"
-require "ISUI/ISLabel"
-require "ISUI/ISTextEntryBox"
 require "GS_I18n"
-require "GS_TerminalUI_Scroll"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_Window"
 require "GS_NetClient"
 require "GS_NodeHighlight"
 require "GS_RulesUI"
 require "GS_FilterEditor"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalZoneEditor = {}
 GlobalStorageSiK.TerminalZoneEditor.instance = nil
 
-GS_ZoneEditorUI = ISPanel:derive("GS_ZoneEditorUI")
+GS_ZoneEditorUI = UI.Window.derive("GS_ZoneEditorUI")
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
-local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("editor")
+local CONTROL_METRICS = UI.Controls.metrics("editor")
+local PALETTE = UI.Theme.palette()
 local PAD = 10
 local INFO_BTN_SIZE = FONT_HGT_SMALL
+
+-- Conserva los rectangulos aprobados del editor y deja a SiK.UI la
+-- construccion, el chrome y el lifecycle de las hojas visibles.
+local function createText(parent, x, y, w, text, color)
+	color = color or PALETTE.textMuted
+	local copy = UI.Controls.copyText(parent, {
+		x = x, y = y, w = math.max(1, w), text = text,
+		font = UIFont.Small, lineGap = 0, tone = "editorText",
+		theme = { editorText = {
+			r = color[1], g = color[2], b = color[3], a = color[4] or 1,
+		} },
+	})
+	if copy.setMouseTransparent then copy:setMouseTransparent(true) end
+	return copy
+end
+
+local function createHost(parent, x, y, w, h)
+	return UI.Controls.panel(parent, {
+		x = x, y = y, w = w, h = h, controlId = "editorHost",
+	})
+end
+
+local function createField(text, x, y, w, numeric)
+	return UI.Controls.field(nil, {
+		x = x, y = y, w = w, h = CONTROL_METRICS.inputHeight,
+		text = text, numeric = numeric == true,
+	})
+end
 
 local function addSummaryRuns(host, layout)
 	for i = 1, #(layout and layout.runs or {}) do
 		local run = layout.runs[i]
 		local color = run.color
-		local lbl = ISLabel:new(run.x, (run.line - 1) * (FONT_HGT_SMALL + 2),
-			FONT_HGT_SMALL, run.text, color[1], color[2], color[3], 1,
-			UIFont.Small, true)
-		lbl:initialise()
-		host:addChild(lbl)
+		createText(host, run.x, (run.line - 1) * (FONT_HGT_SMALL + 2),
+			math.max(1, host.width - run.x), run.text, color)
 	end
 end
 
@@ -60,24 +79,65 @@ end
 ---@param target any
 local function addBlockInfoBtn(scroll, pad, y, titleText, tooltip, target)
 	local titleW = getTextManager():MeasureStringX(UIFont.Small, titleText)
-	local btn = GlobalStorageSiK.SiK_UI.createInfoHintButton(pad + titleW + 6, y, INFO_BTN_SIZE, target, tooltip)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, btn)
+	local btn = UI.Controls.iconButton(nil, {
+		x = pad + titleW + 6, y = y, w = INFO_BTN_SIZE, h = INFO_BTN_SIZE,
+		text = "?", tooltip = tooltip, payload = target,
+	})
+	UI.Scroll.addChild(scroll, btn)
 	return btn
 end
 
 -- fullWidth=true, mismo motivo que GS_TerminalUI_NodeEditor.lua.
 local function createBtn(x, y, w, title, target, onClick)
-	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, CONTROL_METRICS.buttonHeight,
-		title, target, onClick, nil, true)
+	return UI.Controls.button(nil, {
+		x = x, y = y, w = w, h = CONTROL_METRICS.buttonHeight,
+		text = title, fullWidth = true, payload = target,
+		onClick = function() return onClick(target) end,
+	})
+end
+
+local function createSectionLabel(x, y, text)
+	local width = getTextManager():MeasureStringX(UIFont.Small, text) + 2
+	return UI.Controls.sectionTitle(nil, {
+		x = x, y = y, w = width, h = FONT_HGT_SMALL, text = text,
+	})
+end
+
+local function createSectionCard(scroll, x, y, w, h, color)
+	local container = UI.Container.create({ parent = UI.Scroll.childHost(scroll),
+		x = x, y = y, w = w, h = h, padding = 0, accent = color,
+		background = { r = 0.08, g = 0.08, b = 0.08, a = 0.72 },
+		border = { r = 0.28, g = 0.28, b = 0.28, a = 0.70 },
+	})
+	return container and container.panel or nil
+end
+
+local function createProductButton(x, y, w, h, title, target, onClick,
+	activeColor, fullWidth)
+	local button = UI.Controls.button(nil, {
+		x = x, y = y, w = w, h = h, text = title,
+		payload = target, fullWidth = fullWidth == true,
+		danger = activeColor ~= nil,
+		onClick = function() return onClick(target) end,
+	})
+	if activeColor then
+		button.backgroundColor = { r = activeColor[1], g = activeColor[2],
+			b = activeColor[3], a = activeColor[4] or 0.92 }
+	end
+	return button
+end
+
+local function confirmAction(message, onAccept)
+	return UI.Modal.confirm({ message = message, onAccept = onAccept })
 end
 
 --- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua,
 --- los puntos de composicion de la lista de contenedores y el borde del
 --- modal "Anadir regla" - nunca inventado por separado).
 local RULE_OP_COLOR = {
-	OR  = GlobalStorageSiK.SiK_UI.PALETTE.ruleOr,
-	AND = GlobalStorageSiK.SiK_UI.PALETTE.ruleAnd,
-	NOT = GlobalStorageSiK.SiK_UI.PALETTE.ruleNot,
+	OR  = PALETTE.ruleOr,
+	AND = PALETTE.ruleAnd,
+	NOT = PALETTE.ruleNot,
 }
 
 --- Contenedores de una zona (dev26 ronda 3, linea informativa). Se queda
@@ -116,9 +176,7 @@ local function occupancyLabelText(capacity)
 end
 
 function GS_ZoneEditorUI:new(x, y, w, h)
-	local o = ISPanel:new(x, y, w, h)
-	setmetatable(o, self)
-	self.__index = self
+	local o = UI.Window.newInstance(self, x, y, w, h)
 	o.moveWithMouse = false
 	o.drawBackground = false
 	o.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
@@ -137,7 +195,7 @@ function GS_ZoneEditorUI:layoutForm()
 	if not self._formBuilt or not self.editorScroll then
 		return
 	end
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(self.editorScroll)
+	local innerW = UI.Scroll.contentWidth(self.editorScroll)
 	if self._lastLayoutW == innerW then
 		return
 	end
@@ -146,32 +204,33 @@ function GS_ZoneEditorUI:layoutForm()
 end
 
 function GS_ZoneEditorUI:calculateLayout()
-	local w = self.width
-	local h = self.height
-	local pad = self.padding
-	-- La cabecera, incluida la X, pertenece por completo al framework SiK UI.
-	-- No recalcular aqui un tamano local: editor, modales y terminal comparten
-	-- exactamente el mismo rectangulo de cierre y sus margenes.
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-
-	local bodyY = self.headerHeight + pad
-	local bodyH = math.max(120, h - bodyY - pad - GlobalStorageSiK.TerminalScroll.listBottomGap())
+	local content = self.contentRect and self:contentRect()
+		or { x = PAD, y = self.headerHeight + PAD,
+			w = self.width - PAD * 2, h = self.height - self.headerHeight - PAD * 2 }
+	local bodyH = math.max(120,
+		content.h - UI.Scroll.listBottomGap())
 	if self.editorScroll then
-		self.editorScroll:setX(pad)
-		self.editorScroll:setY(bodyY)
-		GlobalStorageSiK.TerminalScroll.resize(self.editorScroll, w - pad * 2, bodyH)
+		self.editorScroll:setX(content.x)
+		self.editorScroll:setY(content.y)
+		UI.Scroll.resize(self.editorScroll, content.w, bodyH)
 		self:layoutForm()
 		self:updateScrollHeight()
 	end
 end
 
 function GS_ZoneEditorUI:initialise()
-	ISPanel.initialise(self)
-	GlobalStorageSiK.SiK_UI.Window.applyEditor(self, function()
-		GlobalStorageSiK.TerminalZoneEditor.close()
-	end, "zoneEditor", {
+	UI.Window.callBase(self, "initialise")
+	UI.Window.applyEditor(self, {
+		geometryKey = "zoneEditor",
+		title = T("IGUI_GS_ZoneEditorTitle"),
 		padding = PAD,
-		onResize = function(panel) panel:calculateLayout() end,
+		onReflow = function() self:calculateLayout() end,
+		onClose = function()
+			GlobalStorageSiK.TerminalZoneEditor.instance = nil
+			if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
+				GlobalStorageSiK.NodeHighlight.clear()
+			end
+		end,
 	})
 	self.clipChildren = true
 	self:setVisible(true)
@@ -183,23 +242,9 @@ end
 function GS_ZoneEditorUI:createChildren()
 	if self._gsChildrenBuilt then return end
 	self._gsChildrenBuilt = true
-	-- El chrome se construye una sola vez por SiK_UI.Window.applyEditor().
+	-- El chrome se construye una sola vez por SiK.UI.Window.applyEditor().
 	-- Crear otra X aquí registraba un segundo control que PZ podía conservar
 	-- como raíz al cerrar el editor.
-end
-
-function GS_ZoneEditorUI:prerender()
-	ISPanel.prerender(self)
-	GlobalStorageSiK.SiK_UI.renderPanelBackground(self)
-	local title = T("IGUI_GS_ZoneEditorTitle") .. ": " .. (self.zone and self.zone.name or "?")
-	local titleRect = GlobalStorageSiK.SiK_UI.headerRects(self).title
-	title = GlobalStorageSiK.SiK_UI.truncateText(title, titleRect.w, UIFont.Medium)
-	local titleY = math.floor((self.headerHeight - FONT_HGT_MEDIUM) / 2)
-	self:drawText(title, titleRect.x, titleY, 1, 1, 1, 1, UIFont.Medium)
-	if self.closeBtn then
-		self.closeBtn:bringToTop()
-	end
-	GlobalStorageSiK.SiK_UI.renderWindowFrame(self)
 end
 
 --- Envia el cambio de prioridad al servidor y refleja el valor localmente.
@@ -228,6 +273,9 @@ function GS_ZoneEditorUI:applyAll()
 	if name ~= "" and name ~= self.zone.name and self.terminal.onRenameZone then
 		self.terminal:onRenameZone(self.zone.id, name)
 		self.zone.name = name
+		if self.setHeader then
+			self:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. name)
+		end
 	end
 	local n = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
 	if n and math.floor(n + 0.5) ~= (self.zone.priority or 50) then
@@ -249,11 +297,11 @@ function GS_ZoneEditorUI:ensureForm()
 	end
 
 	local scroll = self.editorScroll
-	GlobalStorageSiK.TerminalScroll.clear(scroll, false)
+	UI.Scroll.clear(scroll, false)
 
 	local pad = 8
 	local y = pad
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	local innerW = UI.Scroll.contentWidth(scroll)
 
 	-- ── Linea informativa (dev26, ronda 3): cuantos contenedores tiene esta
 	-- zona - ver zoneContainerCount arriba para por que NO intenta sumar
@@ -262,55 +310,47 @@ function GS_ZoneEditorUI:ensureForm()
 	-- GS_TerminalUI_NodeEditor.lua - el bloque de informacion siempre
 	-- precede al campo editable, en las dos ventanas).
 	local zContainerCount = zoneContainerCount(self.zone, self.terminal)
-	self.statsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZoneStatsLine", zContainerCount), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
-	self.statsLbl:initialise()
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.statsLbl)
+	self.statsLbl = createText(nil, pad, y, innerW,
+		T("IGUI_GS_ZoneStatsLine", zContainerCount), PALETTE.textMuted)
+	UI.Scroll.addChild(scroll, self.statsLbl)
 	y = y + FONT_HGT_SMALL + 2
 
-	self.occupancyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, occupancyLabelText(self.capacityInfo), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
-	self.occupancyLbl:initialise()
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.occupancyLbl)
+	self.occupancyLbl = createText(nil, pad, y, innerW,
+		occupancyLabelText(self.capacityInfo), PALETTE.textMuted)
+	UI.Scroll.addChild(scroll, self.occupancyLbl)
 	y = y + FONT_HGT_SMALL + 10
 
-	self.nameLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_ZoneRenameLabel"))
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.nameLbl)
+	self.nameLbl = createSectionLabel(pad, y, T("IGUI_GS_ZoneRenameLabel"))
+	UI.Scroll.addChild(scroll, self.nameLbl)
 	y = y + FONT_HGT_SMALL + 2
 
 	-- Nombre y prioridad ya NO tienen cada uno su propio "Aplicar": un solo
 	-- clic en "Aplicar cambios" (mas abajo) manda ambos juntos - ver applyAll.
-	self.nameEntry = ISTextEntryBox:new(self.zone and self.zone.name or "", pad, y, innerW,
-		CONTROL_METRICS.inputHeight)
-	self.nameEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
-	self.nameEntry:instantiate()
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.nameEntry)
+	self.nameEntry = createField(self.zone and self.zone.name or "", pad, y, innerW, false)
+	UI.Scroll.addChild(scroll, self.nameEntry)
 	y = y + CONTROL_METRICS.inputHeight + 12
 
 	-- Mismo esqueleto de frase pedagogica que GS_TerminalUI_NodeEditor.lua
 	-- (solo cambia "zona" por "contenedor") - texto largo, envuelto linea a
 	-- linea con wrapTextLines (regla 7, CLAUDE.md): una sola ISLabel se
 	-- saldria del ancho del panel.
-	self.priorityLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_ZonePriorityLabel"))
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.priorityLbl)
+	self.priorityLbl = createSectionLabel(pad, y, T("IGUI_GS_ZonePriorityLabel"))
+	UI.Scroll.addChild(scroll, self.priorityLbl)
 	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_ZonePriorityLabel"), T("IGUI_GS_ZonePriorityHint"), scroll)
 	y = y + FONT_HGT_SMALL + 4
 
-	self.priorityEntry = ISTextEntryBox:new(tostring((self.zone and self.zone.priority) or 50),
-		pad, y, innerW, CONTROL_METRICS.inputHeight)
-	self.priorityEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.priorityEntry)
-	self.priorityEntry:instantiate()
-	if self.priorityEntry.setOnlyNumbers then self.priorityEntry:setOnlyNumbers(true) end
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.priorityEntry)
+	self.priorityEntry = createField(tostring((self.zone and self.zone.priority) or 50),
+		pad, y, innerW, true)
+	UI.Scroll.addChild(scroll, self.priorityEntry)
 	y = y + CONTROL_METRICS.inputHeight + 4
 
 	local presetW = math.floor((innerW - 8) / 3)
 	self.priorityPresetHighBtn = createBtn(pad, y, presetW, T("IGUI_GS_NodePriorityPresetHigh"), scroll, function() self:applyPriority(10) end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.priorityPresetHighBtn)
+	UI.Scroll.addChild(scroll, self.priorityPresetHighBtn)
 	self.priorityPresetNormalBtn = createBtn(pad + presetW + 4, y, presetW, T("IGUI_GS_NodePriorityPresetNormal"), scroll, function() self:applyPriority(50) end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.priorityPresetNormalBtn)
+	UI.Scroll.addChild(scroll, self.priorityPresetNormalBtn)
 	self.priorityPresetLowBtn = createBtn(pad + (presetW + 4) * 2, y, presetW, T("IGUI_GS_NodePriorityPresetLow"), scroll, function() self:applyPriority(90) end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.priorityPresetLowBtn)
+	UI.Scroll.addChild(scroll, self.priorityPresetLowBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 16
 
 	-- ── Protocolo de aceptación de zona (dev26, ronda 2) ────────────────────
@@ -319,21 +359,17 @@ function GS_ZoneEditorUI:ensureForm()
 	-- "Plantilla" (aplicar categorías/filtros/prioridad copiados a toda la
 	-- zona de una vez), ahora cubierta por "Extender a la zona" desde el
 	-- propio editor de contenedor (ver GS_TerminalUI_NodeEditor.lua).
-	self.rulesTitleLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_ZoneRulesTitle"))
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rulesTitleLbl)
+	self.rulesTitleLbl = createSectionLabel(pad, y, T("IGUI_GS_ZoneRulesTitle"))
+	UI.Scroll.addChild(scroll, self.rulesTitleLbl)
 	addBlockInfoBtn(scroll, pad, y, T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
 	y = y + FONT_HGT_SMALL + 8
 
 	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
 		self.zone and self.zone.rules, innerW - pad, UIFont.Small,
-		GlobalStorageSiK.SiK_UI.PALETTE.textSecondary)
-	local summaryHost = ISPanel:new(pad, y, innerW - pad,
+		PALETTE.textSecondary)
+	local summaryHost = createHost(nil, pad, y, innerW - pad,
 		summaryLayout.lineCount * (FONT_HGT_SMALL + 2))
-	summaryHost:initialise()
-	summaryHost.drawBackground = false
-	summaryHost.backgroundColor = { r=0,g=0,b=0,a=0 }
-	summaryHost.borderColor = { r=0,g=0,b=0,a=0 }
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, summaryHost)
+	UI.Scroll.addChild(scroll, summaryHost)
 	addSummaryRuns(summaryHost, summaryLayout)
 	y = y + summaryHost:getHeight()
 	y = y + 6
@@ -356,21 +392,21 @@ function GS_ZoneEditorUI:ensureForm()
 	self.applyAllBtn = createBtn(pad, y, innerW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
 		self:applyAll()
 	end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.applyAllBtn)
+	UI.Scroll.addChild(scroll, self.applyAllBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 6
 
 	local role = self.terminal and self.terminal.terminalState
 		and self.terminal.terminalState.permissions and self.terminal.terminalState.permissions.myRole
 	if role == "owner" or role == "admin" then
-		self.rescanZoneBtn = GlobalStorageSiK.SiK_UI.createButton(
+		self.rescanZoneBtn = createProductButton(
 			pad, y, innerW, CONTROL_METRICS.buttonHeight,
 			T("IGUI_GS_ZoneCtxRescan"), scroll, function()
 				if self.zone and self.terminal and self.terminal.onRescanZone then
 					self.terminal:onRescanZone(self.zone.id)
 				end
 			end)
-		self.rescanZoneBtn:setTooltip(T("IGUI_GS_ZonesManageHint"))
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, self.rescanZoneBtn)
+		UI.Controls.setTooltip(self.rescanZoneBtn, T("IGUI_GS_ZonesManageHint"))
+		UI.Scroll.addChild(scroll, self.rescanZoneBtn)
 		y = y + CONTROL_METRICS.buttonHeight + 6
 	end
 
@@ -380,8 +416,8 @@ function GS_ZoneEditorUI:ensureForm()
 	-- la accion es excluir, confirmación solo al excluir.
 	local zoneExcluded = self.zone and self.zone.enabled == false
 	local zoneMembLabel = zoneExcluded and T("IGUI_GS_ZoneBtnInclude") or T("IGUI_GS_ZoneBtnExclude")
-	local zoneMembActiveColor = (not zoneExcluded) and GlobalStorageSiK.SiK_UI.PALETTE.statusDanger or nil
-	self.zoneMembBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, innerW,
+	local zoneMembActiveColor = (not zoneExcluded) and PALETTE.statusDanger or nil
+	self.zoneMembBtn = createProductButton(pad, y, innerW,
 		CONTROL_METRICS.buttonHeight, zoneMembLabel, scroll, function()
 		if self.zone and self.zone.enabled == false then
 			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = true })
@@ -389,15 +425,15 @@ function GS_ZoneEditorUI:ensureForm()
 			self:confirmExcludeZone()
 		end
 	end, zoneMembActiveColor, true)
-	self.zoneMembBtn:setTooltip(T("IGUI_GS_ZoneExcludeTooltip"))
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.zoneMembBtn)
+	UI.Controls.setTooltip(self.zoneMembBtn, T("IGUI_GS_ZoneExcludeTooltip"))
+	UI.Scroll.addChild(scroll, self.zoneMembBtn)
 	y = y + CONTROL_METRICS.buttonHeight + 6
 
-	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, innerW,
+	self.deleteBtn = createProductButton(pad, y, innerW,
 		CONTROL_METRICS.buttonHeight, T("IGUI_GS_DeleteZone"), scroll, function()
 		self:confirmDelete()
-	end, GlobalStorageSiK.SiK_UI.PALETTE.statusDanger, true)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, self.deleteBtn)
+	end, PALETTE.statusDanger, true)
+	UI.Scroll.addChild(scroll, self.deleteBtn)
 	y = y + CONTROL_METRICS.buttonHeight + pad
 
 	self._formBuilt = true
@@ -413,19 +449,22 @@ function GS_ZoneEditorUI:setZone(terminal, zone)
 	local sameZone = self.zone and zone and self.zone.id == zone.id
 	self.terminal = terminal
 	self.zone = zone
+	if self.setHeader then
+		self:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. (zone.name or "?"))
+	end
 	if not sameZone then
 		self:resetForm()
 		self.capacityInfo = nil
 		GlobalStorageSiK.NetClient.sendCommand("getZoneCapacity", { zoneId = zone.id })
 	end
 	if not self.editorScroll then
-		self.editorScroll = GlobalStorageSiK.TerminalScroll.create(self, PAD, 0, 400, 200, "panel")
+		self.editorScroll = UI.Scroll.create(self, PAD, 0, 400, 200, "panel")
 	end
 	self:calculateLayout()
 	self:ensureForm()
 	if not self.editorScroll._gsEditorContentRectBound then
 		self.editorScroll._gsEditorContentRectBound = true
-		GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(self.editorScroll, function()
+		UI.Scroll.setOnContentRectChanged(self.editorScroll, function()
 			self:layoutForm()
 		end)
 	end
@@ -440,7 +479,7 @@ end
 function GS_ZoneEditorUI:onCapacityReceived(capacity)
 	self.capacityInfo = capacity
 	if self.occupancyLbl then
-		self.occupancyLbl.name = occupancyLabelText(capacity)
+		self.occupancyLbl:setText(occupancyLabelText(capacity))
 	end
 end
 
@@ -452,14 +491,14 @@ function GS_ZoneEditorUI:updateScrollHeight(bottom)
 	end
 	bottom = bottom or self._lastContentBottom or 0
 	self._lastContentBottom = bottom
-	GlobalStorageSiK.TerminalScroll.setContentHeight(self.editorScroll, bottom)
+	UI.Scroll.setContentHeight(self.editorScroll, bottom)
 end
 
 --- Vacía el contenido del scroll y limpia referencias a widgets del
 --- formulario (mismo patron que GS_TerminalUI_NodeEditor.lua:resetForm).
 function GS_ZoneEditorUI:resetForm()
 	if self.editorScroll then
-		GlobalStorageSiK.TerminalScroll.clear(self.editorScroll, false)
+		UI.Scroll.clear(self.editorScroll, false)
 	end
 	self._formBuilt = false
 	self.nameLbl = nil
@@ -512,22 +551,18 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 	-- final con el alto real (mismo patron que GS_TerminalUI_NodeEditor.lua
 	-- y GS_TerminalUI_NetworkZones.lua) - si se insertara despues, taparia
 	-- el titulo/chips/boton en vez de quedar detras.
-	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, innerW - pad, 10, color)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+	local card = createSectionCard(scroll, pad, cardTop, innerW - pad, 10, color)
+	UI.Scroll.addChild(scroll, card)
 	self._ruleCards = self._ruleCards or {}
 	self._ruleCards[op] = card
 
-	local titleLbl = ISLabel:new(cx, cy, FONT_HGT_SMALL, T(GlobalStorageSiK.RulesUI.OP_TITLE_KEY[op]), color[1], color[2], color[3], 1, UIFont.Small, true)
-	titleLbl:initialise()
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, titleLbl)
+	local titleLbl = createText(nil, cx, cy, innerContentW,
+		T(GlobalStorageSiK.RulesUI.OP_TITLE_KEY[op]), color)
+	UI.Scroll.addChild(scroll, titleLbl)
 	cy = cy + FONT_HGT_SMALL + 6
 
-	local host = ISPanel:new(cx, cy, innerContentW, chipsH)
-	host:initialise()
-	host.drawBackground = false
-	host.backgroundColor = { r=0,g=0,b=0,a=0 }
-	host.borderColor     = { r=0,g=0,b=0,a=0 }
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, host)
+	local host = createHost(nil, cx, cy, innerContentW, chipsH)
+	UI.Scroll.addChild(scroll, host)
 	self._ruleChipsHosts = self._ruleChipsHosts or {}
 	self._ruleChipsHosts[op] = host
 	self:rebuildRuleChips(op)
@@ -561,10 +596,10 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, innerW, y, op)
 			self:rebuildForm()
 		end)
 	end)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, addBtn)
+	UI.Scroll.addChild(scroll, addBtn)
 	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
 
-	GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, innerW - pad, cy - cardTop)
+	card:setBounds(pad, cardTop, innerW - pad, cy - cardTop)
 	y = cy + 8
 	return y
 end
@@ -588,7 +623,7 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 	local cy = CHIP_PAD
 	local hostW = host.width
 	local removeText = T("IGUI_GS_Remove")
-	local removeBtnW = GlobalStorageSiK.SiK_UI.measureButtonWidth(removeText, UIFont.Small, 20, 52, 120)
+	local removeBtnW = UI.Controls.measureButtonWidth(removeText, UIFont.Small, 20, 52, 120)
 	local labelMaxW = math.max(20, hostW - removeBtnW - 12)
 
 	local shown = 0
@@ -597,16 +632,13 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 		if rule.op == op then
 			shown = shown + 1
 			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
-			label = GlobalStorageSiK.SiK_UI.truncateText(label, labelMaxW, UIFont.Small)
+			label = UI.Controls.truncateText(label, labelMaxW, UIFont.Small)
 			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
-				rule.condition, GlobalStorageSiK.SiK_UI.PALETTE.textPrimary)
-			local lbl = ISLabel:new(4, cy + 2, FONT_HGT_SMALL, label,
-				labelColor[1], labelColor[2], labelColor[3], 1, UIFont.Small, true)
-			lbl:initialise()
-			host:addChild(lbl)
+				rule.condition, PALETTE.textPrimary)
+			createText(host, 4, cy + 2, labelMaxW, label, labelColor)
 
 			local capturedIdx = realIdx
-			local removeBtn = GlobalStorageSiK.SiK_UI.createButton(
+			local removeBtn = createProductButton(
 				hostW - removeBtnW - 2, cy, removeBtnW, CHIP_H,
 				removeText, host,
 				function()
@@ -616,15 +648,14 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 					self:rebuildForm()
 				end
 			)
-			removeBtn:setTooltip(removeText)
+			UI.Controls.setTooltip(removeBtn, removeText)
 			host:addChild(removeBtn)
 			cy = cy + CHIP_H + CHIP_PAD
 		end
 	end
 	if shown == 0 then
-		local emptyLbl = ISLabel:new(4, CHIP_PAD, FONT_HGT_SMALL, T("IGUI_GS_NodeRulesEmpty"), GlobalStorageSiK.SiK_UI.PALETTE.textMuted[1], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[2], GlobalStorageSiK.SiK_UI.PALETTE.textMuted[3], 1, UIFont.Small, true)
-		emptyLbl:initialise()
-		host:addChild(emptyLbl)
+		createText(host, 4, CHIP_PAD, math.max(1, hostW - 8),
+			T("IGUI_GS_NodeRulesEmpty"), PALETTE.textMuted)
 	end
 end
 
@@ -638,12 +669,12 @@ function GS_ZoneEditorUI:rebuildForm()
 	if not self.editorScroll then return end
 	local pendingName = self.nameEntry and self.nameEntry:getText() or nil
 	local pendingPriority = self.priorityEntry and self.priorityEntry:getText() or nil
-	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(self.editorScroll)
+	local savedOffset = UI.Scroll.getScrollOffset(self.editorScroll)
 	self:resetForm()
 	self:ensureForm()
 	if pendingName and self.nameEntry then self.nameEntry:setText(pendingName) end
 	if pendingPriority and self.priorityEntry then self.priorityEntry:setText(pendingPriority) end
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(self.editorScroll, savedOffset)
+	UI.Scroll.setScrollOffset(self.editorScroll, savedOffset)
 end
 
 --- Confirmación antes de excluir la zona (dev26, ronda 2 - solo al excluir,
@@ -651,7 +682,7 @@ end
 function GS_ZoneEditorUI:confirmExcludeZone()
 	if not self.zone then return end
 	local message = T("IGUI_GS_ZoneExcludeConfirm", self.zone.name or "?")
-	GlobalStorageSiK.SiK_UI.Modal.confirm(message, function()
+	confirmAction(message, function()
 		if self.zone then
 			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = false })
 		end
@@ -664,7 +695,7 @@ function GS_ZoneEditorUI:confirmDelete()
 	for i = 1, #nodes do
 		if self.zone and nodes[i].zoneId == self.zone.id then count = count + 1 end
 	end
-	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_ZoneDeleteConfirm", self.zone and self.zone.name or "?", count), function()
+	confirmAction(T("IGUI_GS_ZoneDeleteConfirm", self.zone and self.zone.name or "?", count), function()
 		if self.zone and self.terminal then
 			self.terminal:onDeleteZone(self.zone.id)
 			GlobalStorageSiK.TerminalZoneEditor.close()
@@ -688,8 +719,9 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
 	GlobalStorageSiK.TerminalZoneEditor.close()
 
 	-- Tamano/posicion compartidos con GS_TerminalUI_NodeEditor.lua (dev26
-	-- ronda 4, ver GS_SiK_UI_Core.resolveEditorWindowSize/Pos).
-	local x, y, w, h = GlobalStorageSiK.SiK_UI.Window.editorGeometry(terminal, "zoneEditor")
+	-- ronda 4; el perfil editor SiK.UI conserva geometria por jugador.
+	local bounds = UI.Window.resolveBounds({ profile = "editor" })
+	local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
 
 	local ui = GS_ZoneEditorUI:new(x, y, w, h)
 	ui:initialise()
@@ -708,13 +740,11 @@ function GlobalStorageSiK.TerminalZoneEditor.close()
 	if not ui then
 		return
 	end
-	GlobalStorageSiK.SiK_UI.Window.remember(ui, "zoneEditor")
-	ui:setVisible(false)
-	GlobalStorageSiK.SiK_UI.disposeWindowChrome(ui)
-	ui:removeFromUIManager()
-	GlobalStorageSiK.TerminalZoneEditor.instance = nil
-	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
-		GlobalStorageSiK.NodeHighlight.clear()
+	if ui.close then ui:close("product")
+	else
+		ui:setVisible(false)
+		ui:removeFromUIManager()
+		GlobalStorageSiK.TerminalZoneEditor.instance = nil
 	end
 end
 
@@ -736,6 +766,9 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 	for i = 1, #(zones or {}) do
 		if zones[i].id == ui.zone.id then
 			ui.zone = zones[i]
+			if ui.setHeader then
+				ui:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. (ui.zone.name or "?"))
+			end
 			-- Mismo bug/mismo fix que GS_TerminalUI_NodeEditor.lua:syncFormButtons
 			-- - anadir/quitar una regla dispara rebuildForm() de inmediato
 			-- (callback de GS_FilterEditor.lua) ANTES de que este sync traiga

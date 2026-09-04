@@ -7,6 +7,7 @@ for _, name in ipairs({
 }) do
 	package.loaded[name] = true
 end
+package.loaded["GSSiK_API"] = true
 
 local anchor = { x = 12, y = 34, z = 0 }
 local key = "12_34_0"
@@ -53,6 +54,15 @@ GlobalStorageSiK = {
 	Sandbox = { getAddonInstallSkillRequired = function() return 0 end },
 	isAuthoritative = function() return true end,
 }
+GSSiK = { API = { Addon = {
+	get = function(addonId)
+		local definition = GlobalStorageSiK.AddonRegistry.get(addonId)
+		return definition ~= nil, definition and nil or "ERR_NOT_FOUND", definition
+	end,
+	isActive = function(addonId)
+		return true, nil, GlobalStorageSiK.AddonRegistry.get(addonId) ~= nil
+	end,
+} } }
 
 local inventory = {
 	getItemCount = function() return 1 end,

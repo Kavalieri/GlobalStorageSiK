@@ -1,4 +1,4 @@
--- Wireless capability contract regression for Tablet 0.0.2.17-dev1.
+-- Wireless capability contract regression for Tablet 0.0.2.17-dev1.4.
 
 package.path = package.path .. ";./Contents/mods/GSSiK_Addon_Tablet/42/media/lua/shared/?.lua"
 
@@ -13,15 +13,21 @@ local inventory = {
 local player = { getInventory = function() return inventory end }
 
 SandboxVars = { GSSiK_Addon_Tablet = {} }
-GlobalStorageSiK = {
-	TerminalAccess = {
-		registerWirelessProvider = function(provider) registeredProvider = provider end,
-	},
-	Addons = {
-		isInstalled = function() return installed end,
-		serializeForTerminal = function()
-			return { TabletLink = installed and { itemType = installedType } or nil }
-		end,
+GSSiK = {
+	API = {
+		Access = {
+			registerProvider = function(provider)
+				registeredProvider = provider
+				return true, "OK", { dispose = function() return true end }
+			end,
+		},
+		Installation = {
+			isInstalled = function() return true, "OK", installed end,
+			get = function()
+				if not installed then return false, "ERR_NOT_FOUND", nil end
+				return true, "OK", { itemType = installedType }
+			end,
+		},
 	},
 }
 GSSiK_Addon_Tablet = {
@@ -36,8 +42,7 @@ GSSiK_Addon_Tablet = {
 package.preload["GSSiK_Addon_Tablet_ItemHooks"] = function() return {} end
 package.preload["GSSiK_Addon_Tablet_Sandbox"] = function() return GSSiK_Addon_Tablet.Sandbox end
 package.preload["GSSiK_Addon_Tablet_Log"] = function() return GSSiK_Addon_Tablet.Log end
-package.preload["GS_TerminalAccess"] = function() return GlobalStorageSiK.TerminalAccess end
-package.preload["GS_Addons"] = function() return GlobalStorageSiK.Addons end
+package.preload["GSSiK_API"] = function() return GSSiK.API end
 
 dofile("Contents/mods/GSSiK_Addon_Tablet/42/media/lua/shared/GSSiK_Addon_Tablet_Access.lua")
 assert(registeredProvider ~= nil, "wireless provider was not registered")

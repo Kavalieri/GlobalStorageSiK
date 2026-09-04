@@ -5,10 +5,13 @@
 	Descripción: Aplica revista obligatoria y Electricidad del módulo según AddonRegistry.
 ]]
 
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Sandbox"
 
 GlobalStorageSiK.AddonRecipeTuning = GlobalStorageSiK.AddonRecipeTuning or {}
+
+local AddonAPI = GSSiK.API.Addon
+local DEFAULT_MODULE_SKILL = AddonAPI.defaults().moduleSkillLevel
 
 ---@param sm ScriptManager
 ---@param recipeName string
@@ -49,11 +52,9 @@ end
 ---@param recipeName string
 ---@return boolean
 local function resolveBookRequirement(def, recipeName)
-	if def.resolveRecipeBookRequirement then
-		local ok, result = pcall(def.resolveRecipeBookRequirement, recipeName)
-		if ok and result ~= nil then
-			return result == true
-		end
+	local ok, _, result = AddonAPI.resolveRecipeBookRequirement(def.id, recipeName)
+	if ok and result ~= nil then
+		return result == true
 	end
 	return GlobalStorageSiK.Sandbox.requireRecipeBooks()
 end
@@ -71,8 +72,11 @@ function GlobalStorageSiK.AddonRecipeTuning.apply()
 		return
 	end
 
-	for addonId, def in pairs(GlobalStorageSiK.AddonRegistry.all()) do
-		if GlobalStorageSiK.AddonRegistry.isModActive(addonId) and def.recipeNames then
+	local listed, _, definitions = AddonAPI.list()
+	if not listed then definitions = {} end
+	for _, def in ipairs(definitions) do
+		local activeOk, _, active = AddonAPI.isActive(def.id)
+		if activeOk and active and def.recipeNames then
 			for i = 1, #def.recipeNames do
 				local recipeName = def.recipeNames[i]
 				local recipe = resolveCraftRecipe(sm, recipeName)
@@ -84,7 +88,7 @@ function GlobalStorageSiK.AddonRecipeTuning.apply()
 						and recipeName == def.moduleRecipeName
 						and recipe.setRequiredSkillCount
 						and Perks and Perks.Electricity then
-						local skill = def.moduleSkillLevel or GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL
+						local skill = def.moduleSkillLevel or DEFAULT_MODULE_SKILL
 						recipe:setRequiredSkillCount(Perks.Electricity, skill)
 					end
 				end

@@ -28,6 +28,8 @@ end
 local shared = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/"
 dofile(shared .. "GS_FluidTaxonomy.lua")
 package.loaded["GS_FluidTaxonomy"] = true
+dofile(shared .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(shared .. "GS_ItemSnapshot.lua")
 
 local function javaList(values)

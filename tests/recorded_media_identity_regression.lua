@@ -3,11 +3,23 @@
 
 for _, name in ipairs({
 	"GS_Router", "GS_I18n", "GS_FluidTaxonomy", "GS_NativeProduct", "GS_CategoryResolution",
-	"GS_Network", "GS_Zones", "GS_ZoneRefresh", "GS_Permissions", "GS_SiK_UI_Viewport",
+	"GS_Network", "GS_Zones", "GS_ZoneRefresh", "GS_Permissions",
 }) do
 	package.loaded[name] = true
 end
+package.loaded["SiK/UI/Controls"] = true
+package.loaded["SiK/UI/Viewport"] = true
 package.loaded["GS_ItemSnapshot"] = nil
+
+SiK = { UI = {
+	Controls = {
+		truncateText = function(text) return text end,
+		wrapText = function(text) return { text } end,
+	},
+	Viewport = { resolve = function()
+		return { x = 0, y = 0, w = 1280, h = 720 }
+	end },
+} }
 
 GlobalStorageSiK = {
 	Router = {
@@ -16,9 +28,9 @@ GlobalStorageSiK = {
 	},
 	I18n = {
 		text = function(key) return key end,
-		nameFromItemInstance = function(item) return item:getDisplayName() end,
+		nameFromItemInstance = function(item) return item:getName() end,
 		isLowQualityDisplayName = function() return false end,
-		typeDisplayName = function(fullType) return fullType end,
+		typeDisplayName = function() return "VHS comercial" end,
 		getScriptItem = function() return nil end,
 	},
 	FluidTaxonomy = {
@@ -27,28 +39,59 @@ GlobalStorageSiK = {
 		fillPercent = function() return nil end,
 		amountAndCapacity = function() return nil, nil end,
 	},
+	CategoryResolution = {
+		resolve = function(_, _, _, dynamicPath)
+			local encoded = dynamicPath and table.concat({
+				dynamicPath.l1, dynamicPath.l2, dynamicPath.l3,
+			}, "/") or nil
+			return {
+				nativePath = encoded,
+				nativeStatus = dynamicPath and "classified" or "fallback",
+				effective = dynamicPath and "native" or "vanilla",
+				routingIdentity = encoded or "vanilla:Entertainment",
+				categorySource = dynamicPath and "NATIVE" or "VANILLA",
+			}
+		end,
+	},
 	NativeProduct = { tracePathSample = function() end },
-	SiK_UI = { Viewport = { resolve = function()
-		return { x = 0, y = 0, w = 1280, h = 720 }
-	end } },
 	isAuthoritative = function() return true end,
 }
 
 local shared = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/"
+dofile(shared .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(shared .. "GS_ItemSnapshot.lua")
 
-local function media(fullType, itemId, mediaIndex, title)
+local learningPath = GlobalStorageSiK.RecordedMedia.nativePath(214, { "CRP=1,COO=1" })
+local leisurePath = GlobalStorageSiK.RecordedMedia.nativePath(315, {})
+assert(learningPath and learningPath.l1 == "knowledge_media"
+	and learningPath.l2 == "recorded_media" and learningPath.l3 == "with_learning",
+	"teaching VHS did not resolve to Knowledge > Recorded media > With learning")
+assert(leisurePath and leisurePath.l1 == "knowledge_media"
+	and leisurePath.l2 == "recorded_media" and leisurePath.l3 == "leisure",
+	"leisure VHS did not resolve to Knowledge > Recorded media > Leisure")
+assert(GlobalStorageSiK.RecordedMedia.nativePath(315, nil) == nil,
+	"unresolved VHS metadata was guessed as leisure")
+assert(GlobalStorageSiK.RecordedMedia.nativePath(-1, nil) == nil,
+	"unknown home VHS fabricated a recorded-media L3")
+
+local function media(fullType, itemId, mediaIndex, title, codesOverride)
 	local value = {}
 	function value:getFullType() return fullType end
 	function value:getID() return itemId end
-	function value:getDisplayName() return title end
+	-- La etiqueta de script es deliberadamente genérica. La única proyección
+	-- válida de la edición es getName(player), como hace vanilla RecMedia.
+	function value:getDisplayName() return "VHS comercial" end
 	function value:getName() return title end
 	function value:getWorldSprite() return nil end
 	function value:getRecordedMediaIndex() return mediaIndex end
 	function value:getMediaData()
 		if not mediaIndex or mediaIndex < 0 then return nil end
-		local codes = mediaIndex == 214 and { "CRP=1,COO=1" }
-			or mediaIndex == 315 and { "DOC=1" } or {}
+		local codes = codesOverride
+		if codes == nil then
+			codes = mediaIndex == 214 and { "CRP=1,COO=1" }
+				or mediaIndex == 315 and { "DOC=1" } or {}
+		end
 		return {
 			getId = function() return mediaIndex end,
 			getTranslatedItemDisplayName = function() return title end,
@@ -77,18 +120,18 @@ local function countRows(snapshot)
 end
 
 local exactTooltipDetail = GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(
-	media("Base.VHSTape", 99, 214, "Woodcraft Ep. 3"))
+	media("Base.VHS_Retail", 99, 214, "Woodcraft Ep. 3"))
 assert(exactTooltipDetail.mediaIndex == 214
 	and exactTooltipDetail.mediaTitle == "Woodcraft Ep. 3"
 	and exactTooltipDetail.mediaCodes[1] == "CRP=1,COO=1",
 	"exact item detail did not propagate mediaIndex/mediaTitle/mediaCodes")
 
 local vhs = rowsFor({
-	media("Base.VHSTape", 1, 214, "Woodcraft Ep. 3"),
-	media("Base.VHSTape", 2, 214, "Woodcraft Episode Three"),
-	media("Base.VHSTape", 3, 315, "Exposure Survival Ep. 5"),
-	media("Base.VHSTape", 4, -1, "VHS Tape"),
-	media("Base.VHSTape", 5, -1, "VHS Tape"),
+	media("Base.VHS_Retail", 1, 214, "Woodcraft Ep. 3"),
+	media("Base.VHS_Retail", 2, 214, "Woodcraft Episode Three"),
+	media("Base.VHS_Retail", 3, 315, "Exposure Survival Ep. 5", {}),
+	media("Base.VHS_Home", 4, -1, "VHS Tape"),
+	media("Base.VHS_Home", 5, -1, "VHS Tape"),
 })
 assert(countRows(vhs) == 4,
 	"media identity must be one row for index 214, one for 315 and one per unknown copy")
@@ -112,8 +155,18 @@ assert(woodcraft.unitDetails[1].mediaIndex == 214
 	and woodcraft.unitDetails[1].mediaCodes[1] == "CRP=1,COO=1",
 	"snapshot unit detail did not propagate exact recorded-media identity")
 assert(exposure and exposure.mediaTitle == "Exposure Survival Ep. 5"
-	and exposure.mediaCodes[1] == "DOC=1",
+	and exposure.mediaCodes and #exposure.mediaCodes == 0,
 	"second VHS edition lost its individual title/codes")
+assert(woodcraft.nativePath == "knowledge_media/recorded_media/with_learning",
+	"teaching VHS lost its L3 in the persisted snapshot")
+assert(exposure.nativePath == "knowledge_media/recorded_media/leisure",
+	"leisure VHS lost its L3 in the persisted snapshot")
+for _, row in pairs(vhs) do
+	if row.fullType == "Base.VHS_Home" then
+		assert(row.nativePath == nil,
+			"unknown home VHS was silently classified as leisure")
+	end
+end
 assert(unknown == 2, "unknown media copies were collapsed")
 
 -- Execute the real Index contract over the exact persisted snapshot shape.
@@ -160,26 +213,80 @@ GlobalStorageSiK.CategoryResolution = {
 }
 local parentRows = GlobalStorageSiK.Index.buildRows("media_net", {})
 local woodcraftParent = nil
+local exposureParent = nil
 for i = 1, #parentRows do
 	if parentRows[i].mediaIndex == 214 then woodcraftParent = parentRows[i] end
+	if parentRows[i].mediaIndex == 315 then exposureParent = parentRows[i] end
 end
 assert(woodcraftParent and woodcraftParent.count == 2
-	and woodcraftParent.mediaTitle ~= "VHS Tape"
+	and woodcraftParent.displayName == "Woodcraft Ep. 3"
+	and woodcraftParent.mediaTitle == "Woodcraft Ep. 3"
 	and woodcraftParent.mediaCodes[1] == "CRP=1,COO=1",
 	"Index parent dropped exact VHS identity/presentation metadata")
+assert(exposureParent and exposureParent.count == 1
+	and exposureParent.displayName == "Exposure Survival Ep. 5"
+	and exposureParent.mediaTitle == "Exposure Survival Ep. 5"
+	and exposureParent.rowKey ~= woodcraftParent.rowKey,
+	"single VHS edition lost its title or collapsed into another mediaIndex")
 local detailPage = GlobalStorageSiK.Index.buildDetailPage(
 	"media_net", {}, woodcraftParent.rowKey, 1, 15)
 assert(detailPage.total == 1 and #detailPage.items == 1,
 	"two copies of one VHS edition must form one exact detail row")
 local woodcraftDetail = detailPage.items[1]
 assert(woodcraftDetail.count == 2 and woodcraftDetail.mediaIndex == 214
-	and woodcraftDetail.mediaTitle ~= "VHS Tape"
+	and woodcraftDetail.displayName == woodcraftParent.displayName
+	and woodcraftDetail.mediaTitle == woodcraftParent.mediaTitle
 	and woodcraftDetail.mediaCodes[1] == "CRP=1,COO=1",
 	"Index detail dropped mediaIndex/mediaTitle/mediaCodes")
+local exposurePage = GlobalStorageSiK.Index.buildDetailPage(
+	"media_net", {}, exposureParent.rowKey, 1, 15)
+assert(exposurePage.total == 1 and #exposurePage.items == 1,
+	"single VHS edition did not produce one exact child")
+local exposureDetail = exposurePage.items[1]
+assert(exposureDetail.count == 1 and exposureDetail.mediaIndex == 315
+	and exposureDetail.displayName == "Exposure Survival Ep. 5"
+	and exposureDetail.mediaTitle == "Exposure Survival Ep. 5"
+	and exposureDetail.nativePath == "knowledge_media/recorded_media/leisure",
+	"single VHS child lost title, identity or leisure L3")
+local teachingPerks = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(woodcraftDetail.mediaCodes)
+assert(#teachingPerks == 2 and teachingPerks[1] == "IGUI_perks_Carpentry"
+	and teachingPerks[2] == "IGUI_perks_Cooking",
+	"teaching codes did not survive snapshot -> group -> detail for tooltip presentation")
+
+-- Pagination is only a view over exact unknown units. Replacing page 1 with
+-- another page must neither change the parent identity nor lose/duplicate IDs.
+local originalSnapshot = registry.nodes.media_node.itemSnapshot
+local unknownItems = {}
+for itemId = 1001, 1032 do
+	unknownItems[#unknownItems + 1] = media(
+		"Base.VHS_Home", itemId, -1, "VHS Tape")
+end
+registry.nodes.media_node.itemSnapshot = rowsFor(unknownItems)
+local unknownParents = GlobalStorageSiK.Index.buildRows("media_net", {})
+assert(#unknownParents == 1 and unknownParents[1].count == 32,
+	"unknown VHS parent does not represent the complete physical set")
+local unknownParent = unknownParents[1]
+local seenUnknown, unknownCount = {}, 0
+for page = 1, 3 do
+	local result = GlobalStorageSiK.Index.buildDetailPage(
+		"media_net", {}, unknownParent.rowKey, page, 15)
+	assert(result.total == 32 and result.page == page and result.pageSize == 15,
+		"pagination changed the exact VHS set metadata")
+	for i = 1, #result.items do
+		local child = result.items[i]
+		assert(child.parentRowKey == unknownParent.rowKey and child.mediaIndex == nil,
+			"paginated child changed VHS identity")
+		assert(not seenUnknown[child.itemIds[1]], "pagination duplicated an unknown VHS unit")
+		seenUnknown[child.itemIds[1]] = true
+		unknownCount = unknownCount + 1
+	end
+end
+assert(unknownCount == 32, "pagination omitted unknown VHS units")
+registry.nodes.media_node.itemSnapshot = originalSnapshot
 
 local function exactNetworkCount(mediaIndex)
 	local counts, hasAnyNetwork = GlobalStorageSiK.Index.getNetworkCountsForItem(
-		{}, "Base.VHSTape", nil, mediaIndex, nil)
+		{}, "Base.VHS_Retail", nil, mediaIndex, nil)
 	assert(hasAnyNetwork == true, "accessible media network was not reported")
 	assert(#counts == 1 and counts[1].id == "media_net", "exact VHS lookup lost its network")
 	return counts[1].count
@@ -236,27 +343,32 @@ local function transientMediaProbe()
 	end
 	function probe:getRecordedMediaIndex() return self.appliedIndex end
 	function probe:getDisplayName()
-		return self.appliedIndex == 214 and "Woodcraft Ep. 3" or "Cinta VHS"
+		return "VHS comercial"
+	end
+	function probe:getName()
+		return self.appliedIndex == 214 and "Woodcraft Ep. 3" or "VHS comercial"
 	end
 	return probe
 end
 local localizeRecordedMediaRows = mediaLocalizerFactory({
 	GlobalStorageSiK = {
+		TerminalItems = {},
+		Log = { debug = function() end },
 		I18n = {
 			getScriptItem = function(fullType)
-				return fullType == "Base.VHSTape" and {} or nil
+				return fullType == "Base.VHS_Retail" and {} or nil
 			end,
-			nameFromItemInstance = function(item) return item:getDisplayName() end,
+			typeDisplayName = function() return "VHS comercial" end,
 		},
 	},
 	instanceItem = function(fullType)
-		assert(fullType == "Base.VHSTape", "unexpected media probe type")
+		assert(fullType == "Base.VHS_Retail", "unexpected media probe type")
 		return transientMediaProbe()
 	end,
 })
 local delayedRow = {
-	fullType = "Base.VHSTape", mediaIndex = 214,
-	displayName = "Cinta VHS", variantSummary = {},
+	fullType = "Base.VHS_Retail", mediaIndex = 214,
+	detailKind = "recorded_media", displayName = "Cinta VHS", variantSummary = {},
 }
 localizeRecordedMediaRows({ delayedRow })
 assert(probeAttempts == 1 and setterCalls == 1,
@@ -273,6 +385,13 @@ assert(delayedRow.displayName == "Woodcraft Ep. 3"
 localizeRecordedMediaRows({ delayedRow })
 assert(probeAttempts == 2,
 	"successful RecordedMedia title was not cached after recovery")
+
+assert(mediaLocalizerSource:find("probe:getName(player)", 1, true),
+	"VHS row resolver does not use vanilla getName(player)")
+assert(not mediaLocalizerSource:find("probe:getDisplayName", 1, true),
+	"VHS row resolver still accepts the generic script display name")
+assert(mediaLocalizerSource:find("tostring(tonumber(playerNum) or 0)", 1, true),
+	"VHS title cache is not partitioned by player")
 
 local snapshotSource = assert(io.open(shared .. "GS_ItemSnapshot.lua", "rb"))
 local snapshotText = snapshotSource:read("*a")
@@ -301,7 +420,17 @@ tooltipSource:close()
 assert(tooltipText:find('"\\31mediaIndex:" .. tostring(mediaIndex)', 1, true),
 	"tooltip cache/count contract does not key recorded media by index")
 assert(tooltipText:find("getVHSTrainingLines", 1, true),
-	"VHS skill presentation has no observable runtime hook")
+        "VHS skill presentation has no observable runtime hook")
+assert(tooltipText:find("perkKeysFromCodes(detail.mediaCodes)", 1, true),
+	"tooltip does not consume the exact teaching codes propagated by detail")
+assert(tooltipText:find("TerminalItems.probeForRow", 1, true),
+        "remote VHS tooltip does not reuse the indexed row probe")
+local exactProbeAt = assert(tooltipText:find("getVHSTrainingLines(mediaProbe)", 1, true),
+        "VHS tooltip does not ask the exact indexed vanilla probe first")
+local remoteFallbackAt = assert(tooltipText:find("getRemoteVHSTrainingLines(mediaDetail)", 1, true),
+        "VHS tooltip lost the bounded remote fallback")
+assert(exactProbeAt < remoteFallbackAt,
+        "remote VHS codes take precedence over the exact vanilla probe")
 local mediaSkillsStart = assert(tooltipText:find("local function mediaSkillNames(item)", 1, true),
 	"per-item MediaData skill adapter missing")
 local mediaSkillsEnd = assert(tooltipText:find("local function getVHSTrainingLines(item)",
@@ -324,6 +453,7 @@ assert(tooltipText:find("TooltipLib", 1, true),
 for _, name in ipairs({ "GS_NetClient", "GS_Sandbox", "GS_Log" }) do
 	package.loaded[name] = true
 end
+package.loaded["GS_UI_Framework"] = { Controls = {}, Viewport = {} }
 local sent = {}
 local directPlayer = {}
 GlobalStorageSiK.NetClient = {
@@ -351,14 +481,14 @@ isServer = function() return false end
 dofile(tooltipPath)
 
 local Tooltip = assert(GlobalStorageSiK.ItemNetworkTooltip)
-local networks, loaded = Tooltip.getCachedCounts("Base.VHSTape", nil, 214, nil, 0)
+local networks, loaded = Tooltip.getCachedCounts("Base.VHS_Retail", nil, 214, nil, 0)
 assert(networks == nil and loaded == false, "first synchronous SP probe must not fake preloaded data")
-networks, loaded = Tooltip.getCachedCounts("Base.VHSTape", nil, 214, nil, 0)
+networks, loaded = Tooltip.getCachedCounts("Base.VHS_Retail", nil, 214, nil, 0)
 assert(loaded == true and #networks == 1 and networks[1].count == 2,
 	"SP tooltip cache lost exact mediaIndex 214 count")
-networks, loaded = Tooltip.getCachedCounts("Base.VHSTape", nil, 315, nil, 0)
+networks, loaded = Tooltip.getCachedCounts("Base.VHS_Retail", nil, 315, nil, 0)
 assert(networks == nil and loaded == false, "mediaIndex 315 reused mediaIndex 214 cache key")
-networks, loaded = Tooltip.getCachedCounts("Base.VHSTape", nil, 315, nil, 0)
+networks, loaded = Tooltip.getCachedCounts("Base.VHS_Retail", nil, 315, nil, 0)
 assert(loaded == true and #networks == 1 and networks[1].count == 1,
 	"SP tooltip cache lost exact mediaIndex 315 count")
 assert(#sent == 0, "true SP path sent a network command")
@@ -368,21 +498,21 @@ assert(#sent == 0, "true SP path sent a network command")
 -- overwrite the other, even though fullType is identical.
 Tooltip.invalidateAll()
 isClient = function() return true end
-Tooltip.getCachedCounts("Base.VHSTape", nil, 214, nil, 3)
-Tooltip.getCachedCounts("Base.VHSTape", nil, 315, nil, 3)
+Tooltip.getCachedCounts("Base.VHS_Retail", nil, 214, nil, 3)
+Tooltip.getCachedCounts("Base.VHS_Retail", nil, 315, nil, 3)
 assert(#sent == 2, "serialized tooltip requests were incorrectly deduplicated by fullType")
 assert(sent[1].command == "getItemNetworkCounts" and sent[1].args.mediaIndex == 214
 	and sent[1].playerNum == 3, "serialized request lost mediaIndex 214 or playerNum")
 assert(sent[2].command == "getItemNetworkCounts" and sent[2].args.mediaIndex == 315
 	and sent[2].playerNum == 3, "serialized request lost mediaIndex 315 or playerNum")
-Tooltip.onCountsReceived("Base.VHSTape", {
+Tooltip.onCountsReceived("Base.VHS_Retail", {
 	{ id = "media_net", name = "Media Network", count = 2 },
 }, true, nil, 214, nil, 3)
-Tooltip.onCountsReceived("Base.VHSTape", {
+Tooltip.onCountsReceived("Base.VHS_Retail", {
 	{ id = "media_net", name = "Media Network", count = 1 },
 }, true, nil, 315, nil, 3)
-local cached214 = select(1, Tooltip.getCachedCounts("Base.VHSTape", nil, 214, nil, 3))
-local cached315 = select(1, Tooltip.getCachedCounts("Base.VHSTape", nil, 315, nil, 3))
+local cached214 = select(1, Tooltip.getCachedCounts("Base.VHS_Retail", nil, 214, nil, 3))
+local cached315 = select(1, Tooltip.getCachedCounts("Base.VHS_Retail", nil, 315, nil, 3))
 assert(cached214 and cached214[1].count == 2 and cached315 and cached315[1].count == 1,
 	"serialized responses collided in the mediaIndex cache")
 

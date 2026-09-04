@@ -9,12 +9,11 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_DepositClient"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.TerminalDrop = {}
 
 local T = GlobalStorageSiK.I18n.text
-local tickInstalled = false
-local wasDragging = false
-local pendingItems = nil
 local lastDepositMs = 0
 local DEPOSIT_COOLDOWN_MS = 500
 
@@ -55,45 +54,12 @@ function GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
 	end
 
 	lastDepositMs = now
-	pendingItems = nil
-	wasDragging = false
 	GlobalStorageSiK.DepositClient.clearDrag()
 
 	return GlobalStorageSiK.DepositClient.sendDepositItems(ids)
 end
 
---- Tick: captura suelta de ítem sobre el terminal.
-local function onTickDrop()
-	local dragging = ISMouseDrag and ISMouseDrag.dragging
-	if dragging then
-		wasDragging = true
-		if GlobalStorageSiK.TerminalDrop.isMouseOverTerminal() then
-			pendingItems = GlobalStorageSiK.DepositClient.collectDraggedItems()
-		else
-			pendingItems = nil
-		end
-		return
-	end
-
-	if wasDragging then
-		wasDragging = false
-		if pendingItems and #pendingItems > 0 and GlobalStorageSiK.TerminalDrop.isMouseOverTerminal() then
-			GlobalStorageSiK.TerminalDrop.tryDepositItems(pendingItems)
-		end
-		pendingItems = nil
-	end
-end
-
---- Engancha detección de arrastre (solo tick; sin hook en onMouseUp para evitar bucles).
-function GlobalStorageSiK.TerminalDrop.installHooks()
-	if tickInstalled then
-		return
-	end
-	tickInstalled = true
-	Events.OnTick.Add(onTickDrop)
-end
-
---- Configura panel como zona visual de drop (sin interceptar mouseUp).
+--- Configura el panel como destino visual mediante el contrato publico SiK UI.
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI|nil
 function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
@@ -102,32 +68,83 @@ function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 	end
 	panel.gsDropSetup = true
 	panel.gsDropTerminal = terminal
-
-	local basePrerender = panel.prerender
-	panel.prerender = function(self)
-		if basePrerender then
-			basePrerender(self)
-		elseif ISPanel.prerender then
-			ISPanel.prerender(self)
-		end
-		if GlobalStorageSiK.DepositClient.isDraggingItems() and GlobalStorageSiK.TerminalDrop.isMouseOverTerminal() then
-			self:drawRect(0, 0, self.width, self.height, 0.2, 0.2, 0.45, 0.65)
-			self:drawRectBorder(0, 0, self.width, self.height, 0.65, 0.4, 0.7, 0.9)
-		end
+	panel.gsDropTarget = UI.DropTarget.attach(panel, {
+		playerNum = terminal and terminal.playerNum or 0,
+		tone = "info",
+		dragProvider = function()
+			local items = GlobalStorageSiK.DepositClient.collectDraggedItems()
+			if #items == 0 then
+				return nil
+			end
+			return { payload = items }
+		end,
+		accept = function(items)
+			return items ~= nil and #items > 0
+				and GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
+				and GlobalStorageSiK.DepositClient.canDepositDraggedItems(items)
+		end,
+		onDrop = function(items)
+			return GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
+		end,
+	})
+	if terminal and not terminal.gsDropMonitor then
+		terminal.gsDropMonitor = UI.DropTarget.monitor(terminal, {
+			playerNum = terminal.playerNum or 0,
+			isDragging = function()
+				return ISMouseDrag and ISMouseDrag.dragging ~= nil
+			end,
+			payload = function()
+				local items = GlobalStorageSiK.DepositClient.collectDraggedItems()
+				if #items == 0 then return nil end
+				return items
+			end,
+			isOver = function()
+				return GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
+			end,
+			onDrop = function(items)
+				return GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
+			end,
+		})
 	end
 end
 
---- Etiqueta de ayuda para arrastre.
+--- Libera destino y monitor del ciclo de vida de la superficie. No quedan
+--- handlers de arrastre vivos tras cerrar o reconstruir la pestaña.
+---@param panel ISPanel|nil
+---@param terminal GS_TerminalUI|nil
+---@return boolean
+function GlobalStorageSiK.TerminalDrop.disposePanel(panel, terminal)
+	if not panel then return false end
+	local owner = terminal or panel.gsDropTerminal
+	if panel.gsDropTarget and panel.gsDropTarget.dispose then
+		panel.gsDropTarget:dispose()
+	end
+	panel.gsDropTarget = nil
+	panel.gsDropSetup = nil
+	panel.gsDropTerminal = nil
+	if owner and owner.gsDropMonitor then
+		if owner.gsDropMonitor.dispose then owner.gsDropMonitor:dispose() end
+		owner.gsDropMonitor = nil
+	end
+	return true
+end
+
+--- Texto de ayuda para arrastre construido por el framework publico.
 ---@param parent ISPanel
 ---@param x number
 ---@param y number
----@return ISLabel
+---@return ISPanel
 function GlobalStorageSiK.TerminalDrop.createHintLabel(parent, x, y)
-	local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-	local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, T("IGUI_GS_DropHint"), 0.5, 0.58, 0.66, 1, UIFont.Small, true)
-	lbl:initialise()
-	parent:addChild(lbl)
-	return lbl
+	local parentWidth = parent and tonumber(parent.width) or nil
+	if not parentWidth and parent and parent.getWidth then
+		parentWidth = tonumber(parent:getWidth())
+	end
+	return UI.Controls.copyText(parent, {
+		x = x,
+		y = y,
+		w = math.max(1, (parentWidth or 240) - (tonumber(x) or 0)),
+		text = T("IGUI_GS_DropHint"),
+		tone = "textMuted",
+		playerNum = parent and parent.playerNum or 0,
+	})
 end
-
-GlobalStorageSiK.TerminalDrop.installHooks()

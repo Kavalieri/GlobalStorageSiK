@@ -73,21 +73,32 @@ local sourcePath = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua
 local sourceFile = assert(io.open(sourcePath, "rb"))
 local source = sourceFile:read("*a")
 sourceFile:close()
-local tooltipStart = assert(source:find("%-%- Tooltip al pasar", 1))
-local tooltipEnd = assert(source:find("row%.onRemoteItemDetail", tooltipStart))
-local tooltipBlock = source:sub(tooltipStart, tooltipEnd - 1)
+local renderStart = assert(source:find("local function afterRenderFrameworkRow", 1, true))
+local renderEnd = assert(source:find("local function itemRowAdapter", renderStart, true))
+local tooltipBlock = source:sub(renderStart, renderEnd - 1)
+local callbackStart = assert(source:find("local function updateRemoteMediaTitle", 1, true))
+local callbackEnd = assert(source:find("local function updateFrameworkRow", callbackStart, true))
+local callbackBlock = source:sub(callbackStart, callbackEnd - 1)
 assert(source:find("local function pointerInsideRow(row)", 1, true) ~= nil,
 	"row hover does not use the real pointer/row rectangle")
-assert(tooltipBlock:find("if data and not data._gsPager and not data._gsStale and hovering", 1, true) ~= nil,
+assert(tooltipBlock:find("if not data._gsStale and hovering", 1, true) ~= nil,
 	"ordinary parent/child tooltip lifecycle is not driven by passive row hover")
+assert(tooltipBlock:find("_gsPager", 1, true) == nil,
+	"tooltip lifecycle still depends on a retired product pager row")
 assert(tooltipBlock:find("self:isMouseOver()", 1, true) == nil,
 	"tooltip lifecycle still depends on child-panel hit-testing")
 assert(tooltipBlock:find("aggregateAllowed", 1, true) == nil,
 	"tooltip lifecycle still gates aggregate parents")
-assert(tooltipBlock:find("TerminalItems.makePassiveTooltip(self._gsTooltip)", 1, true) ~= nil,
+assert(tooltipBlock:find("TerminalItems.makePassiveTooltip(row._gsTooltip)", 1, true) ~= nil,
 	"row tooltip is not made mouse-transparent")
 assert(tooltipBlock:find('if data._gsRowKind == "child" then', 1, true) ~= nil
-	and tooltipBlock:find("RemoteItemDetail.activate(self, data, self.terminal)", 1, true) ~= nil,
+	and tooltipBlock:find("RemoteItemDetail.activate(row, data, terminal)", 1, true) ~= nil,
 	"child hover is not wired to exact remote detail")
+assert(callbackBlock:find("row.itemData._gsStale", 1, true) ~= nil
+	and callbackBlock:find("not pointerInsideRow(row)", 1, true) ~= nil,
+	"late remote detail can bind to a stale or no-longer-hovered virtual row")
+assert(callbackBlock:find("detail and detail.itemId", 1, true) ~= nil
+	and callbackBlock:find("row.itemData.itemId", 1, true) ~= nil,
+	"late remote detail is not matched to the exact item identity")
 
 print("remote_item_detail_lifecycle_regression: OK")

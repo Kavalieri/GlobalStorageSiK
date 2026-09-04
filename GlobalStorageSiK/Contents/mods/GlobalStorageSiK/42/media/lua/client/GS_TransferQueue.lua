@@ -10,6 +10,7 @@ require "GS_Log"
 require "GS_I18n"
 require "GS_Sandbox"
 require "GS_OperationPacing"
+require "GS_UI_Feedback"
 
 GlobalStorageSiK.TransferQueue = {}
 
@@ -64,7 +65,7 @@ local function showProgress(force)
 	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
 	operation.lastProgressMs = now
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-	if not player or not player.setHaloNote then return end
+	if not player then return end
 	local moved = (operation.totalMoved or 0) + (pendingJob and pendingJob.totalMoved or 0)
 	local text = GlobalStorageSiK.I18n.text("IGUI_GS_DepositPending")
 	if (operation.totalExpected or 0) > 0 then
@@ -74,7 +75,10 @@ local function showProgress(force)
 	end
 	local currentJob = math.min(operation.jobsTotal or 1, (operation.jobsDone or 0) + 1)
 	text = text .. " (" .. tostring(currentJob) .. "/" .. tostring(operation.jobsTotal or 1) .. ")"
-	pcall(function() player:setHaloNote(text, 200, 220, 200, 220) end)
+	pcall(function()
+		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 220, 200, 220,
+			{ channel = "deposit-progress", dedupeKey = text, throttleMs = 1000 })
+	end)
 end
 
 ---@param job table

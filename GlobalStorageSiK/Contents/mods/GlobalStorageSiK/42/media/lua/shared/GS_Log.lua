@@ -80,16 +80,16 @@ local AREA_CATEGORY = {
 	-- nombrado de terminal (servidor de nombres), no forma parte del
 	-- framework visual - se separa en su propia categoria para no perderla.
 	NodeNaming = "NodeNaming",
-	-- General/framework: apertura de ventana, refresco de pestaña, fallos de
-	-- TerminalUI - antes "UI" (compartida con NodeNaming), ahora bajo el
-	-- arbol SiK UI. Tambien gobierna GS_UIDebug.lua (arbol de widgets, clicks,
-	-- solapes) - ver GlobalStorageSiK.Sandbox.debugCategoryEnabled("SiKUI"),
-	-- sustituye al antiguo interruptor independiente DebugModeUI.
+	-- Adaptador de diagnostico SiK.UI: el framework posee montaje, arbol,
+	-- geometria, solapes e interaccion; Global Storage solo aporta este gate y
+	-- su logger. Sustituye al antiguo interruptor independiente DebugModeUI.
 	TerminalUI = "SiKUI",
-	-- Geometria de columnas de SiK_UI.Table (GS_SiK_UI_Table.lua) - ancho
+	-- Geometria de columnas de SiK.UI.Table (SiK/UI/Table.lua) - ancho
 	-- resuelto por columna, solo se traza cuando el ancho disponible cambia
 	-- de verdad (resize), nunca por fotograma.
 	SiKUITable = "SiKUITable",
+	AdminTableRuntime = "AdminTableRuntime",
+	RecordedMediaRuntime = "RecordedMediaRuntime",
 	-- Motor de scroll/lista virtual (GS_TerminalUI_Scroll.lua) - crecimiento
 	-- de pool y cambios de dataset (Almacen y cualquier lista virtualizada).
 	SiKUIScroll = "SiKUIScroll",

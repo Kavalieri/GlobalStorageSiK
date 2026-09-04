@@ -14,8 +14,7 @@
 require "GSSiK_Addon_Tablet_ItemHooks"
 require "GSSiK_Addon_Tablet_Sandbox"
 require "GSSiK_Addon_Tablet_Log"
-require "GS_TerminalAccess"
-require "GS_Addons"
+require "GSSiK_API"
 
 GSSiK_Addon_Tablet = GSSiK_Addon_Tablet or {}
 
@@ -100,12 +99,13 @@ function GSSiK_Addon_Tablet.getWirelessRangeForNetwork(player, networkId, anchor
 	if not GSSiK_Addon_Tablet.hasAccessTablet(player) then
 		return 0
 	end
-	if not GlobalStorageSiK.Addons or not GlobalStorageSiK.Addons.isInstalled(networkId, anchor, "TabletLink") then
+	local stateOk, _, installed = GSSiK.API.Installation.isInstalled(networkId, anchor, "TabletLink")
+	if stateOk ~= true or installed ~= true then
 		GSSiK_Addon_Tablet.Log.debug("getWirelessRangeForNetwork -> antena no instalada, range=0")
 		return 0
 	end
-	local installed = GlobalStorageSiK.Addons.serializeForTerminal(networkId, anchor)["TabletLink"]
-	local itemType = installed and installed.itemType
+	local descriptorOk, _, descriptor = GSSiK.API.Installation.get(networkId, anchor, "TabletLink")
+	local itemType = descriptorOk == true and descriptor and descriptor.itemType or nil
 	local range
 	if itemType == "GSSiK_Addon_Tablet.GS_WifiAntenna_T3" then
 		range = GSSiK_Addon_Tablet.Sandbox.getTier3Range()
@@ -128,7 +128,10 @@ function GSSiK_Addon_Tablet.getWirelessRangeForNetwork(player, networkId, anchor
 	return range
 end
 
-GlobalStorageSiK.TerminalAccess.registerWirelessProvider({
+if GSSiK_Addon_Tablet._accessRegistration and GSSiK_Addon_Tablet._accessRegistration.dispose then
+	GSSiK_Addon_Tablet._accessRegistration:dispose()
+end
+local accessOk, accessCode, accessRegistration = GSSiK.API.Access.registerProvider({
 	id = "TabletLink",
 	capabilities = {
 		remoteTerminal = true,
@@ -141,3 +144,9 @@ GlobalStorageSiK.TerminalAccess.registerWirelessProvider({
 	getRange = GSSiK_Addon_Tablet.getWirelessRangeForPlayer,
 	getRangeForNetwork = GSSiK_Addon_Tablet.getWirelessRangeForNetwork,
 })
+if accessOk == true then
+	GSSiK_Addon_Tablet._accessRegistration = accessRegistration
+else
+	GSSiK_Addon_Tablet._accessRegistration = nil
+	GSSiK_Addon_Tablet.Log.debug("Access.registerProvider failed: " .. tostring(accessCode))
+end

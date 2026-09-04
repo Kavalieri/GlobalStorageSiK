@@ -8,6 +8,7 @@
 require "GS_Network"
 require "GS_I18n"
 require "GS_WorldHighlight"
+require "GS_UI_Feedback"
 
 GlobalStorageSiK.NodeHighlight = {}
 
@@ -61,8 +62,8 @@ local function showHalo(text, r, g, b)
 	if not player and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer then
 		player = GlobalStorageSiK.NetClient.getPlayer()
 	end
-	if player and player.setHaloNote and text and text ~= "" then
-		player:setHaloNote(text, r or 200, g or 220, b or 160, 480)
+	if player and text and text ~= "" then
+		GlobalStorageSiK.UIFeedback.halo(player, text, r or 200, g or 220, b or 160, 480)
 	end
 end
 

@@ -18,6 +18,8 @@ require "GS_NativeProduct"
 require "GS_Sandbox"
 require "GS_Log"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.VanillaInventoryTaxonomy = GlobalStorageSiK.VanillaInventoryTaxonomy or {}
 
 local Projection = GlobalStorageSiK.VanillaInventoryTaxonomy
@@ -181,9 +183,7 @@ local function drawProjection(pane, originalDrawText, text, x, y, r, g, b, a, fo
 	local label, color = projectionFor(pane, item)
 	local maxWidth = math.max(0, pane.column4 - pane.column3 - 16)
 	if pane.isVScrollBarVisible and pane:isVScrollBarVisible() then maxWidth = math.max(0, maxWidth - 13) end
-	if GlobalStorageSiK.SiK_UI and GlobalStorageSiK.SiK_UI.truncateText then
-		label = GlobalStorageSiK.SiK_UI.truncateText(label, maxWidth, font)
-	end
+	label = UI.Controls.truncateText(label, maxWidth, font)
 	if color then return originalDrawText(pane, label, x, y, color[1], color[2], color[3], a, font) end
 	return originalDrawText(pane, label, x, y, r, g, b, a, font)
 end

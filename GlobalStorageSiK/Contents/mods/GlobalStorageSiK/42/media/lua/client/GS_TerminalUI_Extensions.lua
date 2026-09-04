@@ -7,11 +7,19 @@
 	cuenta. El Core conserva una sola instancia por terminal y tabKey.
 ]]
 
-require "ISUI/ISPanel"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalExtensions = GlobalStorageSiK.TerminalExtensions or {}
 GlobalStorageSiK.TerminalExtensions._definitions = GlobalStorageSiK.TerminalExtensions._definitions or {}
 GlobalStorageSiK.TerminalExtensions._staffActions = GlobalStorageSiK.TerminalExtensions._staffActions or {}
+GlobalStorageSiK.TerminalExtensions._generation =
+	tonumber(GlobalStorageSiK.TerminalExtensions._generation) or 0
+
+local function allocateGeneration()
+	GlobalStorageSiK.TerminalExtensions._generation =
+		GlobalStorageSiK.TerminalExtensions._generation + 1
+	return GlobalStorageSiK.TerminalExtensions._generation
+end
 
 --- Registra una accion interna aportada por un addon para superficies de
 --- diagnostico del Core. El Core solo conoce etiqueta, orden y callback; la
@@ -25,13 +33,22 @@ function GlobalStorageSiK.TerminalExtensions.registerStaffAction(actionKey, opts
 		or type(opts.labelKey) ~= "string" or type(opts.invoke) ~= "function" then
 		return false
 	end
+	local generation = allocateGeneration()
 	GlobalStorageSiK.TerminalExtensions._staffActions[actionKey] = {
 		key = actionKey,
+		generation = generation,
 		labelKey = opts.labelKey,
 		order = tonumber(opts.order) or 100,
 		invoke = opts.invoke,
 		isAvailable = opts.isAvailable,
 	}
+	return true, generation
+end
+
+function GlobalStorageSiK.TerminalExtensions.removeStaffActionIfGeneration(actionKey, generation)
+	local current = GlobalStorageSiK.TerminalExtensions._staffActions[actionKey]
+	if not current or current.generation ~= generation then return false end
+	GlobalStorageSiK.TerminalExtensions._staffActions[actionKey] = nil
 	return true
 end
 
@@ -63,33 +80,77 @@ end
 --- Registra la definicion global de una pestaña. Es idempotente por tabKey:
 --- una recarga del fichero actualiza la definicion, pero no crea UI.
 ---@param tabKey string
----@param opts table { module, titleKey, iconPath, panelField, buildPanel?, setupPanel? }
+---@param opts table { surface, builder?, contextFactory, titleKey, iconPath?, panelField?, isVisible?, enabledStateKey? }
 ---@return boolean ok
 function GlobalStorageSiK.TerminalExtensions.registerDefinition(tabKey, opts)
 	if type(tabKey) ~= "string" or tabKey == "" or type(opts) ~= "table" then
 		return false
 	end
-	local module = opts.module
-	local buildPanel = opts.buildPanel or (module and module.buildPanel)
-	if type(buildPanel) ~= "function" or type(opts.titleKey) ~= "string" then
+	if type(opts.surface) ~= "table" or type(opts.contextFactory) ~= "function"
+		or type(opts.titleKey) ~= "string" or opts.module ~= nil
+		or opts.buildPanel ~= nil or opts.layout ~= nil or opts.refresh ~= nil
+		or (opts.builder ~= nil and type(opts.builder) ~= "function")
+		or (opts.isVisible ~= nil and type(opts.isVisible) ~= "function")
+		or (opts.enabledStateKey ~= nil and type(opts.enabledStateKey) ~= "string") then
 		return false
 	end
+	local generation = allocateGeneration()
 	GlobalStorageSiK.TerminalExtensions._definitions[tabKey] = {
-		module = module,
+		generation = generation,
+		surface = opts.surface,
+		builder = opts.builder or SiK.UI.SurfaceHost.mount,
+		contextFactory = opts.contextFactory,
 		titleKey = opts.titleKey,
 		iconPath = opts.iconPath,
 		panelField = opts.panelField,
-		buildPanel = buildPanel,
-		setupPanel = opts.setupPanel,
+		isVisible = opts.isVisible,
+		enabledStateKey = opts.enabledStateKey,
+		refreshIntervalMs = tonumber(opts.refreshIntervalMs),
+		order = tonumber(opts.order) or 100,
 	}
+	return true, generation
+end
+
+function GlobalStorageSiK.TerminalExtensions.syncVisibilityAll(terminal)
+	local definitions = {}
+	for tabKey, definition in pairs(GlobalStorageSiK.TerminalExtensions._definitions) do
+		definitions[#definitions + 1] = { key = tabKey, definition = definition }
+	end
+	table.sort(definitions, function(left, right)
+		if left.definition.order == right.definition.order then
+			return left.key < right.key
+		end
+		return left.definition.order < right.definition.order
+	end)
+	for index = 1, #definitions do
+		local definition = definitions[index].definition
+		local visible = nil
+		if type(definition.isVisible) == "function" then
+			local ok, result = pcall(definition.isVisible, terminal)
+			visible = ok and result == true
+		elseif definition.enabledStateKey then
+			local state = terminal and terminal.terminalState or nil
+			visible = type(state) == "table"
+				and state[definition.enabledStateKey] == true
+		end
+		if visible ~= nil then
+			GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal,
+				definitions[index].key, visible)
+		end
+	end
+end
+
+function GlobalStorageSiK.TerminalExtensions.removeDefinitionIfGeneration(tabKey, generation)
+	local current = GlobalStorageSiK.TerminalExtensions._definitions[tabKey]
+	if not current or current.generation ~= generation then return false end
+	GlobalStorageSiK.TerminalExtensions._definitions[tabKey] = nil
 	return true
 end
 
 --- Registra una pestaña extra en un terminal ya construido.
 ---@param terminal GS_TerminalUI
 ---@param tabKey string
----@param opts table { panel, module, titleKey, iconPath } - module expone
---- .refresh(panel, terminal) y opcionalmente .layout(panel, innerW, innerH)
+---@param opts table { panel, host, titleKey, iconPath }
 function GlobalStorageSiK.TerminalExtensions.registerTab(terminal, tabKey, opts)
 	if not terminal or not tabKey or not opts or not opts.panel then
 		return false
@@ -103,11 +164,12 @@ function GlobalStorageSiK.TerminalExtensions.registerTab(terminal, tabKey, opts)
 		panel = opts.panel,
 	}
 	local entry = terminal.extraTabs[tabKey]
-	entry.module = opts.module or entry.module
+	entry.host = opts.host or entry.host
 	entry.titleKey = opts.titleKey or entry.titleKey
 	entry.iconPath = opts.iconPath or entry.iconPath
-	terminal.tabViews = terminal.tabViews or {}
-	terminal.tabViews[tabKey] = opts.panel
+	if GlobalStorageSiK.TerminalTabs then
+		GlobalStorageSiK.TerminalTabs.registerPanel(terminal, tabKey, opts.panel)
+	end
 	return true
 end
 
@@ -131,52 +193,77 @@ function GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
 		return nil
 	end
 	GlobalStorageSiK.Log.debug("SiKUITabs", "ensureTab build (primera vez para este terminal)", "tabKey=" .. tostring(tabKey))
-	local fieldPanel = def.panelField and terminal[def.panelField] or nil
-	if fieldPanel then
-		local registered = GlobalStorageSiK.TerminalExtensions.registerTab(terminal, tabKey, {
-			panel = fieldPanel,
-			module = def.module,
-			titleKey = def.titleKey,
-			iconPath = def.iconPath,
-		})
-		return registered and fieldPanel or nil
+	-- The navigation destination is the real parent. It must exist and have
+	-- completed its own layout before any product widget is constructed.
+	GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, true, {
+		key = tabKey,
+		titleKey = def.titleKey,
+		panelField = nil,
+		iconPath = def.iconPath,
+	})
+	local parent = terminal.navigationContainer:getContentHost(tabKey)
+	if not parent or (tonumber(parent.width) or 0) <= 1
+		or (tonumber(parent.height) or 0) <= 1 then
+		GlobalStorageSiK.Log.error("SiKUITabs", "destino sin geometria final",
+			"tabKey=" .. tostring(tabKey))
+		return nil
 	end
-	local panel = ISPanel:new(0, 0, 10, 10)
-	panel:initialise()
-	panel.drawBackground = false
-	panel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	panel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
+	local panel = UI.Controls.panel(parent, {
+		x = 0, y = 0, w = parent.width, h = parent.height, drawBackground = false,
+		backgroundColor = { r = 0, g = 0, b = 0, a = 0 },
+		borderColor = { r = 0, g = 0, b = 0, a = 0 },
+		controlId = "addonTabHost", playerNum = terminal.playerNum,
+	})
 	panel.clipChildren = true
 	panel:setScrollWithParent(false)
 	if panel.setScrollChildren then
 		panel:setScrollChildren(false)
 	end
 	panel:setVisible(false)
-	def.buildPanel(panel, terminal)
-	if type(def.setupPanel) == "function" then
-		def.setupPanel(panel, terminal)
-	end
-	if def.panelField then
-		terminal[def.panelField] = panel
-	end
 	local registered = GlobalStorageSiK.TerminalExtensions.registerTab(terminal, tabKey, {
 		panel = panel,
-		module = def.module,
 		titleKey = def.titleKey,
 		iconPath = def.iconPath,
 	})
 	if not registered then
 		return nil
 	end
+	local context, contextReason = def.contextFactory(terminal)
+	if type(context) ~= "table" then
+		GlobalStorageSiK.Log.error("SiKUITabs", "contextFactory invalido",
+			"tabKey=" .. tostring(tabKey) .. " reason=" .. tostring(contextReason))
+		return nil
+	end
+	local host, hostReason = def.builder(panel, def.surface, {
+		context = context,
+		contextProvider = function()
+			return def.contextFactory(terminal)
+		end,
+		followParent = true,
+		onError = function(payload)
+			GlobalStorageSiK.Log.error("SiKUITabs", "surface host",
+				"tabKey=" .. tostring(tabKey) .. " reason=" .. tostring(payload and payload.reason))
+		end,
+	})
+	if not host then
+		GlobalStorageSiK.Log.error("SiKUITabs", "surface mount fallo",
+			"tabKey=" .. tostring(tabKey) .. " reason=" .. tostring(hostReason))
+		return nil
+	end
+	panel._sikSurfaceHost = host
+	terminal.extraTabs[tabKey].host = host
+	if def.panelField then
+		terminal[def.panelField] = panel
+	end
 	return panel
 end
 
---- Muestra/oculta una pestaña extra ya registrada (delega en el tabRail).
+--- Muestra/oculta una pestaña extra ya registrada en la navegación del Container.
 ---@param terminal GS_TerminalUI
 ---@param tabKey string
 ---@param visible boolean
 function GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal, tabKey, visible)
-	if not terminal or not terminal.tabRail then
+	if not terminal or not terminal.navigationContainer then
 		return false
 	end
 	if visible then
@@ -187,7 +274,7 @@ function GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal, tabKey, vis
 		return false
 	end
 	GlobalStorageSiK.Log.debug("SiKUITabs", "setTabVisible", "tabKey=" .. tostring(tabKey) .. " visible=" .. tostring(visible))
-	terminal.tabRail:setDynamicTabVisible(visible, {
+	GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, {
 		key = tabKey,
 		titleKey = entry.titleKey,
 		panelField = nil,
@@ -202,11 +289,11 @@ end
 ---@return boolean handled
 function GlobalStorageSiK.TerminalExtensions.refreshActive(terminal, tab)
 	local entry = terminal and terminal.extraTabs and terminal.extraTabs[tab]
-	if not entry or not entry.panel or not entry.module or not entry.module.refresh then
+	if not entry or not entry.host then
 		return false
 	end
-	entry.module.refresh(entry.panel, terminal)
-	return true
+	local updated = entry.host:refresh()
+	return updated ~= nil
 end
 
 --- Aplica layout a todas las pestañas extra registradas.
@@ -218,13 +305,15 @@ function GlobalStorageSiK.TerminalExtensions.layoutAll(terminal, innerW, innerH)
 		return
 	end
 	for _, entry in pairs(terminal.extraTabs) do
-		if entry.panel then
-			entry.panel:setX(0)
-			entry.panel:setWidth(innerW)
-			entry.panel:setHeight(innerH)
+		if entry.host then
+			entry.host:reflow({ x = 0, y = 0, w = innerW, h = innerH })
 		end
-		if entry.panel and entry.module and entry.module.layout then
-			entry.module.layout(entry.panel, innerW, innerH)
-		end
+	end
+end
+
+function GlobalStorageSiK.TerminalExtensions.layoutActive(terminal, tabKey, innerW, innerH)
+	local entry = terminal and terminal.extraTabs and terminal.extraTabs[tabKey]
+	if entry and entry.host then
+		entry.host:reflow({ x = 0, y = 0, w = innerW, h = innerH })
 	end
 end

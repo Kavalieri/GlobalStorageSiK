@@ -53,6 +53,8 @@ GlobalStorageSiK.CategoryResolution = {
 		}
 	end,
 }
+dofile(shared .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(shared .. "GS_ItemSnapshot.lua")
 
 local nextId = 0

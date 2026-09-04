@@ -6,15 +6,14 @@
 require "GS_NetClient"
 require "GS_WithdrawClient"
 require "GS_ContainerTargets"
-require "GS_SiK_UI_EscapeStack"
-require "GS_SiK_UI_Viewport"
+local UI = require "GS_UI_Framework"
 require "GS_I18n"
-require "ISUI/ISPanel"
 
 GlobalStorageSiK.TerminalWithdrawDrag = {}
 
 local activeDrag = nil
 local dragPreviewPanel = nil
+local dragSession = nil
 local cleanupRegistered = false
 local PREVIEW_MIN_W = 180
 local PREVIEW_MAX_W = 300
@@ -24,108 +23,18 @@ local PREVIEW_ICON = 32
 local PREVIEW_GAP = 8
 local PREVIEW_ALPHA = 0.78
 
-local GSWithdrawDragPreview = ISPanel:derive("GSWithdrawDragPreview")
-local GSWithdrawDragPreviewRow = ISPanel:derive("GSWithdrawDragPreviewRow")
-
 local function rowIdentity(row)
 	return row and (row.rowKey or row.fullType) or nil
 end
 
-function GSWithdrawDragPreviewRow:new(x, y, width, height, descriptor, rowIndex)
-	local o = ISPanel:new(x, y, width, height)
-	setmetatable(o, self)
-	self.__index = self
-	o.descriptor = descriptor
-	o.rowIndex = rowIndex
-	o.drawBackground = false
-	o.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	o.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	return o
-end
-
-local function truncateMeasured(text, maxWidth)
-	return GlobalStorageSiK.SiK_UI.truncateText(tostring(text or ""), maxWidth, UIFont.Small)
-end
-
-function GSWithdrawDragPreviewRow:prerender()
-	ISPanel.prerender(self)
-	local descriptor = self.descriptor
-	if not descriptor then return end
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	self:drawRect(0, 0, self.width, self.height, PREVIEW_ALPHA,
-		0.035, 0.035, 0.035)
-	self:drawRectBorder(0, 0, self.width, self.height, PREVIEW_ALPHA,
-		0.38, 0.42, 0.46)
-	local iconX = PREVIEW_PAD + 16
-	local iconY = math.floor((self.height - PREVIEW_ICON) / 2)
-	if descriptor.texture then
-		self:drawTextureScaledAspect(descriptor.texture, iconX, iconY,
-			PREVIEW_ICON, PREVIEW_ICON, PREVIEW_ALPHA, 1, 1, 1)
-	end
-	local y = math.floor((self.height - getTextManager():getFontHeight(UIFont.Small)) / 2)
-	if descriptor.indicator and descriptor.indicator ~= "" then
-		self:drawText(descriptor.indicator, PREVIEW_PAD, y,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3],
-			PREVIEW_ALPHA, UIFont.Small)
-	end
-	local textX = iconX + PREVIEW_ICON + PREVIEW_GAP
-	local counter = descriptor.count and tostring(descriptor.count) or nil
-	local counterW = counter and getTextManager():MeasureStringX(UIFont.Small, counter) or 0
-	local counterReserve = counter and (counterW + PREVIEW_GAP) or 0
-	local textW = math.max(20, self.width - textX - PREVIEW_PAD - counterReserve)
-	self:drawText(truncateMeasured(descriptor.name, textW), textX, y,
-		pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], PREVIEW_ALPHA, UIFont.Small)
-	if counter then
-		self:drawTextRight(counter, self.width - PREVIEW_PAD, y,
-			pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3],
-			PREVIEW_ALPHA, UIFont.Small)
-	end
-end
-
-function GSWithdrawDragPreview:new(x, y, width, height)
-	local o = ISPanel:new(x, y, width, height)
-	setmetatable(o, self)
-	self.__index = self
-	return o
-end
-
 local function destroyPreview()
-	if dragPreviewPanel then
-		GlobalStorageSiK.SiK_UI.EscapeStack.remove(dragPreviewPanel)
-		dragPreviewPanel:removeFromUIManager()
+	if dragSession then
+		dragSession:dispose()
+		dragSession = nil
 		dragPreviewPanel = nil
-	end
-end
-
-local function pointerPosition(width, height, playerNum)
-	local mx = getMouseX and getMouseX() or 0
-	local my = getMouseY and getMouseY() or 0
-	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum or 0)
-	local right = viewport.x + viewport.w
-	local bottom = viewport.y + viewport.h
-	local gap = 16
-	local x = mx + gap
-	local y = my + gap
-	-- Se invierte cuando cabe al lado opuesto. Si tampoco cabe, se permite el
-	-- recorte visual: el ghost jamás limita el cursor ni decide el hit-test.
-	if x + width > right and mx - width - gap >= viewport.x then
-		x = mx - width - gap
-	end
-	if y + height > bottom and my - height - gap >= viewport.y then
-		y = my - height - gap
-	end
-	return x, y
-end
-
-local function makeMouseTransparent(panel)
-	if not panel then return end
-	panel.onMouseDown = function() return false end
-	panel.onMouseUp = function() return false end
-	panel.onMouseUpOutside = function() return false end
-	panel.onMouseMove = function() return false end
-	panel.onMouseMoveOutside = function() return false end
-	if panel.javaObject and panel.javaObject.setConsumeMouseEvents then
-		panel.javaObject:setConsumeMouseEvents(false)
+	elseif dragPreviewPanel then
+		UI.DragGhost.destroy(dragPreviewPanel)
+		dragPreviewPanel = nil
 	end
 end
 
@@ -146,6 +55,9 @@ local function createPreview(sourceWidget)
 	for i = 1, #visualRows do
 		if i > visibleDataCount then break end
 		local descriptor = items.describeRow(visualRows[i], listPanel, terminal, nil)
+		-- Warehouse llama `indicator` al estado jerarquico; el contrato publico
+		-- de DragGhost lo recibe como prefijo visual neutral.
+		descriptor.prefix = descriptor.prefix or descriptor.indicator
 		descriptors[i] = descriptor
 		local counterW = descriptor.count
 			and tm:MeasureStringX(UIFont.Small, tostring(descriptor.count)) + PREVIEW_GAP or 0
@@ -156,33 +68,28 @@ local function createPreview(sourceWidget)
 		local hidden = #visualRows - visibleDataCount
 		descriptors[#descriptors + 1] = {
 			name = GlobalStorageSiK.I18n.text("IGUI_GS_DragMoreObjects", tostring(hidden)),
-			indicator = "+", count = "", texture = nil, overflow = true,
+			prefix = "+", count = "", texture = nil, overflow = true,
 		}
 	end
-	local width = math.max(PREVIEW_MIN_W, math.min(PREVIEW_MAX_W, desiredW))
 	local player = GlobalStorageSiK.NetClient.getPlayer()
 	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-	local naturalHeight = #visualRows * rowH
-	local height = math.max(rowH, math.min(naturalHeight, PREVIEW_MAX_ROWS * rowH))
-	local x, y = pointerPosition(width, height, playerNum)
-	dragPreviewPanel = GSWithdrawDragPreview:new(x, y, width, height)
-	dragPreviewPanel:initialise()
-	dragPreviewPanel.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	dragPreviewPanel.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	for i = 1, #descriptors do
-		local rowPanel = GSWithdrawDragPreviewRow:new(
-			0, (i - 1) * rowH, width, rowH, descriptors[i], i)
-		rowPanel:initialise()
-		dragPreviewPanel:addChild(rowPanel)
-		makeMouseTransparent(rowPanel)
-	end
-	dragPreviewPanel.playerNum = playerNum
-	GlobalStorageSiK.SiK_UI.EscapeStack.install(dragPreviewPanel, function()
-		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
-	end, GlobalStorageSiK.SiK_UI.EscapeStack.PRIORITY.TRANSIENT)
-	makeMouseTransparent(dragPreviewPanel)
-	dragPreviewPanel:setAlwaysOnTop(true)
-	dragPreviewPanel:addToUIManager()
+	dragSession = UI.Drag.begin({
+		playerNum = playerNum,
+		payload = activeDrag.payloadRows,
+		createGhost = function()
+			return UI.DragGhost.create({
+				descriptors = descriptors, playerNum = playerNum, rowHeight = rowH,
+				maxRows = PREVIEW_MAX_ROWS,
+				minWidth = PREVIEW_MIN_W, maxWidth = PREVIEW_MAX_W,
+				padding = PREVIEW_PAD, iconSize = PREVIEW_ICON, gap = PREVIEW_GAP,
+				alpha = PREVIEW_ALPHA,
+			})
+		end,
+		onCancel = function()
+			GlobalStorageSiK.TerminalWithdrawDrag.cancel()
+		end,
+	})
+	dragPreviewPanel = dragSession and dragSession.ghost or nil
 end
 
 local function expandInventoryPages()
@@ -328,12 +235,8 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 end
 
 function GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
-	if not dragPreviewPanel then return false end
-	local x, y = pointerPosition(dragPreviewPanel.width, dragPreviewPanel.height,
-		dragPreviewPanel.playerNum)
-	dragPreviewPanel:setX(x)
-	dragPreviewPanel:setY(y)
-	return true
+	if not dragSession then return false end
+	return dragSession:update()
 end
 
 local function clearDrag(cancelReason)

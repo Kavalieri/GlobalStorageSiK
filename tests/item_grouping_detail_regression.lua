@@ -39,6 +39,8 @@ GlobalStorageSiK = {
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_FluidTaxonomy.lua")
 package.loaded["GS_FluidTaxonomy"] = true
+dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_ItemSnapshot.lua")
 package.loaded["GS_ItemSnapshot"] = true
 
@@ -76,10 +78,10 @@ for _, value in ipairs({
 	item("Base.Crisps", 1, "Chips - Plain"),
 	item("Base.Crisps2", 2, "Chips - Barbecue"),
 	item("Base.Crisps3", 3, "Chips - Salt and Vinegar"),
-	item("Base.VHSTape", 10, "Woodcraft Ep. 3", { mediaIndex = 214 }),
-	item("Base.VHSTape", 11, "Woodcraft Ep. 3", { mediaIndex = 214 }),
-	item("Base.VHSTape", 12, "Exposure Survival Ep. 5", { mediaIndex = 315 }),
-	item("Base.VHSTape", 13, "VHS Tape", { mediaIndex = -1 }),
+	item("Base.VHS_Retail", 10, "Woodcraft Ep. 3", { mediaIndex = 214 }),
+	item("Base.VHS_Retail", 11, "Woodcraft Ep. 3", { mediaIndex = 214 }),
+	item("Base.VHS_Retail", 12, "Exposure Survival Ep. 5", { mediaIndex = 315 }),
+	item("Base.VHS_Home", 13, "VHS Tape", { mediaIndex = -1 }),
 	item("Base.PetrolCan", 20, "Gas Can", { fluid = { empty = false, category = nil, fluidType = "Petrol", amount = 0.8, capacity = 10 } }),
 	item("Base.PetrolCan", 21, "Empty Gas Can", { fluid = { empty = true } }),
 }) do
@@ -116,7 +118,9 @@ local vhsParents = {}
 local petrolParents = {}
 for _, row in ipairs(rows) do
         byType[row.fullType] = row
-        if row.fullType == "Base.VHSTape" then vhsParents[#vhsParents + 1] = row end
+        if row.fullType == "Base.VHS_Retail" or row.fullType == "Base.VHS_Home" then
+                vhsParents[#vhsParents + 1] = row
+        end
         if row.fullType == "Base.PetrolCan" then petrolParents[#petrolParents + 1] = row end
 end
 
@@ -199,7 +203,7 @@ assert(nailDetails.pageSize == 15 and #nailDetails.items == 15 and nailDetails.h
 
 local counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.Crisps2")
 assert(#counts == 1 and counts[1].count == 3, "tooltip sums cosmetic family")
-counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.VHSTape", nil, 214, nil)
+counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.VHS_Retail", nil, 214, nil)
 assert(#counts == 1 and counts[1].count == 2, "tooltip counts the same VHS edition")
 counts = GlobalStorageSiK.Index.getNetworkCountsForItem({}, "Base.PetrolCan", nil, nil, emptyFluidStateKey)
 assert(#counts == 1 and counts[1].count == 1, "tooltip separates empty fluid containers")

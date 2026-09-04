@@ -6,29 +6,23 @@
 	pestaña Red (con terminal). Ver GS_PCAcquire.lua para la lógica/estado.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Sandbox"
 require "GS_PCAcquire"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_Modal"
+local UI = require "GS_UI_Framework"
 require "TimedActions/GS_AcquirePCAction"
 
 GlobalStorageSiK.PCAcquireUI = {}
 GlobalStorageSiK.PCAcquireUI.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local LINE_GAP = 4
-local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("task")
-local PANEL_W = math.max(GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W, 640)
+local CONTROL_METRICS = UI.Controls.metrics("task")
+local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
 
-GS_PCAcquireUI = ISPanel:derive("GS_PCAcquireUI")
+GS_PCAcquireUI = UI.Window.derive("GS_PCAcquireUI")
 
 ---@return string[]
 local function itemDisplayNames()
@@ -91,64 +85,81 @@ local function buildStatusLines(player)
 end
 
 function GS_PCAcquireUI:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	-- Mismo fondo que la ventana principal del terminal (GS_TerminalUI.lua),
 	-- no el tono azulado que usaban antes las ventanas propias sueltas.
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
-	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
-		self:destroy()
-	end, { kind = "task", padding = PAD })
+	UI.Modal.apply(self, {
+		kind = "task", padding = PAD, playerNum = self.playerNum,
+		owner = self.modalOwner, resizable = false,
+		title = T("IGUI_GS_PCAcquireOpenBtn"),
+		onClose = function()
+			GlobalStorageSiK.PCAcquireUI.instance = nil
+		end,
+	})
 	self:buildLayout()
 end
 
 function GS_PCAcquireUI:destroy()
 	GlobalStorageSiK.PCAcquireUI.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
-	end
+	if self._sikWindowApplied and not self._sikDisposed then
+		UI.Modal.close(self, "destroy")
+	elseif self.removeFromUIManager then self:removeFromUIManager() end
 end
 
-function GS_PCAcquireUI:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
+local function clearContent(panel)
+	for i = #(panel._contentWidgets or {}), 1, -1 do
+		local child = panel._contentWidgets[i]
+		if child and child.dispose then child:dispose()
+		elseif child then
+			panel:removeChild(child)
+			if child.removeFromUIManager then child:removeFromUIManager() end
+		end
 	end
+	panel._contentWidgets = {}
+end
+
+local function own(panel, child)
+	panel._contentWidgets[#panel._contentWidgets + 1] = child
+	return child
+end
+
+local function requirementTexture(icon)
+	if type(icon) == "string" and GlobalStorageSiK.CraftUtils
+	and GlobalStorageSiK.CraftUtils.getItemIconTexture then
+		return GlobalStorageSiK.CraftUtils.getItemIconTexture(icon)
+	end
+	return icon
 end
 
 --- (Re)construye todo el contenido a partir del estado actual. Se llama al
 --- abrir y cada vez que cambia el inventario/se termina de leer el manual
 --- mientras la ventana está abierta (ver ensureEvents más abajo).
 function GS_PCAcquireUI:buildLayout()
-	for i = #(self.childrenInOrder or {}), 1, -1 do
-		local child = self.childrenInOrder[i]
-		if child ~= self.closeBtn then
-			self:removeChild(child)
-			if child.removeFromUIManager then child:removeFromUIManager() end
-		end
-	end
+	clearContent(self)
+	local rect = self:contentRect()
+	local pad = PAD
+	local textW = rect.w
+	local y = rect.y
 
-	local pad = self.padding
-	local textW = self.width - pad * 2
-	local y = self.headerHeight + pad
-
-	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_PCAcquireIntro"), textW, UIFont.Small)
-	for _, line in ipairs(introLines) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.78, 0.82, 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
+	local intro = own(self, UI.Controls.copyText(self, {
+		x = rect.x, y = y, w = textW, text = T("IGUI_GS_PCAcquireIntro"),
+		tone = "textMuted", lineGap = 2, playerNum = self.playerNum,
+	}))
+	y = y + intro.height
 	y = y + 6
 
 	local lines, allReady = buildStatusLines(self.player)
 	local sigParts = {}
 	for _, spec in ipairs(lines) do
 		sigParts[#sigParts + 1] = spec.ok and "1" or "0"
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad, y, textW, spec.icon, spec.text, spec.ok)
-		y = y + 2
+		local row = own(self, UI.Controls.requirementRow(self, {
+			x = rect.x, y = y, w = textW, texture = requirementTexture(spec.icon),
+			text = spec.text, state = spec.ok and "met" or "missing",
+			playerNum = self.playerNum,
+		}))
+		y = y + row.height + 2
 	end
 	self._lastSig = table.concat(sigParts, "")
 	y = y + 10
@@ -160,12 +171,11 @@ function GS_PCAcquireUI:buildLayout()
 	-- reutiliza el mismo texto ya usado en el tooltip del propio soldador
 	-- (GS_ItemNetworkTooltip.lua), sin duplicar la redaccion.
 	if not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled() then
-		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_SolderingIronFindHint"), textW, UIFont.Small)) do
-			local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.62, 0.68, 0.72, 1, UIFont.Small, true)
-			hintLbl:initialise()
-			self:addChild(hintLbl)
-			y = y + FONT_HGT_SMALL + LINE_GAP
-		end
+		local hint = own(self, UI.Controls.copyText(self, {
+			x = rect.x, y = y, w = textW, text = T("IGUI_GS_SolderingIronFindHint"),
+			tone = "textMuted", lineGap = LINE_GAP, playerNum = self.playerNum,
+		}))
+		y = y + hint.height
 		y = y + 6
 	end
 
@@ -177,16 +187,17 @@ function GS_PCAcquireUI:buildLayout()
 	-- bloqueado de verdad mientras falte cualquier requisito, con el motivo
 	-- en el tooltip - la revalidacion en el momento del clic deja de hacer
 	-- falta porque un boton bloqueado no puede pulsarse.
-	self.craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW,
-		CONTROL_METRICS.buttonHeight, T("IGUI_GS_PCAcquireCraftBtn"), self, function()
+	self.craftBtn = own(self, UI.Controls.button(self, {
+		x = rect.x, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
+		text = T("IGUI_GS_PCAcquireCraftBtn"), fullWidth = true,
+		enabled = allReady, locked = not allReady,
+		tooltip = not allReady and T("IGUI_GS_CraftMissing") or nil,
+		playerNum = self.playerNum, onClick = function()
 		if not self.player then return end
 		ISTimedActionQueue.add(GS_AcquirePCAction:new(self.player))
 		self:destroy()
-	end, nil, true, not allReady)
-	if not allReady then
-		self.craftBtn:setTooltip(T("IGUI_GS_CraftMissing"))
-	end
-	self:addChild(self.craftBtn)
+	end,
+	}))
 	y = y + CONTROL_METRICS.buttonHeight + pad
 
 	-- fitContent resuelve el viewport una vez; los refrescos conservan la
@@ -194,8 +205,8 @@ function GS_PCAcquireUI:buildLayout()
 	local previousX = self:getX()
 	local previousY = self:getY()
 	local wasPositioned = self._positioned == true
-	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
-		kind = "task", bottomPadding = 0,
+	UI.Modal.fitContent(self, y, {
+		contentBottom = true, bottomPadding = 0, center = not wasPositioned,
 	})
 	if wasPositioned then
 		self:setX(previousX)
@@ -241,7 +252,8 @@ function GS_PCAcquireUI:refresh(force)
 end
 
 ---@param player IsoPlayer|nil
-function GlobalStorageSiK.PCAcquireUI.show(player)
+---@param owner ISPanel|nil
+function GlobalStorageSiK.PCAcquireUI.show(player, owner)
 	player = player or (GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()) or getPlayer()
 	if not player then
 		return
@@ -251,9 +263,10 @@ function GlobalStorageSiK.PCAcquireUI.show(player)
 	end
 	local ui = GS_PCAcquireUI:new(0, 0, PANEL_W, 200)
 	ui.player = player
+	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+	ui.modalOwner = owner
 	ui:initialise()
-	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
+	UI.Modal.show(ui)
 	GlobalStorageSiK.PCAcquireUI.instance = ui
 end
 

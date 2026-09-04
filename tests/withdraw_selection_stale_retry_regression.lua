@@ -41,6 +41,7 @@ GlobalStorageSiK = {
 	Client = { activeNetworkId = "network-a" },
 }
 
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_WithdrawClient.lua")
 
 local function countCommand(name)

@@ -5,6 +5,9 @@ for _, name in ipairs({ "GS_I18n", "GS_ItemTaxonomy", "GS_NativeProduct",
 	"GS_RuleSanitizer", "GS_Subcategories", "GS_NodeFilters", "GS_CategoryResolution" }) do
 	package.loaded[name] = true
 end
+package.loaded["GS_UI_Framework"] = {
+	Controls = { wrapText = function(text) return { text } end },
+}
 
 UIFont = { Small = "Small" }
 function getTextManager()
@@ -56,7 +59,6 @@ GlobalStorageSiK = {
 		return condition and condition.type == "category"
 			and (condition.nativePath == "F" or (condition.nativePath == nil and condition.value == "F"))
 	end },
-	SiK_UI = { wrapTextLines = function(text) return { text } end },
 }
 
 local function assertEqual(actual, expected, message)

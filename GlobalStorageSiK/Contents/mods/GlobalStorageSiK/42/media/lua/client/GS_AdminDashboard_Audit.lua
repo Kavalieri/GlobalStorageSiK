@@ -15,7 +15,7 @@
 	y la linea de ficheros atraviesan el borde derecho - 4 ISLabel fijas de
 	una linea, refreshSummary() solo llama a setName()"): sustituidas las 4
 	labels fijas por un bloque dinamico dentro de un TerminalScroll (mismo
-	motor de scroll ya usado en el resto del mod, ver GS_TerminalUI_Scroll.lua)
+	motor público de scroll SiK.UI ya usado en el resto del mod)
 	que envuelve TODO texto variable con SiK_UI.wrapTextLines() y recalcula
 	su propio alto de contenido en cada refreshSummary() - nunca solo
 	setName() sobre una altura fija. version/estado tambien pasan por el
@@ -38,41 +38,43 @@
 	responsabilidad exclusiva de GS_NativeAuditServer.lua/GS_NativeAudit.lua.
 ]]
 
-require "ISUI/ISLabel"
 require "GS_I18n"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_State"
-require "GS_TerminalUI_Scroll"
 require "GS_Config"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.AdminDashboardAudit = GlobalStorageSiK.AdminDashboardAudit or {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 4
-local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
+local BTN_H = UI.Controls.metrics().buttonHeight
 local MIN_SUMMARY_SCROLL_H = FONT_HGT_SMALL * 4
 
--- dev24: renderWrappedLines() promovida a GlobalStorageSiK.SiK_UI.
--- renderWrappedLinePool() (GS_SiK_UI_Core.lua) para reutilizarla tambien en
--- GS_AdminDashboard_Corpus.lua - alias local para no tocar el resto de este
--- fichero.
-local renderWrappedLines = GlobalStorageSiK.SiK_UI.renderWrappedLinePool
+local function renderWrappedLines(host, pool, text, x, y, width, attach)
+	return UI.Controls.renderWrappedLinePool(host, pool, {
+		text = text, x = x, y = y, w = width, lineGap = 2, attach = attach,
+	})
+end
+
+local function relativeAge(value)
+	local dashboard = GlobalStorageSiK.AdminDashboard
+	if dashboard and dashboard.relativeAge then return dashboard.relativeAge(value) end
+	return "?"
+end
 
 local function captureSummaryState(scroll)
-	return GlobalStorageSiK.SiK_UI.State.capture({
-		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+	return UI.State.snapshot({
+		scrollY = UI.Scroll.getScrollOffset(scroll),
 		selectedKey = scroll._sikSelectedKey,
 		focusedKey = scroll._sikFocusedKey,
 	})
 end
 
 local function restoreSummaryState(scroll, snapshot)
-	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	local state = UI.State.merge({}, snapshot) or {}
 	scroll._sikSelectedKey = state.selectedKey
 	scroll._sikFocusedKey = state.focusedKey
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+	UI.Scroll.setScrollOffset(scroll, state.scrollY)
 end
 
 --- Construye la pestaña Taxonomia completa - todos los widgets creados aqui
@@ -106,10 +108,11 @@ function GlobalStorageSiK.AdminDashboardAudit.build(ui, pad, y, textW, bottomLim
 		pad, y, textW, trackAddChild)
 	y = y + LINE_GAP + 4
 
-	ui.nativeAuditBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, T("IGUI_GS_NativeAuditBtn"), ui, function()
-			GlobalStorageSiK.AdminDashboardAudit.runNativeAudit(ui)
-		end)
+	ui.nativeAuditBtn = UI.Controls.button(nil, {
+		x = pad, y = y, w = textW, h = BTN_H,
+		text = T("IGUI_GS_NativeAuditBtn"), fullWidth = true,
+		onClick = function() GlobalStorageSiK.AdminDashboardAudit.runNativeAudit(ui) end,
+	})
 	trackAddChild(ui, ui.nativeAuditBtn)
 	y = y + BTN_H + LINE_GAP + 4
 
@@ -127,9 +130,9 @@ function GlobalStorageSiK.AdminDashboardAudit.build(ui, pad, y, textW, bottomLim
 	-- El propio scroll se crea aqui (una vez), pero su Y/alto reales los fija
 	-- refreshSummary() a partir de ui._auditStateY - evita crear el
 	-- widget 2 veces.
-	ui.nativeAuditSummaryScroll = GlobalStorageSiK.TerminalScroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
+	ui.nativeAuditSummaryScroll = UI.Scroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
 	track(ui.nativeAuditSummaryScroll)
-	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(ui.nativeAuditSummaryScroll, function()
+	UI.Scroll.setOnContentRectChanged(ui.nativeAuditSummaryScroll, function()
 		if ui._auditRelayout then return end
 		ui._auditRelayout = true
 		GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
@@ -162,7 +165,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	elseif ui._nativeAuditLastFailed then
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateError"), { r = 0.85, g = 0.4, b = 0.35 }
 	elseif ui._nativeAuditLastReport then
-		local finishedText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeAuditFinishedAtMs)
+		local finishedText = relativeAge(ui._nativeAuditFinishedAtMs)
 		ui._nativeAuditFinishedAtText = finishedText
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateDone", finishedText), { r = 0.55, g = 0.8, b = 0.5 }
 	else
@@ -194,22 +197,22 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	local scrollY = afterStateY + LINE_GAP + 6
 	local scrollH = math.max(MIN_SUMMARY_SCROLL_H, (ui._auditBottomLimit or scrollY) - scrollY)
 	scroll:setY(scrollY)
-	GlobalStorageSiK.TerminalScroll.resize(scroll, textW, scrollH)
+	UI.Scroll.resize(scroll, textW, scrollH)
 
 	-- Resumen: reconstruido por completo dentro del scroll en cada llamada
 	-- (mismo patron ya usado por refreshMemberPanel en GS_AdminDashboard.lua
 	-- para listas de tamaño variable) - clear() ya garantiza que ninguna
 	-- linea sobrante de una ejecucion anterior queda visible.
 	local preservedState = captureSummaryState(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll)
-	local contentW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	UI.Scroll.clear(scroll)
+	local contentW = UI.Scroll.contentWidth(scroll)
 	local sy = 2
 
 	local report = ui._nativeAuditLastReport
 	if not report then
 		sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyNoRunYet"), 4, sy, contentW - 8,
-			GlobalStorageSiK.TerminalScroll.addChild)
-		GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+			UI.Scroll.addChild)
+		UI.Scroll.finish(scroll, sy)
 		restoreSummaryState(scroll, preservedState)
 		return
 	end
@@ -218,7 +221,7 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 		tostring(report.totalTypes), tostring(report.pending), tostring(report.unclassified),
 		tostring(report.excludedInternal or 0), tostring(report.invalidPath),
 		tostring(report.classifierErrors), tostring(report.timeMs)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	-- dev23 (rechazo de sistemas: "el fingerprint completo es demasiado
 	-- largo para una interfaz, incluso envuelto - mostrar una
@@ -228,15 +231,15 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyEpochLine",
 		tostring(report.catalogEpoch), tostring(report.gameBuildVersion),
 		tostring(report.activeModCount), tostring(report.catalogFingerprintDigest)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyTierVariantLine",
 		tostring(report.tierVariantMatched), tostring(report.tierVariantTotal)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyRunLine",
 		tostring(report.sessionId or "?"), tostring(report.runId or "?")),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	-- dev23 (pedido explicito: "lineas independientes, sin asumir
 	-- exactamente 2 ficheros"): recorre una lista en vez de 2 campos fijos -
@@ -249,11 +252,11 @@ function GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 	for i = 1, #files do
 		if files[i].name then
 			sy = renderWrappedLines(scroll, {}, T(files[i].labelKey, tostring(files[i].name)),
-				4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+				4, sy, contentW - 8, UI.Scroll.addChild)
 		end
 	end
 
-	GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+	UI.Scroll.finish(scroll, sy)
 	restoreSummaryState(scroll, preservedState)
 end
 
@@ -301,7 +304,7 @@ function GlobalStorageSiK.AdminDashboardAudit.onSummary(ui, report)
 	ui._nativeAuditLastFailed = false
 	ui._nativeAuditLastReport = report
 	ui._nativeAuditFinishedAtMs = report and tonumber(report.finishedAtMs) or nil
-	ui._nativeAuditFinishedAtText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeAuditFinishedAtMs)
+	ui._nativeAuditFinishedAtText = relativeAge(ui._nativeAuditFinishedAtMs)
 	GlobalStorageSiK.AdminDashboardAudit.refreshSummary(ui)
 end
 

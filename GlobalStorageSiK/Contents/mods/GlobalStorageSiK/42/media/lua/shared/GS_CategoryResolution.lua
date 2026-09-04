@@ -207,7 +207,12 @@ local function buildBase(fullType, item, knownInstancePath)
 	-- abstención del ScriptItem), por lo que no debe heredar el estado de la
 	-- clasificación estática al decidir si la ruta dinámica es utilizable.
 	local status = instancePath and "classified" or nativeStatus(result, path)
-	if status ~= "classified" then path = nil end
+	-- Una abstencion honesta conserva su ruta nativa visible. Caer aqui a
+	-- DisplayCategory ocultaba el fullType sin clasificar bajo una categoria
+	-- vanilla y hacia imposible distinguir clasificacion de compatibilidad.
+	local visibleAbstention = status == "unclassified" and path
+		and path.l1 == "other" and path.l2 == "unclassified_modded"
+	if status ~= "classified" and not visibleAbstention then path = nil end
 	local vanillaKey = itemDisplayCategory(item) or scriptDisplayCategory(fullType) or "Misc"
 	local categorySource = sourceCategoryKind(vanillaKey)
 	if path then

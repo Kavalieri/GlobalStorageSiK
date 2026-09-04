@@ -1,118 +1,93 @@
--- Core 1.4.3-dev32.4.3: delayed search rereads current text and thresholds.
-for _, name in ipairs({ "GS_I18n", "ISUI/ISButton", "ISUI/ISPanel", "ISUI/ISLabel",
-	"GS_Libs", "GS_UIDebug", "GS_CraftUtils" }) do
-	package.loaded[name] = true
-end
+-- Historical filename retained for runner compatibility.
+-- Current contract: public SiK.UI owns the neutral debounce/Unicode thresholds;
+-- the product receives only effective changes and explicit immediate submits.
 
-local function utf8Codepoints(text, maxChars)
-	local out, i = {}, 1
-	while i <= #text and #out < (maxChars or 100000) do
-		local b1 = string.byte(text, i)
-		local cp, size = b1, 1
-		if b1 >= 0xF0 and i + 3 <= #text then
-			local b2, b3, b4 = string.byte(text, i + 1, i + 3)
-			cp, size = (b1 - 0xF0) * 0x40000 + (b2 - 0x80) * 0x1000
-				+ (b3 - 0x80) * 0x40 + (b4 - 0x80), 4
-		elseif b1 >= 0xE0 and i + 2 <= #text then
-			local b2, b3 = string.byte(text, i + 1, i + 2)
-			cp, size = (b1 - 0xE0) * 0x1000 + (b2 - 0x80) * 0x40 + (b3 - 0x80), 3
-		elseif b1 >= 0xC0 and i + 1 <= #text then
-			local b2 = string.byte(text, i + 1)
-			cp, size = (b1 - 0xC0) * 0x40 + (b2 - 0x80), 2
-		end
-		out[#out + 1] = cp
-		i = i + size
-	end
-	return out
-end
+local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
+local suite = Support.newSuite("dev32_4_3_search_debounce_contract")
 
-local now = 0
-local pending = nil
-getTimestampMs = function() return now end
-Events = { OnTick = {
-	Add = function(fn) pending = fn end,
-	Remove = function(fn) if pending == fn then pending = nil end end,
-} }
-UIFont = { Small = "small" }
 getTextManager = function()
-	return { getFontHeight = function() return 12 end, MeasureStringX = function(_, _, text) return #text end }
-end
-ISButton, ISPanel, ISLabel = {}, {}, {}
-GlobalStorageSiK = {
-	I18n = { text = function(key) return key end },
-	Libs = { unicodeCodepoints = utf8Codepoints },
-	UIDebug = {}, CraftUtils = {},
-	Log = { debug = function() end },
-}
-
-dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_SiK_UI_Core.lua")
-
-local entry = { text = "" }
-function entry:getText() return self.text end
-function entry:setPlaceholderText() end
-local calls = {}
-local panel = { onSearch = function(_, force)
-	calls[#calls + 1] = { force = force, text = entry.text }
-end }
-GlobalStorageSiK.SiK_UI.bindSearchEntry(panel, entry)
-
-local function advance(ms)
-	now = now + ms
-	local fn = pending
-	if fn then fn() end
+	return {
+		getFontHeight = function() return 12 end,
+		MeasureStringX = function(_, _, text) return #tostring(text or "") end,
+	}
 end
 
--- B42 can fire before the entry exposes the new value: schedule on "ab",
--- then publish "abc" before the debounce executes.
-entry.text = "ab"
-entry.onTextChange()
-entry.text = "abc"
-advance(180)
-assert(#calls == 1 and calls[1].text == "abc" and calls[1].force == false,
-	"ASCII 2->3 must apply at the third current character, not the stale callback value")
+local Controls = Support.loadFrameworkModule(suite, "Controls")
+local parent = ISPanel:new(0, 0, 500, 120); parent:initialise()
+local changed, submitted = {}, {}
+local now = 1000
+local search = Controls.search(parent, {
+	x = 8, y = 8, w = 300, h = 32,
+	debounceMs = 180, minChars = 3, wideMinChars = 2,
+	now = function() return now end,
+	onChange = function(context) changed[#changed + 1] = context.value end,
+	onSubmit = function(context) submitted[#submitted + 1] = context.value end,
+})
 
-entry.text = "abcd"
-entry.onTextChange()
-advance(50)
-entry.text = "abcde"
-entry.onTextChange()
-advance(179)
-assert(#calls == 1, "rapid typing must remain debounced")
-advance(1)
-assert(#calls == 2 and calls[2].text == "abcde", "debounce must reread latest text")
+Support.check(suite, "rapid edits apply only the latest eligible value", function()
+	for _, value in ipairs({ "ab", "abc", "abcd", "abcde" }) do
+		search.entry.text = value
+		search.entry:onTextChange()
+	end
+	assert(#changed == 0, "rapid edits bypassed the public debounce")
+	now = 1179; search:update()
+	assert(#changed == 0, "search applied before the debounce deadline")
+	now = 1180; search:update()
+	assert(#changed == 1 and changed[1] == "abcde",
+		"search did not apply exactly the latest eligible value")
+	assert(search:getText() == "abcde", "search getter is stale")
+	return true
+end)
 
-entry.text = "ab"
-entry.onTextChange()
-advance(180)
-assert(#calls == 3 and calls[3].text == "ab", "deleting below threshold restores full rows once")
-entry.text = "a"
-entry.onTextChange()
-advance(180)
-entry.text = ""
-entry.onTextChange()
-advance(180)
-assert(#calls == 3, "continued deletion below threshold must not refresh repeatedly")
+Support.check(suite, "UTF-8 character thresholds and submit remain exact", function()
+	local accented = "b" .. string.char(0xC3, 0xAD) .. "d"
+	local cjk = string.char(0xE6, 0xB1, 0xBD, 0xE6, 0xB2, 0xB9)
+	search.entry.text = accented; search.entry:onTextChange()
+	now = 1360; search:update()
+	assert(changed[#changed] == accented, "accented Latin text was miscounted as wide")
+	search.entry.text = cjk; search.entry:onTextChange()
+	now = 1540; search:update()
+	assert(changed[#changed] == cjk, "two wide UTF-8 characters were not eligible")
+	search.action.onclick(search.action.target)
+	assert(submitted[#submitted] == cjk, "submit did not reread current entry text")
+	assert(search._sikSearchDeadline == nil, "submit left pending debounce work")
+	return true
+end)
 
-local accented = "b" .. string.char(0xC3, 0xAD) .. "d"
-entry.text = accented
-entry.onTextChange()
-advance(180)
-assert(#calls == 4 and calls[4].text == accented,
-	"accented Latin text must use the three-character threshold")
+Support.check(suite, "resize retains one entry and one square action", function()
+	search:setBounds(12, 14, 420, 36)
+	assert(search.entry.width == 420 - 36 - Controls.metrics().controlGap,
+		"entry width did not consume the available row")
+	assert(search.action.x == 420 - 36 and search.action.width == 36,
+		"search action is not right-aligned or square")
+	return true
+end)
 
-entry.text = ""
-entry.onTextChange()
-advance(180)
-local cjkOne = string.char(0xE6, 0xB1, 0xBD)
-local cjkTwo = cjkOne .. string.char(0xE6, 0xB2, 0xB9)
-entry.text = cjkOne
-entry.onTextChange()
-advance(180)
-assert(#calls == 5, "one CJK character stays below its threshold")
-entry.text = cjkTwo
-entry.onTextChange()
-advance(180)
-assert(#calls == 6 and calls[6].text == cjkTwo,
-	"two CJK characters activate without corrupting UTF-8 test bytes")
+Support.check(suite, "Core consumes public search with explicit change and submit paths", function()
+	local root = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
+	local function read(path)
+		local file = assert(io.open(root .. path, "rb"), path)
+		local source = file:read("*a"); file:close()
+		return source
+	end
+	local owner = read("GS_TerminalUI_Items.lua")
+	local context = read("GlobalStorageSiK/UI/TabWarehouseContext.lua")
+	local generated = read("GlobalStorageSiK/UI/Generated/TabWarehouse.lua")
+	assert(owner:find('require "GlobalStorageSiK/UI/Generated/TabWarehouse"', 1, true),
+		"Warehouse does not consume the generated search surface")
+	assert(owner:find("SiK.UI.SurfaceHost.mount(panel, TabWarehouseSpec, {", 1, true)
+		and owner:find("followParent = true", 1, true),
+		"Warehouse does not build search after final parent geometry")
+	assert(context:find('["warehouse.search%-change"]', 1),
+		"Warehouse lost its text-change action")
+	assert(context:find('["warehouse.search"]', 1, true),
+		"Warehouse lost its explicit submit action")
+	assert(context:find("terminal:onSearch(false)", 1, true)
+		and context:find("terminal:onSearch(true)", 1, true),
+		"Warehouse search actions no longer preserve change/submit semantics")
+	assert(generated:find('["id"] = "warehouse-search-field"', 1, true),
+		"generated surface lost its public search field")
+	return true
+end)
 
-print("dev32_4_3_search_debounce_contract: OK")
+Support.finish(suite)

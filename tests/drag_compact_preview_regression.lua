@@ -2,8 +2,12 @@
 -- This does not emulate PZ hit-testing: it verifies the observable panel rect,
 -- pointer preservation, mouse transparency and cleanup against the real module.
 
+local clientLua = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client"
+local frameworkLua = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client"
+package.path = clientLua .. "/?.lua;" .. frameworkLua .. "/?.lua;" .. package.path
+
 for _, name in ipairs({ "GS_NetClient", "GS_WithdrawClient", "GS_ContainerTargets",
-	"GS_SiK_UI_EscapeStack", "GS_SiK_UI_Viewport", "GS_I18n", "ISUI/ISPanel" }) do
+	"GS_I18n", "ISUI/ISPanel" }) do
 	package.loaded[name] = true
 end
 
@@ -41,6 +45,9 @@ end
 function ISPanel:removeFromUIManager() self.inManager = false end
 function ISPanel:setX(x) self.x = x end
 function ISPanel:setY(y) self.y = y end
+function ISPanel:setWidth(width) self.width = width end
+function ISPanel:setHeight(height) self.height = height end
+function ISPanel:setVisible(value) self.visible = value ~= false end
 
 local mouseX, mouseY = 200, 150
 getMouseX, getMouseY = function() return mouseX end, function() return mouseY end
@@ -55,7 +62,6 @@ getTextManager = function() return {
 	MeasureStringX = function(_, _, value) return #tostring(value or "") * 8 end,
 } end
 
-local escapeClose = nil
 local player = { getPlayerNum = function() return 1 end }
 GlobalStorageSiK = {
 	NetClient = { getPlayer = function() return player end },
@@ -67,25 +73,6 @@ GlobalStorageSiK = {
 	WithdrawClient = { sendWithdraw = function() return true end,
 		sendWithdrawBatch = function() return true end },
 	ContainerTargets = {},
-	SiK_UI = {
-		Viewport = { resolve = function(playerNum)
-			assert(playerNum == 1, "preview resolved another player's viewport")
-			return { x = 0, y = 0, w = 400, h = 300 }
-		end },
-		PALETTE = { textPrimary = { 1, 1, 1 }, textSecondary = { 0.7, 0.7, 0.7 } },
-		truncateText = function(value, maxWidth)
-			if #value * 8 <= maxWidth then return value end
-			return value:sub(1, math.max(1, math.floor(maxWidth / 8) - 1)) .. "..."
-		end,
-		EscapeStack = {
-			PRIORITY = { TRANSIENT = 400 },
-			install = function(panel, close)
-				assert(panel.playerNum == 1, "preview registered under wrong player")
-				escapeClose = close
-			end,
-			remove = function() end,
-		},
-	},
 	Client = { registerTransientCleanup = function() return true end },
 	TerminalItems = {
 		rowHeight = function() return 40 end,
@@ -96,6 +83,13 @@ GlobalStorageSiK = {
 		drawRowDescriptor = function() end,
 	},
 }
+
+-- El producto consume exclusivamente la fachada pública. El harness carga
+-- solo las capacidades reales ejercitadas para no arrastrar widgets PZ ajenos
+-- a este contrato focal.
+require "SiK/UI/Drag"
+require "SiK/UI/DragGhost"
+package.loaded["GS_UI_Framework"] = SiK.UI
 
 dofile(dragPath)
 
@@ -113,15 +107,15 @@ local source = {
 	setCapture = function() error("row must not own terminal drag capture") end,
 }
 local row = {
-	rowKey = "very-long", fullType = "Base.VHSTape", count = 125,
+	rowKey = "very-long", fullType = "Base.VHS_Retail", count = 125,
 	indicator = ">", texture = "vhs-texture", _gsRowKind = "parent", expandable = true,
 	displayName = "A deliberately very long recorded-media title that cannot fit",
 }
 local childA = { rowKey = "child-a", parentRowKey = "very-long", _gsRowKind = "child",
-	fullType = "Base.VHSTape", displayName = "Woodcraft episode 3", count = 2,
+	fullType = "Base.VHS_Retail", displayName = "Woodcraft episode 3", count = 2,
 	indicator = "L", texture = "vhs-texture" }
 local childB = { rowKey = "child-b", parentRowKey = "very-long", _gsRowKind = "child",
-	fullType = "Base.VHSTape", displayName = "Exposure Survival episode 5", count = 1,
+	fullType = "Base.VHS_Retail", displayName = "Exposure Survival episode 5", count = 1,
 	indicator = "L", texture = "vhs-texture" }
 local exact = { rowKey = "exact", fullType = "Base.Hammer", displayName = "Hammer",
 	count = 4, indicator = ".", texture = "hammer-texture" }
@@ -132,10 +126,10 @@ local preview = assert(createdPanels[#createdPanels], "compact preview panel mis
 assert(preview.width >= 180 and preview.width <= 300,
 	"compact preview width escaped 180..300: " .. tostring(preview.width))
 assert(preview.height == 40, "compact preview does not use one canonical ROW_H")
-assert(#preview.children == 1, "collapsed parent is not exactly one compact row")
-assert(preview.children[1].descriptor.name == row.displayName
-	and preview.children[1].descriptor.count == "125"
-	and preview.children[1].descriptor.indicator == ">",
+assert(#preview.rows == 1, "collapsed parent is not exactly one compact row")
+assert(preview.rows[1].name == row.displayName
+	and preview.rows[1].count == "125"
+	and preview.rows[1].prefix == ">",
 	"collapsed row lost icon/name/quantity/group state")
 assert(preview.width ~= source.width, "preview copied its source-window width")
 	assert(preview.backgroundColor and preview.backgroundColor.a == 0,
@@ -148,24 +142,24 @@ row.indicator = "v"
 assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(row, 1, { row },
 	{ row, childA, childB }, source), "expanded-parent preview did not start")
 preview = assert(createdPanels[#createdPanels], "expanded compact preview missing")
-assert(preview.height == 3 * 40 and #preview.children == 3,
+assert(preview.height == 3 * 40 and #preview.rows == 3,
 	"expanded parent did not preserve all three compact visual rows")
-assert(preview.children[1].descriptor.name == row.displayName
-	and preview.children[2].descriptor.name == childA.displayName
-	and preview.children[3].descriptor.name == childB.displayName,
+assert(preview.rows[1].name == row.displayName
+	and preview.rows[2].name == childA.displayName
+	and preview.rows[3].name == childB.displayName,
 	"expanded stack changed original visual order")
-assert(preview.children[1].descriptor.indicator == "v"
-	and preview.children[2].descriptor.indicator == "L",
+assert(preview.rows[1].prefix == "v"
+	and preview.rows[2].prefix == "L",
 	"expanded stack lost row group/detail state")
 
 GlobalStorageSiK.TerminalWithdrawDrag.cancel()
 assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(row, 1, { row, exact },
 	{ row, exact }, source), "multiselection preview did not start")
 preview = assert(createdPanels[#createdPanels], "multiselection compact preview missing")
-assert(preview.height == 2 * 40 and #preview.children == 2,
+assert(preview.height == 2 * 40 and #preview.rows == 2,
 	"multiselection did not preserve every selected compact visual row")
-assert(preview.children[1].descriptor.name == row.displayName
-	and preview.children[2].descriptor.name == exact.displayName,
+assert(preview.rows[1].name == row.displayName
+	and preview.rows[2].name == exact.displayName,
 	"multiselection stack changed selection order")
 
 GlobalStorageSiK.TerminalWithdrawDrag.cancel()
@@ -177,10 +171,10 @@ end
 assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(many[1], 1, many, many, source),
 	"overflow preview did not start")
 preview = assert(createdPanels[#createdPanels], "overflow compact preview missing")
-assert(#preview.children <= maxRows and #preview.children < #many,
+assert(#preview.rows <= maxRows and #preview.rows < #many,
 	"overflow stack did not enforce its maximum visible rows")
-local overflowRow = preview.children[#preview.children]
-local overflowLabel = overflowRow and overflowRow.descriptor and overflowRow.descriptor.name or ""
+local overflowRow = preview.rows[#preview.rows]
+local overflowLabel = overflowRow and overflowRow.name or ""
 assert(overflowLabel:find("+", 1, true) and overflowLabel:lower():find("objet", 1, true),
 	"overflow stack does not end with localized +N objects indicator")
 
@@ -203,8 +197,7 @@ expectPosition(5, 295, "right", "up")
 expectPosition(395, 295, "left", "up")
 expectPosition(200, 295, "right", "up")
 
-assert(type(escapeClose) == "function", "Escape callback missing")
-escapeClose()
+assert(SiK.UI.FocusStack.handleEscape(1), "Escape callback missing")
 assert(capture == false, "Escape retained terminal capture")
 assert(preview.inManager == false, "Escape retained compact preview")
 assert(not GlobalStorageSiK.TerminalWithdrawDrag.isActive(), "Escape retained payload")

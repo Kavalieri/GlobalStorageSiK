@@ -50,6 +50,8 @@ GlobalStorageSiK = {
 	},
 }
 
+dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/GS_ItemSnapshot.lua")
 
 local function item(fullType, id, kind)
@@ -91,7 +93,7 @@ assert(onlyRow(merged).unitDetails == nil,
 	"mergeMaps recreated empty unitDetails for a fungible row")
 
 for _, fixture in ipairs({
-	{ fullType = "Base.VHSTape", id = 2, kind = "media", field = "mediaIndex", expected = 42 },
+	{ fullType = "Base.VHS_Retail", id = 2, kind = "media", field = "mediaIndex", expected = 42 },
 	{ fullType = "Base.PetrolCan", id = 3, kind = "fluid", field = "dynamicPercent", expected = 50 },
 	{ fullType = "Base.Hammer", id = 4, kind = "condition", field = "condition", expected = 7 },
 }) do

@@ -436,7 +436,7 @@ end
 --- En instalaciones nuevas todas quedan apagadas y el administrador activa
 --- solo el bloque que corresponda a su prueba. Una clave ausente de una
 --- partida anterior conserva el fallback historico para no ocultar trazas.
----@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
+---@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"AdminTableRuntime"|"RecordedMediaRuntime"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
 	if not SandboxVars.GlobalStorageSiK then

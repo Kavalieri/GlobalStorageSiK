@@ -38,6 +38,7 @@ require "GS_Log"
 require "GS_InventorySync"
 require "GS_Deposit"
 require "GS_Transfer"
+require "GSSiK_API"
 
 GlobalStorageSiK.CraftSession = GlobalStorageSiK.CraftSession or {}
 
@@ -100,8 +101,10 @@ end
 ---@param message string
 local function sessionDebugLog(message)
 	local addonId = session and session.addonId
-	local sink = addonId and GlobalStorageSiK.CraftSession._debugSinks and GlobalStorageSiK.CraftSession._debugSinks[addonId]
-	if sink then
+	local sinkEntry = addonId and GlobalStorageSiK.CraftSession._debugSinks
+		and GlobalStorageSiK.CraftSession._debugSinks[addonId]
+	local sink = type(sinkEntry) == "table" and sinkEntry.callback or sinkEntry
+	if type(sink) == "function" then
 		local ok = pcall(sink, message)
 		if ok then
 			return
@@ -130,7 +133,22 @@ end
 ---@param fn fun(message:string)
 function GlobalStorageSiK.CraftSession.registerDebugSink(addonId, fn)
 	GlobalStorageSiK.CraftSession._debugSinks = GlobalStorageSiK.CraftSession._debugSinks or {}
-	GlobalStorageSiK.CraftSession._debugSinks[addonId] = fn
+	GlobalStorageSiK.CraftSession._registrationGeneration =
+		(tonumber(GlobalStorageSiK.CraftSession._registrationGeneration) or 0) + 1
+	local generation = GlobalStorageSiK.CraftSession._registrationGeneration
+	GlobalStorageSiK.CraftSession._debugSinks[addonId] = {
+		generation = generation,
+		callback = fn,
+	}
+	return true, generation
+end
+
+function GlobalStorageSiK.CraftSession.removeDebugSinkIfGeneration(addonId, generation)
+	local entry = GlobalStorageSiK.CraftSession._debugSinks
+		and GlobalStorageSiK.CraftSession._debugSinks[addonId]
+	if not entry or entry.generation ~= generation then return false end
+	GlobalStorageSiK.CraftSession._debugSinks[addonId] = nil
+	return true
 end
 
 --- Genera un operationId corto para correlacionar TODO lo que ocurre en un
@@ -1023,6 +1041,12 @@ end
 --- sesion, cada tick); nunca conoce que clase concreta patchea cada una.
 local addonHooks = {}
 local addonTickHandlers = {}
+local addonRegistrationGeneration = 0
+
+local function nextAddonRegistrationGeneration()
+	addonRegistrationGeneration = addonRegistrationGeneration + 1
+	return addonRegistrationGeneration
+end
 
 --- Permite a un addon registrar sus propios hooks de clases vanilla/mod
 --- externo (install/uninstall), instalados/desinstalados junto con el hook
@@ -1031,7 +1055,20 @@ local addonTickHandlers = {}
 ---@param installFn fun()
 ---@param uninstallFn fun()
 function GlobalStorageSiK.CraftSession.registerAddonHooks(addonId, installFn, uninstallFn)
-	addonHooks[addonId] = { install = installFn, uninstall = uninstallFn }
+	local generation = nextAddonRegistrationGeneration()
+	addonHooks[addonId] = {
+		install = installFn,
+		uninstall = uninstallFn,
+		generation = generation,
+	}
+	return true, generation
+end
+
+function GlobalStorageSiK.CraftSession.removeAddonHooksIfGeneration(addonId, generation)
+	local entry = addonHooks[addonId]
+	if not entry or entry.generation ~= generation then return false end
+	addonHooks[addonId] = nil
+	return true
 end
 
 --- Permite a un addon registrar una función a llamar CADA tick mientras el
@@ -1040,7 +1077,16 @@ end
 ---@param addonId string
 ---@param fn fun()
 function GlobalStorageSiK.CraftSession.registerTickHandler(addonId, fn)
-	addonTickHandlers[addonId] = fn
+	local generation = nextAddonRegistrationGeneration()
+	addonTickHandlers[addonId] = { callback = fn, generation = generation }
+	return true, generation
+end
+
+function GlobalStorageSiK.CraftSession.removeTickHandlerIfGeneration(addonId, generation)
+	local entry = addonTickHandlers[addonId]
+	if not entry or entry.generation ~= generation then return false end
+	addonTickHandlers[addonId] = nil
+	return true
 end
 
 --- Instala el hook GENÉRICO de contenedores (getContainers) más los hooks
@@ -1169,7 +1215,8 @@ function GlobalStorageSiK.CraftSession.begin(opts)
 	end
 	local addonId = opts.addonId
 	local addonAvailable = false
-	if addonId and GlobalStorageSiK.AddonRegistry and GlobalStorageSiK.AddonRegistry.isModActive(addonId) then
+	local activeOk, _, active = GSSiK.API.Addon.isActive(addonId)
+	if addonId and activeOk and active then
 		if opts.knownInstalled == true then
 			addonAvailable = true
 		elseif GlobalStorageSiK.Addons then
@@ -1256,6 +1303,7 @@ function GlobalStorageSiK.CraftSession.getStatus(addonId)
 	if not session or (addonId and session.addonId ~= addonId) then
 		return { active = false, lastEndReason = lastEndReason }
 	end
+	local player = getSpecificPlayer and getSpecificPlayer(session.playerNum) or nil
 	local containers = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(session.networkId, player) or {}
 	local liveCount, totalCount = GlobalStorageSiK.CraftingBridge.getContainerAvailability(session.networkId, player)
 	return {
@@ -1456,7 +1504,8 @@ ensureSweepTick = function()
 	sessionDebugLog("sweepTick installing")
 	Events.OnTick.Add(function()
 		sweepPendingReturns()
-		for addonId, fn in pairs(addonTickHandlers) do
+		for addonId, entry in pairs(addonTickHandlers) do
+			local fn = type(entry) == "table" and entry.callback or entry
 			local ok, err = pcall(fn)
 			if not ok then
 				GlobalStorageSiK.Log.error("CraftSession", "tick addon=" .. tostring(addonId) .. " fallo: " .. tostring(err))

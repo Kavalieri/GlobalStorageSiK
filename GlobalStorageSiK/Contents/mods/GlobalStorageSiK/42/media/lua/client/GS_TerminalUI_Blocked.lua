@@ -7,10 +7,30 @@
 
 require "GS_TerminalUI_BlockedPanel"
 require "GS_Log"
-require "GS_SiK_UI_Window"
+
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalBlockedUI = {}
 GlobalStorageSiK.TerminalBlockedUI.instance = nil
+
+local TERMINAL_GEOMETRY_KEY = "terminal-shell"
+local TERMINAL_GEOMETRY_VERSION = 2
+
+local function resolveShellRect(playerNum, x, y, width, height)
+	local viewport = UI.Viewport.resolve(playerNum)
+	local profile = "terminal"
+	local rect = UI.Window.resolveBounds({
+		playerNum = playerNum,
+		profile = profile,
+		geometryKey = TERMINAL_GEOMETRY_KEY,
+		geometryVersion = TERMINAL_GEOMETRY_VERSION,
+		x = x, y = y, w = width, h = height,
+	})
+	-- Saved geometry is restored once, when GS_TerminalUI applies Window with
+	-- the same geometry key during initialise.
+	rect.profile = profile
+	return rect
+end
 
 ---@param panel ISPanel|nil
 local function safeClosePanel(panel)
@@ -46,11 +66,14 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 	end
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (nunca crear segunda ventana).
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", state or {})
 		end
 		ui:setVisible(true)
-		ui:bringToTop()
+		if not wasVisible or (state and state.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		GlobalStorageSiK.TerminalBlockedUI.instance = ui
 		GlobalStorageSiK.TerminalBlockedUI.instances[playerNum] = ui
 		return
@@ -61,20 +84,7 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		return
 	end
 
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
-		and GlobalStorageSiK.NetClient.getPlayer(playerNum) or (playerNum == 0 and getPlayer and getPlayer() or nil)
-	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
-	local rect
-	if keepX or keepY or keepW or keepH then
-		rect = GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
-			playerNum = playerNum, x = keepX, y = keepY, width = keepW, height = keepH,
-		})
-	else
-		rect = GlobalStorageSiK.SiK_UI.Window.recall("terminal-shell", playerNum, viewport)
-			or GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
-				playerNum = playerNum,
-			})
-	end
+	local rect = resolveShellRect(playerNum, keepX, keepY, keepW, keepH)
 	ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, playerNum)
 	ui._sikWindowProfile = rect.profile
 	ui.terminalState = {}

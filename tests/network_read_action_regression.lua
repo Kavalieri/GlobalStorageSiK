@@ -118,6 +118,7 @@ local function assertEqual(actual, expected, message)
 	end
 end
 
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_NetworkReadAction.lua")
 
 local row = { fullType = "Base.BookCarpentry1", count = 1 }

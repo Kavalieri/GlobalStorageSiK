@@ -111,6 +111,8 @@ local backpackResolution = GlobalStorageSiK.CategoryResolution.resolve(backpack:
 assert(backpackResolution.nativePath ~= "native:home_leisure_collection/furnishing/storage",
 	"equippable InventoryContainer inherited world-sprite furniture taxonomy")
 
+dofile(shared .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(shared .. "GS_ItemSnapshot.lua")
 local snapshot = {}
 local locker = inventoryItem("Moveable", "fixtures_locker_01")

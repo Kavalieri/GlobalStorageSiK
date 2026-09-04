@@ -4,8 +4,6 @@
 	Fecha: 2026-08-04
 ]]
 
-require "GS_I18n"
-
 GSSiK_Addon_Tablet = GSSiK_Addon_Tablet or {}
 GSSiK_Addon_Tablet.ItemHooks = {}
 
@@ -15,7 +13,7 @@ local function applyDisplayName(item, key)
 	if not item or not key then
 		return
 	end
-	local name = GlobalStorageSiK.I18n.text(key)
+	local name = getText(key)
 	if name and name ~= "" and item.setName then
 		item:setName(name)
 	end

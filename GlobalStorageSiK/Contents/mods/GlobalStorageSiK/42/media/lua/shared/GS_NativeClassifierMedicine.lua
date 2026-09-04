@@ -73,6 +73,13 @@ local PROTECTIVE_TOKENS = toSet({ "neoprene", "gasmask" })
 ---@return table|nil attributes
 ---@return table|nil evidence
 local function classifyMedicine(fullType, si)
+	if fullType == "Base.ComfreyCataplasm" then
+		return
+			{ l1 = "medicine", l2 = "treatment", l3 = "wound_dressing" },
+			{},
+			{},
+			U.evidence("exact_fulltype_medicine", 100)
+	end
 	if not si then return nil end
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end

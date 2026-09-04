@@ -16,21 +16,47 @@
 	ya probado.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
+require "GS_UI_Feedback"
+
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_AddonRecipes"
 require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_Modal"
-require "GS_TerminalUI_Scroll"
 require "GS_Sandbox"
 require "TimedActions/GS_AddonInstallAction"
 require "TimedActions/ISTimedActionQueue"
+
+local UI = require "GS_UI_Framework"
+local AddonAPI = GSSiK.API.Addon
+
+local function addonDefinition(addonId)
+	local ok, _, definition = AddonAPI.get(addonId)
+	if ok then return definition end
+	return nil
+end
+
+local function addonIsActive(addonId)
+	local ok, _, active = AddonAPI.isActive(addonId)
+	return ok == true and active == true
+end
+
+local function addonModuleItemTypes(addonId)
+	local ok, _, itemTypes = AddonAPI.moduleItemTypes(addonId)
+	if ok then return itemTypes end
+	return {}
+end
+
+local function playerKnowsMagazine(player, addonId)
+	local ok, _, known = AddonAPI.playerKnowsMagazine(player, addonId)
+	return ok == true and known == true
+end
+
+local function canInstallAddon(player, addonId, networkId, anchor)
+	local ok, _, allowed = AddonAPI.canInstall(player, addonId, networkId, anchor)
+	return ok == true and allowed == true
+end
 
 GlobalStorageSiK.AddonManageUI = {}
 GlobalStorageSiK.AddonManageUI.instance = nil
@@ -39,10 +65,10 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
-local CONTROL_METRICS = GlobalStorageSiK.SiK_UI.Controls.metrics("task")
-local PANEL_W = math.max(GlobalStorageSiK.SiK_UI.STANDARD_MODAL_W, 640)
+local CONTROL_METRICS = UI.Controls.metrics("task")
+local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
 
-GS_AddonManageUI = ISPanel:derive("GS_AddonManageUI")
+GS_AddonManageUI = UI.Window.derive("GS_AddonManageUI")
 
 ---@param fullType string|nil
 ---@return string
@@ -58,7 +84,7 @@ end
 local function moduleRequirementText(def)
 	local names = {}
 	local seen = {}
-	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+	local moduleTypes = addonModuleItemTypes(def.id)
 	for i = 1, #moduleTypes do
 		local fullType = moduleTypes[i]
 		if fullType and fullType ~= "" and not seen[fullType] then
@@ -70,6 +96,40 @@ local function moduleRequirementText(def)
 		return itemDisplayName(def.itemType)
 	end
 	return table.concat(names, " / ")
+end
+
+local function requirementTexture(spec)
+	if spec.texture then return spec.texture end
+	if spec.itemType and GlobalStorageSiK.CraftUtils
+		and GlobalStorageSiK.CraftUtils.getItemIconTexture then
+		return GlobalStorageSiK.CraftUtils.getItemIconTexture(spec.itemType)
+	end
+	return spec.icon
+end
+
+local function addRequirementCard(owner, y, width, title, rows)
+	local card = assert(UI.Block.create({
+		parent = owner, x = owner.padding, y = y, w = width, h = 1000,
+		title = title, variant = "section", contentHost = true,
+		playerNum = owner.playerNum,
+	}))
+	owner._sikCards = owner._sikCards or {}
+	owner._sikCards[#owner._sikCards + 1] = card
+	local rowY = 0
+	for index = 1, #rows do
+		local spec = rows[index]
+		local row = UI.Controls.requirementRow(card.content, {
+			x = 0, y = rowY, w = card.content.width,
+			text = spec.text, texture = requirementTexture(spec),
+			state = spec.ok, playerNum = owner.playerNum,
+		})
+		rowY = rowY + row.height
+		if index < #rows then rowY = rowY + 6 end
+	end
+	local reserved = title and (CONTROL_METRICS.rowHeight + 8) or 0
+	local height = 16 + reserved + rowY
+	card:reflow({ x = owner.padding, y = y, w = width, h = height })
+	return height
 end
 
 --- Huella de los materiales de la receta base del modulo (chasis/cabezal/
@@ -115,10 +175,10 @@ end
 ---@param installed table ya confirmado por el servidor (ver nota en buildLayout)
 ---@return string
 local function statusSignature(player, def, networkId, anchor, installed)
-	local modActive = GlobalStorageSiK.AddonRegistry.isModActive(def.id)
+	local modActive = addonIsActive(def.id)
 	local isInstalled = (installed or {})[def.id] ~= nil
-	local knowsMag = player and GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(player, def.id)
-	local canInstall = player and GlobalStorageSiK.AddonRegistry.canInstallModule(player, def.id, networkId, anchor)
+	local knowsMag = player and playerKnowsMagazine(player, def.id)
+	local canInstall = player and canInstallAddon(player, def.id, networkId, anchor)
 	local uninstallDiskItem = GlobalStorageSiK.Addons.uninstallDiskItem()
 	local hasUninstallDisk = uninstallDiskItem and player and player:getInventory()
 		and (player:getInventory():getItemCountRecurse(uninstallDiskItem) or 0) >= 1
@@ -126,30 +186,32 @@ local function statusSignature(player, def, networkId, anchor, installed)
 end
 
 function GS_AddonManageUI:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	-- Mismo fondo que la ventana principal del terminal (ver nota identica en
 	-- GS_ReaderAcquireUI.lua).
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
-	GlobalStorageSiK.SiK_UI.Modal.apply(self, function()
-		self:destroy()
-	end, { kind = "task", padding = PAD })
+	local def = addonDefinition(self.addonId)
+	UI.Modal.apply(self, {
+		kind = "task", padding = PAD,
+		title = def and T(def.titleKey or "IGUI_GS_AddonUnknown") or "",
+		onClose = function()
+			GlobalStorageSiK.AddonManageUI.instance = nil
+		end,
+	})
+	self.padding = PAD
 	self:buildLayout()
 end
 
 function GS_AddonManageUI:destroy()
-	GlobalStorageSiK.AddonManageUI.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
-	end
+	UI.Modal.close(self, "product")
 end
 
 function GS_AddonManageUI:onKeyRelease(key)
 	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
+		UI.Modal.close(self, "escape")
 	end
 end
 
@@ -203,8 +265,10 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	-- refrescos, igual que ya se acepto en Programacion/PC/disquetera al
 	-- migrar a este mismo patron.
 	local locked = isInstalled and (canUninstall ~= true) or (not isInstalled and canInstall ~= true)
-	local actionBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW,
-		CONTROL_METRICS.buttonHeight, btnLabel, self, function()
+	local actionBtn = UI.Controls.button(self, {
+		x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
+		text = btnLabel, fullWidth = true, locked = locked,
+		onClick = function()
 		-- BUG REAL encontrado (reportado: "si no tenemos antena en el
 		-- inventario no da feedback, falla en silencio aunque el boton
 		-- reacciona"): antes esto enviaba el comando y cerraba la ventana
@@ -228,10 +292,11 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 		-- feedback de exito/fallo llega despues via el toast generico de
 		-- GS_Client.lua (actionResult) cuando la accion termine de verdad.
 		if not isInstalled then
-			local recheckOk = self.player and GlobalStorageSiK.AddonRegistry.canInstallModule(self.player, def.id, self.networkId, self.anchor)
+			local recheckOk = self.player and canInstallAddon(self.player, def.id, self.networkId, self.anchor)
 			if not recheckOk then
-				if self.player and self.player.setHaloNote then
-					self.player:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+				if self.player then
+					GlobalStorageSiK.UIFeedback.halo(self.player, T("IGUI_GS_CraftMissing"),
+						220, 180, 100, 300, { tone = "warning" })
 				end
 				return
 			end
@@ -242,34 +307,40 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 			-- descubrir el fallo solo por el mensaje del servidor con la
 			-- ventana ya cerrada.
 			if not canUninstall then
-				if self.player and self.player.setHaloNote then
-					self.player:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+				if self.player then
+					GlobalStorageSiK.UIFeedback.halo(self.player, T("IGUI_GS_CraftMissing"),
+						220, 180, 100, 300, { tone = "warning" })
 				end
 				return
 			end
 			ISTimedActionQueue.add(GS_AddonInstallAction:new(self.player, def.id, "uninstall", self.networkId, self.anchor, searchQuery))
 		end
 		self:destroy()
-	end, nil, true, locked)
+	end })
 	if locked then
-		actionBtn:setTooltip(T("IGUI_GS_CraftMissing"))
+		UI.Controls.setTooltip(actionBtn, T("IGUI_GS_CraftMissing"))
 	end
-	self:addChild(actionBtn)
 	self._actionBtn = actionBtn
 	return y + CONTROL_METRICS.buttonHeight + pad
 end
 
 --- (Re)construye todo el contenido a partir del estado actual.
 function GS_AddonManageUI:buildLayout()
+	for i = #(self._sikCards or {}), 1, -1 do
+		self._sikCards[i]:dispose()
+	end
+	self._sikCards = {}
 	for i = #(self.childrenInOrder or {}), 1, -1 do
 		local child = self.childrenInOrder[i]
-		if child ~= self.closeBtn then
+		local chrome = child == self.closeControl or child == self.titleControl
+			or child == self.headerStatusControl
+		if not chrome then
 			self:removeChild(child)
 			if child.removeFromUIManager then child:removeFromUIManager() end
 		end
 	end
 
-	local def = GlobalStorageSiK.AddonRegistry.get(self.addonId)
+	local def = addonDefinition(self.addonId)
 	if not def then
 		self:destroy()
 		return
@@ -279,17 +350,14 @@ function GS_AddonManageUI:buildLayout()
 	local textW = self.width - pad * 2
 	local y = self.headerHeight + pad
 
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	local descLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T(def.descKey or "IGUI_GS_AddonDescGeneric"), textW, UIFont.Small)
-	for _, line in ipairs(descLines) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3], 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
-	y = y + 6
+	local description = UI.Controls.copyText(self, {
+		x = pad, y = y, w = textW,
+		text = T(def.descKey or "IGUI_GS_AddonDescGeneric"),
+		tone = "textMuted", playerNum = self.playerNum,
+	})
+	y = y + description.height + 6
 
-	local modActive = GlobalStorageSiK.AddonRegistry.isModActive(def.id)
+	local modActive = addonIsActive(def.id)
 	-- BUG REAL encontrado (reportado: "aparece como instalado en la bahia
 	-- pero la ventana dice Instalar en vez de Desinstalar"): esto llamaba a
 	-- serializeForTerminal(), que lee el mirror LOCAL de ModData en el
@@ -302,10 +370,11 @@ function GS_AddonManageUI:buildLayout()
 	local isInstalled = installed[def.id] ~= nil
 
 	if not modActive then
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonStatusModOff"), pal.statusDanger[1], pal.statusDanger[2], pal.statusDanger[3], 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 8
+		local status = UI.Controls.status(self, {
+			x = pad, y = y, text = T("IGUI_GS_AddonStatusModOff"),
+			tone = "danger", playerNum = self.playerNum,
+		})
+		y = y + status.height + 8
 	end
 
 	-- Que item CONCRETO esta instalado (igual que en la bahia/panel Addons -
@@ -316,10 +385,11 @@ function GS_AddonManageUI:buildLayout()
 	local installedItemType = isInstalled and installed[def.id].itemType or nil
 	if installedItemType then
 		local itemName = GlobalStorageSiK.I18n.typeDisplayName(installedItemType)
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_AddonInstalledItem", itemName), pal.statusOk[1], pal.statusOk[2], pal.statusOk[3], 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 8
+		local status = UI.Controls.status(self, {
+			x = pad, y = y, text = T("IGUI_GS_AddonInstalledItem", itemName),
+			tone = "success", playerNum = self.playerNum,
+		})
+		y = y + status.height + 8
 	end
 
 	-- Cadena de tiers (ver def.tierItems, hoy solo la usa la Antena WiFi GS
@@ -328,24 +398,20 @@ function GS_AddonManageUI:buildLayout()
 	-- (no tarjetas de receta completas, serian demasiado altas para 3
 	-- niveles) con el tier instalado/en inventario resaltado en verde.
 	if def.tierItems and #def.tierItems > 0 then
-		local tierCardTop = y
-		local tierCard = GlobalStorageSiK.SiK_UI.createSectionCard(pad, tierCardTop, textW, 10)
-		self:addChild(tierCard)
-		y = y + 8
 		local inv = self.player and self.player:getInventory()
+		local rows = {}
 		for i = 1, #def.tierItems do
 			local tier = def.tierItems[i]
 			local tierName = GlobalStorageSiK.I18n.typeDisplayName(tier.item)
 			local isActiveTier = installedItemType == tier.item
 			local owned = inv and (inv:getItemCountRecurse(tier.item) or 0) >= 1
 			local statusKey = isActiveTier and "IGUI_GS_TierInstalled" or (owned and "IGUI_GS_TierInInventory" or "IGUI_GS_TierNotOwned")
-			local line = tierName .. " - " .. T(statusKey)
-			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, tier.item, line, isActiveTier or owned)
-			y = y + 4
+			rows[#rows + 1] = {
+				itemType = tier.item, text = tierName .. " - " .. T(statusKey),
+				ok = isActiveTier or owned,
+			}
 		end
-		y = y + 4
-		GlobalStorageSiK.SiK_UI.resizeSectionCard(tierCard, pad, tierCardTop, textW, y - tierCardTop)
-		y = y + 10
+		y = y + addRequirementCard(self, y, textW, nil, rows) + 10
 	end
 
 	-- Bloque de instalacion, claramente diferenciado (pedido explicitamente:
@@ -375,29 +441,21 @@ function GS_AddonManageUI:buildLayout()
 		local hasSkill = requiredSkill <= 0 or (self.player and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= requiredSkill)
 		canUninstall = hasReader and (not uninstallDiskItem or hasUninstallDisk == true) and hasSkill
 
-		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqUninstallTitle"))
-		self:addChild(reqLbl)
-		y = y + FONT_HGT_SMALL + 6
-
-		local cardTop = y
-		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, textW, 10)
-		self:addChild(card)
-		y = y + 8
 		local readerType = GlobalStorageSiK.Config and GlobalStorageSiK.Config.ITEM_TERMINAL_READER
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
-		y = y + 6
+		local rows = {
+			{ itemType = readerType, text = T("IGUI_GS_AddonReqReader"), ok = hasReader },
+		}
 		if uninstallDiskItem then
-			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, uninstallDiskItem, T("IGUI_GS_AddonReqUninstallDisk"), hasUninstallDisk)
-			y = y + 6
+			rows[#rows + 1] = { itemType = uninstallDiskItem,
+				text = T("IGUI_GS_AddonReqUninstallDisk"), ok = hasUninstallDisk }
 		end
 		if requiredSkill > 0 then
 			local skillIcon = GlobalStorageSiK.CraftUtils.getPerkTexture and GlobalStorageSiK.CraftUtils.getPerkTexture(Perks and Perks.Electricity)
-			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, skillIcon, T("IGUI_GS_AddonReqSkill", requiredSkill), hasSkill)
-			y = y + 6
+			rows[#rows + 1] = { texture = skillIcon,
+				text = T("IGUI_GS_AddonReqSkill", requiredSkill), ok = hasSkill }
 		end
-		y = y + 2
-		GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
-		y = y + 10
+		y = y + addRequirementCard(self, y, textW,
+			T("IGUI_GS_AddonReqUninstallTitle"), rows) + 10
 		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
 		-- tiene sentido detras de todas las recetas).
 		y = createAddonActionButton(self, y, def, true, canInstall, canUninstall)
@@ -406,7 +464,7 @@ function GS_AddonManageUI:buildLayout()
 		local inv = self.player and self.player:getInventory()
 		local hasModule = false
 		if inv then
-			local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+			local moduleTypes = addonModuleItemTypes(def.id)
 			for i = 1, #moduleTypes do
 				if moduleTypes[i] and (inv:getItemCountRecurse(moduleTypes[i]) or 0) >= 1 then
 					hasModule = true
@@ -416,7 +474,7 @@ function GS_AddonManageUI:buildLayout()
 		end
 		local hasDisk = not def.installDiskItem or def.installDiskItem == ""
 			or (inv and (inv:getItemCountRecurse(def.installDiskItem) or 0) >= 1)
-		local hasMagazine = self.player and GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(self.player, def.id)
+		local hasMagazine = self.player and playerKnowsMagazine(self.player, def.id)
 		-- BUG REAL cerrado (2026-08-23, pedido explicito: "no veo la
 		-- disquetera como requisito global de todas las instalaciones, en su
 		-- modal, junto al resto de requisitos") - este bloque nunca
@@ -430,33 +488,19 @@ function GS_AddonManageUI:buildLayout()
 		local hasSkill = requiredSkill <= 0 or (self.player and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= requiredSkill)
 		canInstall = hasReader and hasModule and hasDisk and hasMagazine and hasSkill
 
-		local reqLbl = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_AddonReqInstallTitle"))
-		self:addChild(reqLbl)
-		y = y + FONT_HGT_SMALL + 6
-
-		-- La tarjeta de fondo se crea y se añade PRIMERO (para que quede
-		-- detras de las lineas de requisito, añadidas justo despues) y se
-		-- redimensiona AL FINAL, una vez conocido el contenido real - mismo
-		-- orden que createSectionCard/resizeSectionCard usan en el resto del
-		-- terminal, para no repetir el bug ya documentado de dimensionar
-		-- despues de rellenar contenido.
-		local cardTop = y
-		local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad, cardTop, textW, 10)
-		self:addChild(card)
-		y = y + 8
 		local readerType = GlobalStorageSiK.Config and GlobalStorageSiK.Config.ITEM_TERMINAL_READER
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, readerType, T("IGUI_GS_AddonReqReader"), hasReader)
-		y = y + 6
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.itemType, moduleRequirementText(def), hasModule)
-		y = y + 6
+		local rows = {
+			{ itemType = readerType, text = T("IGUI_GS_AddonReqReader"), ok = hasReader },
+			{ itemType = def.itemType, text = moduleRequirementText(def), ok = hasModule },
+		}
 		if def.installDiskItem and def.installDiskItem ~= "" then
-			y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.installDiskItem, itemDisplayName(def.installDiskItem), hasDisk)
-			y = y + 6
+			rows[#rows + 1] = { itemType = def.installDiskItem,
+				text = itemDisplayName(def.installDiskItem), ok = hasDisk }
 		end
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad + 8, y, textW - 16, def.magazineType, itemDisplayName(def.magazineType), hasMagazine)
-		y = y + 8
-		GlobalStorageSiK.SiK_UI.resizeSectionCard(card, pad, cardTop, textW, y - cardTop)
-		y = y + 10
+		rows[#rows + 1] = { itemType = def.magazineType,
+			text = itemDisplayName(def.magazineType), ok = hasMagazine }
+		y = y + addRequirementCard(self, y, textW,
+			T("IGUI_GS_AddonReqInstallTitle"), rows) + 10
 		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
 		-- tiene sentido detras de todas las recetas).
 		y = createAddonActionButton(self, y, def, false, canInstall, canUninstall)
@@ -490,8 +534,8 @@ function GS_AddonManageUI:buildLayout()
 	local previousX = self:getX()
 	local previousY = self:getY()
 	local wasPositioned = self._positioned == true
-	GlobalStorageSiK.SiK_UI.Modal.fitContent(self, y, {
-		kind = "task", bottomPadding = 0,
+	UI.Modal.fitContent(self, y, {
+		contentBottom = true, bottomPadding = 0,
 	})
 	if wasPositioned then
 		self:setX(previousX)
@@ -515,14 +559,11 @@ end
 ---@param b number
 ---@return number
 function GS_AddonManageUI:addWrappedLabel(x, y, text, maxW, r, g, b)
-	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxW, UIFont.Small)
-	for _, line in ipairs(lines) do
-		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, line, r, g, b, 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
-	return y
+	local copy = UI.Controls.copyText(self, {
+		x = x, y = y, w = maxW, text = text,
+		tone = "text", playerNum = self.playerNum,
+	})
+	return y + copy.height
 end
 
 --- Refresca sin reabrir (mismas guardas que GS_ReaderAcquireUI:refresh()).
@@ -535,7 +576,7 @@ function GS_AddonManageUI:refresh(force)
 		self._refreshPending = true
 		return
 	end
-	local def = GlobalStorageSiK.AddonRegistry.get(self.addonId)
+	local def = addonDefinition(self.addonId)
 	if not def then
 		return
 	end
@@ -556,7 +597,7 @@ end
 --- ModData y podia mostrar "Instalar" para un addon que la propia bahia
 --- ya pintaba como instalado.
 function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, terminal, installed)
-	if not addonId or not GlobalStorageSiK.AddonRegistry.get(addonId) then
+	if not addonId or not addonDefinition(addonId) then
 		return
 	end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
@@ -577,8 +618,7 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.terminal = terminal
 	ui.installed = installed or {}
 	ui:initialise()
-	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
+	UI.Modal.show(ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
 end
 

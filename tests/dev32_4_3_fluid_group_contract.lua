@@ -40,6 +40,8 @@ GlobalStorageSiK = {
 local ROOT = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/"
 dofile(ROOT .. "GS_FluidTaxonomy.lua")
 package.loaded["GS_FluidTaxonomy"] = true
+dofile(ROOT .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(ROOT .. "GS_ItemSnapshot.lua")
 package.loaded["GS_ItemSnapshot"] = true
 

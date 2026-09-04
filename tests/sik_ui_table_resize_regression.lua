@@ -1,67 +1,54 @@
--- Regression test for Core 1.4.3-dev32.4 shared SiK UI table resize.
--- Run from GlobalStorageSiK-Repo: lua51.exe tests/sik_ui_table_resize_regression.lua
+-- Regression contract for public SiK.UI.Table resize and sort interaction.
 
-package.loaded["GS_SiK_UI_Core"] = true
-package.loaded["GS_SiK_UI_Metrics"] = true
-package.loaded["GS_TerminalUI_Scroll"] = true
-package.loaded["GS_SiK_UI_List"] = true
+local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
+local suite = Support.newSuite("sik_ui_table_resize_regression")
+local Table = Support.loadFrameworkModule(suite, "Table")
 
-UIFont = { Small = "Small" }
-function getTextManager()
-	return { MeasureStringX = function(_, _, text) return #tostring(text or "") * 6 end,
-		getFontHeight = function() return 12 end }
-end
-
-ISPanel = {
-	onMouseDown = function() return false end,
-	onMouseMove = function() return false end,
-	onMouseUp = function() return false end,
-}
-GlobalStorageSiK = {
-	SiK_UI = { Metrics = {
-		tokens = function()
-			return { controlVerticalPadding = 10, tableHeaderVerticalPadding = 10,
-				tableColumnGap = 8, tableCellPadding = 6 }
-		end,
-	}, List = {}, Table = {} },
-	I18n = { text = function(key) return key end },
-}
-
-local function assertEqual(actual, expected, message)
-	if actual ~= expected then
-		error((message or "values differ") .. ": expected=" .. tostring(expected)
-			.. " actual=" .. tostring(actual), 2)
-	end
-end
-
-dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_SiK_UI_Table.lua")
-
-local Table = GlobalStorageSiK.SiK_UI.Table
 local columns = {
-	{ key = "name", flex = 1, minWidth = 80 },
-	{ key = "category", flex = 1, minWidth = 100 },
-	{ key = "zone", width = 72 },
-	{ key = "count", width = 48, align = "right" },
+	{ key = "name", title = "Name", flex = 1, minWidth = 80, sortable = true },
+	{ key = "category", title = "Category", flex = 1, minWidth = 100 },
+	{ key = "zone", title = "Zone", width = 72 },
+	{ key = "count", title = "Count", width = 48, align = "right" },
 }
-local options = { left = 0, right = 0, gap = 4 }
-local header = { width = 420 }
-local sorts = 0
-header.onMouseUp = function() sorts = sorts + 1 return true end
-Table.attachHeaderResize(header, columns, options)
+local parent = ISPanel:new(0, 0, 500, 360); parent:initialise()
+local sorts, resizeEvents = 0, 0
+local instance = assert(Table.create({
+	parent = parent, x = 0, y = 0, w = 420, h = 260,
+	columns = columns, gap = 4, rows = {},
+	onSort = function() sorts = sorts + 1 end,
+	onColumnResize = function() resizeEvents = resizeEvents + 1 end,
+}))
 
-local before = Table.resolveColumns(header.width, columns, options)
-local boundary = before[1].finish
-assert(header:onMouseDown(boundary, 4), "shared divider must start a drag")
-assert(header:onMouseMove(28, 0), "drag must be handled by the common helper")
-assert(header:onMouseUp(boundary + 28, 4), "drag release must be handled")
-local after = Table.resolveColumns(header.width, columns, options)
-assertEqual(after[1].width, before[1].width + 28, "left column follows the divider")
-assertEqual(after[2].width, before[2].width - 28, "adjacent column gives the same width")
-assertEqual(after[4].finish, before[4].finish, "right-anchored quantity remains at the table edge")
-assertEqual(sorts, 0, "a resize never triggers column sorting")
+Support.check(suite, "drag redistributes adjacent widths and preserves right edge", function()
+	local header = instance.header
+	local before = instance.columnLayout
+	local boundary = before[1].finish
+	local leftBefore, rightBefore, finalEdge = before[1].width, before[2].width,
+		before[#before].finish
+	assert(header:onMouseDown(boundary, 4), "shared divider must start a drag")
+	assert(header:onMouseMove(28, 0), "drag must be handled by Table")
+	assert(header:onMouseUp(boundary + 28, 4), "drag release must be handled")
+	local after = instance.columnLayout
+	assert(after[1].width == leftBefore + 28, "left column did not follow divider")
+	assert(after[2].width == rightBefore - 28, "adjacent column did not yield width")
+	assert(after[#after].finish == finalEdge, "right-anchored quantity moved")
+	assert(resizeEvents == 1 and sorts == 0, "resize emitted wrong callbacks")
+	return true
+end)
 
-assert(not header:onMouseDown(12, 4), "ordinary header click is not claimed as resize")
-assert(header:onMouseUp(12, 4), "ordinary header click reaches the original handler")
-assertEqual(sorts, 1, "sort handler remains intact after common resize wiring")
+Support.check(suite, "ordinary sortable header click remains intact", function()
+	local header = instance.header
+	assert(header:onMouseDown(12, 4) == false, "ordinary click was claimed as resize")
+	assert(header:onMouseUp(12, 4) == true, "ordinary sortable click was ignored")
+	assert(sorts == 1 and instance.sortKey == "name", "sort callback/state changed")
+	return true
+end)
 
-print("sik_ui_table_resize_regression: OK")
+Support.check(suite, "resize owner is exact public Table instance", function()
+	assert(SiK.UI.Table == Table, "Table is not owned by SiK.UI")
+	assert(instance.header._sikTable == instance, "header lost its public Table owner")
+	instance:dispose()
+	return true
+end)
+
+Support.finish(suite)

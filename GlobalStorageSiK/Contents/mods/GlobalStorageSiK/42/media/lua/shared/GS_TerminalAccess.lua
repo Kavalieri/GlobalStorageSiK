@@ -21,7 +21,13 @@ require "GS_Debug"
 
 GlobalStorageSiK.TerminalAccess = {}
 
-require "GS_Addons"
+-- Do not require GS_Addons here. GS_Addons consumes GSSiK_API and the public
+-- API resolves TerminalAccess lazily when an addon registers a wireless
+-- provider. Loading it here closes the cycle
+-- TerminalAccess -> Addons -> GSSiK_API -> TerminalAccess and prevents the
+-- shared catalog (including Core's own reader) from finishing its bootstrap.
+-- The three call sites below are deliberately nil-safe because Addons is an
+-- optional capability at access-evaluation time.
 
 --- Log de diagnóstico de acceso (sandbox DebugMode).
 ---@param step string
@@ -302,17 +308,81 @@ end
 --- Varios addons pueden registrar su propio proveedor sin pisarse entre
 --- ellos ni tocar este fichero.
 GlobalStorageSiK.TerminalAccess._wirelessProviders = GlobalStorageSiK.TerminalAccess._wirelessProviders or {}
+GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration =
+	GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration or 0
+GlobalStorageSiK.TerminalAccess.MAX_WIRELESS_PROVIDERS = 32
 
----@param provider table { hasAccess, hasCraft?, hasBuilder?, getRange }
-function GlobalStorageSiK.TerminalAccess.registerWirelessProvider(provider)
-	if not provider or type(provider.id) ~= "string" or provider.id == ""
-		or type(provider.hasAccess) ~= "function" then
-		return
+local function copyCapabilities(capabilities)
+	if capabilities == nil then return nil end
+	if type(capabilities) ~= "table" then return nil end
+	local copy = {}
+	for key, value in pairs(capabilities) do
+		if type(key) ~= "string" or key == ""
+			or (type(value) ~= "boolean" and type(value) ~= "string" and type(value) ~= "number") then
+			return nil
+		end
+		copy[key] = value
 	end
+	return copy
+end
+
+--- Internal preparation boundary used by GSSiK.API.Access. The returned
+--- definition owns its scalar metadata while retaining only the callbacks
+--- that must execute in the registering addon.
+---@param provider table
+---@return boolean ok
+---@return string code
+---@return table|nil prepared
+function GlobalStorageSiK.TerminalAccess._prepareWirelessProvider(provider)
+	if type(provider) ~= "table" or type(provider.id) ~= "string" or provider.id == ""
+		or #provider.id > 64 or type(provider.hasAccess) ~= "function" then
+		return false, "ERR_SCHEMA", nil
+	end
+	local callbackNames = {
+		"hasCraft", "hasBuilder", "getRange", "getRangeForNetwork", "canUseNetwork",
+	}
+	for index = 1, #callbackNames do
+		local name = callbackNames[index]
+		if provider[name] ~= nil and type(provider[name]) ~= "function" then
+			return false, "ERR_SCHEMA", nil
+		end
+	end
+	local capabilities = copyCapabilities(provider.capabilities)
+	if provider.capabilities ~= nil and capabilities == nil then
+		return false, "ERR_SCHEMA", nil
+	end
+	return true, "OK", {
+		id = provider.id,
+		hasAccess = provider.hasAccess,
+		hasCraft = provider.hasCraft,
+		hasBuilder = provider.hasBuilder,
+		getRange = provider.getRange,
+		getRangeForNetwork = provider.getRangeForNetwork,
+		canUseNetwork = provider.canUseNetwork,
+		capabilities = capabilities,
+	}
+end
+
+---@return number generation
+function GlobalStorageSiK.TerminalAccess._allocateWirelessProviderGeneration()
+	GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration =
+		GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration + 1
+	return GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration
+end
+
+---@return number count
+function GlobalStorageSiK.TerminalAccess._countWirelessProviders()
+	return #GlobalStorageSiK.TerminalAccess._wirelessProviders
+end
+
+---@param provider table
+---@param generation number
+function GlobalStorageSiK.TerminalAccess._commitWirelessProvider(provider, generation)
+	provider._gssikGeneration = generation
 	local rebuilt = {}
 	local replaced = false
-	for i = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
-		local current = GlobalStorageSiK.TerminalAccess._wirelessProviders[i]
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		local current = GlobalStorageSiK.TerminalAccess._wirelessProviders[index]
 		if current and current.id == provider.id then
 			if not replaced then
 				rebuilt[#rebuilt + 1] = provider
@@ -324,6 +394,46 @@ function GlobalStorageSiK.TerminalAccess.registerWirelessProvider(provider)
 	end
 	if not replaced then rebuilt[#rebuilt + 1] = provider end
 	GlobalStorageSiK.TerminalAccess._wirelessProviders = rebuilt
+end
+
+---@param providerId string
+---@param generation number
+---@return boolean removed
+function GlobalStorageSiK.TerminalAccess._removeWirelessProviderIfGeneration(providerId, generation)
+	local rebuilt = {}
+	local removed = false
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		local current = GlobalStorageSiK.TerminalAccess._wirelessProviders[index]
+		if current and current.id == providerId and current._gssikGeneration == generation then
+			removed = true
+		else
+			rebuilt[#rebuilt + 1] = current
+		end
+	end
+	if removed then
+		GlobalStorageSiK.TerminalAccess._wirelessProviders = rebuilt
+	end
+	return removed
+end
+
+---@param provider table { hasAccess, hasCraft?, hasBuilder?, getRange }
+function GlobalStorageSiK.TerminalAccess.registerWirelessProvider(provider)
+	local ok, code, prepared = GlobalStorageSiK.TerminalAccess._prepareWirelessProvider(provider)
+	if not ok then return false, code end
+	local current = false
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		if GlobalStorageSiK.TerminalAccess._wirelessProviders[index].id == prepared.id then
+			current = true
+			break
+		end
+	end
+	if not current and GlobalStorageSiK.TerminalAccess._countWirelessProviders()
+		>= GlobalStorageSiK.TerminalAccess.MAX_WIRELESS_PROVIDERS then
+		return false, "ERR_CAPACITY"
+	end
+	local generation = GlobalStorageSiK.TerminalAccess._allocateWirelessProviderGeneration()
+	GlobalStorageSiK.TerminalAccess._commitWirelessProvider(prepared, generation)
+	return true, "OK"
 end
 
 --- Indica si el jugador lleva tableta de acceso remoto (cualquier addon

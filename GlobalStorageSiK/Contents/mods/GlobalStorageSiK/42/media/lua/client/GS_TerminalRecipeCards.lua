@@ -5,11 +5,10 @@
 	Descripción: UI compartida para recetas del mod (terminal, tableta).
 ]]
 
-require "ISUI/ISPanel"
 require "GS_I18n"
 require "GS_CraftUtils"
-require "GS_SiK_UI_Core"
-require "GS_TerminalUI_Scroll"
+
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalRecipeCards = GlobalStorageSiK.TerminalRecipeCards or {}
 
@@ -30,14 +29,14 @@ local CRAFT_BTN_H = FONT_HGT_SMALL + 10
 ---@param g number
 ---@param b number
 local function pushWrappedLines(out, text, maxWidth, r, g, b)
-	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(text, maxWidth, UIFont.Small)) do
+	for _, line in ipairs(UI.Controls.wrapText(text, maxWidth, UIFont.Small)) do
 		table.insert(out, { text = line, r = r, g = g, b = b })
 	end
 end
 
 --- Mide altura del cuerpo de una tarjeta.
 --- IMPORTANTE: las filas con icono tambien envuelven su texto en varias
---- lineas si no cabe en el ancho reservado (ver drawBodyLines) — antes esta
+--- lineas si no cabe en el ancho reservado (ver createBodyControls) — antes esta
 --- funcion solo reservaba UNA linea fija para esas filas, asi que un texto
 --- largo (ej. titulo de revista) se dibujaba en 2+ lineas pero el panel
 --- media solo 1, y el contenido siguiente (materiales, botones) quedaba
@@ -53,10 +52,12 @@ function GlobalStorageSiK.TerminalRecipeCards.measureBodyHeight(bodyLines, textW
 	for i = 1, #bodyLines do
 		local spec = bodyLines[i]
 		if spec.icon or spec.itemType then
-			local wrappedH = GlobalStorageSiK.SiK_UI.countWrappedLines(spec.text, textWIcon, UIFont.Small, LINE_GAP)
+			local wrappedH = #UI.Controls.wrapText(spec.text, textWIcon, UIFont.Small)
+				* (FONT_HGT_SMALL + LINE_GAP)
 			h = h + math.max(iconRowH, wrappedH)
 		else
-			h = h + GlobalStorageSiK.SiK_UI.countWrappedLines(spec.text, textW, UIFont.Small, LINE_GAP)
+			h = h + #UI.Controls.wrapText(spec.text, textW, UIFont.Small)
+				* (FONT_HGT_SMALL + LINE_GAP)
 		end
 	end
 	return h
@@ -87,14 +88,14 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 		pushWrappedLines(lines, wbLine, textWIcon, wbR, wbG, wbB)
 	end
 	if recipe.requireLight then
-		local _lp = GlobalStorageSiK.SiK_UI.PALETTE
+		local _lp = UI.Theme.palette()
 		local ltR = recipe.hasCraftLight and _lp.statusOk[1] or _lp.statusDanger[1]
 		local ltG = recipe.hasCraftLight and _lp.statusOk[2] or _lp.statusDanger[2]
 		local ltB = recipe.hasCraftLight and _lp.statusOk[3] or _lp.statusDanger[3]
 		local ltLine = recipe.hasCraftLight and T("IGUI_GS_ReqLightOk") or T("IGUI_GS_ReqLightMissing")
 		pushWrappedLines(lines, ltLine, textWIcon, ltR, ltG, ltB)
 	end
-	local _ip = GlobalStorageSiK.SiK_UI.PALETTE
+	local _ip = UI.Theme.palette()
 	for j = 1, #(recipe.ingredients or {}) do
 		local ing = recipe.ingredients[j]
 		local colorR, colorG, colorB = _ip.statusDanger[1], _ip.statusDanger[2], _ip.statusDanger[3]
@@ -120,13 +121,31 @@ local function resolveReqIcon(spec)
 	return nil
 end
 
---- Dibuja líneas del cuerpo de la tarjeta.
----@param panel ISPanel
+local function lineTheme(spec)
+	return {
+		recipeLine = {
+			r = spec.r or 1, g = spec.g or 1, b = spec.b or 1, a = 1,
+		},
+	}
+end
+
+local function disposeControls(controls)
+	for i = #controls, 1, -1 do
+		local control = controls[i]
+		if control and control.dispose then control:dispose() end
+		controls[i] = nil
+	end
+end
+
+--- Construye la presentación de requisitos con controles públicos SiK.UI.
+---@param card table
 ---@param bodyLines table
 ---@param textW number
 ---@param startY number
 ---@param pad number
-function GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, textW, startY, pad)
+---@return table controls
+local function createBodyControls(card, bodyLines, textW, startY, pad)
+	local controls = {}
 	local y = startY
 	local lh = FONT_HGT_SMALL + LINE_GAP
 	local iconRowH = math.max(lh, REQ_ICON + LINE_GAP)
@@ -139,28 +158,97 @@ function GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, te
 			local rowStart = y
 			local iconY = y + math.floor((iconRowH - REQ_ICON) / 2)
 			local fp = REQ_ICON_FRAME_PAD
-			panel:drawRect(pad - fp, iconY - fp, REQ_ICON + fp * 2, REQ_ICON + fp * 2, 0.9, 0.08, 0.08, 0.08)
-			panel:drawRectBorder(pad - fp, iconY - fp, REQ_ICON + fp * 2, REQ_ICON + fp * 2, 0.8, spec.r or 1, spec.g or 1, spec.b or 1)
-			panel:drawTextureScaledAspect(icon, pad, iconY, REQ_ICON, REQ_ICON, 1, 1, 1, 1)
-			for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(spec.text, textWIcon, UIFont.Small)) do
-				panel:drawText(line, textX, y, spec.r, spec.g, spec.b, 1, UIFont.Small)
-				y = y + lh
-			end
+			local frame = UI.Controls.panel(card, {
+				x = pad - fp, y = iconY - fp,
+				w = REQ_ICON + fp * 2, h = REQ_ICON + fp * 2,
+				drawBackground = true,
+				backgroundColor = { r = 0.08, g = 0.08, b = 0.08, a = 0.9 },
+				borderColor = {
+					r = spec.r or 1, g = spec.g or 1, b = spec.b or 1, a = 0.8,
+				},
+			})
+			controls[#controls + 1] = frame
+			controls[#controls + 1] = UI.Controls.icon(frame, {
+				x = fp, y = fp, w = REQ_ICON, h = REQ_ICON,
+				texture = icon, iconSize = REQ_ICON,
+			})
+			local copy = UI.Controls.copyText(card, {
+				x = textX, y = y, w = textWIcon, text = spec.text,
+				font = UIFont.Small, lineGap = LINE_GAP,
+				tone = "recipeLine", theme = lineTheme(spec),
+			})
+			controls[#controls + 1] = copy
+			y = y + copy.height
 			if y < rowStart + iconRowH then
 				y = rowStart + iconRowH
 			end
 		else
-			for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(spec.text, textW, UIFont.Small)) do
-				panel:drawText(line, pad, y, spec.r, spec.g, spec.b, 1, UIFont.Small)
-				y = y + lh
-			end
+			local copy = UI.Controls.copyText(card, {
+				x = pad, y = y, w = textW, text = spec.text,
+				font = UIFont.Small, lineGap = LINE_GAP,
+				tone = "recipeLine", theme = lineTheme(spec),
+			})
+			controls[#controls + 1] = copy
+			y = y + copy.height
 		end
 	end
-	return y
+	return controls
+end
+
+local function findRecipeInState(state, recipeId)
+	for recipeIndex = 1, #(state and state.recipes or {}) do
+		local candidate = state.recipes[recipeIndex]
+		if candidate.id == recipeId then return candidate end
+	end
+	return nil
+end
+
+local function findLiveRecipe(card, fallback)
+	local owner = card.ownerUI
+	local live = owner and findRecipeInState(owner.craftRecipesState, card.recipeId) or nil
+	if live then return live end
+	live = owner and findRecipeInState(owner.addonRecipesState, card.recipeId) or nil
+	if live then return live end
+	return fallback
+end
+
+local function presentationSignature(recipe, bodyLines)
+	local values = {
+		tostring(recipe.outputDisplay or recipe.id or ""),
+		recipe.canCraft == true and "1" or "0",
+	}
+	for i = 1, #bodyLines do
+		local spec = bodyLines[i]
+		values[#values + 1] = table.concat({
+			tostring(spec.text or ""), tostring(spec.r or ""),
+			tostring(spec.g or ""), tostring(spec.b or ""),
+			tostring(spec.itemType or spec.icon or ""),
+		}, "|")
+	end
+	return table.concat(values, "\30")
+end
+
+local function syncCard(card, fallback)
+	local liveRecipe = findLiveRecipe(card, fallback)
+	local bodyLines = GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(
+		liveRecipe, card.textW)
+	local signature = presentationSignature(liveRecipe, bodyLines)
+	if signature ~= card._recipePresentationSignature then
+		disposeControls(card._recipeBodyControls or {})
+		card._recipeBodyControls = createBodyControls(card, bodyLines, card.textW,
+			card.titleHeight + card.contentPad, card.contentPad)
+		card._recipePresentationSignature = signature
+		card.titleControl:setText(liveRecipe.outputDisplay or liveRecipe.id)
+	end
+	local canCraft = liveRecipe.canCraft == true
+	card.craftBtn:setText(canCraft and T("IGUI_GS_CraftNow")
+		or T("IGUI_GS_CraftMissing"))
+	card.craftBtn:setLocked(not canCraft)
+	card.craftBtn:setEnabled(canCraft)
 end
 
 --- Añade tarjeta de receta al scroll.
----@param scroll ISPanel
+---@param scroll table
 ---@param recipe table
 ---@param y number
 ---@param cardW number
@@ -176,70 +264,68 @@ function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, 
 	)
 	local cardH = titleH + pad + bodyH + CRAFT_BTN_H + 12
 
-	local card = ISPanel:new(pad, y, cardW, cardH)
-	card:initialise()
-	card.drawBackground = false
-	card.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
+	local palette = UI.Theme.palette()
+	local card = UI.Controls.panel(nil, {
+		x = pad, y = y, w = cardW, h = cardH, drawBackground = true,
+		backgroundColor = {
+			r = palette.bgCard[1], g = palette.bgCard[2],
+			b = palette.bgCard[3], a = 0.94,
+		},
+		borderColor = {
+			r = palette.border[1] * 0.45, g = palette.border[2] * 0.45,
+			b = palette.border[3] * 0.45, a = 0.35,
+		},
+	})
 	card.textW = textW
 	card.contentPad = pad
 	card.titleHeight = titleH
 	card.recipeId = recipe.id
 	card.ownerUI = owner
 	card.clipChildren = true
-
-	card.prerender = function(panel)
-		ISPanel.prerender(panel)
-		local liveRecipe = recipe
-		local ui = panel.ownerUI
-		if ui and ui.craftRecipesState and ui.craftRecipesState.recipes then
-			for i = 1, #ui.craftRecipesState.recipes do
-				local candidate = ui.craftRecipesState.recipes[i]
-				if candidate.id == panel.recipeId then
-					liveRecipe = candidate
-					break
-				end
-			end
-		end
-		if ui and ui.addonRecipesState and ui.addonRecipesState.recipes then
-			for i = 1, #ui.addonRecipesState.recipes do
-				local candidate = ui.addonRecipesState.recipes[i]
-				if candidate.id == panel.recipeId then
-					liveRecipe = candidate
-					break
-				end
-			end
-		end
-		local title = liveRecipe.outputDisplay or liveRecipe.id
-		local bodyLines = GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(liveRecipe, panel.textW)
-		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, panel.titleHeight)
-		local _rcp = GlobalStorageSiK.SiK_UI.PALETTE
-		panel:drawText(title, panel.contentPad, 3, _rcp.textPrimary[1], _rcp.textPrimary[2], _rcp.textPrimary[3], 1, UIFont.Small)
-		GlobalStorageSiK.TerminalRecipeCards.drawBodyLines(panel, bodyLines, panel.textW, panel.titleHeight + panel.contentPad, panel.contentPad)
-		if panel.craftBtn then
-			local canCraft = liveRecipe.canCraft == true
-			local newTitle = canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-			panel.craftBtn._sikUiLabel = newTitle
-			-- Mismo patron ya migrado en Programacion/PC/disquetera (2026-08-26,
-			-- auditoria de botones): _sikUiLocked es SOLO el aspecto visual
-			-- (atenuado, sin la textura gris generica de setEnable), pero el
-			-- gating real de clic sigue viviendo en setEnable - un boton
-			-- ISButton deshabilitado no procesa el clic en absoluto en PZ.
-			panel.craftBtn._sikUiLocked = not canCraft
-			panel.craftBtn:setEnable(canCraft)
-		end
-	end
+	local header = UI.Controls.panel(card, {
+		x = 1, y = 1, w = math.max(1, cardW - 2), h = math.max(1, titleH - 1),
+		drawBackground = true,
+		backgroundColor = {
+			r = palette.bgHeader[1], g = palette.bgHeader[2],
+			b = palette.bgHeader[3], a = 0.98,
+		},
+		borderColor = { r = 0, g = 0, b = 0, a = 0 },
+	})
+	header.clipChildren = true
+	card.titleControl = UI.Controls.copyText(header, {
+		x = pad - 1, y = 2, w = math.max(1, textW),
+		text = recipe.outputDisplay or recipe.id, font = UIFont.Small,
+		lineGap = 0, tone = "text",
+	})
 
 	local btnTitle = recipe.canCraft and T("IGUI_GS_CraftNow") or T("IGUI_GS_CraftMissing")
-	local craftBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, cardH - CRAFT_BTN_H - 6, textW, CRAFT_BTN_H, btnTitle, card, function()
-		if owner and owner.onCraftModRecipe then
-			owner:onCraftModRecipe(recipe.id)
-		end
-	end, nil, true, recipe.canCraft ~= true)
-	craftBtn:setEnable(recipe.canCraft == true)
+	local craftBtn = UI.Controls.button(nil, {
+		x = pad, y = cardH - CRAFT_BTN_H - 6, w = textW, h = CRAFT_BTN_H,
+		text = btnTitle, enabled = recipe.canCraft == true,
+		onClick = function()
+			if owner and owner.onCraftModRecipe then owner:onCraftModRecipe(recipe.id) end
+		end,
+	})
 	card.craftBtn = craftBtn
 	card:addChild(craftBtn)
+	card._recipeBodyControls = {}
+	local previousUpdate = card.update
+	card.update = function(panel)
+		if type(previousUpdate) == "function" then previousUpdate(panel) end
+		syncCard(panel, recipe)
+	end
+	local panelDispose = card.dispose
+	card.dispose = function(panel)
+		if panel._recipeCardDisposed then return false end
+		panel._recipeCardDisposed = true
+		disposeControls(panel._recipeBodyControls or {})
+		if panel.craftBtn then panel.craftBtn:dispose(); panel.craftBtn = nil end
+		if panel.titleControl then panel.titleControl:dispose(); panel.titleControl = nil end
+		if header then header:dispose(); header = nil end
+		return panelDispose(panel)
+	end
+	syncCard(card, recipe)
 
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+	UI.Scroll.addChild(scroll, card)
 	return cardH
 end

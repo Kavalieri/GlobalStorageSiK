@@ -1,6 +1,7 @@
--- Shared runner for author-side SiK UI geometry contracts.
--- It deliberately distinguishes missing foundation modules (BLOCKED) from
--- implemented contracts that return invalid geometry (FAIL).
+-- Shared runner for author-side SiK UI contracts.
+-- The production framework is an independent ModID, so every runtime contract
+-- loads the public SiK.UI module from that repository.  A missing public module
+-- is BLOCKED; private Core clones are never accepted as a substitute.
 
 local Support = {}
 
@@ -59,41 +60,48 @@ function Support.requireFunction(suite, owner, key, label)
 	return owner[key]
 end
 
-function Support.loadClientModule(suite, moduleName)
-	local clientRoot = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
-	local path = clientRoot .. moduleName .. ".lua"
+local FRAMEWORK_ROOT = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/"
+
+function Support.frameworkRoot()
+	return FRAMEWORK_ROOT
+end
+
+function Support.frameworkPath(relativePath)
+	return FRAMEWORK_ROOT .. "SiK/UI/" .. tostring(relativePath or "")
+end
+
+local harnessReady = false
+local function prepareFrameworkHarness()
+	if harnessReady then return end
+	-- Reuse the framework's neutral PZ widget stub so Core-side contracts exercise
+	-- exactly the same public modules as the standalone repository tests.
+	dofile("../SiKUIFramework-Repo/tests/geometry/pz_ui_stub.lua")
+	if not string.find(package.path, FRAMEWORK_ROOT .. "?.lua", 1, true) then
+		package.path = FRAMEWORK_ROOT .. "?.lua;" .. package.path
+	end
+	harnessReady = true
+end
+
+function Support.loadFrameworkModule(suite, moduleName)
+	prepareFrameworkHarness()
+	local path = FRAMEWORK_ROOT .. "SiK/UI/" .. moduleName .. ".lua"
 	if not fileExists(path) then
-		Support.blocked(suite, moduleName, "module not implemented")
-		return false
+		Support.blocked(suite, "SiK.UI." .. moduleName, "public module not implemented")
+		return nil
 	end
-        GlobalStorageSiK = GlobalStorageSiK or {}
-        GlobalStorageSiK.SiK_UI = GlobalStorageSiK.SiK_UI or {}
-        -- Metrics consumes the framework-owned WindowChrome token.  The pure
-        -- harness stubs Core, so it supplies the same public accessor rather
-        -- than allowing a module-local geometry fallback.
-        GlobalStorageSiK.SiK_UI.CHROME = GlobalStorageSiK.SiK_UI.CHROME or {
-                headerHeight = 48,
-                closeButtonSize = 36,
-                horizontalPadding = 14,
-                titleCloseGap = 12,
-        }
-        GlobalStorageSiK.SiK_UI.windowChrome = GlobalStorageSiK.SiK_UI.windowChrome
-                or function() return GlobalStorageSiK.SiK_UI.CHROME end
-	-- Foundation modules may keep their normal PZ requires. The geometry APIs
-	-- exercised here are pure, so loading them only needs dependency sentinels;
-	-- no game object is instantiated and no PZ runtime is simulated.
-	package.loaded["GS_SiK_UI_Core"] = package.loaded["GS_SiK_UI_Core"] or true
-	package.loaded["ISUI/ISModalDialog"] = package.loaded["ISUI/ISModalDialog"] or true
-	package.loaded["GS_TerminalUI_Scroll"] = package.loaded["GS_TerminalUI_Scroll"] or true
-	if not string.find(package.path, clientRoot .. "?.lua", 1, true) then
-		package.path = clientRoot .. "?.lua;" .. package.path
-	end
-	local ok, result = pcall(dofile, path)
+	local ok, result = pcall(require, "SiK/UI/" .. moduleName)
 	if not ok then
-		Support.fail(suite, moduleName, "module cannot load in author harness: " .. tostring(result))
-		return false
+		Support.fail(suite, "SiK.UI." .. moduleName,
+			"public module cannot load in author harness: " .. tostring(result))
+		return nil
 	end
-	return true
+	if type(SiK) ~= "table" or type(SiK.UI) ~= "table"
+		or SiK.UI[moduleName] ~= result then
+		Support.fail(suite, "SiK.UI." .. moduleName,
+			"module is not published through the exact public namespace")
+		return nil
+	end
+	return result
 end
 
 function Support.assertNumber(value, label)

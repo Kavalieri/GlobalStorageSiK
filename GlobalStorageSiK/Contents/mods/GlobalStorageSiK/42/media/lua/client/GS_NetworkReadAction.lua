@@ -10,6 +10,7 @@ require "TimedActions/ISReadABook"
 require "TimedActions/ISTimedActionQueue"
 require "GS_DepositClient"
 require "GS_I18n"
+require "GS_UI_Feedback"
 require "GS_Log"
 require "GS_WithdrawClient"
 
@@ -33,9 +34,10 @@ local function playerFor(loan)
 end
 
 local function showError(player, key)
-	if not player or not player.setHaloNote then return end
+	if not player then return end
 	pcall(function()
-		player:setHaloNote(GlobalStorageSiK.I18n.text(key), 255, 120, 120, 300)
+		GlobalStorageSiK.UIFeedback.halo(player, GlobalStorageSiK.I18n.text(key),
+			255, 120, 120, 300, { tone = "danger" })
 	end)
 end
 

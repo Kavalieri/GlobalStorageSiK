@@ -6,6 +6,7 @@ local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
 local suite = Support.newSuite("sik_ui_drag_ghost_contract")
 
 local CLIENT = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
+local FRAMEWORK = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/"
 local function read(path)
 	local file = assert(io.open(path, "rb"), path)
 	local text = file:read("*a")
@@ -33,32 +34,40 @@ end
 
 local itemsSource = read(CLIENT .. "GS_TerminalUI_Items.lua")
 local dragSource = read(CLIENT .. "GS_TerminalWithdrawDrag.lua")
-local truncateStart = assert(dragSource:find("local function truncateMeasured", 1, true),
-	"shared preview truncator adapter missing")
-local truncateEnd = assert(dragSource:find("function GSWithdrawDragPreviewRow:prerender", truncateStart, true),
-	"shared preview truncator adapter boundary missing")
-local truncateSource = dragSource:sub(truncateStart, truncateEnd - 1)
+local frameworkDragSource = read(FRAMEWORK .. "Drag.lua")
+local frameworkGhostSource = read(FRAMEWORK .. "DragGhost.lua")
+local frameworkMetricsSource = read(FRAMEWORK .. "Metrics.lua")
+local frameworkTableSource = read(FRAMEWORK .. "Table.lua")
 local previewStart = assert(dragSource:find("local function createPreview", 1, true),
 	"compact preview constructor missing")
 local previewEnd = assert(dragSource:find("local function expandInventoryPages", previewStart, true),
 	"compact preview constructor boundary missing")
 local previewSource = dragSource:sub(previewStart, previewEnd - 1)
 
-Support.check(suite, "DragGhost is a compact row stack rather than a copied table", function()
+Support.check(suite, "product consumes the standalone Drag and DragGhost contracts", function()
+	contains(dragSource, 'local UI = require "GS_UI_Framework"', "public UI facade import missing")
+	excludes(dragSource, 'require "SiK/UI/', "consumer imports standalone internals directly")
+	contains(previewSource, "UI.Drag.begin({", "framework does not own drag lifecycle")
+	contains(previewSource, "UI.DragGhost.create({", "framework does not own ghost rendering")
+	excludes(dragSource, "GlobalStorageSiK.SiK_UI", "private UI namespace remains")
+	excludes(dragSource, "GSWithdrawDragPreview", "product still defines a private ghost widget")
+	excludes(dragSource, "ISPanel:derive", "product still derives a private UI class")
+	return true
+end)
+
+Support.check(suite, "DragGhost remains a bounded compact stack rather than a copied table", function()
 	contains(dragSource, "local PREVIEW_MIN_W = 180", "compact minimum width missing")
 	contains(dragSource, "local PREVIEW_MAX_W = 300", "compact maximum width missing")
 	contains(dragSource, "local PREVIEW_MAX_ROWS =", "compact stack has no bounded row count")
 	contains(previewSource, "items.rowHeight", "preview does not consume canonical ROW_H")
-	contains(dragSource, "truncateMeasured", "long preview names are not truncated")
 	contains(dragSource, "local PREVIEW_ALPHA = 0.78", "light preview alpha missing")
 	excludes(previewSource, "drawRowDescriptor", "preview still copies the Warehouse row renderer")
 	excludes(previewSource, "sourceWidget.width", "preview width still depends on its source window")
-	contains(previewSource, "#visualRows * rowH", "preview height does not preserve visual rows")
 	contains(previewSource, "for i = 1, #visualRows do", "preview does not render every visual row")
-	contains(dragSource, "descriptor.texture", "compact row omits the item icon")
-	contains(dragSource, "descriptor.name", "compact row omits the item name")
-	contains(dragSource, "descriptor.count", "compact row omits its own quantity")
-	contains(dragSource, "descriptor.indicator", "compact row omits group/expanded state")
+	contains(previewSource, "descriptor.prefix = descriptor.prefix or descriptor.indicator",
+		"Warehouse hierarchy state is not mapped to the neutral ghost prefix")
+	contains(previewSource, "descriptors = descriptors", "row descriptors never reach DragGhost")
+	contains(previewSource, "maxRows = PREVIEW_MAX_ROWS", "bounded rows not delegated")
 	contains(dragSource, "IGUI_GS_DragMoreObjects", "overflow has no localized +N objects label")
 	excludes(previewSource, "selectionCount", "stack replaces row quantities with one selection summary")
 	excludes(previewSource, ".category", "preview leaks the Category column")
@@ -66,26 +75,28 @@ Support.check(suite, "DragGhost is a compact row stack rather than a copied tabl
 	return true
 end)
 
-Support.check(suite, "preview truncates through the shared UTF-safe SiK UI helper", function()
-	contains(truncateSource, "GlobalStorageSiK.SiK_UI.truncateText",
-		"preview does not delegate truncation to the shared UTF-safe helper")
-	contains(dragSource, "truncateMeasured(descriptor.name, textW)",
-		"preview name bypasses the shared truncator adapter")
-	excludes(truncateSource, "string.sub", "preview defines a local byte truncator")
-	excludes(truncateSource, ":sub(", "preview defines a local byte truncator")
-	excludes(truncateSource, "while ", "preview defines a local truncation loop")
-	excludes(truncateSource, "for ", "preview defines a local truncation loop")
+Support.check(suite, "framework owns size truncation placement passivity and cleanup", function()
+	contains(frameworkGhostSource, "local function resolveSize", "framework size resolver missing")
+	contains(frameworkGhostSource, "local function truncate", "framework truncator missing")
+	contains(frameworkGhostSource, "local function clampPointer", "framework pointer clamp missing")
+	contains(frameworkGhostSource, "SiK.UI.Tooltip.makePassive(panel)", "ghost is not mouse-passive")
+	contains(frameworkGhostSource, "function panel:dispose()", "ghost cleanup contract missing")
+	contains(frameworkDragSource, "SiK.UI.FocusStack.push({", "drag does not own Escape lifecycle")
+	excludes(dragSource, "local function pointerPosition", "product duplicates pointer placement")
+	excludes(dragSource, "local function truncateMeasured", "product duplicates truncation")
+	excludes(dragSource, "local function makeMouseTransparent", "product duplicates passivity")
+	excludes(dragSource, ":addToUIManager()", "product bypasses framework ghost lifecycle")
 	return true
 end)
 
 Support.check(suite, "drag integration keeps compact visuals and exact semantic payload separate", function()
 	contains(itemsSource, "TerminalItems.buildDragState", "semantic drag builder missing")
-	contains(itemsSource, "dragState.payloadRows, dragState.visualRows, self",
+	contains(itemsSource, "dragState.payloadRows, dragState.visualRows, row)",
 		"begin does not receive the exact semantic and visual sets")
 	contains(dragSource, "payloadRows", "drag state omits semantic payload")
 	contains(previewSource, "activeDrag.visualRows", "preview drops expanded or selected visual rows")
-	assert(select(2, previewSource:gsub("GSWithdrawDragPreviewRow:new", "")) == 1,
-		"preview row constructor is duplicated instead of reused in one loop")
+	contains(previewSource, "payload = activeDrag.payloadRows",
+		"framework drag session receives visual rows instead of semantic payload")
 	contains(dragSource, "finishAtPointer", "drop completion is not event-driven")
 	return true
 end)
@@ -123,10 +134,11 @@ Support.check(suite, "drag logging is event-only and has no move or frame noise"
 end)
 
 Support.check(suite, "warehouse expander owns a 32 pixel click target", function()
-        contains(itemsSource, "local EXPANDER_HITBOX_W = 32", "expander target is not canonical")
-        contains(itemsSource, "x <= EXPANDER_HITBOX_W", "row click bypasses expander target")
-        excludes(itemsSource, "x <= 20", "legacy 20 pixel expander target remains")
-        return true
+	contains(frameworkMetricsSource, "expansionHitbox = 32", "expander target is not canonical")
+	contains(frameworkTableSource, "prefixStart + self.expansionHitbox",
+		"row click bypasses the framework expander target")
+	excludes(itemsSource, "x <= 20", "legacy 20 pixel expander target remains")
+	return true
 end)
 
 Support.check(suite, "drag has no polling sync or global monkey patch route", function()
@@ -137,19 +149,20 @@ Support.check(suite, "drag has no polling sync or global monkey patch route", fu
 end)
 
 Support.check(suite, "preview placement uses the real pointer and never becomes the drop target", function()
-	contains(dragSource, "getMouseX", "preview does not follow the real horizontal pointer")
-	contains(dragSource, "getMouseY", "preview does not follow the real vertical pointer")
+	contains(frameworkDragSource, "getMouseX", "framework drag does not follow the real pointer")
+	contains(frameworkDragSource, "getMouseY", "framework drag does not follow the real pointer")
 	contains(dragSource, "findPaneAtMouse(true, player, activeDrag.playerNum)",
 		"drop does not resolve the real pointer target in its captured viewport")
-	contains(dragSource, "setConsumeMouseEvents(false)", "preview consumes vanilla pane mouse events")
+	contains(frameworkGhostSource, "SiK.UI.Tooltip.makePassive(panel)",
+		"preview consumes vanilla pane mouse events")
 	return true
 end)
 
 Support.check(suite, "sent drags release their visual state and group headers remain draggable", function()
 	contains(dragSource, "clearDrag(nil)", "valid drop does not clear capture and preview before send")
-	local dragStart = assert(itemsSource:find("row.onMouseMove = function", 1, true),
+	local dragStart = assert(itemsSource:find("onMouseMove = function(context)", 1, true),
 		"row drag handler missing")
-	local dragEnd = assert(itemsSource:find("row.onMouseUpOutside = function", dragStart, true),
+	local dragEnd = assert(itemsSource:find("onMouseUpOutside = function(context)", dragStart, true),
 		"row drag handler boundary missing")
 	excludes(itemsSource:sub(dragStart, dragEnd - 1),
 		"aggregateAllowed == false and not self.itemData.itemIds",
@@ -169,7 +182,8 @@ Support.check(suite, "stateful group header delegates one semantic selection ind
 end)
 
 Support.check(suite, "Escape drop and cancel all converge on transient cleanup", function()
-	contains(dragSource, "EscapeStack", "Escape does not own the transient layer")
+	contains(frameworkDragSource, "SiK.UI.FocusStack.push({", "Escape does not own the transient layer")
+	contains(previewSource, "onCancel = function()", "product cancel callback missing")
 	contains(dragSource, "TerminalWithdrawDrag.cancel()", "Escape/cancel callback missing")
 	contains(dragSource, "destroyPreview", "preview cleanup missing")
 	contains(dragSource, "activeDrag = nil", "semantic payload cleanup missing")
@@ -182,9 +196,10 @@ end)
 for _, name in ipairs({
 	"ISUI/ISPanel", "ISUI/ISLabel", "ISUI/ISContextMenu", "GS_Libs", "GS_BulkFilters",
 	"GS_CatalogManager", "GS_I18n", "GS_ItemSnapshot", "GS_NativeProduct", "GS_CategoryResolution",
+	"GS_RecordedMedia",
 	"GS_DepositSources", "GS_TerminalWithdrawDrag", "GS_WithdrawMenu", "GS_QuantityPrompt",
         "GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight", "GS_ContainerTargets", "GS_UIDebug",
-	"GS_TerminalUI_Scroll", "GS_SiK_UI_Table", "GS_SiK_UI_Core", "GS_ItemNetworkTooltip",
+	"GS_TerminalUI_Scroll", "GS_ItemNetworkTooltip",
 	"GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail",
 }) do
 	package.loaded[name] = true
@@ -203,21 +218,24 @@ GlobalStorageSiK = {
 	},
 	NativeProduct = {},
 	CategoryResolution = {},
-	SiK_UI = {
-		Table = { metrics = function() return { rowHeight = 24, headerHeight = 24 } end },
-		truncateText = function(value) return value end,
-	},
 	TerminalWithdrawDrag = { isActive = function() return false end },
 }
+package.loaded["GS_UI_Framework"] = {
+	Table = { metrics = function() return { rowHeight = 24, headerHeight = 24 } end },
+	Tooltip = {},
+}
+package.loaded["GlobalStorageSiK/UI/Generated/TabWarehouse"] = {}
+package.loaded["GlobalStorageSiK/UI/TabWarehouseContext"] = { create = function() return nil end }
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile(CLIENT .. "GS_TerminalUI_Items.lua")
 
 local build = GlobalStorageSiK.TerminalItems.buildDragState
 
-local parent = { rowKey = "parent", fullType = "Base.VHSTape", _gsRowKind = "parent",
+local parent = { rowKey = "parent", fullType = "Base.VHS_Retail", _gsRowKind = "parent",
 	expandable = true, aggregateAllowed = true, count = 3 }
-local childA = { rowKey = "child-a", fullType = "Base.VHSTape", _gsRowKind = "child",
+local childA = { rowKey = "child-a", fullType = "Base.VHS_Retail", _gsRowKind = "child",
 	parentRowKey = "parent", itemId = 101, aggregateAllowed = false, count = 2 }
-local childB = { rowKey = "child-b", fullType = "Base.VHSTape", _gsRowKind = "child",
+local childB = { rowKey = "child-b", fullType = "Base.VHS_Retail", _gsRowKind = "child",
 	parentRowKey = "parent", itemId = 202, aggregateAllowed = false, count = 1 }
 local exact = { rowKey = "exact", fullType = "Base.Hammer", _gsRowKind = "parent",
 	aggregateAllowed = true, count = 4 }

@@ -15,6 +15,8 @@ require "GS_CategoryResolution"
 require "GS_RuleSanitizer"
 require "GS_NodeFilters"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.RulesUI = {}
 
 local T = GlobalStorageSiK.I18n.text
@@ -235,7 +237,7 @@ function GlobalStorageSiK.RulesUI.layoutSummary(rules, maxWidth, font, fallbackC
 		local wordWidth = tm:MeasureStringX(font, word)
 		if wordWidth > maxWidth then
 			if x > 0 then nextLine() end
-			local chunks = GlobalStorageSiK.SiK_UI.wrapTextLines(word, maxWidth, font)
+			local chunks = UI.Controls.wrapText(word, maxWidth, font)
 			for i = 1, #chunks do
 				addRun(chunks[i], color)
 				if i < #chunks then nextLine() end

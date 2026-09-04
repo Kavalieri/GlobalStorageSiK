@@ -10,7 +10,7 @@
 	desbloquea ni sobrescribe la otra, y viceversa (mismo aislamiento que ya
 	tienen las guardas de concurrencia server-side, ver
 	GS_NativeCorpusServer.lua). Reutiliza el layout envuelto+scroll de dev23
-	(GlobalStorageSiK.SiK_UI.renderWrappedLinePool, GS_TerminalUI_Scroll)
+	(UI.Controls.renderWrappedLinePool, SiK.UI.Scroll)
 	sin duplicarlo.
 
 	NUNCA envía la lista detallada de divergencias por red - eso vive
@@ -19,36 +19,42 @@
 	cachés, redes ni permisos.
 ]]
 
-require "ISUI/ISLabel"
 require "GS_I18n"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Controls"
-require "GS_SiK_UI_State"
-require "GS_TerminalUI_Scroll"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.AdminDashboardCorpus = GlobalStorageSiK.AdminDashboardCorpus or {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 4
-local BTN_H = GlobalStorageSiK.SiK_UI.Controls.metrics().buttonHeight
+local BTN_H = UI.Controls.metrics().buttonHeight
 local MIN_SUMMARY_SCROLL_H = FONT_HGT_SMALL * 4
 
-local renderWrappedLines = GlobalStorageSiK.SiK_UI.renderWrappedLinePool
+local function renderWrappedLines(host, pool, text, x, y, width, attach)
+	return UI.Controls.renderWrappedLinePool(host, pool, {
+		text = text, x = x, y = y, w = width, lineGap = 2, attach = attach,
+	})
+end
+
+local function relativeAge(value)
+	local dashboard = GlobalStorageSiK.AdminDashboard
+	if dashboard and dashboard.relativeAge then return dashboard.relativeAge(value) end
+	return "?"
+end
 
 local function captureSummaryState(scroll)
-	return GlobalStorageSiK.SiK_UI.State.capture({
-		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+	return UI.State.snapshot({
+		scrollY = UI.Scroll.getScrollOffset(scroll),
 		selectedKey = scroll._sikSelectedKey,
 		focusedKey = scroll._sikFocusedKey,
 	})
 end
 
 local function restoreSummaryState(scroll, snapshot)
-	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	local state = UI.State.merge({}, snapshot) or {}
 	scroll._sikSelectedKey = state.selectedKey
 	scroll._sikFocusedKey = state.focusedKey
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+	UI.Scroll.setScrollOffset(scroll, state.scrollY)
 end
 
 --- Construye la seccion "Validar corpus" dentro de la pestaña Taxonomia -
@@ -74,23 +80,27 @@ function GlobalStorageSiK.AdminDashboardCorpus.build(ui, pad, y, textW, bottomLi
 	ui._corpusContentW = textW
 	ui._corpusStatePool = {}
 
-	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_TaxonomyCorpusTitle"))
+	local title = UI.Controls.sectionTitle(nil, {
+		x = pad, y = y, w = textW, h = FONT_HGT_SMALL,
+		text = T("IGUI_GS_TaxonomyCorpusTitle"),
+	})
 	trackAddChild(ui, title)
 	y = y + FONT_HGT_SMALL + LINE_GAP + 2
 
-	ui.nativeCorpusBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, T("IGUI_GS_NativeCorpusBtn"), ui, function()
-			GlobalStorageSiK.AdminDashboardCorpus.runNativeCorpus(ui)
-		end)
+	ui.nativeCorpusBtn = UI.Controls.button(nil, {
+		x = pad, y = y, w = textW, h = BTN_H,
+		text = T("IGUI_GS_NativeCorpusBtn"), fullWidth = true,
+		onClick = function() GlobalStorageSiK.AdminDashboardCorpus.runNativeCorpus(ui) end,
+	})
 	trackAddChild(ui, ui.nativeCorpusBtn)
 	y = y + BTN_H + LINE_GAP + 4
 
 	ui._corpusStateY = y
 	ui._corpusBottomLimit = bottomLimitY
 
-	ui.nativeCorpusSummaryScroll = GlobalStorageSiK.TerminalScroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
+	ui.nativeCorpusSummaryScroll = UI.Scroll.create(ui, pad, y, textW, MIN_SUMMARY_SCROLL_H)
 	track(ui.nativeCorpusSummaryScroll)
-	GlobalStorageSiK.TerminalScroll.setOnContentRectChanged(ui.nativeCorpusSummaryScroll, function()
+	UI.Scroll.setOnContentRectChanged(ui.nativeCorpusSummaryScroll, function()
 		if ui._corpusRelayout then return end
 		ui._corpusRelayout = true
 		GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
@@ -116,7 +126,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	elseif ui._nativeCorpusLastFailed then
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateError"), { r = 0.85, g = 0.4, b = 0.35 }
 	elseif ui._nativeCorpusLastReport then
-		local finishedText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeCorpusFinishedAtMs)
+		local finishedText = relativeAge(ui._nativeCorpusFinishedAtMs)
 		ui._nativeCorpusFinishedAtText = finishedText
 		stateText, stateColor = T("IGUI_GS_TaxonomyStateDone", finishedText), { r = 0.55, g = 0.8, b = 0.5 }
 	else
@@ -144,29 +154,29 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 	local scrollY = afterStateY + LINE_GAP + 6
 	local scrollH = math.max(MIN_SUMMARY_SCROLL_H, (ui._corpusBottomLimit or scrollY) - scrollY)
 	scroll:setY(scrollY)
-	GlobalStorageSiK.TerminalScroll.resize(scroll, textW, scrollH)
+	UI.Scroll.resize(scroll, textW, scrollH)
 
 	local preservedState = captureSummaryState(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll)
-	local contentW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	UI.Scroll.clear(scroll)
+	local contentW = UI.Scroll.contentWidth(scroll)
 	local sy = 2
 
 	local report = ui._nativeCorpusLastReport
 	if not report then
 		sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyNoRunYet"), 4, sy, contentW - 8,
-			GlobalStorageSiK.TerminalScroll.addChild)
-		GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+			UI.Scroll.addChild)
+		UI.Scroll.finish(scroll, sy)
 		restoreSummaryState(scroll, preservedState)
 		return
 	end
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusVersionLine", tostring(report.corpusVersion)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusCountsLine",
 		tostring(report.totalCases), tostring(report.applicableCases), tostring(report.absentCases),
 		tostring(report.skippedCases), tostring(report.passedCases), tostring(report.failedCases)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	-- "Exactitud" simple (aciertos/aplicables), nunca llamada precision/
 	-- recall (pedido explicito de sistemas - esos terminos exigirian una
@@ -175,16 +185,16 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 		tostring(report.l1CorrectCount), tostring(report.l1Total),
 		tostring(report.l2CorrectCount), tostring(report.l2Total),
 		tostring(report.l3CorrectCount), tostring(report.l3Total)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusFailureKindsLine",
 		tostring(report.classificationFailures), tostring(report.evidenceFailures),
 		tostring(report.facetAttributeFailures), tostring(report.requiredMissingFailures)),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyRunLine",
 		tostring(report.sessionId or "?"), tostring(report.runId or "?")),
-		4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+		4, sy, contentW - 8, UI.Scroll.addChild)
 
 	-- dev25/dev26 (pedido explicito de sistemas §4: "mostrar en su resumen
 	-- el estado del bloque propio y sus razones mediante el layout envuelto
@@ -207,21 +217,21 @@ function GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 		if status then
 			sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusBlockStatusLine",
 				BLOCK_STATUS_FIELDS[i].blockName, tostring(status)),
-				4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+				4, sy, contentW - 8, UI.Scroll.addChild)
 			local reasons = report[BLOCK_STATUS_FIELDS[i].reasonsKey]
 			if reasons and reasons ~= "" then
 				sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyCorpusBlockReasonsLine", tostring(reasons)),
-					4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+					4, sy, contentW - 8, UI.Scroll.addChild)
 			end
 		end
 	end
 
 	if report.fileName then
 		sy = renderWrappedLines(scroll, {}, T("IGUI_GS_TaxonomyFileCorpus", tostring(report.fileName)),
-			4, sy, contentW - 8, GlobalStorageSiK.TerminalScroll.addChild)
+			4, sy, contentW - 8, UI.Scroll.addChild)
 	end
 
-	GlobalStorageSiK.TerminalScroll.finish(scroll, sy)
+	UI.Scroll.finish(scroll, sy)
 	restoreSummaryState(scroll, preservedState)
 end
 
@@ -255,7 +265,7 @@ function GlobalStorageSiK.AdminDashboardCorpus.onSummary(ui, report)
 	ui._nativeCorpusLastFailed = false
 	ui._nativeCorpusLastReport = report
 	ui._nativeCorpusFinishedAtMs = report and tonumber(report.finishedAtMs) or nil
-	ui._nativeCorpusFinishedAtText = GlobalStorageSiK.SiK_UI.relativeAge(ui._nativeCorpusFinishedAtMs)
+	ui._nativeCorpusFinishedAtText = relativeAge(ui._nativeCorpusFinishedAtMs)
 	GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(ui)
 end
 

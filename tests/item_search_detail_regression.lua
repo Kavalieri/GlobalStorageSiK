@@ -62,7 +62,7 @@ GlobalStorageSiK.CategoryResolution = {
 -- Cache keys are intrinsic values, not Lua table identity. variantSearchText
 -- must participate in the key, and language epoch must invalidate labels.
 local cacheRowA = {
-	fullType = "Base.VHSTape", displayName = "Cinta VHS", category = "Media",
+	fullType = "Base.VHS_Retail", displayName = "Cinta VHS", category = "Media",
 	nativePath = paths.media, variantSearchText = "media:214 Woodcraft Ep. 3",
 }
 local haystackA = GlobalStorageSiK.I18n.itemSearchHaystack(cacheRowA)
@@ -123,13 +123,13 @@ local snapshot = {
 		category = "Food", count = 1, variantKey = "fungible", nativePath = paths.food,
 	},
 	vhs_214 = {
-		rowKey = "Base.VHSTape\31variant:media:214", fullType = "Base.VHSTape",
+		rowKey = "Base.VHS_Retail\31variant:media:214", fullType = "Base.VHS_Retail",
 		displayName = "Woodcraft Ep. 3", category = "Media", count = 2,
 		detailKind = "recorded_media", variantKey = "media:214", mediaIndex = 214,
 		mediaTitle = "Woodcraft Ep. 3", nativePath = paths.media,
 	},
 	vhs_315 = {
-		rowKey = "Base.VHSTape\31variant:media:315", fullType = "Base.VHSTape",
+		rowKey = "Base.VHS_Retail\31variant:media:315", fullType = "Base.VHS_Retail",
 		displayName = "Exposure Survival Ep. 5", category = "Media", count = 1,
 		detailKind = "recorded_media", variantKey = "media:315", mediaIndex = 315,
 		mediaTitle = "Exposure Survival Ep. 5", nativePath = paths.media,
@@ -179,7 +179,7 @@ local byType = {}
 local vhsByIndex = {}
 for i = 1, #rows do
 	byType[rows[i].fullType] = rows[i]
-	if rows[i].fullType == "Base.VHSTape" then
+	if rows[i].fullType == "Base.VHS_Retail" then
 		vhsByIndex[rows[i].mediaIndex] = rows[i]
 	end
 end

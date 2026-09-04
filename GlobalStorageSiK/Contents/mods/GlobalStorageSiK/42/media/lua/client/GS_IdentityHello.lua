@@ -44,6 +44,13 @@ end
 local function onCreatePlayer()
 	attempts = 0
 	tickCounter = 0
+	-- En SP real isClient() e isServer() son false: no existe un servidor
+	-- remoto que pueda devolver identityHelloAck. La identidad se resuelve en
+	-- el mismo proceso autoritativo y no debe iniciar este handshake MP.
+	if type(isClient) ~= "function" or not isClient() then
+		awaitingAck = false
+		return
+	end
 	awaitingAck = true
 	trySend()
 end

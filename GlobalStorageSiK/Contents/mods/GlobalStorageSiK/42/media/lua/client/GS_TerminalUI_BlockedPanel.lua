@@ -5,16 +5,12 @@
 	Descripción: Aviso + receta craft; pestaña integrada en GS_TerminalUI.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalRecipes"
 require "GS_CraftUtils"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_State"
-require "GS_TerminalUI_Scroll"
 require "GS_WorldHighlight"
+require "GS_UI_Feedback"
 require "GS_TerminalAccess"
 require "GS_TerminalInstallReaderChoice"
 require "GS_InstallTerminalReader"
@@ -23,18 +19,18 @@ require "GS_Sandbox"
 require "GS_PCAcquireUI"
 require "GS_ReaderAcquireUI"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.TerminalBlockedPanel = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 4
 local CARD_GAP = 12
-local INTRO_PAD = 10
 local CONTENT_PAD = 10
-local CRAFT_BTN_H = FONT_HGT_SMALL + 10
+local CONTROL_METRICS = UI.Controls.metrics("standard")
+local CRAFT_BTN_H = CONTROL_METRICS.buttonHeight
 local REFRESH_TICKS = 8
-local REQ_ICON = 20
-local REQ_ICON_GAP = 6
 -- Declaración adelantada: la función real se define más abajo (junto al
 -- resto de la lógica del lector), pero stateSignature (justo debajo)
 -- necesita poder llamarla. Un "local function" normal no sirve aquí porque
@@ -45,18 +41,18 @@ local REQ_ICON_GAP = 6
 local installReaderStatus
 
 local function captureScrollState(scroll)
-	return GlobalStorageSiK.SiK_UI.State.capture({
-		scrollY = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll),
+	return UI.State.snapshot({
+		scrollY = UI.Scroll.getScrollOffset(scroll),
 		selectedKey = scroll._sikSelectedKey,
 		focusedKey = scroll._sikFocusedKey,
 	})
 end
 
 local function restoreScrollState(scroll, snapshot)
-	local state = GlobalStorageSiK.SiK_UI.State.restore({}, snapshot)
+	local state = UI.State.snapshot(snapshot or {})
 	scroll._sikSelectedKey = state.selectedKey
 	scroll._sikFocusedKey = state.focusedKey
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, state.scrollY)
+	UI.Scroll.setScrollOffset(scroll, state.scrollY)
 end
 
 --- Firma del estado bloqueado para decidir si hace falta reconstruir el
@@ -167,42 +163,14 @@ local function introApproachHintLines(panelWidth, state)
 	elseif state and (state.reason == "denied" or state.reason == "no_permission") then
 		hintKey = "IGUI_GS_BlockedNoAccess"
 	end
-	local wrapW = math.max(260, panelWidth - INTRO_PAD * 2)
-	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(T(hintKey, prox), wrapW, UIFont.Small)
+	local wrapW = math.max(260, panelWidth - 16)
+	local lines = UI.Controls.wrapText(T(hintKey, prox), wrapW, UIFont.Small)
 	if extraKey then
-		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T(extraKey, prox), wrapW, UIFont.Small)) do
+		for _, line in ipairs(UI.Controls.wrapText(T(extraKey, prox), wrapW, UIFont.Small)) do
 			lines[#lines + 1] = line
 		end
 	end
 	return lines
-end
-
-local function measureIntroHeight(panelWidth, state)
-	local wrapW = math.max(260, panelWidth - INTRO_PAD * 2)
-	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)
-	local lh = FONT_HGT_SMALL + LINE_GAP
-	local hintLines = introApproachHintLines(panelWidth, state)
-	-- Version del mod visible aqui (pedido 2026-08-15, ronda de pruebas
-	-- -devN del equipo): la pantalla de bloqueo es la que ven SIEMPRE al
-	-- entrar sin terminal a mano, asi confirman de un vistazo que build
-	-- cargo el juego sin tener que abrir consola ni preguntar por chat.
-	return INTRO_PAD + #lines * lh + 8 + #hintLines * lh + 8 + lh + INTRO_PAD
-end
-
---- Color ok/falta de un requisito - antes cada sitio repetia el mismo
---- literal (0.5/0.78/0.5 vs 0.82/0.32/0.32) 6 veces en este fichero, sin
---- relacion con la paleta compartida (pedido 2026-08-26: "ajustarse a la
---- nueva UI y las herramientas ya generadas"). Los valores de PALETTE son
---- casi identicos (diferencia solo de matiz), asi que no cambia el aspecto
---- de forma perceptible, solo deja de duplicar el color a mano.
----@param ok boolean
----@return number r
----@return number g
----@return number b
-local function reqColor(ok)
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	local c = ok and pal.statusOk or pal.statusDanger
-	return c[1], c[2], c[3]
 end
 
 local function resolveReqIcon(spec)
@@ -215,25 +183,37 @@ local function resolveReqIcon(spec)
 	return nil
 end
 
+local function cardHost(scroll)
+	return UI.Scroll.childHost(scroll)
+end
 
-local function drawIntroBlock(panel)
-	local state = panel.blockedState or {}
-	local y = INTRO_PAD
+local function createStaticBlock(scroll, y, width, height, title, tooltip)
+	return assert(UI.Block.create({
+		parent = cardHost(scroll), x = CONTENT_PAD, y = y,
+		w = width, h = height, title = title, variant = "section",
+		contentHost = true,
+		tooltip = tooltip,
+	}))
+end
+
+local function addIntroCard(scroll, y, width, state)
+	local textW = math.max(260, width - 16)
+	local message = UI.Controls.wrapText(T("IGUI_GS_BlockedMessage"), textW, UIFont.Small)
+	local hint = introApproachHintLines(width, state)
 	local lh = FONT_HGT_SMALL + LINE_GAP
-	local wrapW = math.max(260, panel.width - INTRO_PAD * 2)
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_BlockedMessage"), wrapW, UIFont.Small)) do
-		panel:drawText(line, INTRO_PAD, y, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		y = y + lh
-	end
-	y = y + 8
-	for _, line in ipairs(introApproachHintLines(panel.width, state)) do
-		panel:drawText(line, INTRO_PAD, y, pal.statusOk[1], pal.statusOk[2], pal.statusOk[3], 1, UIFont.Small)
-		y = y + lh
-	end
-	y = y + 8
-	local versionLine = "GlobalStorageSiK v" .. tostring(GlobalStorageSiK.Config.MOD_VERSION)
-	panel:drawText(versionLine, INTRO_PAD, y, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 0.55, UIFont.Small)
+	local height = 16 + #message * lh + 8 + #hint * lh
+	local card = createStaticBlock(scroll, y, width, height)
+	local bodyY = 0
+	local copy = UI.Controls.copyText(card.content, {
+		x = 0, y = bodyY, w = card.content.width,
+		text = table.concat(message, "\n"), tone = "text",
+	})
+	bodyY = bodyY + copy.height + 8
+	UI.Controls.copyText(card.content, {
+		x = 0, y = bodyY, w = card.content.width,
+		text = table.concat(hint, "\n"), tone = "success",
+	})
+	return height
 end
 
 --- Estado del metodo nuevo de instalacion (lector+disquete) para el jugador
@@ -275,12 +255,10 @@ end
 ---@param cardW number
 ---@return number cardH
 local function buildInstallReaderCard(scroll, terminal, y, cardW)
-	local pad = 10
-	local textW = math.max(220, cardW - pad * 2)
+	local gap = CONTROL_METRICS.controlGap
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 	local status = installReaderStatus(player)
 
-	local titleH = FONT_HGT_SMALL + 10
 	-- Siempre 3 lineas fijas (lector / disco / ordenador), cada una marcada
 	-- ok/falta, para que el jugador vea de un vistazo que tiene y que falta
 	-- en vez de una unica linea ambigua que mezclaba varios casos.
@@ -301,9 +279,6 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		lines[#lines + 1] = { text = T("IGUI_GS_InstallReaderComputerNoneShort"), ok = false, itemType = COMPUTER_LINE_ICON }
 	end
 
-	local lineH = FONT_HGT_SMALL + LINE_GAP
-	local iconRowH = math.max(lineH, REQ_ICON + LINE_GAP)
-	local bodyH = #lines * iconRowH
 	-- Rediseño 2026-08-26 (maqueta validada, "revisar bloqueo/reclamar/sin
 	-- red para que se ajusten a la nueva UI"): "Conseguir PC" vivia como
 	-- boton suelto FUERA de esta tarjeta aunque es la misma pregunta ("como
@@ -311,35 +286,18 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	-- Instalar aqui/Fabricar lector, solo cuando no se ha detectado ningun
 	-- ordenador cerca.
 	local showPcBtn = status.computerState == "none"
-	local cardH = titleH + pad + bodyH + CRAFT_BTN_H + 12
-	if showPcBtn then
-		cardH = cardH + CRAFT_BTN_H + 6
-	end
-
-	local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
-	card:initialise()
-	card.drawBackground = false
-	card.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	card.prerender = function(panel)
-		ISPanel.prerender(panel)
-		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
-		local pal = GlobalStorageSiK.SiK_UI.PALETTE
-		panel:drawText(T("IGUI_GS_InstallReaderCardTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		local ly = titleH + pad
-		local textX = pad + REQ_ICON + REQ_ICON_GAP
-		for i = 1, #lines do
-			local spec = lines[i]
-			local r, g, b = reqColor(spec.ok)
-			local icon = resolveReqIcon(spec)
-			if icon then
-				-- Mismo fix que en drawBodyLines: (a,r,g,b), no (r,g,b,a).
-				panel:drawTextureScaled(icon, pad, ly, REQ_ICON, REQ_ICON, 1, 1, 1, 1)
-				panel:drawText(spec.text, textX, ly, r, g, b, 1, UIFont.Small)
-			else
-				panel:drawText(spec.text, pad, ly, r, g, b, 1, UIFont.Small)
-			end
-			ly = ly + iconRowH
-		end
+	local card = createStaticBlock(scroll, y, cardW, 1000,
+		T("IGUI_GS_InstallReaderCardTitle"),
+		T("IGUI_GS_BlockedApproachReader"))
+	local body = card.content
+	local rowY = 0
+	for i = 1, #lines do
+		local spec = lines[i]
+		local row = UI.Controls.requirementRow(body, {
+			x = 0, y = rowY, w = body.width, text = spec.text,
+			texture = resolveReqIcon(spec), state = spec.ok,
+		})
+		rowY = rowY + row.height + gap
 	end
 
 	-- BUG REAL reportado por el usuario con captura (2026-08-26): btnY se
@@ -351,16 +309,20 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	-- del borde de la tarjeta, solapando la siguiente ("Tus redes"). btnY
 	-- debe anclarse al final del CUERPO (titulo+lineas), nunca al final de
 	-- la tarjeta completa, para no depender de cuantos botones vengan despues.
-	local btnY = titleH + pad + bodyH + 6
+	local btnY = rowY + 2
 	-- Si falta el lector, se lo ponemos fácil: un botón "Fabricar lector" al
 	-- lado de "Instalar aquí" que abre la misma ventana propia que ya usa
 	-- "Conseguir PC" (validar requisitos, esperar el tiempo de crafteo,
 	-- añadir el resultado al inventario) en vez de mandar al jugador al menú
 	-- vanilla a craftear 3 piezas por separado.
-	local installBtnW = textW
+	local installBtnW = body.width
 	if not status.hasReader then
-		installBtnW = math.floor((textW - 8) / 2)
+		installBtnW = math.floor((body.width - gap) / 2)
 	end
+	local primaryActions = assert(UI.ActionGroup.create({
+		parent = body, x = 0, y = btnY, w = body.width, h = CRAFT_BTN_H,
+		mode = "equal", gap = gap, padding = 0,
+	}))
 
 	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
 	-- criterio ya aplicado a Programacion/PC/disquetera): antes este boton se
@@ -373,8 +335,10 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	-- y se refresca solo cuando cambia el estado real (stateSignature/
 	-- applyRefreshIfNeeded, cada REFRESH_TICKS), igual de "tiempo real" que
 	-- el resto de indicadores de esta misma tarjeta.
-	local btn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, btnY, installBtnW, CRAFT_BTN_H, T("IGUI_GS_InstallReaderCardBtn"), card, function()
+	local btn = UI.Controls.button(primaryActions.panel, {
+		x = 0, y = 0, w = installBtnW, h = CRAFT_BTN_H,
+		text = T("IGUI_GS_InstallReaderCardBtn"), locked = not status.allReady,
+		onClick = function()
 			local p = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 			local st = installReaderStatus(p)
 			if st.allReady then
@@ -383,7 +347,8 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 				-- El dialogo de red nueva/existente se abre solo al terminar.
 				GlobalStorageSiK.InstallTerminalReader.begin(p, st.target)
 			end
-		end, nil, true, not status.allReady)
+		end,
+	})
 	if not status.allReady then
 		local msg
 		if not status.hasReader then
@@ -395,30 +360,45 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		else
 			msg = T("IGUI_GS_InstallReaderComputerNoneShort")
 		end
-		btn:setTooltip(msg)
+		UI.Controls.setTooltip(btn, msg)
 	end
-	card.installBtn = btn
-	card:addChild(btn)
+	card.panel.installBtn = btn
+	primaryActions:add(btn, { width = installBtnW, height = CRAFT_BTN_H })
 
 	if not status.hasReader then
-		local buildReaderBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad + installBtnW + 8, btnY, installBtnW, CRAFT_BTN_H, T("IGUI_GS_ReaderAcquireOpenBtn"), card, function()
-				GlobalStorageSiK.ReaderAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-			end, nil, true)
-		card.buildReaderBtn = buildReaderBtn
-		card:addChild(buildReaderBtn)
+		local buildReaderBtn = UI.Controls.button(primaryActions.panel, {
+			x = 0, y = 0, w = installBtnW, h = CRAFT_BTN_H,
+			text = T("IGUI_GS_ReaderAcquireOpenBtn"), onClick = function()
+				GlobalStorageSiK.ReaderAcquireUI.show(
+					GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer(),
+					terminal
+				)
+			end,
+		})
+		card.panel.buildReaderBtn = buildReaderBtn
+		primaryActions:add(buildReaderBtn, { width = installBtnW, height = CRAFT_BTN_H })
 	end
+	primaryActions:reflow({ x = 0, y = btnY, w = body.width, h = CRAFT_BTN_H })
+	card.panel.primaryActions = primaryActions
 
+	local contentBottom = btnY + CRAFT_BTN_H
 	if showPcBtn then
-		local pcBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, btnY + CRAFT_BTN_H + 6, textW, CRAFT_BTN_H, T("IGUI_GS_PCAcquireOpenBtn"), card, function()
-				GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-			end, nil, true)
-		card.pcBtn = pcBtn
-		card:addChild(pcBtn)
+		local pcY = contentBottom + gap
+		local pcBtn = UI.Controls.button(body, {
+			x = 0, y = pcY, w = body.width, h = CRAFT_BTN_H,
+			text = T("IGUI_GS_PCAcquireOpenBtn"), onClick = function()
+				GlobalStorageSiK.PCAcquireUI.show(
+					GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer(),
+					terminal
+				)
+			end,
+		})
+		card.panel.pcBtn = pcBtn
+		contentBottom = pcY + CRAFT_BTN_H
 	end
 
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+	local cardH = 16 + CONTROL_METRICS.rowHeight + 8 + contentBottom
+	card:reflow({ x = CONTENT_PAD, y = y, w = cardW, h = cardH })
 	return cardH
 end
 
@@ -431,7 +411,14 @@ function GlobalStorageSiK.TerminalBlockedPanel.build(terminal)
 	if terminal.blockedScroll then
 		return
 	end
-	terminal.blockedScroll = GlobalStorageSiK.TerminalScroll.createInteractive(terminal.blockedPanel, 0, 0, 100, 100)
+	terminal.blockedScroll = UI.Scroll.create(terminal.blockedPanel, 0, 0, 100, 100)
+	UI.Scroll.setOnContentRectChanged(terminal.blockedScroll,
+		function(_, current, previous)
+			if terminal.accessMode ~= "blocked" or not terminal.blockedState then return end
+			if not previous or not current or current.w ~= previous.w then
+				GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
+			end
+		end)
 end
 
 ---@param terminal GS_TerminalUI
@@ -442,8 +429,8 @@ function GlobalStorageSiK.TerminalBlockedPanel.layout(terminal, innerW, innerH)
 		return
 	end
 	-- CRITICO: terminal.blockedPanel (el contenedor con clipChildren=true que
-	-- envuelve blockedScroll, creado en GS_TerminalUI.createChildren via
-	-- createTabPanel = ISPanel:new(0,0,10,10)) SOLO se redimensiona a traves
+	-- envuelve blockedScroll, creado por el shell de GS_TerminalUI) SOLO se
+	-- redimensiona a traves
 	-- del bucle de tabPanels en GS_TerminalUI:calculateLayout() - pero ese
 	-- bucle se salta si el ancho del terminal no cambio mas de 6px desde el
 	-- ultimo layout (ver applyRefreshIfNeeded). Resultado confirmado con
@@ -455,7 +442,7 @@ function GlobalStorageSiK.TerminalBlockedPanel.layout(terminal, innerW, innerH)
 	-- calculateLayout() decida ejecutarse.
 	terminal.blockedPanel:setWidth(innerW)
 	terminal.blockedPanel:setHeight(innerH)
-	GlobalStorageSiK.TerminalScroll.resize(terminal.blockedScroll, innerW, innerH)
+	UI.Scroll.resize(terminal.blockedScroll, innerW, innerH)
 end
 
 --- Ilumina en el mundo el ALCANCE de cada red a la que el jugador tiene
@@ -498,11 +485,14 @@ function GlobalStorageSiK.TerminalBlockedPanel.redrawMarkers()
 	-- resaltado del mundo falla en silencio, el botón "Mostrar cobertura"
 	-- parece no hacer nada y no hay forma de saber si es un problema de
 	-- datos (sin redes/sin ancla) o de renderizado.
-	if player and player.setHaloNote then
+	if player then
 		if marked == 0 then
-			player:setHaloNote(T("IGUI_GS_CoverageNoneMarked"), 220, 180, 100, 300)
+			GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_CoverageNoneMarked"),
+				220, 180, 100, 300, { tone = "warning", channel = "coverage" })
 		else
-			player:setHaloNote(T("IGUI_GS_CoverageMarkedCount", tostring(marked)), 140, 220, 160, 300)
+			GlobalStorageSiK.UIFeedback.halo(player,
+				T("IGUI_GS_CoverageMarkedCount", tostring(marked)),
+				140, 220, 160, 300, { tone = "success", channel = "coverage" })
 		end
 	end
 end
@@ -566,31 +556,17 @@ function GlobalStorageSiK.TerminalBlockedPanel.toggleSingleTerminalCoverage(row)
 end
 
 ---@param terminal GS_TerminalUI
-function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
-	if not terminal or not terminal.blockedScroll then
-		return
-	end
+local function rebuildContentBody(terminal)
 	local scroll = terminal.blockedScroll
 	local preservedState = captureScrollState(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll)
-	local cardW = math.max(260, scroll.width - CONTENT_PAD * 2)
+	UI.Scroll.clear(scroll)
+	-- Consume the Block-owned content rectangle. This changes immediately when
+	-- resize or scrollbar overflow changes, instead of waiting for the periodic
+	-- product refresh and rebuilding against the stale outer scroll width.
+	local cardW = math.max(260, UI.Scroll.contentWidth(scroll) - CONTENT_PAD * 2)
 	local y = CONTENT_PAD
 
-	local introH = measureIntroHeight(cardW, terminal.blockedState)
-	local intro = ISPanel:new(CONTENT_PAD, y, cardW, introH)
-	intro:initialise()
-	intro.drawBackground = false
-	intro.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	intro.blockedState = terminal.blockedState
-	if intro.setMouseTransparent then
-		intro:setMouseTransparent(true)
-	end
-	intro.prerender = function(panel)
-		ISPanel.prerender(panel)
-		GlobalStorageSiK.SiK_UI.drawCardBackground(panel, 0)
-		drawIntroBlock(panel)
-	end
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, intro)
+	local introH = addIntroCard(scroll, y, cardW, terminal.blockedState)
 	y = y + introH + CARD_GAP
 
 	-- Rediseño 2026-08-26 (maqueta validada, "revisar bloqueo/reclamar/sin
@@ -598,7 +574,7 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	-- suelto directamente sobre el fondo del scroll, sin ningun tratamiento
 	-- de tarjeta salvo la de instalar lector - ahora los 4 bloques (Estado,
 	-- Recuperar acceso, Instalar terminal, Tus redes) comparten la misma
-	-- tarjeta con borde/cabecera (drawCardBackground), agrupados por
+	-- bloque declarativo con borde/cabecera (SiK.UI.Block), agrupados por
 	-- intencion en vez de por orden de aparicion historico. Ningun cambio de
 	-- condicion de visibilidad ni de texto - solo el contenedor visual.
 	local claimEligible = terminal.blockedState and terminal.blockedState.reason == "network_vacant"
@@ -612,42 +588,43 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 	-- botones a la vez si el jugador es elegible para ambos.
 	local recoverEligible = terminal.blockedState and terminal.blockedState.canRecoverRole
 	if claimEligible or recoverEligible then
-		local pad = 10
-		local titleH = FONT_HGT_SMALL + 10
+		local gap = CONTROL_METRICS.controlGap
 		local btnCount = (claimEligible and 1 or 0) + (recoverEligible and 1 or 0)
-		local cardH = titleH + pad + btnCount * (CRAFT_BTN_H + 6)
-		local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
-		card:initialise()
-		card.drawBackground = false
-		card.prerender = function(panel)
-			ISPanel.prerender(panel)
-			GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
-			local pal = GlobalStorageSiK.SiK_UI.PALETTE
-			panel:drawText(T("IGUI_GS_RecoverAccessTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		end
-		local by = titleH + pad
+		local contentH = btnCount * CRAFT_BTN_H + math.max(0, btnCount - 1) * gap
+		local cardH = 16 + CONTROL_METRICS.rowHeight + 8 + contentH
+		local card = createStaticBlock(scroll, y, cardW, cardH,
+			T("IGUI_GS_RecoverAccessTitle"),
+			T("IGUI_GS_PermSuccessionHint"))
+		local actions = assert(UI.ActionGroup.create({
+			parent = card.content, x = 0, y = 0, w = card.content.width, h = contentH,
+			mode = "stack", gap = gap, padding = 0,
+		}))
 		if claimEligible then
 			local claimNetworkId = terminal.blockedState.networkId
-			local claimBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad, by, cardW - pad * 2, CRAFT_BTN_H, T("IGUI_GS_ClaimOwnershipButton"), card, function()
+			local claimButton = UI.Controls.button(actions.panel, {
+				x = 0, y = 0, w = card.content.width, h = CRAFT_BTN_H,
+				text = T("IGUI_GS_ClaimOwnershipButton"), onClick = function()
 					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and claimNetworkId then
 						GlobalStorageSiK.NetClient.sendCommand("reclaimOwnership", { networkId = claimNetworkId })
 					end
-				end, nil, true)
-			card:addChild(claimBtn)
-			by = by + CRAFT_BTN_H + 6
+				end,
+			})
+			actions:add(claimButton, { height = CRAFT_BTN_H, grow = 0 })
 		end
 		if recoverEligible then
 			local recoverNetworkId = terminal.blockedState.networkId
-			local recoverBtn = GlobalStorageSiK.SiK_UI.createButton(
-				pad, by, cardW - pad * 2, CRAFT_BTN_H, T("IGUI_GS_RecoverRoleButton"), card, function()
+			local recoverButton = UI.Controls.button(actions.panel, {
+				x = 0, y = 0, w = card.content.width, h = CRAFT_BTN_H,
+				text = T("IGUI_GS_RecoverRoleButton"), onClick = function()
 					if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand and recoverNetworkId then
 						GlobalStorageSiK.NetClient.sendCommand("recoverOwnRole", { networkId = recoverNetworkId })
 					end
-				end, nil, true)
-			card:addChild(recoverBtn)
+				end,
+			})
+			actions:add(recoverButton, { height = CRAFT_BTN_H, grow = 0 })
 		end
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+		actions:reflow({ x = 0, y = 0, w = card.content.width, h = contentH })
+		card.panel.actions = actions
 		y = y + cardH + CARD_GAP
 	end
 
@@ -695,33 +672,22 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 		networksText = T("IGUI_GS_BlockedYourNetworks", table.concat(names, ", "))
 	end
 	do
-		local pad = 10
-		local titleH = FONT_HGT_SMALL + 10
-		local textW = math.max(120, cardW - pad * 2)
-		local netLines = GlobalStorageSiK.SiK_UI.wrapTextLines(networksText, textW, UIFont.Small)
+		local textW = math.max(120, cardW - 16)
+		local netLines = UI.Controls.wrapText(networksText, textW, UIFont.Small)
 		local lh = FONT_HGT_SMALL + LINE_GAP
-		local cardH = titleH + pad + #netLines * lh + 4
-		local card = ISPanel:new(CONTENT_PAD, y, cardW, cardH)
-		card:initialise()
-		card.drawBackground = false
-		card.prerender = function(panel)
-			ISPanel.prerender(panel)
-			GlobalStorageSiK.SiK_UI.drawCardBackground(panel, titleH)
-			local pal = GlobalStorageSiK.SiK_UI.PALETTE
-			panel:drawText(T("IGUI_GS_YourNetworksTitle"), pad, 3, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-			local ly = titleH + pad
-			for i = 1, #netLines do
-				panel:drawText(netLines[i], pad, ly, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-				ly = ly + lh
-			end
-		end
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
+		local cardH = 16 + CONTROL_METRICS.rowHeight + 8 + #netLines * lh
+		local card = createStaticBlock(scroll, y, cardW, cardH,
+			T("IGUI_GS_YourNetworksTitle"), networksText)
+		UI.Controls.copyText(card.content, {
+			x = 0, y = 0, w = card.content.width,
+			text = table.concat(netLines, "\n"), tone = "textMuted",
+		})
 		y = y + cardH + CARD_GAP
 	end
 
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + CONTENT_PAD)
-	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
-	GlobalStorageSiK.TerminalScroll.setScrollBarsVisible(
+	UI.Scroll.setContentHeight(scroll, y + CONTENT_PAD)
+	UI.Scroll.ensureScrollBars(scroll)
+	UI.Scroll.setScrollBarsVisible(
 		scroll, (scroll._gsContentHeight or 0) > (scroll.height or 0) + 2)
 	restoreScrollState(scroll, preservedState)
 	terminal.lastBlockedLayoutWidth = terminal.width
@@ -736,6 +702,17 @@ function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
 		GlobalStorageSiK.UIDebug.dumpTree(terminal, "blockedPanel-rebuild")
 		GlobalStorageSiK.UIDebug.checkOverlaps(terminal, "blockedPanel-rebuild")
 	end
+end
+
+---@param terminal GS_TerminalUI
+function GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
+	if not terminal or not terminal.blockedScroll or terminal._gsBlockedGeometryReflow then
+		return
+	end
+	terminal._gsBlockedGeometryReflow = true
+	local ok, reason = pcall(rebuildContentBody, terminal)
+	terminal._gsBlockedGeometryReflow = false
+	if not ok then error(reason, 0) end
 end
 
 ---@param terminal GS_TerminalUI

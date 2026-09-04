@@ -4,24 +4,20 @@
 ]]
 
 require "GSSiK_Addon_Tablet_Access"
-require "GS_TerminalUI_Api"
-require "GS_PlayerUtils"
-require "GS_I18n"
-require "GS_SiK_UI_Modal"
-require "GS_SiK_UI_Controls"
-pcall(require, "GS_SiK_UI_Block")
-pcall(require, "GS_SiK_UI_List")
+local ProductAPI = require "GSSiK_API_Client"
+local UI = require "SiK_UI"
 
 GSSiK_Addon_Tablet = GSSiK_Addon_Tablet or {}
 GSSiK_Addon_Tablet.NetworkSelector = GSSiK_Addon_Tablet.NetworkSelector or {}
 
 local Selector = GSSiK_Addon_Tablet.NetworkSelector
 Selector.instances = Selector.instances or {}
-local SiK_UI = GlobalStorageSiK.SiK_UI
-local Modal = SiK_UI.Modal
-local Controls = SiK_UI.Controls
-local Block = SiK_UI.Block
-local List = SiK_UI.List
+local RemoteAccess = ProductAPI.RemoteAccess
+local Modal = UI.Modal
+local Controls = UI.Controls
+local Block = UI.Block
+local Card = UI.Card
+local Scroll = UI.Scroll
 local REQUEST_TIMEOUT_MS = 12000
 
 local STATE_COPY = {
@@ -47,16 +43,22 @@ local STATE_COPY = {
 		titleKey = "IGUI_GSSiK_RemoteErrorTitle",
 		helpKey = "IGUI_GSSiK_RemoteErrorHelp",
 		feedbackKey = "IGUI_GSSiK_RemoteError",
-		feedbackKind = "error",
+		feedbackKind = "danger",
 	},
 }
 
 local function T(key, ...)
-	if GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.text then
-		return GlobalStorageSiK.I18n.text(key, ...)
-	end
-	if getText then return getText(key) end
+	if getText then return getText(key, ...) end
 	return key
+end
+
+local function resolvePlayer(playerArg)
+	if type(playerArg) == "number" and getSpecificPlayer then
+		return getSpecificPlayer(math.max(0, math.floor(playerArg)))
+	end
+	if playerArg and playerArg.getPlayerNum then return playerArg end
+	if getSpecificPlayer then return getSpecificPlayer(0) end
+	return nil
 end
 
 local function rounded(value)
@@ -141,25 +143,19 @@ local function trackStateWidget(panel, widget)
 	return widget
 end
 
-local function clearRows(panel)
-	panel.optionRows = {}
-	if List and List.clearScrollable and panel.list then
-		List.clearScrollable(panel.list, false)
-	elseif panel.list and panel.list.clear then
-		panel.list:clear()
-	end
-end
+local disposeRows
 
 local function removeStateWidgets(panel)
-	clearRows(panel)
-	local body = panel._stateBody
+	disposeRows(panel)
+	if panel.listBlock then panel.listBlock:dispose() end
+	panel.listBlock = nil
+	panel.listScroll = nil
 	for i = #panel._stateWidgets, 1, -1 do
 		local widget = panel._stateWidgets[i]
-		if body and body.removeChild then body:removeChild(widget) end
-		if widget and widget.removeFromUIManager then widget:removeFromUIManager() end
+		if widget and widget.dispose then widget:dispose() end
 	end
 	panel._stateWidgets = {}
-	panel.list = nil
+	panel.stateCard = nil
 	panel.feedback = nil
 	panel.cancelButton = nil
 	panel.openButton = nil
@@ -175,57 +171,52 @@ local function findSelectable(panel, networkId)
 	return nil
 end
 
-local function onSelectOption(target, _, selected)
-	target:selectNetwork(selected and selected.networkId)
+disposeRows = function(panel)
+	local rows = panel.optionRows or {}
+	for index = #rows, 1, -1 do
+		if rows[index] and rows[index].dispose then rows[index]:dispose() end
+	end
+	panel.optionRows = {}
+end
+
+local function layoutRows(panel)
+	if not panel.listBlock or not panel.listScroll then return 0 end
+	local rect = panel.listBlock:getContentRect()
+	local y = 0
+	for index = 1, #panel.optionRows do
+		local row = panel.optionRows[index]
+		row:setX(0)
+		row:setY(y)
+		row:reflow(rect.w)
+		y = y + row.height + 8
+	end
+	local height = math.max(0, y - 8)
+	if panel.listBlock.contentHeight ~= height then
+		panel.listBlock:setContentHeight(height)
+		return layoutRows(panel)
+	end
+	return height
 end
 
 local function refreshRows(panel)
-	clearRows(panel)
-	if not panel.list then return end
-	local y = 0
-	local contentW = panel.list.width or (panel.list.getWidth and panel.list:getWidth()) or 0
-	if List and List.finishScrollable then
-		local rect = List.finishScrollable(panel.list, 0)
-		contentW = rect and rect.w or contentW
-	end
-	for i = 1, #panel.networks do
-		local candidate = panel.networks[i]
-		local data = {
+	disposeRows(panel)
+	if not panel.listScroll then return end
+	for index = 1, #panel.networks do
+		local candidate = panel.networks[index]
+		local row = Controls.listOption(panel.listScroll.host, {
+			x = 0, y = 0, w = panel.listBlock:getContentRect().w,
 			text = candidateLabel(candidate),
-			networkId = candidate.networkId,
-			enabled = candidate.selectable ~= false,
+			payload = candidate,
 			selected = candidate.networkId == panel.selectedNetworkId,
-		}
-		local row
-		if List and List.addScrollableOption then
-			row = List.addScrollableOption(panel.list, {
-				x = 0, y = y, w = contentW, data = data,
-				target = panel,
-				callback = onSelectOption,
-			})
-		elseif panel.list.addItem then
-			panel.list:addItem(data.text, data)
-		end
-		if row then
-			panel.optionRows[#panel.optionRows + 1] = row
-			y = y + (row.height or 34) + 8
-		end
+			enabled = candidate.selectable ~= false,
+			onClick = function(context)
+				local selected = context and context.payload
+				if selected then panel:selectNetwork(selected.networkId) end
+			end,
+		})
+		panel.optionRows[#panel.optionRows + 1] = row
 	end
-	if List and List.finishScrollable then
-		local rect = List.finishScrollable(panel.list, math.max(0, y - 8))
-		if rect and rect.w ~= contentW and #panel.optionRows > 0 then
-			y = 0
-			for i = 1, #panel.optionRows do
-				local row = panel.optionRows[i]
-				if row.setX then row:setX(0) end
-				if row.setY then row:setY(y) end
-				local height = row.setOptionWidth and row:setOptionWidth(rect.w)
-					or row.height or 34
-				y = y + height + 8
-			end
-			List.finishScrollable(panel.list, math.max(0, y - 8))
-		end
-	end
+	layoutRows(panel)
 end
 
 local function feedbackFor(panel)
@@ -242,30 +233,14 @@ local function feedbackFor(panel)
 		end
 		if selected then
 			return T("IGUI_GSSiK_RemoteSelected", selected.label or selected.name,
-				providerLabel(selected)), "ok"
+			providerLabel(selected)), "success"
 		end
 	end
 	return T("IGUI_GSSiK_RemoteChoose"), "info"
 end
 
-local function renderBlockBackground(block)
-	ISPanel.prerender(block)
-	SiK_UI.drawCardBackground(block, 0)
-end
-
-local function createStateBlock(panel, y, height)
-	local content = panel._stateContent
-	local block = ISPanel:new(content.x, y, content.w, height)
-	if block.initialise then block:initialise() end
-	block.drawBackground = false
-	block.prerender = renderBlockBackground
-	panel._stateBody:addChild(block)
-	trackStateWidget(panel, block)
-	return block
-end
-
 local function onCancelAction(panel)
-	panel:close()
+	Selector.close(panel)
 end
 
 local function onPrimaryAction(panel)
@@ -294,7 +269,7 @@ local function createActions(panel, y)
 		panel.cancelButton = trackStateWidget(panel, Controls.button(panel._stateBody, {
 			x = content.x, y = y, w = content.w,
 			text = T("IGUI_GSSiK_RemoteCancel"), fullWidth = true,
-			target = panel, onClick = onCancelAction,
+			onClick = function() onCancelAction(panel) end,
 		}))
 		return y + metrics.buttonHeight
 	end
@@ -302,34 +277,23 @@ local function createActions(panel, y)
 	local half = math.floor((content.w - metrics.controlGap) / 2)
 	panel.cancelButton = trackStateWidget(panel, Controls.button(panel._stateBody, {
 		x = content.x, y = y, w = half, text = leftText, fullWidth = true,
-		target = panel, onClick = onCancelAction,
+		onClick = function() onCancelAction(panel) end,
 	}))
 	panel.openButton = trackStateWidget(panel, Controls.button(panel._stateBody, {
 		x = content.x + half + metrics.controlGap, y = y, w = half,
 		text = rightText, fullWidth = true,
-		target = panel, onClick = onPrimaryAction,
+		onClick = function() onPrimaryAction(panel) end,
 	}))
 	setButtonEnabled(panel.openButton, panel.state ~= "available"
-		or (panel.selectedNetworkId ~= nil and panel.openRequestId == nil))
+		or (panel.selectedNetworkId ~= nil and panel.openRequestHandle == nil))
 	return y + metrics.buttonHeight
 end
 
 local function createHeader(parent, x, y, width, titleKey, helpKey)
-	if not Controls.blockHeader then
-		return { height = controlMetrics().sectionHeight }
-	end
 	return Controls.blockHeader(parent, {
 		x = x, y = y, w = width,
 		text = T(titleKey), tooltip = T(helpKey),
 	})
-end
-
-local function resolveBlockRect(block)
-	if Block and Block.resolveContentRect then
-		return Block.resolveContentRect({ x = 0, y = 0, w = block.width, h = block.height })
-	end
-	return { x = 8, y = 8, w = math.max(0, (block.width or 0) - 16),
-		h = math.max(0, (block.height or 0) - 16) }
 end
 
 local function fitStateContent(panel, bottom)
@@ -347,48 +311,57 @@ function Selector.renderState(panel)
 	removeStateWidgets(panel)
 	local content = panel._stateContent
 	local metrics = controlMetrics()
-	local tokens = SiK_UI.Metrics and SiK_UI.Metrics.tokens and SiK_UI.Metrics.tokens() or {}
-	local pad = tonumber(tokens.blockPaddingX) or 8
+	local pad = 8
 	local y = content.y
 
 	if panel.state == "available" then
 		local blockH = pad * 2 + metrics.sectionHeight + metrics.rowGap + 176
-		local block = createStateBlock(panel, y, blockH)
-		local rect = resolveBlockRect(block)
-		local header = createHeader(block, rect.x, rect.y, rect.w,
+		panel.stateCard = trackStateWidget(panel, Card.create({
+			parent = panel._stateBody, x = content.x, y = y,
+			w = content.w, h = blockH, scrollable = false,
+		}))
+		local host = panel.stateCard.content
+		local rect = { x = 0, y = 0, w = host.width, h = host.height }
+		local header = createHeader(host, rect.x, rect.y, rect.w,
 			"IGUI_GSSiK_RemoteNetworksTitle", "IGUI_GSSiK_RemoteNetworksHelp")
 		local listY = rect.y + (header.height or metrics.sectionHeight) + metrics.rowGap
-		if List and List.createScrollable then
-			panel.list = List.createScrollable(block, rect.x, listY, rect.w, 176)
-		elseif ISScrollingListBox and ISScrollingListBox.new then
-			panel.list = ISScrollingListBox:new(rect.x, listY, rect.w, 176)
-			if panel.list.initialise then panel.list:initialise() end
-			block:addChild(panel.list)
-		end
+		trackStateWidget(panel, header)
+		panel.listBlock = Block.create({ parent = host, x = rect.x, y = listY,
+			w = rect.w, h = 176, contentHeight = 0,
+			metrics = { block = { padding = 0 } },
+		})
+		panel.listScroll = Scroll.create({ parent = panel.listBlock.panel,
+			viewportRect = panel.listBlock:getContentRect(),
+			trackRect = panel.listBlock:getTrackRect(), contentHeight = 0,
+			playerNum = panel.playerNum,
+		})
+		panel.listBlock:attachScroll(panel.listScroll, true)
+		panel.listBlock:subscribe(function() layoutRows(panel) end)
 		refreshRows(panel)
 		y = y + blockH + metrics.rowGap
 		local feedbackText, feedbackKind = feedbackFor(panel)
-		if Controls.feedback then
-			panel.feedback = trackStateWidget(panel, Controls.feedback(panel._stateBody, {
-				x = content.x, y = y, w = content.w,
-				text = feedbackText, kind = feedbackKind,
-			}))
-		end
+		panel.feedback = trackStateWidget(panel, Controls.feedback(panel._stateBody, {
+			x = content.x, y = y, w = content.w,
+			text = feedbackText, tone = feedbackKind,
+		}))
 		y = y + metrics.statusHeight + 8 + metrics.rowGap
 	else
 		local copy = STATE_COPY[panel.state] or STATE_COPY.error
 		local feedbackH = metrics.statusHeight + 8
 		local blockH = pad * 2 + metrics.sectionHeight + metrics.rowGap + feedbackH
-		local block = createStateBlock(panel, y, blockH)
-		local rect = resolveBlockRect(block)
-		local header = createHeader(block, rect.x, rect.y, rect.w, copy.titleKey, copy.helpKey)
+		panel.stateCard = trackStateWidget(panel, Card.create({
+			parent = panel._stateBody, x = content.x, y = y,
+			w = content.w, h = blockH, scrollable = false,
+		}))
+		local host = panel.stateCard.content
+		local rect = { x = 0, y = 0, w = host.width, h = host.height }
+		local header = trackStateWidget(panel,
+			createHeader(host, rect.x, rect.y, rect.w, copy.titleKey, copy.helpKey))
 		local feedbackY = rect.y + (header.height or metrics.sectionHeight) + metrics.rowGap
-		if Controls.feedback then
-			panel.feedback = Controls.feedback(block, {
-				x = rect.x, y = feedbackY, w = rect.w,
-				text = T(copy.feedbackKey), kind = copy.feedbackKind,
-			})
-		end
+		panel.feedback = trackStateWidget(panel, Controls.feedback(host, {
+			x = rect.x, y = feedbackY, w = rect.w,
+			text = T(copy.feedbackKey), tone = copy.feedbackKind,
+		}))
 		y = y + blockH + metrics.rowGap
 	end
 
@@ -404,7 +377,7 @@ function Selector.setState(panel, state)
 end
 
 function Selector.selectNetwork(panel, networkId)
-	if panel.closed or panel.openRequestId or type(networkId) ~= "string" then return false end
+	if panel.closed or panel.openRequestHandle or type(networkId) ~= "string" then return false end
 	local found = findSelectable(panel, networkId)
 	if not found then return false end
 	panel.selectedNetworkId = found.networkId
@@ -412,18 +385,16 @@ function Selector.selectNetwork(panel, networkId)
 	return true
 end
 
-function Selector.close(panel)
-	if not panel or panel.closed then return end
+local function cleanupSelector(panel)
+	if not panel or panel.closed then return false end
 	panel.closed = true
-	if panel.requestId then
-		GlobalStorageSiK.TerminalUI.cancelRemoteNetworkRequest(panel.requestId, panel.player)
-		panel.requestId = nil
+	if panel.requestHandle then
+		panel.requestHandle:dispose()
+		panel.requestHandle = nil
 	end
-	if panel.openRequestId then
-		if GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest then
-			GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(panel.openRequestId, panel.player)
-		end
-		panel.openRequestId = nil
+	if panel.openRequestHandle then
+		panel.openRequestHandle:dispose()
+		panel.openRequestHandle = nil
 	end
 	panel.requestDeadlineMs = nil
 	panel.openRequestDeadlineMs = nil
@@ -431,19 +402,25 @@ function Selector.close(panel)
 		Selector.instances[panel.playerNum or 0] = nil
 	end
 	if Selector.instance == panel then Selector.instance = nil end
-	Modal.close(panel)
+	removeStateWidgets(panel)
+	return true
+end
+
+function Selector.close(panel)
+	if not panel or panel.closed then return false end
+	return Modal.close(panel, "selector")
 end
 
 function Selector.confirmSelection(panel)
-	if panel.closed or panel.openRequestId or not panel.selectedNetworkId then return false end
+	if panel.closed or panel.openRequestHandle or not panel.selectedNetworkId then return false end
 	local selected = panel.selectedNetworkId
 	if not findSelectable(panel, selected) then return false end
 	local completed = false
-	local requestId = GlobalStorageSiK.TerminalUI.requestOpenNetwork(selected, panel.player,
+	local ok, code, handle = RemoteAccess.open(selected, panel.player,
 		function(accepted, reason, payload)
 			completed = true
 			if panel.closed then return end
-			panel.openRequestId = nil
+			panel.openRequestHandle = nil
 			panel.openRequestDeadlineMs = nil
 			if accepted == true then
 				panel:close()
@@ -452,9 +429,9 @@ function Selector.confirmSelection(panel)
 			panel.selectedNetworkId = nil
 			Selector.setState(panel, accepted == false and "outdated" or "error")
 		end)
-	if requestId then
+	if ok and handle then
 		if not completed and not panel.closed then
-			panel.openRequestId = requestId
+			panel.openRequestHandle = handle
 			panel.openRequestDeadlineMs = nowMs() + REQUEST_TIMEOUT_MS
 			setButtonEnabled(panel.openButton, false)
 		end
@@ -469,26 +446,26 @@ end
 
 function Selector.beginRequest(panel)
 	if panel.closed then return false end
-	if panel.openRequestId then
-		if GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest then
-			GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(panel.openRequestId, panel.player)
-		end
-		panel.openRequestId = nil
+	if panel.openRequestHandle then
+		panel.openRequestHandle:dispose()
+		panel.openRequestHandle = nil
 		panel.openRequestDeadlineMs = nil
 	end
-	if panel.requestId then
-		GlobalStorageSiK.TerminalUI.cancelRemoteNetworkRequest(panel.requestId, panel.player)
-		panel.requestId = nil
+	if panel.requestHandle then
+		panel.requestHandle:dispose()
+		panel.requestHandle = nil
 	end
 	panel.networks = {}
 	panel.selectedNetworkId = nil
 	panel.requestDeadlineMs = nowMs() + REQUEST_TIMEOUT_MS
 	Selector.setState(panel, "loading")
-	panel.requestId = GlobalStorageSiK.TerminalUI.requestRemoteNetworks(function(networks, reason)
+	local completed = false
+	local ok, code, handle = RemoteAccess.list(panel.player, function(accepted, reason, networks)
+		completed = true
 		if panel.closed then return end
-		panel.requestId = nil
+		panel.requestHandle = nil
 		panel.requestDeadlineMs = nil
-		if reason then
+		if accepted ~= true then
 			Selector.setState(panel, reason == "outdated" and "outdated" or "error")
 			return
 		end
@@ -506,23 +483,25 @@ function Selector.beginRequest(panel)
 			end
 		end
 		Selector.setState(panel, #panel.networks > 0 and "available" or "empty")
-	end, panel.player)
-	if not panel.requestId then
+	end)
+	if ok and handle and not completed and not panel.closed then
+		panel.requestHandle = handle
+		return true
+	end
+	if not completed then
 		panel.requestDeadlineMs = nil
 		Selector.setState(panel, "error")
 	end
-	return panel.requestId ~= nil
+	return ok == true
 end
 
 function Selector.update(panel)
 	if panel.closed or not getTimestampMs then return end
 	local now = nowMs()
-	if panel.openRequestId and panel.openRequestDeadlineMs
+	if panel.openRequestHandle and panel.openRequestDeadlineMs
 		and now >= panel.openRequestDeadlineMs then
-		if GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest then
-			GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(panel.openRequestId, panel.player)
-		end
-		panel.openRequestId = nil
+		panel.openRequestHandle:dispose()
+		panel.openRequestHandle = nil
 		panel.openRequestDeadlineMs = nil
 		panel.selectedNetworkId = nil
 		Selector.setState(panel, "error")
@@ -530,9 +509,9 @@ function Selector.update(panel)
 	end
 	if panel.state == "loading" and panel.requestDeadlineMs
 		and now >= panel.requestDeadlineMs then
-		if panel.requestId then
-			GlobalStorageSiK.TerminalUI.cancelRemoteNetworkRequest(panel.requestId, panel.player)
-			panel.requestId = nil
+		if panel.requestHandle then
+			panel.requestHandle:dispose()
+			panel.requestHandle = nil
 		end
 		panel.requestDeadlineMs = nil
 		Selector.setState(panel, "error")
@@ -558,14 +537,14 @@ end
 
 function Selector.ensureTransientCleanup()
 	if Selector._cleanupRegistered then return true end
-	local client = GlobalStorageSiK.Client
-	if not client or type(client.registerTransientCleanup) ~= "function" then return false end
-	client.registerTransientCleanup("TabletNetworkSelector", function(playerNum)
+	local ok, code, registration = RemoteAccess.registerCleanup("TabletNetworkSelector", function(playerNum)
 		if playerNum == nil then Selector.closeAll()
 		else Selector.closeForPlayer(playerNum) end
 	end)
+	if not ok then return false end
+	Selector._cleanupRegistration = registration
 	Selector._cleanupRegistered = true
-	return true
+	return registration ~= nil
 end
 
 local function buildContent(body, content, panel)
@@ -581,7 +560,7 @@ end
 
 function Selector.show(playerArg)
 	Selector.ensureTransientCleanup()
-	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	local player = resolvePlayer(playerArg)
 	if not player then return nil end
 	local playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	local existing = Selector.instances[playerNum]
@@ -593,7 +572,9 @@ function Selector.show(playerArg)
 		contentHeight = 326,
 		playerNum = playerNum,
 		resizable = false,
-		onClose = function(target) target:close() end,
+		onClose = function(context)
+			cleanupSelector(context and context.component)
+		end,
 		buildContent = buildContent,
 	})
 	panel.player = player
@@ -601,8 +582,8 @@ function Selector.show(playerArg)
 	panel.networks = {}
 	panel.optionRows = {}
 	panel.selectedNetworkId = nil
-	panel.requestId = nil
-	panel.openRequestId = nil
+	panel.requestHandle = nil
+	panel.openRequestHandle = nil
 	panel.requestDeadlineMs = nil
 	panel.openRequestDeadlineMs = nil
 	panel.closed = false
@@ -610,7 +591,6 @@ function Selector.show(playerArg)
 	panel.setState = Selector.setState
 	panel.selectNetwork = Selector.selectNetwork
 	panel.confirmSelection = Selector.confirmSelection
-	panel.close = Selector.close
 	panel.beginRequest = Selector.beginRequest
 	panel._selectorBaseUpdate = panel.update
 	panel.update = Selector.panelUpdate

@@ -9,6 +9,7 @@ require "GS_Router"
 require "GS_I18n"
 require "GS_FluidTaxonomy"
 require "GS_NativeProduct"
+require "GS_RecordedMedia"
 
 -- El publicador forma parte del runtime completo, pero ItemSnapshot tambien se
 -- carga aislado en harnesses y consumidores de la API shared. Intentar cargarlo
@@ -425,6 +426,9 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	local fluid = GlobalStorageSiK.FluidTaxonomy.inspect
 		and GlobalStorageSiK.FluidTaxonomy.inspect(item) or nil
 	local dynamicPath, dynamicSignature = fluid and fluid.path or nil, fluid and fluid.signature or nil
+	if mediaIndex ~= nil then
+		dynamicPath = GlobalStorageSiK.RecordedMedia.nativePath(mediaIndex, mediaCodes) or dynamicPath
+	end
 	local dynamicStateKey = fluid and fluid.stateKey or nil
 	local dynamicPercent = fluid and fluid.fillPercent or nil
 	local fluidAmount, fluidCapacity = fluid and fluid.amount or nil, fluid and fluid.capacity or nil

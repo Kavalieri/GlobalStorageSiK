@@ -363,20 +363,12 @@ option GlobalStorageSiK.DebugCatSiKUI
 	translation = GlobalStorageSiK_DebugCatSiKUI,
 }
 
-option GlobalStorageSiK.DebugCatSiKUITable
+option GlobalStorageSiK.DebugCatRecordedMediaRuntime
 {
 	type = boolean,
 	default = false,
 	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatSiKUITable,
-}
-
-option GlobalStorageSiK.DebugCatSiKUIScroll
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatSiKUIScroll,
+	translation = GlobalStorageSiK_DebugCatRecordedMediaRuntime,
 }
 
 option GlobalStorageSiK.DebugCatSiKUITabs

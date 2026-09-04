@@ -1,6 +1,6 @@
 --[[
 
-	GlobalStorageSiK - Pestañas laterales (delega en GS_TerminalTabRail)
+	GlobalStorageSiK - Pestañas laterales (adaptador de SiK.UI.Tabs)
 
 	Autor: SiK
 
@@ -10,110 +10,118 @@
 
 
 
-require "ISUI/ISPanel"
+local UI = require "GS_UI_Framework"
 
 require "GS_I18n"
 
 require "GS_Sandbox"
 
-require "GS_TerminalUI_TabRail"
-require "GS_SiK_UI_Metrics"
+local T = GlobalStorageSiK.I18n.text
 
+local function railProfile()
+	return UI.Metrics.profile(0, "terminal")
+end
 
+local function copyDefinition(definition)
+	local copy = {}
+	for key, value in pairs(definition or {}) do copy[key] = value end
+	return copy
+end
+
+local function navigationItem(definition, pinned)
+	local title = T(definition.titleKey)
+	local item = {
+		key = definition.key, text = title, tooltip = title,
+		icon = { path = definition.iconPath, width = 72, height = 72 },
+		iconSize = 72, iconExact = true, iconOnly = true, payload = definition,
+	}
+	if pinned then item.pin = "end" end
+	return item
+end
+
+local function navigationItems(terminal)
+	local items = {}
+	for i = 1, #(terminal.tabDefs or {}) do
+		items[#items + 1] = navigationItem(terminal.tabDefs[i], false)
+	end
+	for i = 1, #(terminal.dynamicTabDefs or {}) do
+		items[#items + 1] = navigationItem(terminal.dynamicTabDefs[i], false)
+	end
+	if terminal.footerTabDef then items[#items + 1] = navigationItem(terminal.footerTabDef, true) end
+	return items
+end
+
+local function navigationOptions(terminal, items)
+	local profile = railProfile()
+	return {
+		placement = "left", activeKey = terminal.activeTabKey or "items",
+		items = items, extent = profile.window.railWidth,
+		iconOnly = true, itemExtent = profile.window.railItemHeight,
+		iconSize = profile.window.railIconSize, iconFit = "contain", iconPadding = 0,
+		barPadding = profile.window.railPadding, itemGap = profile.window.railGap,
+		separator = true, separatorOffset = 6,
+		selectionStyle = "border",
+		backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.96 },
+		selectedBackgroundColor = { r = 0.12, g = 0.10, b = 0.08, a = 0.96 },
+		hoverBackgroundColor = { r = 0.10, g = 0.10, b = 0.10, a = 0.96 },
+		pressedBackgroundColor = { r = 0.08, g = 0.07, b = 0.06, a = 0.96 },
+		borderColor = { r = 0, g = 0, b = 0, a = 0 },
+		selectedBorderColor = { r = 0.95, g = 0.55, b = 0.15, a = 0.90 },
+		iconColor = { r = 0.88, g = 0.88, b = 0.88, a = 0.88 },
+		hoverIconColor = { r = 0.92, g = 0.92, b = 0.92, a = 1 },
+		selectedIconColor = { r = 0.95, g = 0.55, b = 0.15, a = 1 },
+		hoverIconScale = 1,
+		separatorColor = { r = 0.35, g = 0.35, b = 0.35, a = 0.45 },
+		tooltipMode = "flyout", tooltipSide = "before", tooltipGap = 4,
+		tooltipBackgroundColor = { r = 0.10, g = 0.10, b = 0.10, a = 0.95 },
+		tooltipBorderColor = { r = 0.40, g = 0.40, b = 0.40, a = 0.90 },
+		tooltipTextColor = { r = 0.92, g = 0.94, b = 0.96, a = 1 },
+		onActivate = function(context)
+			local item = context and context.value
+			if item and terminal.activateTab then terminal:activateTab(item.key) end
+		end,
+	}
+end
+
+local function syncNavigationSelection(terminal)
+	local navigation = terminal.navigationContainer and terminal.navigationContainer.navigation
+	if not navigation then return end
+	local active = terminal.activeTabKey or "items"
+	if not navigation:setActive(active, false) then navigation:setActive("items", false) end
+	local incident = terminal.networkIncident
+	local alert = false
+	if incident and incident.count and incident.count > 0 then
+		local danger = incident.level ~= "amber"
+		alert = {
+			icon = danger and "sik.alert.danger.24" or "sik.alert.warning.24",
+			size = 24, margin = 2, severity = danger and "danger" or "warning",
+			glow = true, tooltip = incident.tooltip,
+		}
+	end
+	navigation:updateItem("network", { alert = alert })
+end
+
+local function buildNavigation(terminal)
+	local shell = UI.Window.chromeRects(terminal)
+	local container, err = UI.Container.create({ parent = terminal,
+		x = shell.content.x, y = shell.content.y,
+		w = shell.content.w, h = shell.content.h,
+		bounds = { x = shell.content.x, y = shell.content.y,
+			w = shell.content.w, h = shell.content.h },
+		padding = 0, controlId = "terminal-surface",
+		navigation = navigationOptions(terminal, navigationItems(terminal)),
+	})
+	if not container then error("SiK.UI.Container navigation failed: " .. tostring(err)) end
+	terminal.navigationContainer = container
+end
+
+local function layoutNavigation(terminal, bounds)
+	if not terminal.navigationContainer then return end
+	terminal.navigationContainer:reflow(bounds)
+	syncNavigationSelection(terminal)
+end
 
 GlobalStorageSiK.TerminalTabs = {}
-
-
-
----@param host ISPanel
-
----@param panel ISPanel|nil
-
--- Comprueba pertenencia real en childrenInOrder (array que PZ renderiza).
--- NO usar getParent(): PZ removeChild NO limpia .parent, queda stale y rompe
--- la re-adición (inventario vacío al volver de otra pestaña).
----@param host ISPanel
----@param panel ISPanel
----@return boolean
-local function isChildOf(host, panel)
-
-	local ch = host and host.childrenInOrder
-
-	if type(ch) ~= "table" then
-
-		return false
-
-	end
-
-	for i = 1, #ch do
-
-		if ch[i] == panel then
-
-			return true
-
-		end
-
-	end
-
-	return false
-
-end
-
-
-
----@param host ISPanel
-
----@param panel ISPanel|nil
-
-local function detachPanel(host, panel)
-
-	if not host or not panel then
-
-		return
-
-	end
-
-	if isChildOf(host, panel) then
-
-		host:removeChild(panel)
-
-	end
-
-	panel:setVisible(false)
-
-end
-
-
-
----@param host ISPanel
-
----@param panel ISPanel|nil
-
-local function attachPanel(host, panel)
-
-	if not host or not panel then
-
-		return
-
-	end
-
-	panel:setX(0)
-
-	panel:setY(0)
-
-	panel:setVisible(true)
-
-	-- Evitar doble-add: addChild hace table.insert(childrenInOrder,...) SIN comprobar
-	-- duplicados. Comprobamos pertenencia real, no getParent() (queda stale).
-	if isChildOf(host, panel) then
-
-		return
-
-	end
-
-	host:addChild(panel)
-
-end
 
 
 
@@ -125,31 +133,13 @@ end
 
 function GlobalStorageSiK.TerminalTabs.build(terminal, tabDefs)
 
-	terminal.tabViews = {}
+	terminal.tabPanels = {}
 
 	terminal.tabDefs = tabDefs
-
-
-
-	terminal.contentHost = ISPanel:new(0, 0, 10, 10)
-
-	terminal.contentHost:initialise()
-
-	terminal.contentHost.drawBackground = false
-
-	terminal.contentHost.clipChildren = true
-
-	terminal.contentHost:setScrollWithParent(false)
-
-	if terminal.contentHost.setScrollChildren then
-
-		terminal.contentHost:setScrollChildren(false)
-
-	end
-
-	terminal:addChild(terminal.contentHost)
-
-
+	terminal.dynamicTabDefs = terminal.dynamicTabDefs or {}
+	terminal.dynamicTabDefByKey = terminal.dynamicTabDefByKey or {}
+	terminal.activeTabKey = "items"
+	buildNavigation(terminal)
 
 	for i = 1, #tabDefs do
 
@@ -163,11 +153,10 @@ function GlobalStorageSiK.TerminalTabs.build(terminal, tabDefs)
 
 			panel:setY(0)
 
-			panel:setVisible(false)
-
 			panel.clipChildren = true
 
-			terminal.tabViews[def.key] = panel
+			terminal.tabPanels[def.key] = panel
+			terminal.navigationContainer:mountContent(def.key, panel)
 
 		end
 
@@ -187,11 +176,10 @@ function GlobalStorageSiK.TerminalTabs.build(terminal, tabDefs)
 
 			fpanel:setY(0)
 
-			fpanel:setVisible(false)
-
 			fpanel.clipChildren = true
 
-			terminal.tabViews[fdef.key] = fpanel
+			terminal.tabPanels[fdef.key] = fpanel
+			terminal.navigationContainer:mountContent(fdef.key, fpanel)
 
 		end
 
@@ -199,11 +187,7 @@ function GlobalStorageSiK.TerminalTabs.build(terminal, tabDefs)
 
 
 
-	GlobalStorageSiK.TerminalTabRail.build(terminal, tabDefs, terminal.footerTabDef)
-
-	terminal.activeTabKey = "items"
-
-	attachPanel(terminal.contentHost, terminal.tabViews.items)
+	terminal.navigationContainer:setActive("items", false)
 
 end
 
@@ -217,7 +201,7 @@ end
 
 function GlobalStorageSiK.TerminalTabs.measureRailWidth(terminal)
 
-	return GlobalStorageSiK.TerminalTabRail.measureWidth(terminal.tabDefs, terminal)
+	return railProfile().window.railWidth
 
 end
 
@@ -228,8 +212,8 @@ end
 ---@param terminal GS_TerminalUI
 
 function GlobalStorageSiK.TerminalTabs.layoutRail(terminal)
-
-	GlobalStorageSiK.TerminalTabRail.layout(terminal)
+	local panel = terminal.navigationContainer and terminal.navigationContainer.panel
+	if panel then layoutNavigation(terminal, { x = panel.x, y = panel.y, w = panel.width, h = panel.height }) end
 
 end
 
@@ -243,6 +227,46 @@ function GlobalStorageSiK.TerminalTabs.layoutBar(terminal)
 
 	GlobalStorageSiK.TerminalTabs.layoutRail(terminal)
 
+end
+
+function GlobalStorageSiK.TerminalTabs.registerPanel(terminal, tabKey, panel)
+	if not terminal or not tabKey or not panel then return false end
+	terminal.tabPanels = terminal.tabPanels or {}
+	terminal.tabPanels[tabKey] = panel
+	if not terminal.navigationContainer then return false end
+	return terminal.navigationContainer:mountContent(tabKey, panel) ~= nil
+end
+
+function GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, definition)
+	if not terminal or not terminal.navigationContainer then return false end
+	local def = copyDefinition(definition or {})
+	local key = def.key or "craft"
+	def.key = key
+	terminal.dynamicTabDefs = terminal.dynamicTabDefs or {}
+	terminal.dynamicTabDefByKey = terminal.dynamicTabDefByKey or {}
+	if visible then
+		if not terminal.dynamicTabDefByKey[key] then
+			terminal.dynamicTabDefByKey[key] = def
+			terminal.dynamicTabDefs[#terminal.dynamicTabDefs + 1] = def
+		end
+	else
+		if not terminal.dynamicTabDefByKey[key] then return true end
+		terminal.dynamicTabDefByKey[key] = nil
+		for index = #terminal.dynamicTabDefs, 1, -1 do
+			if terminal.dynamicTabDefs[index].key == key then
+				table.remove(terminal.dynamicTabDefs, index)
+				break
+			end
+		end
+		if terminal.activeTabKey == key and terminal.activateTab then terminal:activateTab("items") end
+	end
+	local navigation = terminal.navigationContainer.navigation
+	navigation:setItems(navigationItems(terminal))
+	for tabKey, panel in pairs(terminal.tabPanels or {}) do
+		terminal.navigationContainer:mountContent(tabKey, panel)
+	end
+	syncNavigationSelection(terminal)
+	return true
 end
 
 
@@ -268,27 +292,10 @@ function GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 		return
 	end
 	terminal._gsBlockedFrameState = blocked
-	if terminal.tabRail then
-		if blocked then
-			if terminal.tabRail.hideFlyout then
-				terminal.tabRail:hideFlyout()
-			end
-			terminal.tabRail:setVisible(false)
-			terminal.tabRail:setX(-4096)
-			terminal.tabRail:setWidth(1)
-			if terminal.tabRail.setMouseTransparent then
-				terminal.tabRail:setMouseTransparent(true)
-			end
-		else
-			terminal.tabRail:setVisible(true)
-			terminal.tabRail:setX(0)
-			if terminal.tabRail.setMouseTransparent then
-				terminal.tabRail:setMouseTransparent(false)
-			end
-		end
-	end
-	if blocked and terminal.contentHost then
-		terminal.contentHost:bringToTop()
+	local navigation = terminal.navigationContainer and terminal.navigationContainer.navigation
+	if navigation then navigation:setBarVisible(not blocked) end
+	if blocked and terminal.navigationContainer and terminal.navigationContainer.panel then
+		terminal.navigationContainer.panel:bringToTop()
 	end
 	if terminal.closeBtn then
 		terminal.closeBtn:bringToTop()
@@ -304,6 +311,8 @@ end
 ---@param tabKey string
 
 function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
+	local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
+		and type(getTimestampMs) == "function" and getTimestampMs() or nil
 
 	-- BUG REAL DE DISEÑO cerrado (2026-08-26, pedido explicito tras el fix de
 	-- fallthrough de clic en GS_TerminalTabSlot: "evitar que cualquier click
@@ -317,7 +326,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	-- logica: una clave que no sea una de las fijas conocidas nunca activa
 	-- "addons" por defecto - cae siempre a "items".
 	if tabKey ~= "items" and tabKey ~= "network" and tabKey ~= "config" and tabKey ~= "addons"
-		and not (terminal.tabViews and terminal.tabViews[tabKey]) then
+		and not (terminal.tabPanels and terminal.tabPanels[tabKey]) then
 		tabKey = "items"
 	end
 
@@ -341,10 +350,17 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	if terminal.ensureTabBuilt then terminal:ensureTabBuilt(tabKey) end
 	if forceStatusTab and terminal.configPanel then terminal.configPanel.activeSubTab = "estado" end
 
-	if not terminal.tabViews or not terminal.tabViews[tabKey] or not terminal.contentHost then
+	if not terminal.tabPanels or not terminal.tabPanels[tabKey]
+		or not terminal.navigationContainer then
 
 		return
 
+	end
+	if terminal.activeTabKey == tabKey and terminal._gsActivatedTabKey == tabKey
+		and not forceStatusTab then
+		if terminal.accessMode ~= "blocked" then syncNavigationSelection(terminal) end
+		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
+		return tabKey
 	end
 
 	if terminal.activeTabKey == "network" and tabKey ~= "network" then
@@ -357,21 +373,10 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
 	end
 
-	local activePanel = terminal.tabViews[tabKey]
-
-	for _, panel in pairs(terminal.tabViews) do
-
-		if panel ~= activePanel then
-
-			detachPanel(terminal.contentHost, panel)
-
-		end
-
-	end
-
-	attachPanel(terminal.contentHost, activePanel)
-
 	terminal.activeTabKey = tabKey
+	terminal._gsActivatedTabKey = tabKey
+	local navigation = terminal.navigationContainer.navigation
+	navigation:setActive(tabKey, false)
 
 
 
@@ -394,42 +399,24 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
 	end
 
-	if tabKey == "addons" and terminal.onAddonsTabActivated then
-
-		terminal:onAddonsTabActivated()
-
-	end
-
 	if terminal.refreshActiveTabContent then
 
 		terminal:refreshActiveTabContent()
 
 	end
 
-	GlobalStorageSiK.TerminalScroll.stripTerminalTree(terminal)
-
-	if terminal.tabRail and terminal.accessMode ~= "blocked" then
-
-		terminal.tabRail:bringToTop()
-
-		terminal.tabRail:syncSelection()
-
-	end
+	if terminal.accessMode ~= "blocked" then syncNavigationSelection(terminal) end
 
 	GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 
-	-- DIAGNÓSTICO doble-interfaz (temporal v0.10.18.83)
-	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.debugDumpTree then
-		GlobalStorageSiK.TerminalUI.debugDumpTree("activate->" .. tostring(tabKey))
-	end
-
-	-- Volcado completo del arbol + solapes en CUALQUIER pestaña activada, no
-	-- solo la de bloqueo (sandbox DebugCatSiKUI, dev36, antes DebugModeUI) - a peticion expresa: poder
-	-- evaluar cualquier ventana/pestaña del mod, y como se puede desactivar,
-	-- no representa ruido cuando no se necesita.
-	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
-		GlobalStorageSiK.UIDebug.dumpTree(terminal, "activate->" .. tostring(tabKey))
-		GlobalStorageSiK.UIDebug.checkOverlaps(terminal, "activate->" .. tostring(tabKey))
+	-- Los volcados geometricos completos siguen disponibles mediante
+	-- TerminalUI.debugDumpTree(), pero nunca forman parte de la interaccion
+	-- ordinaria: recorrer dos veces todo el arbol al cambiar de pestaña
+	-- bloqueaba el hilo UI incluso con el diagnostico habilitado.
+	if startedMs then
+		GlobalStorageSiK.UIDebug.action("tab_activate",
+			"tab=" .. tostring(tabKey)
+				.. " durationMs=" .. tostring(getTimestampMs() - startedMs))
 	end
 
 end
@@ -452,7 +439,14 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 
 	end
 
-	terminal.accessMode = mode or "full"
+	local nextMode = mode or "full"
+	local previousMode = terminal.accessMode
+	terminal.accessMode = nextMode
+	if terminal.syncHeaderChrome then terminal:syncHeaderChrome() end
+	if previousMode == nextMode and nextMode == "full" then
+		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
+		return
+	end
 
 	if blockedState then
 
@@ -489,7 +483,7 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 
 		local tab = terminal.activeTabKey or "items"
 
-		if tab == "blocked" or not terminal.tabViews or not terminal.tabViews[tab] then
+		if tab == "blocked" or not terminal.tabPanels or not terminal.tabPanels[tab] then
 
 			tab = "items"
 

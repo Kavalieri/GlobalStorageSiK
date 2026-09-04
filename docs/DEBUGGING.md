@@ -42,20 +42,27 @@ session.json
 
 `session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` únicamente si necesitas el eco acotado en el cliente.
 
-### Árbol "SiK UI" (dev36)
+### Adaptador de diagnóstico de SiK UI
 
-Antes de dev36 existían tres interruptores sueltos, sin relación visible entre sí: `DebugModeUI` (clics/árbol de widgets/solapes, mecanismo propio distinto del resto), `DebugCatUI` (apertura de ventana + nombrado de nodo, mezclados en una sola categoría) y `DebugCatSearch` (caja de búsqueda). Los tres quedaron **retirados y sustituidos** por un único árbol de categorías `DebugCat`, con el mismo mecanismo estándar que Network/Craft/Inventory/Router, agrupado bajo el prefijo visible "SiK UI:" para poder depurar el framework de interfaz propio (`GS_SiK_UI_Core.lua`, `GS_SiK_UI_Table.lua`, `GS_TerminalUI_Scroll.lua`, `GS_TerminalUI_TabRail.lua`, `GS_TerminalUI_Extensions.lua`) por partes. El nombrado de nodo (`NodeNaming`), al no ser parte del framework visual sino lógica de negocio, pasó a su propia categoría independiente en vez de perderse.
+El framework independiente es propietario de la inspección de montaje,
+visibilidad, geometría, árboles de componentes y solapes. Global Storage no
+duplica esos recorridos: `GS_UIDebug.lua` es únicamente un adaptador compatible
+que conecta el interruptor Sandbox con `SiK.UI.Diagnostics` y con el logger del
+producto. Las categorías específicas conservan únicamente contexto de producto.
 
 | Clave nueva | Sustituye a | Cubre |
 |---|---|---|
-| `DebugCatSiKUI` | `DebugModeUI` + la mitad "ventana" de `DebugCatUI` | Clics de botón, apertura/reutilización/refresco de la ventana del terminal, árbol de widgets y solapes (`GS_UIDebug.lua`). Traza general/maestra del framework. |
-| `DebugCatSiKUITable` | (nueva, sin logging previo) | Geometría de columnas resuelta por `SiK_UI.Table` (Almacén, Zonas y nodos, Red, Permisos...) — solo cuando el ancho disponible cambia de verdad. |
-| `DebugCatSiKUIScroll` | (nueva, sin logging previo) | Motor de scroll/lista virtual compartido: crecimiento del pool de filas y cambios de dataset. |
+| `DebugCatSiKUI` | `DebugModeUI` + la mitad "ventana" de `DebugCatUI` | Activa únicamente el diagnóstico de integración Global Storage -> SiK UI. El diagnóstico interno de composición y ciclo de vida se activa en la página Sandbox propia de SiK UI Framework. |
 | `DebugCatSiKUITabs` | (nueva, sin logging previo) | Barra de pestañas lateral + contrato de registro Core/addon: creación/reutilización de panel, visibilidad, clic de activación/cancelación. |
 | `DebugCatSiKUISearch` | `DebugCatSearch` | Caja de búsqueda de la pestaña Almacén (bytes vs. caracteres UTF-8 reales — diagnóstico de idiomas no-ASCII). |
 | `DebugCatNodeNaming` | mitad "nombrado" de `DebugCatUI` | Aplicación del nombre visible de un contenedor a su objeto en el mundo. |
 
-Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` primero (cubre clics/apertura/solapes); añade la sub-categoría concreta (`Table`/`Scroll`/`Tabs`/`Search`) solo si el problema está claramente en esa pieza — no las actives todas a la vez sin necesidad.
+Al investigar composición interna, activa en la página propia del framework
+`Diagnóstico de composición y ciclo de vida` /
+`Composition and lifecycle diagnostics`. Activa además en Global Storage
+`Modo depuración (debug)` / `Debug mode` y `>> Integración con SiK UI` /
+`>> SiK UI integration` solo si necesitas hechos del consumidor. Añade una
+categoría específica únicamente para esa superficie; no actives todo el árbol.
 
 ### Glosario de opciones del Core
 
@@ -74,15 +81,58 @@ Al investigar algo de interfaz, activa `Modo depuración` + `DebugCatSiKUI` prim
 | `DebugCatTooltip` | `>> Tooltip de red` / `>> Network tooltip` | Instalación/recuperación del hook, fallos y fallback del tooltip de cantidades. No registra cada frame. |
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
 | `DebugDetailRouter` | `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` | Tier y capacidad de cada candidato; alto volumen. |
+| `DebugCatAddons` | `>> Instalación/desinstalación de addons` / `>> Addon install/uninstall` | Catálogo por addon con ID/ModID, registro, disponibilidad, causa y montaje; además, consumo/devolución de la unidad durante instalación o retirada. |
 | `DebugCatRuleMigration` | `>> Migración de reglas legacy` / `>> Legacy rule migration` | Clasifica reglas persistidas como nativas, categorías fuente explícitas, vanilla, alias GS, externas retiradas o residuo técnico; conserva hasta tres muestras acotadas de `rules` o `categories`. |
-| `DebugCatSiKUI` | `>> SiK UI: clics y widgets` / `>> SiK UI: clicks & widgets` | Clics, apertura/reutilización/refresco de ventana, árbol de widgets y solapes. Traza general del framework — ver árbol "SiK UI" arriba. |
-| `DebugCatSiKUITable` | `>> SiK UI: geometría de tabla` / `>> SiK UI: table geometry` | Anchos de columna resueltos por `SiK_UI.Table`; solo al cambiar el ancho disponible. |
-| `DebugCatSiKUIScroll` | `>> SiK UI: scroll y lista virtual` / `>> SiK UI: scroll & virtual list` | Pool de filas y cambios de dataset del motor de scroll/lista virtual. |
+| `DebugCatSiKUI` | `>> Integración con SiK UI` / `>> SiK UI integration` | Hechos de integración del producto con el framework. Incluye tiempos acotados `shell_visible`, `state_refresh`, `tab_activate` y `refreshItemsTab_done`; no registra una línea por frame. Para montaje, geometría, árbol y solapes internos se usa el interruptor propio de SiK UI Framework. |
+| `DebugCatRecordedMediaRuntime` | `>> DIAGNÓSTICO: identidad de medios grabados` / `>> DIAGNOSTIC: recorded-media identity` | Resumen acotado de filas VHS, títulos exactos/no resueltos, L3 Con enseñanza/Ocio y hasta cinco `mediaIndex` de muestra. |
 | `DebugCatSiKUITabs` | `>> SiK UI: pestañas y extensiones` / `>> SiK UI: tabs & extensions` | Registro/reutilización de panel, visibilidad y clic de pestaña. |
 | `DebugCatSiKUISearch` | `>> SiK UI: caja de búsqueda` / `>> SiK UI: search box` | Bytes vs. caracteres UTF-8 reales en el cuadro de búsqueda de Almacén. |
 | `DebugCatNodeNaming` | `>> Nombrado de terminal` / `>> Terminal naming` | Aplicación del nombre visible de un contenedor a su objeto en el mundo. |
 
 Las líneas del Core usan componente y evento estables. Operaciones largas deben emitir estados significativos, no una línea por tick. Si un estado no cambió, no se repite.
+
+### Prueba DEV: descubrimiento y montaje de addons
+
+Activa únicamente `Modo depuración (debug)` / `Debug mode` y
+`>> Instalación/desinstalación de addons` / `>> Addon install/uninstall`.
+Mantén apagadas las categorías no relacionadas y todos los sublogs
+`>>> DETALLE / >>> DETAIL`. Abre la pestaña Addons con Craft, Builder y Tablet
+activos: cada ID debe aparecer exactamente una vez con `registered=true`,
+`available=true`, `mounted=true` y `cause=available`. Repite retirando uno de
+los tres ModID: los otros dos deben seguir montados y el ausente debe quedar
+identificado por su ModID y por la causa accionable, sin traza por fotograma.
+
+El prefijo esperado es `[CLI] [GlobalStorageSiK:DEBUG:Addons]`; conserva el
+`console.txt` del cliente y, si la prueba es dedicada, el `console.txt` del
+servidor. El eco de dedicado se activa solo si se necesita expresamente.
+
+### Prueba DEV: identidad y clasificación de VHS
+
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y
+`>> DIAGNÓSTICO: identidad de medios grabados` /
+`>> DIAGNOSTIC: recorded-media identity`. En dedicado, añade
+`>> Reenviar logs del dedicado a clientes` /
+`>> Relay dedicated-server logs to clients` solo si necesitas el eco en el
+cliente. Mantén apagadas las categorías no relacionadas y todos los sublogs
+`>>> DETALLE / >>> DETAIL`.
+
+Deposita dos copias de una misma cinta con enseñanza, otra edición con
+enseñanza distinta y una cinta de ocio. Tras reescanear y reabrir Almacén, cada
+cabecera debe usar el nombre original localizado de su edición; las dos copias
+idénticas forman una sola fila con cantidad 2 y las ediciones distintas nunca se
+agrupan como `VHS comercial`. La búsqueda por una palabra del título debe
+encontrar esa edición, y los tres selectores deben ofrecer
+`Conocimiento y medios > Medios grabados > Con enseñanza/Ocio` /
+`Knowledge and media > Recorded media > With learning/Leisure`. El tooltip de
+la cinta docente conserva el anexo de red y muestra únicamente las habilidades
+de esa edición; la cinta de ocio no genera un bloque `Enseña` vacío.
+
+El evento esperado es una línea acotada
+`[GlobalStorageSiK:DEBUG:RecordedMediaRuntime] projection` con `rows`, `exact`,
+`unresolved`, `learning`, `leisure` y hasta cinco muestras `mediaIndex=título`.
+`unresolved` debe ser `0` para cintas vanilla conocidas. Conserva
+`console.txt` y `GlobalStorageSiK_Debug_RecordedMediaRuntime.log`; en dedicado,
+conserva además el `console.txt` del servidor.
 
 ### Perfiles de rendimiento local
 

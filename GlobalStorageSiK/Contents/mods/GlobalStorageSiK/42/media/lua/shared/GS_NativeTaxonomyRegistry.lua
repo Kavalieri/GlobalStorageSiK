@@ -111,7 +111,8 @@ local TREE = {
 		-- "magazine" solos no garantizan tema de receta - revistas de tema
 		-- general sin evidencia de receta/oficio caen aqui, nunca en
 		-- recipe_magazine sin confirmar).
-		skill_book = {}, recipe_magazine = {}, general_magazine = {}, literature = {}, document = {}, recorded_media = {},
+		skill_book = {}, recipe_magazine = {}, general_magazine = {}, literature = {}, document = {},
+		recorded_media = { "with_learning", "leisure" },
 	},
 	electronics_power = {
 		power = {}, communication = {}, lighting = {}, component = {}, entertainment = {},

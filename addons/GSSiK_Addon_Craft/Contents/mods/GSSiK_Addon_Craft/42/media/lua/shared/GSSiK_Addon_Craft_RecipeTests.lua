@@ -8,8 +8,6 @@
 	(compatibilidad / addon aun sin sandbox-options.txt actualizado).
 ]]
 
-require "GS_Sandbox"
-
 GSSiK_Addon_Craft_RecipeTests = GSSiK_Addon_Craft_RecipeTests or {}
 
 local RECIPE_SLUGS = { "PrinterFrame", "PrinterExtruderHead", "PrinterControlBoard", "Printer3D", "CraftDisk" }

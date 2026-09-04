@@ -1476,13 +1476,17 @@ local function forEachOnlinePlayer(fn)
 	if getOnlinePlayers then
 		local ok, list = pcall(getOnlinePlayers)
 		if ok and list and list.size then
-			for i = 0, list:size() - 1 do
+			local size = tonumber(list:size()) or 0
+			for i = 0, size - 1 do
 				local p = list:get(i)
 				if p then
 					fn(p)
 				end
 			end
-			return
+			-- En SP B42 getOnlinePlayers() existe pero devuelve una lista vacia.
+			-- No debe cortar aqui: progreso y cierre de jobs se entregan mediante
+			-- los jugadores locales activos del fallback inferior.
+			if size > 0 then return end
 		end
 	end
 	if getNumActivePlayers and getSpecificPlayer then
@@ -2169,6 +2173,22 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 						summary.snapshotRows or 0)
 					gsSendServerCommand(player, "actionResult", payload)
 				end
+			end
+		end
+	end)
+end
+
+--- Actualizacion pequena de cabecera: nunca reconstruye ni reenvia el catalogo.
+function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
+	forEachOnlinePlayer(function(player)
+		local username = player.getUsername and player:getUsername() or ""
+		local requested = requestedWatchers and requestedWatchers[username] ~= nil
+		if requested or isTerminalWatcher(player, networkId) then
+			local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
+			if allowed then
+				status.networkId = networkId
+				status.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+				gsSendServerCommand(player, "scanProgress", status)
 			end
 		end
 	end)

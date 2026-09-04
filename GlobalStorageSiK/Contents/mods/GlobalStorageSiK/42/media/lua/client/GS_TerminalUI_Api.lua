@@ -11,12 +11,15 @@ require "GS_TerminalAccess"
 require "GS_PlayerUtils"
 require "GS_UIDebug"
 require "GS_Log"
-require "GS_SiK_UI_Window"
+
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
 GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or {}
 
 local DEFER_REFRESH_ITEM_COUNT = 150
+local TERMINAL_GEOMETRY_KEY = "terminal-shell"
+local TERMINAL_GEOMETRY_VERSION = 2
 
 function GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
 	return GlobalStorageSiK.TerminalUI.instances[tonumber(playerNum) or 0]
@@ -48,12 +51,19 @@ end
 
 local function resolveShellRect(player)
 	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-	local viewport = GlobalStorageSiK.SiK_UI.Viewport.resolve(playerNum)
-	local saved = GlobalStorageSiK.SiK_UI.Window.recall("terminal-shell", playerNum, viewport)
-	if saved then return saved end
-	return GlobalStorageSiK.SiK_UI.Window.resolveProfile(viewport.profile, viewport, {
+	local viewport = UI.Viewport.resolve(playerNum)
+	local profile = "terminal"
+	local rect = UI.Window.resolveBounds({
 		playerNum = playerNum,
+		profile = profile,
+		geometryKey = TERMINAL_GEOMETRY_KEY,
+		geometryVersion = TERMINAL_GEOMETRY_VERSION,
 	})
+	-- resolveBounds owns only safe default geometry. GS_TerminalUI applies this
+	-- same key through Window.apply, the single owner of saved geometry.
+	rect.profile = profile
+	rect.geometryVersion = TERMINAL_GEOMETRY_VERSION
+	return rect
 end
 
 --- Cierra la ventana principal si existe (modo completo).
@@ -96,20 +106,34 @@ end
 --- Aplica estado al panel; difiere refrescos muy grandes un tick para evitar bloqueos.
 ---@param ui GS_TerminalUI
 ---@param state table|nil
-local function applyTerminalState(ui, state)
+local function applyTerminalState(ui, state, forceDeferred)
 	if not ui or not ui.refreshFromState then
 		return
 	end
 	local itemCount = state and state.items and #state.items or 0
+	ui._gsPendingTerminalState = state
 	local function runRefresh()
-		local ok, err = pcall(ui.refreshFromState, ui, state)
+		local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
+			and type(getTimestampMs) == "function" and getTimestampMs() or nil
+		local pendingState = ui._gsPendingTerminalState
+		ui._gsPendingTerminalState = nil
+		local ok, err = pcall(ui.refreshFromState, ui, pendingState)
 		if not ok then
 			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
 		end
+		if startedMs then
+			GlobalStorageSiK.UIDebug.action("state_refresh",
+				"durationMs=" .. tostring(getTimestampMs() - startedMs)
+					.. " items=" .. tostring(pendingState and pendingState.items and #pendingState.items or 0)
+					.. " deferred=" .. tostring(forceDeferred == true))
+		end
 	end
-	if itemCount > DEFER_REFRESH_ITEM_COUNT and Events and Events.OnTick then
+	if (forceDeferred or itemCount > DEFER_REFRESH_ITEM_COUNT) and Events and Events.OnTick then
+		if ui._gsTerminalRefreshQueued then return end
+		ui._gsTerminalRefreshQueued = true
 		local function deferOnce()
 			Events.OnTick.Remove(deferOnce)
+			ui._gsTerminalRefreshQueued = nil
 			if GlobalStorageSiK.TerminalUI.getInstanceForPlayer(ui.playerNum) == ui then
 				runRefresh()
 			end
@@ -123,6 +147,8 @@ end
 --- Abre o refresca la ventana principal del terminal.
 ---@param state table|nil
 function GlobalStorageSiK.TerminalUI.show(state)
+	local showStartedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
+		and type(getTimestampMs) == "function" and getTimestampMs() or nil
 	if GlobalStorageSiK.TerminalAccessGuard and GlobalStorageSiK.TerminalAccessGuard.ensure then
 		GlobalStorageSiK.TerminalAccessGuard.ensure()
 	end
@@ -159,17 +185,19 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		tostring(ui ~= nil), (state and state.items and #state.items) or 0, tostring(networkId))
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (no crear segunda ventana).
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
 		GlobalStorageSiK.TerminalUI.instance = ui
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 		end
 		applyTerminalState(ui, state)
-		if ui.applyResponsiveBounds then
-			ui:applyResponsiveBounds(ui.x, ui.y, ui.width, ui.height)
-			ui:syncAfterResponsiveResize()
-		end
 		ui:setVisible(true)
-		ui:bringToTop()
+		-- Los estados periódicos refrescan datos, no el z-order. Solo una apertura
+		-- explícita o la reaparición de una ventana oculta puede elevar el shell;
+		-- Modal.raiseOwner conserva después cualquier modal hijo por encima.
+		if not wasVisible or (state and state.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == ui then
 			GlobalStorageSiK.TerminalBlockedUI.instance = nil
 		end
@@ -190,10 +218,18 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
 	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d",
 		rect.x, rect.y, rect.w, rect.h)
+	if showStartedMs then
+		GlobalStorageSiK.UIDebug.action("shell_visible",
+			"durationMs=" .. tostring(getTimestampMs() - showStartedMs)
+				.. " contentDeferred=true")
+	end
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 		GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 	end
-	applyTerminalState(ui, state)
+	-- El shell ya esta en UIManager: construir/refrescar el contenido activo en
+	-- el siguiente tick permite que la ventana se pinte antes del trabajo pesado
+	-- y coalesce cualquier snapshot que llegue durante esa apertura.
+	applyTerminalState(ui, state, true)
 end
 
 --- Muestra ventana bloqueada por acceso denegado (sin round-trip al servidor).
@@ -234,12 +270,15 @@ function GlobalStorageSiK.TerminalUI.showBlocked(payloadOrReason, rect)
 	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar.
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
 		GlobalStorageSiK.TerminalUI.instance = ui
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", payload)
 		end
 		ui:setVisible(true)
-		ui:bringToTop()
+		if not wasVisible or (payload and payload.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		GlobalStorageSiK.TerminalBlockedUI.instance = ui
 		return
 	end

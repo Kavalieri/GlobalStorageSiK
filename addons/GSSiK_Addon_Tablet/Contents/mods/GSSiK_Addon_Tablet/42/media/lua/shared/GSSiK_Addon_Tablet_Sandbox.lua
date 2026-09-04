@@ -10,14 +10,13 @@
 	sandbox, incluido 0 para desactivar cualquiera.
 ]]
 
-GlobalStorageSiK = GlobalStorageSiK or {}
 GSSiK_Addon_Tablet = GSSiK_Addon_Tablet or {}
 GSSiK_Addon_Tablet.Sandbox = {}
 
 --- Version del addon para mostrar en su propia pestaña del terminal - se
 --- sincroniza a mano con Contents/mods/GSSiK_Addon_Tablet/42/mod.info
 --- (modversion=) en cada release, mismo criterio que Core (GS_Config.MOD_VERSION).
-GSSiK_Addon_Tablet.VERSION = "1.5.0"
+GSSiK_Addon_Tablet.VERSION = "0.0.2.17-dev1.4"
 
 --- Rango inalámbrico tier 1 (Tableta base).
 ---@return number

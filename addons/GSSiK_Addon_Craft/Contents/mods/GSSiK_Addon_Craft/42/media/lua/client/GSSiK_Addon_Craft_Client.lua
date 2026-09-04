@@ -4,29 +4,41 @@
 	Fecha: 2025-06-27
 ]]
 
-require "GS_TerminalUI"
-require "GS_TerminalUI_Extensions"
+local API = require "GSSiK_API_Client"
 require "GSSiK_Addon_Craft_Register"
-require "GS_NetworkCraftBridge"
-require "GS_NetworkCraftSession"
-require "GS_ItemActions"
 require "GSSiK_Addon_Craft_NetworkCraft"
 require "GSSiK_Addon_Craft_NetworkCook"
-require "GSSiK_Addon_Craft_TerminalUI"
+local TerminalModule = require "GSSiK_Addon_Craft_TerminalUI"
 require "GSSiK_Addon_Craft_Sandbox"
 require "GSSiK_Addon_Craft_Log"
 
-GlobalStorageSiK.TerminalTabs = GlobalStorageSiK.TerminalTabs or {}
+GSSiK_Addon_Craft = GSSiK_Addon_Craft or {}
+GSSiK_Addon_Craft._apiRegistrations = GSSiK_Addon_Craft._apiRegistrations or {}
+local registrations = GSSiK_Addon_Craft._apiRegistrations
+local Session = API.WorkSession
+local Terminal = API.Terminal
+
+local function retainRegistration(key, ok, code, handle)
+	if ok ~= true or not handle then error("GSSiK.API " .. key .. ": " .. tostring(code)) end
+	local previous = registrations[key]
+	if previous and previous.dispose then previous:dispose() end
+	registrations[key] = handle
+end
 
 -- El sink de debug y los hooks de crafteo en red ya se registran en
 -- GSSiK_Addon_Craft_NetworkCraft.lua (migrado desde aqui, ver ese fichero).
 
-GlobalStorageSiK.TerminalExtensions.registerDefinition("craft", {
-	module = GlobalStorageSiK.TerminalCraft,
+retainRegistration("terminal-tab", Terminal.registerTab({
+	key = "craft",
+	surface = TerminalModule.surface,
+	builder = TerminalModule.builder,
+	contextFactory = TerminalModule.contextFactory,
 	titleKey = "IGUI_GS_TabCraft",
 	iconPath = "media/ui/GS/GS_TabCraft.png",
 	panelField = "craftPanel",
-})
+	enabledStateKey = "craftTabEnabled",
+	order = 10,
+}))
 
 local DIRECT_RELOAD_TYPES = {
 	["Base.BlowTorch"] = true,
@@ -61,11 +73,10 @@ end
 
 local function providerTerminal(context)
 	local extra = context and context.extra or {}
-	local terminal = extra.terminal or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	local terminal = extra.terminal or Terminal.current()
 	if not terminal or not terminal.terminalState then return nil end
 	if not terminal.getIsVisible or terminal:getIsVisible() ~= true then return nil end
-	local installed = terminal.terminalState.installedAddons
-	if not installed or installed["Craft"] == nil then return nil end
+	if not Terminal.isAddonInstalled(terminal, "Craft") then return nil end
 	return terminal
 end
 
@@ -111,7 +122,7 @@ end
 
 -- Core solo compone el menú. Craft conserva aplicabilidad y ejecución y abre
 -- la sesión existente, que vuelve a validar addon, red, alcance e insumos.
-GlobalStorageSiK.ItemActions.registerProvider({
+retainRegistration("item-actions", API.ItemActions.registerProvider({
 	id = "craft.item-actions",
 	addonId = "Craft",
 	capabilities = { "reload", "refill", "craft" },
@@ -146,26 +157,26 @@ GlobalStorageSiK.ItemActions.registerProvider({
 		terminal:openNetworkCraft("vanilla", recipe, itemString)
 		return true
 	end,
-})
+}))
 
 --- Abre crafteo con contenedores de red.
 ---@param mode string
-function GS_TerminalUI:openNetworkCraft(mode, recipe, itemString)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
-	if not player or not GlobalStorageSiK.CraftSession then
+function TerminalModule.openCraft(terminal, mode, recipe, itemString)
+	local player = Terminal.player(terminal)
+	if not player or not terminal then
 		return
 	end
-	local state = self.terminalState or {}
+	local state = Terminal.state(terminal) or {}
 	-- Antes, si begin() u openHandcraft() fallaban, el clic no hacia nada
 	-- visible - ahora SIEMPRE se refresca el panel al final (exito o fallo)
-	-- para que GS_NetworkCraftSession.getLastOpenError() se muestre en la
+	-- para que WorkSession.getOpenFailure() se muestre en la
 	-- etiqueta de estado que ya existe en este panel.
 	-- Confiar en el terminalState ya confirmado por el servidor (el mismo
 	-- dato que hace que la pestaña Addons muestre el modulo instalado) en
 	-- vez de solo el mirror local de red (ModData), que puede ir con
-	-- retraso justo tras instalar - ver comentario en CraftSession.begin.
+	-- retraso justo tras instalar - ver el contrato WorkSession.begin.
 	local knownInstalled = state.installedAddons and state.installedAddons["Craft"] ~= nil
-	local began, beginReason = GlobalStorageSiK.CraftSession.begin({
+	local began, beginReason = Session.begin({
 		player = player,
 		networkId = state.networkId,
 		terminalAnchor = state.terminalAnchor,
@@ -178,50 +189,42 @@ function GS_TerminalUI:openNetworkCraft(mode, recipe, itemString)
 		.. " networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
 		.. " reason=" .. tostring(beginReason))
 	if began then
-		local opened, openReason = GlobalStorageSiK.CraftSession.openHandcraft(mode, recipe, itemString)
+		local opened, openReason = Session.openHandcraft("Craft", mode, recipe, itemString)
 		GSSiK_Addon_Craft.Log.debug("openHandcraft opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
-	if self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
+	if terminal.craftPanel then
+		TerminalModule.refresh(terminal.craftPanel, terminal)
 	end
 end
 
-function GS_TerminalUI:onOpenVanillaCraft()
-	self:openNetworkCraft("vanilla")
-end
-
-function GS_TerminalUI:onOpenNeatCraft()
-	self:openNetworkCraft("neat")
-end
-
-GlobalStorageSiK.TerminalExtensions.registerStaffAction("craft.vanilla", {
+retainRegistration("staff-action", Terminal.registerStaffAction("craft.vanilla", {
 	labelKey = "IGUI_GS_CraftOpenVanilla",
 	order = 10,
 	invoke = function(dashboard)
 		if dashboard and dashboard.setVisible then
 			dashboard:setVisible(false)
 		end
-		local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
-		if terminal and terminal.openNetworkCraft then
-			terminal:openNetworkCraft("vanilla")
+		local terminal = Terminal.current()
+		if terminal then
+			TerminalModule.openCraft(terminal, "vanilla")
 		else
-			GlobalStorageSiK.CraftSession.openHandcraft("vanilla")
+			Session.openHandcraft("Craft", "vanilla")
 		end
 	end,
-})
+}))
 
 --- Abre cocina (Project_Cook, mod externo opcional) con contenedores de red
 --- - misma sesion "Craft" que crafteo, distinto uiMode para diagnostico. Ver
 --- GSSiK_Addon_Craft_NetworkCook.lua: Project_Cook rastrea su propia
---- ventana, no via ISEntityUI, así que no reutiliza CraftSession.openHandcraft.
-function GS_TerminalUI:onOpenCook()
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
-	if not player or not GlobalStorageSiK.CraftSession then
+--- ventana, no via ISEntityUI, así que no reutiliza WorkSession.openHandcraft.
+function TerminalModule.openCook(terminal)
+	local player = Terminal.player(terminal)
+	if not player or not terminal then
 		return
 	end
-	local state = self.terminalState or {}
+	local state = Terminal.state(terminal) or {}
 	local knownInstalled = state.installedAddons and state.installedAddons["Craft"] ~= nil
-	local began, beginReason = GlobalStorageSiK.CraftSession.begin({
+	local began, beginReason = Session.begin({
 		player = player,
 		networkId = state.networkId,
 		terminalAnchor = state.terminalAnchor,
@@ -236,30 +239,20 @@ function GS_TerminalUI:onOpenCook()
 		local opened, openReason = GSSiK_Addon_Craft_NetworkCook.openCookUI(player)
 		GSSiK_Addon_Craft.Log.debug("openCookUI opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 		if opened then
-			GlobalStorageSiK.CraftSession.setLastOpenError(nil)
+			Session.reportOpenFailure("Craft", nil)
 		else
-			GlobalStorageSiK.CraftSession.setLastOpenError(openReason)
-			GlobalStorageSiK.CraftSession.endSession(nil)
+			Session.reportOpenFailure("Craft", openReason)
+			Session.endSession(nil)
 		end
 	end
-	if self.craftPanel and GlobalStorageSiK.TerminalCraft then
-		GlobalStorageSiK.TerminalCraft.refresh(self.craftPanel, self)
+	if terminal.craftPanel then
+		TerminalModule.refresh(terminal.craftPanel, terminal)
 	end
 end
 
-function GS_TerminalUI:syncCraftTabVisibility()
-	local state = self.terminalState or {}
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
-	local show = state.craftTabEnabled
-	if show == nil and GlobalStorageSiK.Addons then
-		show = GlobalStorageSiK.Addons.canShowTerminalCraftTab(
-			state.networkId,
-			state.terminalAnchor,
-			state.accessMode,
-			player
-		)
-	end
-	if GlobalStorageSiK.TerminalExtensions then
-		GlobalStorageSiK.TerminalExtensions.setTabVisible(self, "craft", show == true)
-	end
+function TerminalModule.syncVisibility(terminal)
+	local show = Terminal.isTabEnabled(terminal, "Craft", "craftTabEnabled")
+	Terminal.setTabVisible(terminal, "craft", show)
 end
+
+return GSSiK_Addon_Craft

@@ -27,6 +27,7 @@
 ]]
 
 GlobalStorageSiK.UILayout = GlobalStorageSiK.UILayout or {}
+local UI = require "GS_UI_Framework"
 
 local Column = {}
 Column.__index = Column
@@ -46,7 +47,7 @@ end
 function Column:_set(widget, x, y, w, h)
 	if not widget then return end
 	if self.scroll then
-		local TS = GlobalStorageSiK.TerminalScroll
+		local TS = UI.Scroll
 		if x ~= nil and TS and TS.setContentX then TS.setContentX(self.scroll, widget, x) end
 		if y ~= nil and TS and TS.setContentY then TS.setContentY(self.scroll, widget, y) end
 		if w ~= nil and widget.setWidth then widget:setWidth(w) end

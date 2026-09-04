@@ -3,7 +3,7 @@
 -- not simulated, only the exact client request count and capture ownership.
 
 for _, name in ipairs({ "GS_NetClient", "GS_DepositSources", "GS_WithdrawClient",
-	"GS_ContainerTargets", "GS_I18n", "GS_SiK_UI_EscapeStack", "GS_SiK_UI_Viewport",
+	"GS_ContainerTargets", "GS_I18n",
 	"ISUI/ISPanel" }) do
 	package.loaded[name] = true
 end
@@ -50,13 +50,6 @@ GlobalStorageSiK = {
                 keyForContainer = function() return destinationKey end,
                 debugDropTarget = function() end,
 	},
-	SiK_UI = { Viewport = { resolve = function()
-		return { x = 0, y = 0, w = 1280, h = 720 }
-	end }, EscapeStack = {
-		PRIORITY = { TRANSIENT = 400 },
-		install = function(_, close) escapeClose = close end,
-		remove = function() end,
-	} },
 	Client = { registerTransientCleanup = function(_, callback)
 		transientCleanup = callback
 		return true
@@ -70,6 +63,26 @@ GlobalStorageSiK = {
 		drawRowDescriptor = function() end,
 	},
 }
+
+local publicUI = {
+	DragGhost = {
+		create = function(options)
+			return { descriptors = options.descriptors, removeFromUIManager = function() end }
+		end,
+		destroy = function() end,
+	},
+	Drag = {
+		begin = function(options)
+			escapeClose = options.onCancel
+			return {
+				ghost = options.createGhost(),
+				update = function() return true end,
+				dispose = function() end,
+			}
+		end,
+	},
+}
+package.loaded["GS_UI_Framework"] = publicUI
 
 getMouseX, getMouseY = function() return 100 end, function() return 100 end
 getCore = function() return { getScreenWidth = function() return 1280 end,

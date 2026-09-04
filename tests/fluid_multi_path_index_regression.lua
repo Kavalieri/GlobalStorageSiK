@@ -76,6 +76,8 @@ GlobalStorageSiK.CategoryResolution = {
 }
 package.loaded["GS_CategoryResolution"] = true
 
+dofile(shared .. "GS_RecordedMedia.lua")
+package.loaded["GS_RecordedMedia"] = true
 dofile(shared .. "GS_ItemSnapshot.lua")
 package.loaded["GS_ItemSnapshot"] = true
 
@@ -172,7 +174,7 @@ for _, name in ipairs({
 	"ISUI/ISPanel", "ISUI/ISLabel", "ISUI/ISContextMenu", "GS_Libs", "GS_BulkFilters",
 	"GS_DepositSources", "GS_TerminalWithdrawDrag", "GS_WithdrawMenu", "GS_QuantityPrompt",
 	"GS_Log", "GS_ContextMenuUi", "GS_NodeHighlight", "GS_ContainerTargets",
-	"GS_TerminalUI_Scroll", "GS_SiK_UI_Table", "GS_SiK_UI_Core", "GS_ItemNetworkTooltip",
+	"GS_ItemNetworkTooltip",
 	"GS_NetworkReadAction", "GS_NetClient", "GS_RemoteItemDetail", "GS_UIDebug",
 }) do
 	package.loaded[name] = true
@@ -182,11 +184,16 @@ function getTextManager()
 	return { getFontHeight = function() return 12 end,
 		MeasureStringX = function(_, _, value) return #tostring(value or "") * 6 end }
 end
-GlobalStorageSiK.SiK_UI = {
-	Table = { metrics = function() return { rowHeight = 24, headerHeight = 24 } end },
-	truncateText = function(value) return value end,
+package.loaded["GS_UI_Framework"] = {
+	Table = {
+		metrics = function() return { rowHeight = 24, headerHeight = 24 } end,
+	},
+	Tooltip = {},
 }
+package.loaded["GlobalStorageSiK/UI/Generated/TabWarehouse"] = {}
+package.loaded["GlobalStorageSiK/UI/TabWarehouseContext"] = { create = function() return nil end }
 GlobalStorageSiK.TerminalWithdrawDrag = { isActive = function() return false end }
+dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua")
 assert(#GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, fuel) == 1,

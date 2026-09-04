@@ -120,6 +120,10 @@ local function notifyProgress(job, summary)
 				job.skipped or 0, job.failed or 0),
 			jobType = "redistribute",
 			jobState = "running",
+			progressPhase = summary.phase,
+			progressChecked = summary.checked or 0,
+			progressTotal = summary.total or 0,
+			progressMoved = job.moved or 0,
 		})
 	end)
 end

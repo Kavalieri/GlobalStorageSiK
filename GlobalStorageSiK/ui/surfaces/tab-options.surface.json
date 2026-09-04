@@ -1,0 +1,623 @@
+{
+  "documentKind": "product-surface-spec",
+  "schemaId": "sik-ui-catalog-v1",
+  "schemaVersion": 1,
+  "frameworkRef": {
+    "id": "SiKUIFramework",
+    "manifestSha256": "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6"
+  },
+  "visualBaseline": {
+    "masterPath": "Documentacion/UI/terminal-tabs.html",
+    "masterSha256": "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
+    "selector": "[data-surface-id=\"tab-options\"]",
+    "canonicalizer": "sik-ui-dom-v2",
+    "subtreeSha256": "62f0db6b9ee17d720fb77f3ec3c22d392832bb68932abe08ed2232ac5f1227a7",
+    "validation": "HTML_VALIDATED_BY_KAVA"
+  },
+  "product": {
+    "id": "global-storage-sik",
+    "namespace": "GlobalStorageSiK"
+  },
+  "surface": {
+    "id": "tab-options",
+    "kind": "embedded",
+    "owner": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Options.lua",
+      "symbol": "GlobalStorageSiK.TerminalOptions"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalOptions.buildSection"
+      }
+    ],
+    "profiles": ["compact", "standard", "wide"],
+    "root": {
+      "id": "options-root",
+      "type": "container",
+      "variant": "fill",
+      "layout": {
+        "mode": "column",
+        "base": [
+          { "name": "fill", "value": { "kind": "literal", "value": true } },
+          { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }
+        ],
+        "overrides": []
+      },
+      "props": [
+        { "name": "direction", "value": { "kind": "literal", "value": "column" } },
+        { "name": "overflow", "value": { "kind": "literal", "value": "clip" } }
+      ],
+      "actions": [
+        { "event": "change", "actionId": "options.change-subtab" }
+      ],
+      "capabilities": [
+        { "id": "container.navigation", "props": [{ "name": "enabled", "value": { "kind": "literal", "value": true } }, { "name": "placement", "value": { "kind": "literal", "value": "top" } }, { "name": "active-key", "value": { "kind": "literal", "value": "estado" } }] }
+      ],
+      "options": [
+        { "id": "estado", "labelRef": "options.tab.state", "value": "estado", "contentId": "options-state-content" },
+        { "id": "admin", "labelRef": "options.tab.admin", "value": "admin", "contentId": "options-admin-content" }
+      ],
+      "children": [
+            {
+              "id": "options-state-content",
+              "type": "container",
+              "variant": "dynamic",
+              "layout": { "mode": "grid", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "columns", "value": { "kind": "literal", "value": 2 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [{ "profileId": "compact", "bindings": [{ "name": "columns", "value": { "kind": "literal", "value": 1 } }] }] },
+              "props": [{ "name": "overflow", "value": { "kind": "literal", "value": "scroll" } }],
+              "actions": [],
+              "children": [
+                {
+                  "id": "options-network-block",
+                  "type": "block",
+                  "variant": "accent",
+                  "layout": { "mode": "column", "base": [{ "name": "span", "value": { "kind": "literal", "value": 2 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.state.network.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.state.network.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }] }],
+                  "children": [
+                    {
+                      "id": "options-network-name",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "status" } },
+                        { "name": "label", "value": { "kind": "i18n", "ref": "options.state.network.current" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.networkName" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-network-selector",
+                      "type": "control",
+                      "variant": "default",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "combo" } },
+                        { "name": "label", "value": { "kind": "i18n", "ref": "options.state.network.selected" } },
+                        { "name": "data", "value": { "kind": "state", "path": "options.state.selectedNetwork" } }
+                      ],
+                      "actions": [{ "event": "change", "actionId": "options.select-network" }],
+                      "options": [{ "id": "available", "labelRef": "options.state.network.selected", "value": "available" }],
+                      "children": []
+                    },
+                    {
+                      "id": "options-network-summary",
+                      "type": "control",
+                      "variant": "subtle",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "feedback" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.networkSummary" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-network-actions",
+                      "type": "form",
+                      "variant": "equal-actions",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [{ "profileId": "compact", "bindings": [{ "name": "columns", "value": { "kind": "literal", "value": 1 } }] }] },
+                      "props": [{ "name": "data", "value": { "kind": "data", "path": "options.state.networkActions" } }],
+                      "actions": [],
+                      "children": [
+                        {
+                          "id": "options-network-use",
+                          "type": "control",
+                          "variant": "default",
+                          "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "button" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.network.use" } }],
+                          "actions": [{ "event": "activate", "actionId": "options.use-network" }],
+                          "children": []
+                        },
+                        {
+                          "id": "options-network-refresh",
+                          "type": "control",
+                          "variant": "default",
+                          "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "button" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.network.refresh" } }],
+                          "actions": [{ "event": "activate", "actionId": "options.refresh-networks" }],
+                          "children": []
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "id": "options-operational-block",
+                  "type": "block",
+                  "variant": "default",
+                  "layout": { "mode": "column", "base": [{ "name": "min-height", "value": { "kind": "literal", "value": 224 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.state.operational.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.state.operational.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }] }],
+                  "children": [
+                    {
+                      "id": "options-power-status",
+                      "type": "control",
+                      "variant": "success",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "feedback" } },
+                        { "name": "label", "value": { "kind": "i18n", "ref": "options.state.operational.power" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.power" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-terminal-status",
+                      "type": "control",
+                      "variant": "success",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.operational.terminal" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.terminalStatus" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-zones-status",
+                      "type": "control",
+                      "variant": "success",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.operational.zones" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.zonesStatus" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-access-status",
+                      "type": "control",
+                      "variant": "success",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.operational.access" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.accessStatus" } }],
+                      "actions": [], "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "options-resources-block",
+                  "type": "block",
+                  "variant": "default",
+                  "layout": { "mode": "column", "base": [{ "name": "min-height", "value": { "kind": "literal", "value": 224 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.state.resources.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.state.resources.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }] }],
+                  "children": [
+                    {
+                      "id": "options-resource-summary",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.resources.summary" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.resourceSummary" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-resource-access",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.resources.access" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.accessMode" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-resource-consumption",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.resources.consumption" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.consumption" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-resource-capacity-availability",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.resources.capacity-available" } }, { "name": "data", "value": { "kind": "data", "path": "options.state.capacityAvailable" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-capacity",
+                      "type": "control",
+                      "variant": "capacity",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "progress" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.capacity" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-range-title",
+                      "type": "control",
+                      "variant": "default",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "section-title" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.state.range.title" } }],
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-terminal-range",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "status" } },
+                        { "name": "label", "value": { "kind": "i18n", "ref": "options.state.range.terminal" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.terminalRange" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-network-range",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "status" } },
+                        { "name": "label", "value": { "kind": "i18n", "ref": "options.state.range.network" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.networkRange" } }
+                      ],
+                      "actions": [],
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "options-palette-block",
+                  "type": "block",
+                  "variant": "default",
+                  "layout": { "mode": "column", "base": [{ "name": "span", "value": { "kind": "literal", "value": 2 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.state.palette.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.state.palette.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }] }],
+                  "children": [
+                    {
+                      "id": "options-palette-options",
+                      "type": "card-collection",
+                      "variant": "palette",
+                      "layout": { "mode": "grid", "base": [{ "name": "columns", "value": { "kind": "literal", "value": 3 } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [{ "profileId": "compact", "bindings": [{ "name": "columns", "value": { "kind": "literal", "value": 2 } }] }] },
+                      "props": [
+                        { "name": "items", "value": { "kind": "data", "path": "options.state.palettes" } },
+                        { "name": "columns", "value": { "kind": "literal", "value": 3 } },
+                        { "name": "maxColumns", "value": { "kind": "literal", "value": 3 } },
+                        { "name": "exactColumns", "value": { "kind": "literal", "value": true } }
+                      ],
+                      "actions": [{ "event": "activate", "actionId": "options.change-palette" }],
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "options-admin-content",
+              "type": "container",
+              "variant": "dynamic",
+              "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+              "props": [{ "name": "overflow", "value": { "kind": "literal", "value": "scroll" } }],
+              "actions": [],
+              "children": [
+                {
+                  "id": "options-terminals-block",
+                  "type": "block",
+                  "variant": "default",
+                  "layout": { "mode": "column", "base": [{ "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.admin.terminals.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.admin.terminals.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }, { "name": "actions", "value": { "kind": "data", "path": "options.admin.terminalHeaderActions" } }] }],
+                  "children": [
+                    {
+                      "id": "options-terminals-table",
+                      "type": "table",
+                      "variant": "interactive",
+                      "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.terminals" } }],
+                      "actions": [{ "event": "activate", "actionId": "options.open-terminal" }],
+                      "columns": [
+                        { "key": "name", "labelRef": "options.admin.column.terminal-name", "align": "left", "flex": 1, "min": 130 },
+                        { "key": "coords", "labelRef": "options.admin.column.coordinates", "align": "left", "flex": 1, "min": 130 },
+                        { "key": "role", "labelRef": "options.admin.column.terminal-role", "align": "left", "width": 110 },
+                        { "key": "status", "labelRef": "options.admin.column.status", "align": "right", "width": 100 }
+                      ],
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "id": "options-members-block",
+                  "type": "block",
+                  "variant": "default",
+                  "layout": { "mode": "column", "base": [{ "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+                  "props": [
+                    { "name": "title", "value": { "kind": "i18n", "ref": "options.admin.members.title" } },
+                    { "name": "help", "value": { "kind": "i18n", "ref": "options.admin.members.help" } }
+                  ],
+                  "actions": [],
+                  "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }, { "name": "actions", "value": { "kind": "data", "path": "options.admin.memberHeaderActions" } }] }],
+                  "children": [
+                    {
+                      "id": "options-members-table",
+                      "type": "table",
+                      "variant": "interactive",
+                      "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.members" } }],
+                      "actions": [{ "event": "activate", "actionId": "options.open-member" }],
+                      "columns": [
+                        { "key": "role", "labelRef": "options.admin.column.member-role", "align": "left", "width": 120 },
+                        { "key": "name", "labelRef": "options.admin.column.member-name", "align": "left", "flex": 1, "min": 160 },
+                        { "key": "connection", "labelRef": "options.admin.column.connection", "align": "right", "width": 140 }
+                      ],
+                      "children": []
+                    },
+                    {
+                      "id": "options-succession-hint",
+                      "type": "control",
+                      "variant": "subtle",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "feedback" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.succession.help" } }, { "name": "data", "value": { "kind": "data", "path": "options.admin.successionHint" } }],
+                      "visual": { "visibleWhen": "owner" },
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-backup-warning",
+                      "type": "control",
+                      "variant": "warning",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.succession.warning" } }, { "name": "data", "value": { "kind": "data", "path": "options.admin.backupWarning" } }],
+                      "visual": { "visibleWhen": "owner-without-backup" },
+                      "actions": [], "children": []
+                    },
+                    {
+                      "id": "options-claim-ownership",
+                      "type": "control",
+                      "variant": "default",
+                      "layout": { "mode": "row", "base": [], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "button" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.claim" } }, { "name": "data", "value": { "kind": "data", "path": "options.admin.canClaim" } }],
+                      "visual": { "visibleWhen": "can-claim-as-admin" },
+                      "actions": [{ "event": "activate", "actionId": "options.claim-ownership" }],
+                      "children": []
+                    },
+                    {
+                      "id": "options-access-copy",
+                      "type": "form",
+                      "variant": "plain",
+                      "layout": { "mode": "column", "base": [{ "name": "gap", "value": { "kind": "token", "ref": "spacing.4" } }], "overrides": [] },
+                      "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.access" } }],
+                      "visual": { "visibleWhen": "admin-or-owner" },
+                      "actions": [],
+                      "children": [
+                        {
+                          "id": "options-access-title",
+                          "type": "control",
+                          "variant": "default",
+                          "layout": { "mode": "row", "base": [], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "section-title" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.access.title" } }],
+                          "actions": [],
+                          "children": []
+                        },
+                        {
+                          "id": "options-access-help",
+                          "type": "control",
+                          "variant": "subtle",
+                          "layout": { "mode": "row", "base": [], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "feedback" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.access.help" } }],
+                          "actions": [],
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "options-access-form",
+                      "type": "form",
+                      "variant": "inline",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [{ "profileId": "compact", "bindings": [{ "name": "columns", "value": { "kind": "literal", "value": 1 } }] }] },
+                      "props": [{ "name": "data", "value": { "kind": "data", "path": "options.admin.access" } }],
+                      "visual": { "visibleWhen": "admin-or-owner" },
+                      "actions": [{ "event": "submit", "actionId": "options.add-access" }],
+                      "children": [
+                        {
+                          "id": "options-access-subject",
+                          "type": "control",
+                          "variant": "default",
+                          "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "combo" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.access.select" } }, { "name": "data", "value": { "kind": "state", "path": "options.admin.access.subject" } }],
+                          "actions": [{ "event": "change", "actionId": "options.select-access" }],
+                          "options": [
+                            { "id": "available", "labelRef": "options.admin.access.select", "value": "available" }
+                          ],
+                          "children": []
+                        },
+                        {
+                          "id": "options-access-add",
+                          "type": "control",
+                          "variant": "field-action",
+                          "layout": { "mode": "row", "base": [], "overrides": [] },
+                          "props": [{ "name": "kind", "value": { "kind": "literal", "value": "button" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.access.add" } }],
+                          "actions": [{ "event": "activate", "actionId": "options.add-access" }],
+                          "children": []
+                        }
+                      ]
+                    },
+                    {
+                      "id": "options-access-warning",
+                      "type": "control",
+                      "variant": "warning",
+                      "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+                      "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "label", "value": { "kind": "i18n", "ref": "options.admin.access.empty" } }],
+                      "visual": { "visibleWhen": "add-without-selection" },
+                      "actions": [],
+                      "children": []
+                    }
+                  ]
+                }
+              ]
+            }
+      ]
+    }
+  },
+  "surfaceReferences": [],
+  "assets": [],
+  "i18n": [
+    { "id": "options.tab.state", "translations": [{ "locale": "es", "text": "Estado" }] },
+    { "id": "options.tab.admin", "translations": [{ "locale": "es", "text": "Admin" }] },
+    { "id": "options.state.network.title", "translations": [{ "locale": "es", "text": "Red seleccionada" }] },
+    { "id": "options.state.network.help", "translations": [{ "locale": "es", "text": "Selecciona una red accesible para esta sesión. Usar red no inicia un reescaneo ni modifica la configuración compartida." }] },
+    { "id": "options.state.network.current", "translations": [{ "locale": "es", "text": "Red actual" }] },
+    { "id": "options.state.network.selected", "translations": [{ "locale": "es", "text": "Red seleccionada" }] },
+    { "id": "options.state.network.use", "translations": [{ "locale": "es", "text": "Usar seleccionada" }] },
+    { "id": "options.state.network.refresh", "translations": [{ "locale": "es", "text": "Actualizar lista" }] },
+    { "id": "options.state.operational.title", "translations": [{ "locale": "es", "text": "Estado operativo" }] },
+    { "id": "options.state.operational.help", "translations": [{ "locale": "es", "text": "Resume las cuatro condiciones que permiten usar esta red. Cada indicador cambia con el estado autoritativo recibido." }] },
+    { "id": "options.state.operational.power", "translations": [{ "locale": "es", "text": "Energía disponible" }] },
+    { "id": "options.state.operational.terminal", "translations": [{ "locale": "es", "text": "Terminal detectado" }] },
+    { "id": "options.state.operational.zones", "translations": [{ "locale": "es", "text": "Zonas listas" }] },
+    { "id": "options.state.operational.access", "translations": [{ "locale": "es", "text": "Acceso disponible" }] },
+    { "id": "options.state.resources.title", "translations": [{ "locale": "es", "text": "Recursos y actividad" }] },
+    { "id": "options.state.resources.help", "translations": [{ "locale": "es", "text": "Muestra la actividad agregada de la red, el modo de acceso, el consumo y la capacidad recibidos del estado actual." }] },
+    { "id": "options.state.resources.summary", "translations": [{ "locale": "es", "text": "Nodos y tipos" }] },
+    { "id": "options.state.resources.access", "translations": [{ "locale": "es", "text": "Acceso" }] },
+    { "id": "options.state.resources.consumption", "translations": [{ "locale": "es", "text": "Consumo" }] },
+    { "id": "options.state.resources.capacity-available", "translations": [{ "locale": "es", "text": "Capacidad de red" }] },
+    { "id": "options.state.resources.capacity", "translations": [{ "locale": "es", "text": "Capacidad" }] },
+    { "id": "options.state.resources.warning", "translations": [{ "locale": "es", "text": "Estimación parcial" }] },
+    { "id": "options.state.range.title", "translations": [{ "locale": "es", "text": "Alcance" }] },
+    { "id": "options.state.range.help", "translations": [{ "locale": "es", "text": "Distingue la distancia desde la que puede usarse esta terminal y el radio físico cubierto por la red." }] },
+    { "id": "options.state.range.terminal", "translations": [{ "locale": "es", "text": "Uso del terminal" }] },
+    { "id": "options.state.range.network", "translations": [{ "locale": "es", "text": "Alcance de red" }] },
+    { "id": "options.state.palette.title", "translations": [{ "locale": "es", "text": "Paleta de interfaz" }] },
+    { "id": "options.state.palette.help", "translations": [{ "locale": "es", "text": "Preferencia visual local por personaje. Solo modifica colores neutrales; estados, peligro y operadores conservan su significado." }] },
+    { "id": "options.admin.terminals.title", "translations": [{ "locale": "es", "text": "Terminales" }] },
+    { "id": "options.admin.terminals.help", "translations": [{ "locale": "es", "text": "Lista los terminales registrados. Pulsa una fila para renombrar, cambiar el principal, suspender o retirar ese terminal." }] },
+    { "id": "options.admin.column.terminal-name", "translations": [{ "locale": "es", "text": "Nombre" }] },
+    { "id": "options.admin.column.coordinates", "translations": [{ "locale": "es", "text": "Coordenadas" }] },
+    { "id": "options.admin.column.terminal-role", "translations": [{ "locale": "es", "text": "Rol" }] },
+    { "id": "options.admin.column.status", "translations": [{ "locale": "es", "text": "Estado" }] },
+    { "id": "options.admin.members.title", "translations": [{ "locale": "es", "text": "Miembros" }] },
+    { "id": "options.admin.members.help", "translations": [{ "locale": "es", "text": "Muestra rol y última conexión. Pulsa una fila para gestionar rol, zonas permitidas, propiedad o retirada de acceso." }] },
+    { "id": "options.admin.column.member-role", "translations": [{ "locale": "es", "text": "Rol" }] },
+    { "id": "options.admin.column.member-name", "translations": [{ "locale": "es", "text": "Nombre" }] },
+    { "id": "options.admin.column.connection", "translations": [{ "locale": "es", "text": "Última conexión" }] },
+    { "id": "options.admin.succession.help", "translations": [{ "locale": "es", "text": "La propiedad se conserva mejor cuando existe otro administrador con acceso." }] },
+    { "id": "options.admin.succession.warning", "translations": [{ "locale": "es", "text": "Conviene mantener al menos otro administrador con acceso." }] },
+    { "id": "options.admin.claim", "translations": [{ "locale": "es", "text": "Reclamar propiedad" }] },
+    { "id": "options.admin.access.title", "translations": [{ "locale": "es", "text": "Añadir acceso" }] },
+    { "id": "options.admin.access.help", "translations": [{ "locale": "es", "text": "Concede acceso a un jugador o a una facción disponible." }] },
+    { "id": "options.admin.access.select", "translations": [{ "locale": "es", "text": "Selecciona jugador o facción" }] },
+    { "id": "options.admin.access.add", "translations": [{ "locale": "es", "text": "Añadir" }] }
+    ,{ "id": "options.admin.access.empty", "translations": [{ "locale": "es", "text": "Nada seleccionado." }] }
+  ],
+  "actionAllowlist": [
+    { "id": "options.change-subtab", "events": ["change"] },
+    { "id": "options.select-network", "events": ["change"] },
+    { "id": "options.use-network", "events": ["activate"] },
+    { "id": "options.refresh-networks", "events": ["activate"] },
+    { "id": "options.open-terminal", "events": ["activate"] },
+    { "id": "options.open-member", "events": ["activate"] },
+    { "id": "options.claim-ownership", "events": ["activate"] },
+    { "id": "options.select-access", "events": ["change"] },
+    { "id": "options.add-access", "events": ["activate", "submit"] },
+    { "id": "options.change-palette", "events": ["activate"] }
+  ],
+  "contracts": {
+    "data": [
+      { "path": "options.state.networkName", "schema": { "type": "any" } },
+      { "path": "options.state.networkSummary", "schema": { "type": "any" } },
+      { "path": "options.state.networkActions", "schema": { "type": "object", "properties": [] } },
+      { "path": "options.state.power", "schema": { "type": "any" } },
+      { "path": "options.state.terminalStatus", "schema": { "type": "any" } },
+      { "path": "options.state.zonesStatus", "schema": { "type": "any" } },
+      { "path": "options.state.accessStatus", "schema": { "type": "any" } },
+      { "path": "options.state.resourceSummary", "schema": { "type": "any" } },
+      { "path": "options.state.accessMode", "schema": { "type": "any" } },
+      { "path": "options.state.consumption", "schema": { "type": "any" } },
+      { "path": "options.state.capacityAvailable", "schema": { "type": "any" } },
+      { "path": "options.state.capacity", "schema": { "type": "any" } },
+      { "path": "options.state.terminalRange", "schema": { "type": "any" } },
+      { "path": "options.state.networkRange", "schema": { "type": "any" } },
+      { "path": "options.state.palettes", "schema": { "type": "array", "items": { "type": "object", "properties": [] } } },
+      { "path": "options.admin.terminalHeaderActions", "schema": { "type": "array", "items": { "type": "any" } } },
+      { "path": "options.admin.terminals", "schema": { "type": "array", "items": { "type": "object", "properties": [] } } },
+      { "path": "options.admin.memberHeaderActions", "schema": { "type": "array", "items": { "type": "any" } } },
+      { "path": "options.admin.members", "schema": { "type": "array", "items": { "type": "object", "properties": [] } } },
+      { "path": "options.admin.successionHint", "schema": { "type": "any", "nullable": true } },
+      { "path": "options.admin.backupWarning", "schema": { "type": "any", "nullable": true } },
+      { "path": "options.admin.canClaim", "schema": { "type": "boolean" } },
+      { "path": "options.admin.access", "schema": { "type": "object", "properties": [] } },
+      { "path": "options.admin.accessActions", "schema": { "type": "object", "properties": [] } }
+    ],
+    "state": [
+      { "path": "options.state.selectedNetwork", "schema": { "type": "any", "nullable": true } },
+      { "path": "options.admin.access.subject", "schema": { "type": "any", "nullable": true } }
+    ],
+    "actionPayloads": [
+      { "actionId": "options.change-subtab", "event": "change", "payload": { "type": "string" } },
+      { "actionId": "options.select-network", "event": "change", "payload": { "type": "any", "nullable": true } },
+      { "actionId": "options.use-network", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "options.refresh-networks", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "options.open-terminal", "event": "activate", "payload": { "type": "object", "properties": [] } },
+      { "actionId": "options.open-member", "event": "activate", "payload": { "type": "object", "properties": [] } },
+      { "actionId": "options.claim-ownership", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "options.select-access", "event": "change", "payload": { "type": "any", "nullable": true } },
+      { "actionId": "options.add-access", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "options.add-access", "event": "submit", "payload": { "type": "object", "properties": [] } },
+      { "actionId": "options.change-palette", "event": "activate", "payload": { "type": "any" } }
+    ]
+  },
+  "runtime": {
+    "artifact": {
+      "repository": "global-storage-sik",
+      "moduleId": "GlobalStorageSiK/UI/Generated/TabOptions",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GlobalStorageSiK/UI/Generated/TabOptions.lua"
+    },
+    "loader": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Options.lua",
+      "symbol": "GlobalStorageSiK.TerminalOptions",
+      "builderSymbol": "SiK.UI.buildSurface"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalOptions.buildSection"
+      }
+    ]
+  }
+}

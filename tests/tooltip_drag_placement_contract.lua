@@ -6,6 +6,7 @@ local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
 local suite = Support.newSuite("tooltip_drag_placement_contract")
 
 local CLIENT = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
+local FRAMEWORK = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/"
 local function read(path)
 	local file = assert(io.open(path, "rb"), path)
 	local text = file:read("*a")
@@ -40,6 +41,8 @@ end
 
 local tooltipSource = read(CLIENT .. "GS_ItemNetworkTooltip.lua")
 local dragSource = read(CLIENT .. "GS_TerminalWithdrawDrag.lua")
+local frameworkTooltipSource = read(FRAMEWORK .. "Tooltip.lua")
+local frameworkDragGhostSource = read(FRAMEWORK .. "DragGhost.lua")
 local placementSource = section(tooltipSource,
 	"local function placeMeasuredTooltip", "local function drawNetworkExtension")
 local fixedPlacementSource = section(placementSource,
@@ -167,8 +170,17 @@ Support.check(suite, "drag suppresses the complete tooltip and both overlays ign
 	contains(tooltipSource, "if withdrawDragActive() then")
 	contains(tooltipSource, "if self.setVisible then self:setVisible(false) end")
 	contains(tooltipSource, "panel.javaObject:setConsumeMouseEvents(false)")
-	contains(dragSource, "panel.javaObject:setConsumeMouseEvents(false)")
-	contains(dragSource, "makeMouseTransparent(dragPreviewPanel)")
+	contains(dragSource, "UI.DragGhost.create({",
+		"product drag bypasses the public visual-overlay owner")
+	contains(frameworkDragGhostSource, "SiK.UI.Tooltip.makePassive(panel)",
+		"drag ghost is not made passive by the framework")
+	contains(frameworkTooltipSource, "widget.javaObject:setConsumeMouseEvents(false)",
+		"framework passive overlay still consumes mouse events")
+	contains(frameworkTooltipSource,
+		"widget.tooltip.javaObject:setConsumeMouseEvents(false)",
+		"framework passive nested tooltip still consumes mouse events")
+	contains(frameworkTooltipSource, 'widget[name] = function() return false end',
+		"framework passive overlay still exposes active mouse handlers")
 	return true
 end)
 
