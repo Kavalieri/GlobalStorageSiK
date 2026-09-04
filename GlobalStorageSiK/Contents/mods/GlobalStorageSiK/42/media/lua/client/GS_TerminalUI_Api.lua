@@ -166,8 +166,10 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		and GlobalStorageSiK.TerminalAccess.trustServerForOpen()
 	local serverConfirmed = state and state.openUi == true
 		and state.terminalAnchor and state.accessMode
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	local stateUpdate = ui ~= nil and state and state.openUi ~= true
 	if needAccess and player and GlobalStorageSiK.TerminalAccess.validateServerOpen
-		and not (trustServer and serverConfirmed) then
+		and not stateUpdate and not (trustServer and serverConfirmed) then
 		if GlobalStorageSiK.UIDebug then
 			GlobalStorageSiK.UIDebug.log("OPEN", "revalidando en cliente pese a openUi=%s (trustServer=%s serverConfirmed=%s)",
 				tostring(state and state.openUi), tostring(trustServer), tostring(serverConfirmed))
@@ -180,7 +182,6 @@ function GlobalStorageSiK.TerminalUI.show(state)
 			return
 		end
 	end
-	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
 	GlobalStorageSiK.UIDebug.log("OPEN", "show() reuse=%s items=%d nid=%s",
 		tostring(ui ~= nil), (state and state.items and #state.items) or 0, tostring(networkId))
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (no crear segunda ventana).

@@ -251,14 +251,15 @@ end)
 local Metrics = Support.loadFrameworkModule(suite, "Metrics")
 local Block = Support.loadFrameworkModule(suite, "Block")
 
-Support.check(suite, "runtime rail consumes the native 72 px production icons", function()
+Support.check(suite, "runtime rail fills each 76 px cell with the product icon", function()
 	local profile = Metrics.profile(0, "terminal")
 	assert(profile.window.railWidth == 104, "runtime rail track clips the production icon")
 	assert(profile.window.railPadding == 4, "runtime rail inset differs from HTML")
 	assert(profile.window.railItemHeight == 76, "runtime rail cell clips the production icon")
-	assert(profile.window.railIconSize == 72, "runtime rail icon is not native 72x72")
 	assert(profile.window.railGap == 4, "runtime rail gap differs from HTML")
-	contains(tabs, 'iconFit = "contain"', "product rail requests a cropped/scaled cover fit")
+	contains(tabs, "iconSize = 76", "product rail does not request the full cell extent")
+	contains(tabs, 'iconFit = "fill"', "product rail leaves forbidden inner icon margins")
+	contains(tabs, "iconPadding = 0", "product rail adds forbidden icon padding")
 	return true
 end)
 

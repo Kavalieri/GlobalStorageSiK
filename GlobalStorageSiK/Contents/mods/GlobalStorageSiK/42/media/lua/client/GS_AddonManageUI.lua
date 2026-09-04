@@ -535,7 +535,10 @@ function GS_AddonManageUI:buildLayout()
 	local previousY = self:getY()
 	local wasPositioned = self._positioned == true
 	UI.Modal.fitContent(self, y, {
-		contentBottom = true, bottomPadding = 0,
+		-- y ya apunta al final del contenido, pero el modal necesita conservar
+		-- tambien su margen inferior real. Sin esta reserva el clamp de Window
+		-- podia dejar el boton de accion unos pixeles fuera del padre.
+		contentBottom = true, bottomPadding = pad,
 	})
 	if wasPositioned then
 		self:setX(previousX)

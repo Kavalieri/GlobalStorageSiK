@@ -286,6 +286,10 @@ function TabOptionsContext.create(terminal)
 			if type(palette.refreshTree) == "function" then
 				palette.refreshTree(GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
 			end
+			if GlobalStorageSiK.TerminalOptions
+				and type(GlobalStorageSiK.TerminalOptions.refreshScroll) == "function" then
+				GlobalStorageSiK.TerminalOptions.refreshScroll(terminal, terminal.terminalState or {})
+			end
 			if type(terminal.setDirty) == "function" then terminal:setDirty(true) end
 			return true
 		end,

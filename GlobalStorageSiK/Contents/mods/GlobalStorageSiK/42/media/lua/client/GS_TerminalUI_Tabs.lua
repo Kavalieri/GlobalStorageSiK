@@ -32,8 +32,8 @@ local function navigationItem(definition, pinned)
 	local title = T(definition.titleKey)
 	local item = {
 		key = definition.key, text = title, tooltip = title,
-		icon = { path = definition.iconPath, width = 72, height = 72 },
-		iconSize = 72, iconExact = true, iconOnly = true, payload = definition,
+		icon = { path = definition.iconPath, width = 76, height = 76 },
+		iconSize = 76, iconExact = false, iconOnly = true, payload = definition,
 	}
 	if pinned then item.pin = "end" end
 	return item
@@ -57,7 +57,7 @@ local function navigationOptions(terminal, items)
 		placement = "left", activeKey = terminal.activeTabKey or "items",
 		items = items, extent = profile.window.railWidth,
 		iconOnly = true, itemExtent = profile.window.railItemHeight,
-		iconSize = profile.window.railIconSize, iconFit = "contain", iconPadding = 0,
+		iconSize = profile.window.railItemHeight, iconFit = "fill", iconPadding = 0,
 		barPadding = profile.window.railPadding, itemGap = profile.window.railGap,
 		separator = true, separatorOffset = 6,
 		selectionStyle = "border",
@@ -347,7 +347,6 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 		tabKey = "config"
 		forceStatusTab = true
 	end
-	if terminal.ensureTabBuilt then terminal:ensureTabBuilt(tabKey) end
 	if forceStatusTab and terminal.configPanel then terminal.configPanel.activeSubTab = "estado" end
 
 	if not terminal.tabPanels or not terminal.tabPanels[tabKey]
@@ -362,6 +361,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
 		return tabKey
 	end
+	local builtNow = terminal.ensureTabBuilt and terminal:ensureTabBuilt(tabKey) == true
 
 	if terminal.activeTabKey == "network" and tabKey ~= "network" then
 
@@ -399,7 +399,7 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 
 	end
 
-	if terminal.refreshActiveTabContent then
+	if terminal.refreshActiveTabContent and not builtNow then
 
 		terminal:refreshActiveTabContent()
 

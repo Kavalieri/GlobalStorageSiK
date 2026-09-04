@@ -267,7 +267,11 @@ local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
 function GS_TerminalUI:refreshActiveTabContent()
 	local state = self.terminalState or {}
 	local tab = self.activeTabKey or "items"
-	if self.ensureTabBuilt then self:ensureTabBuilt(tab) end
+	local builtNow = self.ensureTabBuilt and self:ensureTabBuilt(tab) == true
+	-- Every builder mounts with the current terminal state. Re-running the
+	-- tab refresh immediately afterwards mounted/updated the same surface a
+	-- second time in the same frame and made opening/tab switches stall.
+	if builtNow then return end
 	if tab == "items" then
 		self:refreshItemsTab()
 	elseif tab == "network" then
@@ -289,12 +293,12 @@ end
 -- scrolls, tooltips ni listeners hasta su primera activación.
 function GS_TerminalUI:ensureTabBuilt(tabKey)
 	self._gsBuiltTabs = self._gsBuiltTabs or {}
-	if self._gsBuiltTabs[tabKey] then return end
+	if self._gsBuiltTabs[tabKey] then return false end
 	if tabKey == "items" then
 		local built, reason = GlobalStorageSiK.TerminalItems.buildSection(self.itemsPanel, self)
 		if not built then
 			GlobalStorageSiK.Log.error("TerminalUI", "warehouse_surface_failed", tostring(reason))
-			return
+			return false
 		end
 	elseif tabKey == "network" then
 		GlobalStorageSiK.TerminalNetwork.buildZonesSection(self, self.networkPanel)
@@ -307,9 +311,10 @@ function GS_TerminalUI:ensureTabBuilt(tabKey)
 	else
 		-- Las pestañas de addons conservan su propio lifecycle.
 		self._gsBuiltTabs[tabKey] = true
-		return
+		return true
 	end
 	self._gsBuiltTabs[tabKey] = true
+	return true
 end
 
 local function createTabPanel(terminal)
@@ -829,10 +834,10 @@ function GS_TerminalUI:refreshFromState(state)
 		end
 	end
 	local tab = self.activeTabKey or "items"
-	if self.ensureTabBuilt then self:ensureTabBuilt(tab) end
-	if tab == "items" and inventoryChanged then
+	local builtNow = self.ensureTabBuilt and self:ensureTabBuilt(tab) == true
+	if tab == "items" and inventoryChanged and not builtNow then
 		self:refreshItemsTab()
-	elseif tab == "network" and networkChanged then
+	elseif tab == "network" and networkChanged and not builtNow then
 		GlobalStorageSiK.TerminalNetwork.refreshScroll(self, self.terminalState)
 		if GlobalStorageSiK.TerminalNodeEditor.syncNodeData then
 			GlobalStorageSiK.TerminalNodeEditor.syncNodeData(self, self.terminalState.nodes or {})
@@ -840,11 +845,11 @@ function GS_TerminalUI:refreshFromState(state)
 		if GlobalStorageSiK.TerminalZoneEditor and GlobalStorageSiK.TerminalZoneEditor.syncZoneData then
 			GlobalStorageSiK.TerminalZoneEditor.syncZoneData(self.terminalState.zones or {})
 		end
-	elseif tab == "config" and (networkChanged or inventoryChanged or addonsChanged) then
+	elseif tab == "config" and (networkChanged or inventoryChanged or addonsChanged) and not builtNow then
 		GlobalStorageSiK.TerminalOptions.refreshScroll(self, self.terminalState)
-	elseif tab == "addons" and self.addonsPanel and addonsChanged then
+	elseif tab == "addons" and self.addonsPanel and addonsChanged and not builtNow then
 		GlobalStorageSiK.TerminalAddons.refresh(self.addonsPanel, self)
-	elseif GlobalStorageSiK.TerminalExtensions then
+	elseif not builtNow and GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.refreshActive(self, tab)
 	end
 	-- Programación va ANTES que Craft/Build para que, si el periférico Reader
