@@ -314,6 +314,18 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
 		and type(getTimestampMs) == "function" and getTimestampMs() or nil
 
+	-- Una pestaña de addon puede publicarse en el rail durante la misma
+	-- interacción que instala el periférico. La definición ya existe, pero su
+	-- panel todavía no: materializarla antes de validar la clave evita que el
+	-- primer clic sea degradado erróneamente a Almacén.
+	if tabKey and terminal and not (terminal.tabPanels and terminal.tabPanels[tabKey])
+		and GlobalStorageSiK.TerminalExtensions
+		and GlobalStorageSiK.TerminalExtensions._definitions
+		and GlobalStorageSiK.TerminalExtensions._definitions[tabKey]
+		and GlobalStorageSiK.TerminalExtensions.ensureTab then
+		GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
+	end
+
 	-- BUG REAL DE DISEÑO cerrado (2026-08-26, pedido explicito tras el fix de
 	-- fallthrough de clic en GS_TerminalTabSlot: "evitar que cualquier click
 	-- no capturado caiga en la pestaña de addon - si tiene que haber una por

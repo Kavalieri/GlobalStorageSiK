@@ -8,10 +8,10 @@
   },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
+    "masterSha256": "ef9196981acb41dbb508b1f1ea6949ee13b1c68dd6de748e36e383bcb1bc26ad",
     "selector": "[data-surface-id=\"tab-options\"]",
     "canonicalizer": "sik-ui-dom-v2",
-    "subtreeSha256": "62f0db6b9ee17d720fb77f3ec3c22d392832bb68932abe08ed2232ac5f1227a7",
+    "subtreeSha256": "8ae819e985efb36d47cd1ed7a231e2004bfb494dc32d54ab6cb5b3dd072f5d08",
     "validation": "HTML_VALIDATED_BY_KAVA"
   },
   "product": {
@@ -288,6 +288,19 @@
                         { "name": "label", "value": { "kind": "i18n", "ref": "options.state.range.network" } },
                         { "name": "data", "value": { "kind": "data", "path": "options.state.networkRange" } }
                       ],
+                      "actions": [],
+                      "children": []
+                    },
+                    {
+                      "id": "options-antenna-range",
+                      "type": "control",
+                      "variant": "status",
+                      "layout": { "mode": "row", "base": [{ "name": "span", "value": { "kind": "literal", "value": 2 } }], "overrides": [] },
+                      "props": [
+                        { "name": "kind", "value": { "kind": "literal", "value": "status" } },
+                        { "name": "data", "value": { "kind": "data", "path": "options.state.antennaRange" } }
+                      ],
+                      "visual": { "visibleWhen": "tablet-addon-installed" },
                       "actions": [],
                       "children": []
                     }
@@ -571,6 +584,7 @@
       { "path": "options.state.capacity", "schema": { "type": "any" } },
       { "path": "options.state.terminalRange", "schema": { "type": "any" } },
       { "path": "options.state.networkRange", "schema": { "type": "any" } },
+      { "path": "options.state.antennaRange", "schema": { "type": "any", "nullable": true } },
       { "path": "options.state.palettes", "schema": { "type": "array", "items": { "type": "object", "properties": [] } } },
       { "path": "options.admin.terminalHeaderActions", "schema": { "type": "array", "items": { "type": "any" } } },
       { "path": "options.admin.terminals", "schema": { "type": "array", "items": { "type": "object", "properties": [] } } },

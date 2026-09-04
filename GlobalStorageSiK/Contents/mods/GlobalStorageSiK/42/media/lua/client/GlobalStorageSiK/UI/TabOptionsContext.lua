@@ -327,6 +327,14 @@ function TabOptionsContext.create(terminal)
 				.. text("IGUI_GS_NetLastLocation", locationText(selected))
 		end
 		local fuel, capacity = state.fuelConsumption or {}, state.capacity or {}
+		local installedAddons = state.installedAddons or {}
+		local antennaInstalled = installedAddons.TabletLink ~= nil
+		local antennaRange = 0
+		if antennaInstalled and GlobalStorageSiK.TerminalAccess
+			and GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork then
+			antennaRange = GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(
+				playerFor(terminal), self.selectedNetworkId, state.terminalAnchor)
+		end
 		local accessMode = text("IGUI_GS_NetAccessPhysical")
 		if state.accessMode == "wireless" then accessMode = text("IGUI_GS_NetAccessWireless")
 		elseif state.accessMode == "bypass" then accessMode = text("IGUI_GS_NetAccessBypass") end
@@ -345,7 +353,8 @@ function TabOptionsContext.create(terminal)
 					consumption = status(text("IGUI_GS_StatsFuel", string.format("%.2f", tonumber(fuel.total) or 0))), capacityAvailable = status(text("IGUI_GS_NetCapacityAvailable")),
 					capacity = CapacityPresentation.fromState(capacity),
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
-					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)), palettes = paletteRows(),
+					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
+					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(),
 				},
 				admin = {
 					terminalHeaderActions = {}, terminals = terminals, memberHeaderActions = {}, members = members,
@@ -363,6 +372,7 @@ function TabOptionsContext.create(terminal)
 				owner = isOwner, ["owner-without-backup"] = isOwner and #(perms.allowedUsers or {}) == 0,
 				["can-claim-as-admin"] = perms.canClaimAsAdmin == true, ["admin-or-owner"] = isAdmin,
 				["add-without-selection"] = isAdmin and self.selectedAccessKey == nil,
+				["tablet-addon-installed"] = antennaInstalled,
 			},
 			i18n = {
 				["options.admin.column.connection"] = text("IGUI_GS_PermColConnection"),

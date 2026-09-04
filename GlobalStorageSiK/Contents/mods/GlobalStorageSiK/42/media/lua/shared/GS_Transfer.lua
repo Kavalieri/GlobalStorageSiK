@@ -256,7 +256,13 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	local requestedIds = nil
 	if requestedItemIds ~= nil then
 		requestedIds = {}
-		for i = 1, #requestedItemIds do requestedIds[requestedItemIds[i]] = true end
+		-- Kahlua can retain InventoryItem:getID() as a Java numeric value while
+		-- command payloads arrive as Lua numbers.  They print identically but are
+		-- different table keys.  Exact selection therefore compares one stable
+		-- wire identity on both sides instead of the runtime numeric type.
+		for i = 1, #requestedItemIds do
+			requestedIds[tostring(requestedItemIds[i])] = true
+		end
 	end
 	local acceptedTypes = { [fullType] = true }
 	for i = 1, #(familyFullTypes or {}) do acceptedTypes[familyFullTypes[i]] = true end
@@ -304,7 +310,7 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 					-- distinto (otra habilidad) - no es la fila que se pidio,
 					-- seguir buscando en vez de retirar la cinta equivocada.
 					j = j + 1
-				elseif requestedIds and not requestedIds[itemId] then
+				elseif requestedIds and not requestedIds[tostring(itemId)] then
 					j = j + 1
 				elseif dynamicSignature and not matchesDynamicSignature(item, dynamicSignature) then
 					j = j + 1

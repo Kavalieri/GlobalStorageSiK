@@ -394,6 +394,14 @@ Support.check(suite, "dynamic addon tabs preserve visibility and parent first co
 	return true
 end)
 
+Support.check(suite, "first click materializes a newly published addon tab", function()
+	local buildAt = assert(tabs:find("TerminalExtensions.ensureTab(terminal, tabKey)", 1, true))
+	local fallbackAt = assert(tabs:find('tabKey = "items"', buildAt, true))
+	assert(buildAt < fallbackAt,
+		"dynamic tab key is rejected before its registered surface can be materialized")
+	return true
+end)
+
 Support.check(suite, "base surfaces mount only after navigation has final geometry", function()
 	contains(terminal, "local shell = UI.Window.chromeRects(terminal)",
 		"base tab hosts do not derive their initial size from the final shell")

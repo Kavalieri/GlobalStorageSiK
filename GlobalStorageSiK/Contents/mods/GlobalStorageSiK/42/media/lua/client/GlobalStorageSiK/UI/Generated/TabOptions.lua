@@ -554,10 +554,10 @@ return {
     ["frameworkManifestSha256"] = "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "25f4e74dfab7d6002af7924f86bbf457af8a135d2f764a52ba42724a7a390d76",
+    ["surfaceSpecSha256"] = "deea79dfc937ef5c78ad10059744215b5b15cae3e0bbb57636a776060eb4e2c9",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
-    ["visualSubtreeSha256"] = "62f0db6b9ee17d720fb77f3ec3c22d392832bb68932abe08ed2232ac5f1227a7"
+    ["visualMasterSha256"] = "ef9196981acb41dbb508b1f1ea6949ee13b1c68dd6de748e36e383bcb1bc26ad",
+    ["visualSubtreeSha256"] = "8ae819e985efb36d47cd1ed7a231e2004bfb494dc32d54ab6cb5b3dd072f5d08"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -1460,6 +1460,45 @@ return {
                   },
                   ["type"] = "control",
                   ["variant"] = "status"
+                },
+                {
+                  ["actions"] = {},
+                  ["children"] = {},
+                  ["id"] = "options-antenna-range",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "span",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 2
+                        }
+                      }
+                    },
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "status"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.state.antennaRange"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "status",
+                  ["visual"] = {
+                    ["visibleWhen"] = "tablet-addon-installed"
+                  }
                 }
               },
               ["id"] = "options-resources-block",
