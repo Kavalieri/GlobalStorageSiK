@@ -201,7 +201,12 @@ function GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
 		panelField = nil,
 		iconPath = def.iconPath,
 	})
-	local parent = terminal.navigationContainer:getContentHost(tabKey)
+	local destination = terminal.navigationContainer:getContentHost(tabKey)
+	-- Navigation returns the logical Container handle.  Dynamic surfaces mount
+	-- into its physical child host; testing geometry on the handle itself made
+	-- every newly installed addon look like a 0x0 destination and discard the
+	-- click even though the rail callback had fired correctly.
+	local parent = destination and (destination.childParent or destination.panel)
 	if not parent or (tonumber(parent.width) or 0) <= 1
 		or (tonumber(parent.height) or 0) <= 1 then
 		GlobalStorageSiK.Log.error("SiKUITabs", "destino sin geometria final",
