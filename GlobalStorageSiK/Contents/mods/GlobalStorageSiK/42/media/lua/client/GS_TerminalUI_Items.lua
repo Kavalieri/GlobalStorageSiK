@@ -2047,6 +2047,12 @@ local function releaseWarehouse(panel, terminal)
 		panel._sikWarehouseContext = nil
 		released = true
 	end
+	if panel.itemTable and panel.itemTableFrame then panel.itemTable:dispose() end
+	if panel.itemTableFrame then
+		panel.itemTableFrame:dispose()
+		panel.itemTableFrame = nil
+		released = true
+	end
 	panel.itemTable = nil
 	if terminal then
 		terminal.itemsListPanel, terminal.searchBox, terminal.searchEntry, terminal.searchBtn = nil, nil, nil, nil
@@ -2114,11 +2120,24 @@ end
 local function ensureItemTable(panel, terminal)
 	if panel.itemTable then return panel.itemTable end
 	local options = itemTableOptions(panel, terminal)
-	options.parent, options.x, options.y = panel, 0, 0
-	options.w, options.h = panel.width, math.max(120, panel.height)
+	local frame, frameReason = UI.Block.create({
+		parent = panel, x = 0, y = 0,
+		w = panel.width, h = math.max(120, panel.height),
+		title = T("IGUI_GS_TabItems"), tooltip = T("IGUI_GS_TabItems"),
+	})
+	if not frame then
+		GlobalStorageSiK.Log.error("TerminalItems", "block_create_failed", tostring(frameReason))
+		return nil
+	end
+	panel.itemTableFrame = frame
+	local content = frame:getContentRect()
+	options.parent, options.embedded = frame.childParent, true
+	options.x, options.y, options.w, options.h = content.x, content.y, content.w, content.h
 	options.columns, options.rows = ITEM_TABLE_COLUMNS, {}
 	local tableInstance, reason = UI.Table.create(options)
 	if not tableInstance then
+		frame:dispose()
+		panel.itemTableFrame = nil
 		GlobalStorageSiK.Log.error("TerminalItems", "table_create_failed", tostring(reason))
 		return nil
 	end

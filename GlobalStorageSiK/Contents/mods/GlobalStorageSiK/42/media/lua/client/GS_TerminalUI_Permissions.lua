@@ -413,11 +413,20 @@ end
 ---@param ui table
 function GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui)
         local tableBlock = ui and ui.memberTableBlock
-        if not tableBlock then return end
+	local frame = ui and ui.memberTableFrame
+	if not tableBlock or not frame then return end
         local rows = ui.memberRows or {}
-        tableBlock:layout({ x = 8, y = ui.permTableY or 0,
-                w = ui._permRowW or tableBlock:getBounds().w,
-                rows = rows, preserveOffset = true })
+	local frameX, frameY = 8, ui.permTableY or 0
+	local frameW = ui._permRowW or frame.w
+	frame:setBounds(frameX, frameY, frameW, frame.h)
+	local content = frame:getContentRect()
+	tableBlock:layout({ x = content.x, y = content.y, w = content.w,
+		rows = rows, preserveOffset = true })
+	local bottom = math.max(0, frame.h - content.y - content.h)
+	frame:setBounds(frameX, frameY, frameW, content.y + tableBlock:getHeight() + bottom)
+	content = frame:getContentRect()
+	tableBlock:layout({ x = content.x, y = content.y, w = content.w, h = content.h,
+		rows = rows, preserveOffset = true })
 end
 
 ---@param ui table
@@ -557,11 +566,19 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	ui.terminalRef = terminal
 
         ui.permTableY = y
+	local tableFrame, frameError = UI.Block.create({
+		parent = UI.Scroll.childHost(scroll), x = pad, y = ui.permTableY,
+		w = rowW, h = titleH + ROW_H * 2 + pad * 2,
+		title = T("IGUI_GS_PermMembersTableTitle"),
+		tooltip = T("IGUI_GS_PermMembersTableTitle"),
+	})
+	if not tableFrame then error("SiK.UI.Block.create(admin.members): " .. tostring(frameError)) end
+	ui.memberTableFrame = tableFrame
+	local tableContent = tableFrame:getContentRect()
         local tableInstance, tableError = UI.Table.create({
-                parent = UI.Scroll.childHost(scroll),
-                x = pad, y = ui.permTableY, w = rowW,
-                title = T("IGUI_GS_PermMembersTableTitle"),
-                tooltip = T("IGUI_GS_PermMembersTableTitle"),
+				parent = tableFrame.childParent, embedded = true,
+				x = tableContent.x, y = tableContent.y,
+				w = tableContent.w, h = tableContent.h,
                 emptyText = T("IGUI_GS_NoPermAccess"), columns = MEMBER_TABLE_COLUMNS,
                 rowHeight = MEMBER_TABLE_OPTIONS.rowHeight,
                 gap = MEMBER_TABLE_OPTIONS.gap,
@@ -575,11 +592,13 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
                 end,
         })
         if not tableInstance then
+		tableFrame:dispose()
+		ui.memberTableFrame = nil
                 error("SiK.UI.Table.create(admin.members): " .. tostring(tableError))
         end
         ui.memberTableBlock = tableInstance
         GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui)
-        y = ui.permTableY + ui.memberTableBlock:getHeight() + BLOCK_GAP
+		y = ui.permTableY + ui.memberTableFrame.h + BLOCK_GAP
 	ui.permAccessListStartY = ui.permTableY
 
 	-- Avisos de sucesion de propietario (solo visibles para el owner, ver
@@ -794,7 +813,7 @@ local function layoutPermsBlock(scroll, ui, startY)
         -- scrollbar y estado vacío como una sola superficie.
         ui.permTableY = col:y()
         GlobalStorageSiK.TerminalPermissions.layoutMemberRows(ui)
-        local tableH = ui.memberTableBlock and ui.memberTableBlock:getHeight() or (ROW_H + 16)
+		local tableH = ui.memberTableFrame and ui.memberTableFrame.h or (ROW_H + 16)
 	ui.permAccessListStartY = ui.permTableY
 	col.cursor = col.cursor + tableH + BLOCK_GAP
 
@@ -866,6 +885,10 @@ function GlobalStorageSiK.TerminalPermissions.ensureInNetworkScroll(scroll, term
                         ui.memberTableBlock:dispose()
                         ui.memberTableBlock = nil
                 end
+		if ui.memberTableFrame then
+			ui.memberTableFrame:dispose()
+			ui.memberTableFrame = nil
+		end
                 for i = 1, #(ui.permWidgets or {}) do
                         UI.Scroll.disposeChild(host, ui.permWidgets[i])
                 end

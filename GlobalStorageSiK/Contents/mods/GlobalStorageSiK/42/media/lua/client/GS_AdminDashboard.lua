@@ -630,6 +630,10 @@ function GS_AdminDashboardUI:initialise()
 				self.memberTableBlock:dispose()
 				self.memberTableBlock = nil
 			end
+			if self.memberTableFrame then
+				self.memberTableFrame:dispose()
+				self.memberTableFrame = nil
+			end
 		end,
         })
         self._relativeAgeBinding = UI.Lifecycle.bindVisibleRefresh(self, {
@@ -1133,12 +1137,18 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 	local tableHeight = math.max(ROW_H + TABLE_METRICS.headerHeight + 48, scroll.height or 0)
 	if not self.memberTableBlock or self.memberTableBlock.disposed then
 		local dashboard = self
-		local tableInstance, reason = UI.Table.create({
-			parent = UI.Scroll.childHost(scroll),
-			x = 0, y = 0, w = w,
-			h = tableHeight,
+		local frame, frameReason = UI.Block.create({
+			parent = UI.Scroll.childHost(scroll), x = 0, y = 0, w = w, h = tableHeight,
 			title = T("IGUI_GS_AdminMembersTitle"),
 			tooltip = T("IGUI_GS_AdminMembersTitle"),
+		})
+		if not frame then error("SiK.UI.Block.create(staff.members): " .. tostring(frameReason)) end
+		self.memberTableFrame = frame
+		local content = frame:getContentRect()
+		local tableInstance, reason = UI.Table.create({
+			parent = frame.childParent, embedded = true,
+			x = content.x, y = content.y, w = content.w,
+			h = content.h,
 			emptyText = T("IGUI_GS_AdminNoMembers"),
 			columns = ADMIN_MEMBER_TABLE_COLUMNS,
 			left = ADMIN_MEMBER_TABLE_OPTIONS.left,
@@ -1151,15 +1161,19 @@ function GS_AdminDashboardUI:refreshMemberPanel(members)
 			end,
 		})
 		if not tableInstance then
+			frame:dispose()
+			self.memberTableFrame = nil
 			error("SiK.UI.Table.create(staff.members): " .. tostring(reason))
 		end
 		self.memberTableBlock = tableInstance
 	end
+	self.memberTableFrame:setBounds(0, 0, w, tableHeight)
+	local content = self.memberTableFrame:getContentRect()
 	self.memberTableBlock:layout({
-		x = 0, y = 0, w = w, h = tableHeight,
+		x = content.x, y = content.y, w = content.w, h = content.h,
 		rows = self._members, preserveOffset = true,
 	})
-	UI.Scroll.setContentHeight(scroll, self.memberTableBlock:getHeight())
+	UI.Scroll.setContentHeight(scroll, self.memberTableFrame.h)
 	UI.Scroll.ensureScrollBars(scroll)
 end
 
