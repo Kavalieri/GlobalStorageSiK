@@ -337,7 +337,7 @@ function GS_ZoneEditorUI:ensureForm()
 	-- saldria del ancho del panel.
 	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
 		T("IGUI_GS_ZonePriorityLabel"), T("IGUI_GS_ZonePriorityHint"), scroll)
-	y = y + INFO_BTN_SIZE + 4
+	y = y + self.priorityLbl.height + 4
 
 	self.priorityEntry = createField(tostring((self.zone and self.zone.priority) or 50),
 		pad, y, contentW, true)
@@ -361,7 +361,7 @@ function GS_ZoneEditorUI:ensureForm()
 	-- propio editor de contenedor (ver GS_TerminalUI_NodeEditor.lua).
 	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
 		T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
-	y = y + INFO_BTN_SIZE + 8
+	y = y + self.rulesTitleLbl.height + 8
 
 	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
 		self.zone and self.zone.rules, contentW, UIFont.Small,

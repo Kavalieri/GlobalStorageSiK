@@ -214,9 +214,10 @@ GlobalStorageSiK.UIHook.patchEquippedItem()
 
 local anchorCalls = 0
 local anchor = {
-	x = 10, y = 20, mouseOver = false,
+	x = 10, y = 20, height = 64, mouseOver = false,
 	getX = function(self) return self.x end,
 	getY = function(self) return self.y end,
+	getHeight = function(self) return self.height end,
 	isMouseOver = function(self) return self.mouseOver end,
 	onMouseDown = function(_, x, y)
 		if x == 0 and y == 0 then anchorCalls = anchorCalls + 1 end
@@ -233,8 +234,8 @@ local terminalButton, staffButton = popup and popup.terminalButton, popup and po
 check("sidebar creates framework controls once", popup ~= nil
 	and controlCalls.panel == 1 and controlCalls.iconButton == 2
 	and #popup.children == 2)
-check("sidebar initial geometry preserves vanilla anchor slot", popup.x == 110
-	and popup.y == 220 and popup.width == 96 and popup.height == 48
+check("sidebar initial geometry centers both launchers in the vanilla anchor slot", popup.x == 110
+	and popup.y == 228 and popup.width == 96 and popup.height == 48
 	and terminalButton.x == 48 and terminalButton.width == 48 and terminalButton.height == 48
 	and terminalButton.options.iconFit == "square" and terminalButton.options.iconPadding == 0
 	and terminalButton.texture.path == "media/ui/GS/Launcher/sik-mainbutton-48.png"
@@ -252,7 +253,7 @@ local prerenderIsVanillaOnly = popup.visible == false and originalCalls.prerende
 equipped.absoluteX, equipped.absoluteY = 130, 240
 tick()
 local visibleOverAnchor = popup.visible == true and popup.bringToTopCalls == 1
-	and popup.x == 140 and popup.y == 260
+	and popup.x == 140 and popup.y == 268
 anchor.mouseOver = false
 popup.mouseOver = true
 tick()

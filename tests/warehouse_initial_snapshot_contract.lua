@@ -70,6 +70,13 @@ assert(model({ items = { { rowKey = "server-row" } }, scanActive = false,
 	scanStatus = { state = "COMPLETED" } }, {}).emptyText == "IGUI_GS_NoFilterMatches",
 	"post-snapshot filtered empty state was not distinguished from inventory empty")
 
+assert(itemsSource:find('sortKey%s*=%s*panel%.itemsSortKey%s*or%s*"category"'),
+	"Warehouse creation must expose category as the untouched default sort")
+assert(itemsSource:find('panel%.itemsSortKey%s*=%s*panel%.itemsSortKey%s*or%s*"category"'),
+	"Warehouse refresh must preserve category as the untouched default sort")
+assert(not itemsSource:find('itemsSortKey%s*=%s*panel%.itemsSortKey%s*or%s*"name"'),
+	"Warehouse silently restored the legacy name sort")
+
 -- Completion is pushed into the already-open shell.  It must refresh the
 -- active Warehouse and update its single surface, never require close/reopen.
 local refreshFunction = assert(terminalSource:match(

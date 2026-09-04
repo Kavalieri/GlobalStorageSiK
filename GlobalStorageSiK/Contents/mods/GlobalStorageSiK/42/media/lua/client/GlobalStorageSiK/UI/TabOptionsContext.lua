@@ -65,8 +65,8 @@ local function locationText(row)
 		math.floor(point.z or 0))
 end
 
-local function status(value, tone)
-	return { text = tostring(value or ""), tone = tone or "text" }
+local function status(value, tone, indicator)
+	return { text = tostring(value or ""), tone = tone or "text", indicator = indicator == true }
 end
 
 local function tableCell(value, r, g, b)
@@ -337,10 +337,10 @@ function TabOptionsContext.create(terminal)
 				state = {
 					networkName = status(networkLabel(selected)), selectedNetwork = { items = networkItems, selected = self.selectedNetworkId },
 					networkSummary = status(selectedSummary, "textMuted"), networkActions = {},
-					power = status(powered and text("IGUI_GS_ValPowerOk") or text("IGUI_GS_ValPowerOff"), powered and "success" or "danger"),
-					terminalStatus = status(terminalCount > 0 and text("IGUI_GS_ValTerminalOk") or text("IGUI_GS_ValTerminalMissing"), terminalCount > 0 and "success" or "danger"),
-					zonesStatus = status(zoneCount > 0 and text("IGUI_GS_ValZonesOk", zoneCount) or text("IGUI_GS_ValZonesMissing"), zoneCount > 0 and "success" or "warning"),
-					accessStatus = status(powered and zoneCount > 0 and text("IGUI_GS_ValNetworkReady") or text("IGUI_GS_ValNetworkBlocked"), powered and zoneCount > 0 and "success" or "danger"),
+					power = status(powered and text("IGUI_GS_ValPowerOk") or text("IGUI_GS_ValPowerOff"), powered and "success" or "danger", true),
+					terminalStatus = status(terminalCount > 0 and text("IGUI_GS_ValTerminalOk") or text("IGUI_GS_ValTerminalMissing"), terminalCount > 0 and "success" or "danger", true),
+					zonesStatus = status(zoneCount > 0 and text("IGUI_GS_ValZonesOk", zoneCount) or text("IGUI_GS_ValZonesMissing"), zoneCount > 0 and "success" or "warning", true),
+					accessStatus = status(powered and zoneCount > 0 and text("IGUI_GS_ValNetworkReady") or text("IGUI_GS_ValNetworkBlocked"), powered and zoneCount > 0 and "success" or "danger", true),
 					resourceSummary = status(text("IGUI_GS_NetResourceSummary", nodeCount, state.itemTypeCount or 0)), accessMode = status(accessMode),
 					consumption = status(text("IGUI_GS_StatsFuel", string.format("%.2f", tonumber(fuel.total) or 0))), capacityAvailable = status(text("IGUI_GS_NetCapacityAvailable")),
 					capacity = CapacityPresentation.fromState(capacity),

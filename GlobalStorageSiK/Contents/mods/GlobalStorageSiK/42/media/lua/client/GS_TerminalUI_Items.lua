@@ -1990,7 +1990,7 @@ local function itemTableOptions(panel, terminal)
 			panel._itemsScrollOffset = 0
 			if terminal.refreshItemsTab then terminal:refreshItemsTab() end
 		end,
-		sortKey = panel.itemsSortKey or "name", sortAsc = panel.itemsSortAsc ~= false,
+		sortKey = panel.itemsSortKey or "category", sortAsc = panel.itemsSortAsc ~= false,
 		emptyText = T("IGUI_GS_NoItems"),
 	}
 end
@@ -2174,7 +2174,7 @@ function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items
 	items = items or {}
 	localizeRecordedMediaRows(items, terminal and terminal.playerNum or 0)
 	panel._itemsCatalog = items
-	panel.itemsSortKey = panel.itemsSortKey or "name"
+	panel.itemsSortKey = panel.itemsSortKey or "category"
 	panel.itemsSortAsc = panel.itemsSortAsc ~= false
 	panel._selectedKeys = panel._selectedKeys or {}
 	items = sortRows(items, panel.itemsSortKey, panel.itemsSortAsc, terminal)

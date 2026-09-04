@@ -554,7 +554,7 @@ return {
     ["frameworkManifestSha256"] = "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "f3c3b52127351e9be531adc9153b0e4ea4d4f7c6647584d45a6e9eb29a4cccd9",
+    ["surfaceSpecSha256"] = "d94803031f73a3a8d026cb618b2eb6388f6bfdb096270c5836c18d28d64333d2",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
     ["visualMasterSha256"] = "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
     ["visualSubtreeSha256"] = "62f0db6b9ee17d720fb77f3ec3c22d392832bb68932abe08ed2232ac5f1227a7"
@@ -975,7 +975,7 @@ return {
                       ["name"] = "kind",
                       ["value"] = {
                         ["kind"] = "literal",
-                        ["value"] = "feedback"
+                        ["value"] = "status"
                       }
                     },
                     {
@@ -1106,10 +1106,10 @@ return {
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "min-height",
+                    ["name"] = "columns",
                     ["value"] = {
                       ["kind"] = "literal",
-                      ["value"] = 224
+                      ["value"] = 2
                     }
                   },
                   {
@@ -1120,8 +1120,21 @@ return {
                     }
                   }
                 },
-                ["mode"] = "column",
-                ["overrides"] = {}
+                ["mode"] = "grid",
+                ["overrides"] = {
+                  {
+                    ["bindings"] = {
+                      {
+                        ["name"] = "columns",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 1
+                        }
+                      }
+                    },
+                    ["profileId"] = "compact"
+                  }
+                }
               },
               ["props"] = {
                 {
@@ -1311,6 +1324,13 @@ return {
                           ["kind"] = "literal",
                           ["value"] = true
                         }
+                      },
+                      {
+                        ["name"] = "span",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 2
+                        }
                       }
                     },
                     ["mode"] = "row",
@@ -1340,7 +1360,15 @@ return {
                   ["children"] = {},
                   ["id"] = "options-range-title",
                   ["layout"] = {
-                    ["base"] = {},
+                    ["base"] = {
+                      {
+                        ["name"] = "span",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 2
+                        }
+                      }
+                    },
                     ["mode"] = "row",
                     ["overrides"] = {}
                   },
@@ -1438,10 +1466,10 @@ return {
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "min-height",
+                    ["name"] = "columns",
                     ["value"] = {
                       ["kind"] = "literal",
-                      ["value"] = 224
+                      ["value"] = 2
                     }
                   },
                   {
@@ -1452,8 +1480,21 @@ return {
                     }
                   }
                 },
-                ["mode"] = "column",
-                ["overrides"] = {}
+                ["mode"] = "grid",
+                ["overrides"] = {
+                  {
+                    ["bindings"] = {
+                      {
+                        ["name"] = "columns",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 1
+                        }
+                      }
+                    },
+                    ["profileId"] = "compact"
+                  }
+                }
               },
               ["props"] = {
                 {

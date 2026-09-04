@@ -117,6 +117,12 @@ local function loadSidebarIcon(textureWidth, adminVariant)
 	return getTexture("media/ui/GS/Launcher/sik-mainbutton" .. suffix .. textureWidth .. ".png")
 end
 
+local function popupY(panel, anchor, textureHeight)
+	local anchorHeight = anchor and anchor.getHeight and anchor:getHeight() or textureHeight
+	return panel:getAbsoluteY() + anchor:getY()
+		+ math.floor((anchorHeight - textureHeight) / 2)
+end
+
 GS_InventorySidebarPopup = GS_InventorySidebarPopup or {}
 
 function GS_InventorySidebarPopup:new(x, y, width, height, chr)
@@ -229,7 +235,7 @@ function GS_SidebarPatch.updatePopupGeometry(panel)
 	local textureWidth = getTextureWidth()
 	local textureHeight = textureWidth
 	panel.gsInventoryPopup:setX(panel:getAbsoluteX() + anchor:getX())
-	panel.gsInventoryPopup:setY(panel:getAbsoluteY() + anchor:getY())
+	panel.gsInventoryPopup:setY(popupY(panel, anchor, textureHeight))
 	panel.gsInventoryPopup:setSidebarGeometry(textureWidth, textureHeight,
 		isPlayerStaff(panel.chr))
 end
@@ -251,7 +257,7 @@ function GS_SidebarPatch.ensurePopup(panel)
 		local textureWidth = getTextureWidth()
 		local textureHeight = textureWidth
 		local absX = panel:getAbsoluteX() + anchor:getX()
-		local absY = panel:getAbsoluteY() + anchor:getY()
+		local absY = popupY(panel, anchor, textureHeight)
 		panel.gsInventoryPopup = GS_InventorySidebarPopup:new(absX, absY, textureWidth * 2, textureHeight, panel.chr)
 		panel.gsInventoryPopup.owner = panel
 		panel.gsInventoryPopup:addToUIManager()

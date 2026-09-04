@@ -603,7 +603,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- GS_TerminalUI_ZoneEditor.lua (solo cambia "contenedor"/"zona") -────
 	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
 		T("IGUI_GS_NodePriorityLabel"), T("IGUI_GS_NodePriorityHint"), scroll)
-	y = y + INFO_BTN_SIZE + 4
+	y = y + self.priorityLbl.height + 4
 
 	self.priorityEntry = createField(tostring(editPriority), pad, y, contentW, true)
 	UI.Scroll.addChild(scroll, self.priorityEntry)
@@ -673,7 +673,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- categorias legacy en setNode, mas abajo).
 	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
 		T("IGUI_GS_NodeRulesTitle"), T("IGUI_GS_NodeRulesHint"), scroll)
-	y = y + INFO_BTN_SIZE + 8
+	y = y + self.rulesTitleLbl.height + 8
 
 	-- Resumen legible: se recalcula en rebuildRuleChips, aqui solo se reserva
 	-- el hueco con el texto inicial para calcular su altura real (regla 7,

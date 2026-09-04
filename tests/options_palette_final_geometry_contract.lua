@@ -25,8 +25,10 @@ end
 local state = {
 	networkName = { text = "Network" }, selectedNetwork = { items = {}, selected = nil },
 	networkSummary = { text = "Summary" }, networkActions = {},
-	power = { text = "Power" }, terminalStatus = { text = "Terminal" },
-	zonesStatus = { text = "Zones" }, accessStatus = { text = "Access" },
+	power = { text = "Power", indicator = true },
+	terminalStatus = { text = "Terminal", indicator = true },
+	zonesStatus = { text = "Zones", indicator = true },
+	accessStatus = { text = "Access", indicator = true },
 	resourceSummary = { text = "Resources" }, accessMode = { text = "Physical" },
 	consumption = { text = "0" }, capacityAvailable = { text = "Available" },
 	capacity = { value = 20, max = 100, percent = 20, unit = "kg" },
@@ -97,6 +99,30 @@ assert(collection.panel.height >= collection.contentHeight,
 assert(collection.cards[6].panel.parent == collection.panel,
 	"lower palette row must be parented inside the collection")
 
+local power = assert(tree.nodes["options-power-status"], "power status missing")
+local terminal = assert(tree.nodes["options-terminal-status"], "terminal status missing")
+local zones = assert(tree.nodes["options-zones-status"], "zones status missing")
+local access = assert(tree.nodes["options-access-status"], "access status missing")
+assert(power._sikUiControl == "statusIndicator" and terminal._sikUiControl == "statusIndicator"
+	and zones._sikUiControl == "statusIndicator" and access._sikUiControl == "statusIndicator",
+	"operational dashboard must use the semantic status-dot component")
+assert(power.y == terminal.y and zones.y == access.y and zones.y > power.y,
+	"operational dashboard must remain a compact two-by-two grid")
+assert(terminal.x > power.x and access.x > zones.x,
+	"operational dashboard second column collapsed into vertical loose text")
+
+local resource = assert(tree.nodes["options-resource-summary"], "resource summary missing")
+local accessMode = assert(tree.nodes["options-resource-access"], "access mode missing")
+local consumption = assert(tree.nodes["options-resource-consumption"], "consumption missing")
+local availability = assert(tree.nodes["options-resource-capacity-availability"], "capacity availability missing")
+assert(resource.y == accessMode.y and consumption.y == availability.y
+	and accessMode.x > resource.x and availability.x > consumption.x,
+	"resources dashboard must remain a compact two-column grid")
+local capacity = assert(tree.nodes["options-capacity"], "capacity bar missing")
+local rangeTitle = assert(tree.nodes["options-range-title"], "range title missing")
+assert(capacity.width > resource.width and rangeTitle.width > resource.width,
+	"capacity and reach summary must span both resource columns")
+
 for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	local tableView = assert(tree.nodes[id], "options table missing: " .. id)
 	assert(tableView._sikUiComponent == "table", "options data degraded outside SiK Table: " .. id)
@@ -105,6 +131,8 @@ for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 		"embedded options table painted a second frame: " .. id)
 	assert(tableView:getHeight() == tableView:getRequiredHeight(),
 		"options table retained unexplained space below its real rows: " .. id)
+	assert(tableView.block.reservedTop == 0 and tableView.block.reservedBottom == 0,
+		"table double-reserved its own header/rows inside the outer block: " .. id)
 	local row = assert(tableView.list.pool[1], "options representative row missing: " .. id)
 	local paints = {}
 	row.drawRect = function(_, x, y, w, h)
