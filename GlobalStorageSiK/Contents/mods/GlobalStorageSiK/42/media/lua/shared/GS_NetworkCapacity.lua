@@ -169,7 +169,7 @@ local function accumulateNode(totals, node, liveEntry, player)
 			totals.partialEstimate = true
 		end
 		totals.liveNodes = totals.liveNodes + 1
-		return used, capacity and (capacity + (personalBonus or 0)) or nil
+		return used, capacity and (capacity + (personalBonus or 0)) or nil, personalBonus, capacity == nil
 	end
 
 	if node.offline == true then
@@ -189,10 +189,51 @@ local function accumulateNode(totals, node, liveEntry, player)
 
 	if node.storedCapacity and node.storedCapacity > 0 then
 		totals.totalCapacity = totals.totalCapacity + node.storedCapacity
-		return used, node.storedCapacity
+		return used, node.storedCapacity, 0, true
 	end
 	totals.partialEstimate = true
-	return used, nil
+	return used, nil, 0, true
+end
+
+-- One payload shape for network, zone and container bars. Effective capacity
+-- already includes the querying player's adjustment; never add it twice.
+local function capacityStatus(used, capacity, percent)
+	if capacity <= 0 then return "ok" end
+	if used >= capacity then return "full" end
+	if percent >= (GlobalStorageSiK.Config.WEIGHT_CRITICAL_PERCENT or 95) then return "critical" end
+	if percent >= (GlobalStorageSiK.Config.WEIGHT_WARN_PERCENT or 80) then return "warning" end
+	return "ok"
+end
+
+local function scopeCapacity(used, effective, bonus, partial)
+	effective = effective or 0
+	bonus = bonus or 0
+	local percent = effective > 0 and math.min(100, math.floor(used / effective * 100 + 0.5)) or 0
+	return {
+		usedWeight = math.floor(used * 10 + 0.5) / 10,
+		capacity = math.floor(effective * 10 + 0.5) / 10,
+		effectiveCapacity = math.floor(effective * 10 + 0.5) / 10,
+		totalCapacity = math.floor((effective - bonus) * 10 + 0.5) / 10,
+		personalBonus = math.floor(bonus * 10 + 0.5) / 10,
+		percent = percent,
+		status = capacityStatus(used, effective, percent),
+		partialEstimate = partial == true,
+	}
+end
+
+local function recordScope(totals, node, used, capacity, bonus, partial)
+	totals.perNode[node.id] = scopeCapacity(used, capacity, bonus, partial)
+	if node.zoneId then
+		local zone = totals.perZone[node.zoneId] or {
+			usedWeight = 0, capacity = 0, personalBonus = 0, containerCount = 0,
+		}
+		zone.usedWeight = zone.usedWeight + used
+		zone.capacity = zone.capacity + (capacity or 0)
+		zone.personalBonus = zone.personalBonus + (bonus or 0)
+		zone.containerCount = zone.containerCount + 1
+		zone.partialEstimate = zone.partialEstimate == true or partial == true
+		totals.perZone[node.zoneId] = zone
+	end
 end
 
 --- Calcula estadísticas de capacidad de una red.
@@ -242,20 +283,8 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local zone = registry.zones and registry.zones[node.zoneId]
 			if zone and zone.networkId == networkId and zone.enabled ~= false then
 				counted[node.id] = true
-				local nodeUsed, nodeCap = accumulateNode(totals, node, liveById[node.id], player)
-				if nodeCap and nodeCap > 0 then
-					totals.perNode[node.id] = {
-						usedWeight = math.floor(nodeUsed * 10 + 0.5) / 10,
-						capacity = math.floor(nodeCap * 10 + 0.5) / 10,
-						percent = math.min(100, math.floor((nodeUsed / nodeCap) * 100 + 0.5)),
-					}
-				end
-				if node.zoneId then
-					local z = totals.perZone[node.zoneId] or { usedWeight = 0, capacity = 0 }
-					z.usedWeight = z.usedWeight + nodeUsed
-					z.capacity = z.capacity + (nodeCap or 0)
-					totals.perZone[node.zoneId] = z
-				end
+				local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, node, liveById[node.id], player)
+				recordScope(totals, node, nodeUsed, nodeCap, bonus, partial)
 			end
 		end
 	end
@@ -267,26 +296,19 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local entry = network.containers[i]
 			if entry and entry.id and not counted[entry.id] then
 				counted[entry.id] = true
-				local nodeUsed, nodeCap = accumulateNode(totals, entry, liveById[entry.id], player)
-				if nodeCap and nodeCap > 0 then
-					totals.perNode[entry.id] = {
-						usedWeight = math.floor(nodeUsed * 10 + 0.5) / 10,
-						capacity = math.floor(nodeCap * 10 + 0.5) / 10,
-						percent = math.min(100, math.floor((nodeUsed / nodeCap) * 100 + 0.5)),
-					}
-				end
-				if entry.zoneId then
-					local z = totals.perZone[entry.zoneId] or { usedWeight = 0, capacity = 0 }
-					z.usedWeight = z.usedWeight + nodeUsed
-					z.capacity = z.capacity + (nodeCap or 0)
-					totals.perZone[entry.zoneId] = z
-				end
+				local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, entry, liveById[entry.id], player)
+				recordScope(totals, entry, nodeUsed, nodeCap, bonus, partial)
 			end
 		end
 	end
 
 	-- Cierra perZone con su % final (usedWeight/capacity ya acumulados arriba).
 	for _, z in pairs(totals.perZone) do
+		local scoped = scopeCapacity(z.usedWeight, z.capacity, z.personalBonus, z.partialEstimate)
+		z.totalCapacity = scoped.totalCapacity
+		z.effectiveCapacity = scoped.effectiveCapacity
+		z.personalBonus = scoped.personalBonus
+		z.status = scoped.status
 		z.usedWeight = math.floor(z.usedWeight * 10 + 0.5) / 10
 		z.capacity = math.floor(z.capacity * 10 + 0.5) / 10
 		z.percent = (z.capacity > 0) and math.min(100, math.floor((z.usedWeight / z.capacity) * 100 + 0.5)) or nil
@@ -340,12 +362,7 @@ function GlobalStorageSiK.NetworkCapacity.computeNode(container, player)
 		return nil
 	end
 	local effective = capacity + (personalBonus or 0)
-	local percent = math.min(100, math.floor((used / effective) * 100 + 0.5))
-	return {
-		usedWeight = math.floor(used * 10 + 0.5) / 10,
-		capacity = math.floor(effective * 10 + 0.5) / 10,
-		percent = percent,
-	}
+	return scopeCapacity(used, effective, personalBonus, false)
 end
 
 --- Peso/capacidad de UNA zona (solo sus nodos, no toda la red) - mismo motor
@@ -376,6 +393,7 @@ function GlobalStorageSiK.NetworkCapacity.computeZone(zoneId, player)
 	end
 	for _, node in pairs(registry.nodes or {}) do
 		if node.zoneId == zoneId and node.enabled ~= false and node.membership ~= "excluded" and node.id then
+			totals.containerCount = (totals.containerCount or 0) + 1
 			accumulateNode(totals, node, liveById[node.id], player)
 		end
 	end
@@ -387,12 +405,9 @@ function GlobalStorageSiK.NetworkCapacity.computeZone(zoneId, player)
 	if effectiveCapacity > 0 then
 		percent = math.min(100, math.floor((totals.usedWeight / effectiveCapacity) * 100 + 0.5))
 	end
-	return {
-		usedWeight = math.floor(totals.usedWeight * 10 + 0.5) / 10,
-		capacity = math.floor(effectiveCapacity * 10 + 0.5) / 10,
-		percent = percent,
-		partialEstimate = totals.partialEstimate == true,
-	}
+	local result = scopeCapacity(totals.usedWeight, effectiveCapacity, totals.personalBonus, totals.partialEstimate)
+	result.containerCount = totals.containerCount or 0
+	return result
 end
 
 --- Redondea y serializa para envío al cliente.

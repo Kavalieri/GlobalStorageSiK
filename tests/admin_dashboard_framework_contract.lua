@@ -36,7 +36,7 @@ assert(not code:match(":drawRect"), "Admin Dashboard must not paint table header
 
 local requiredFrameworkCalls = {
 	"UI.Window.derive", "UI.Window.callBase", "UI.Window.apply", "UI.Window.resolveBounds",
-	"UI.Modal.apply", "UI.Modal.confirm",
+	"UI.Modal.apply", "Confirmation.show", "UI.Block.create",
 	"UI.Controls.button", "UI.Controls.combo", "UI.Table.create", "UI.Scroll.create",
 	"UI.Lifecycle.bindVisibleRefresh",
 }
@@ -51,6 +51,7 @@ local tableLayoutCalls = {}
 local scrollState = { contentHeight = nil, ensureCount = 0 }
 local capturedWindowOptions = nil
 local lifecycleBindOptions = nil
+local blockFrame = nil
 
 local tableInstance = {
 	disposed = false,
@@ -65,6 +66,24 @@ local tableInstance = {
 }
 
 local UI = {
+	Block = {
+		create = function(options)
+			blockFrame = {
+				childParent = options.parent,
+				h = options.h,
+				disposed = false,
+				getContentRect = function(self)
+					return { x = 0, y = 0, w = options.w, h = self.h }
+				end,
+				setBounds = function(self, _, _, w, h)
+					options.w, self.h = w, h
+					return self
+				end,
+				dispose = function(self) self.disposed = true end,
+			}
+			return blockFrame
+		end,
+	},
 	Controls = {
 		metrics = function() return { buttonHeight = 28, inputHeight = 28 } end,
 	},
@@ -154,6 +173,9 @@ package.preload["GS_TerminalUI_Extensions"] = function() return GlobalStorageSiK
 package.preload["GS_AdminDashboard_Audit"] = function() return GlobalStorageSiK.AdminDashboardAudit end
 package.preload["GS_AdminDashboard_Corpus"] = function() return GlobalStorageSiK.AdminDashboardCorpus end
 package.preload["GS_UI_Framework"] = function() return UI end
+package.preload["GS_Confirmation"] = function()
+	return { show = function() end }
+end
 dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 
 assert(dofile(SOURCE_PATH) == nil, "Admin Dashboard module did not load under neutral framework doubles")
@@ -199,6 +221,8 @@ local members = {
 GS_AdminDashboardUI.refreshMemberPanel(memberHost, members)
 assert(tableCreateCount == 1 and capturedTableOptions.parent == hostWidget,
 	"member panel must create one SiK.UI.Table inside the SiK.UI.Scroll host")
+assert(memberHost.memberTableFrame == blockFrame,
+	"member table must be physically owned by one SiK.UI.Block")
 assert(#capturedTableOptions.columns == 2, "member table must expose semantic member and connection columns only")
 assert(capturedTableOptions.columns[1].key == "member"
 	and capturedTableOptions.columns[2].key == "connection"

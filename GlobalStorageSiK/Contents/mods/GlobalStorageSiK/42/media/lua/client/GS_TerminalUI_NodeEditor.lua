@@ -16,7 +16,10 @@ require "GS_RulesUI"
 require "GS_FilterEditor"
 require "GS_TerminalUI_ZoneEditor"
 require "GS_CompatMods"
+local ContainerInventory = require "GS_ContainerInventory"
+local Confirmation = require "GS_Confirmation"
 local UI = require "GS_UI_Framework"
+local ScrollDock = UI.ScrollDock
 
 GlobalStorageSiK.TerminalNodeEditor = {}
 GlobalStorageSiK.TerminalNodeEditor.instance = nil
@@ -81,12 +84,12 @@ local function createSectionLabel(x, y, text)
 end
 
 local function createSectionCard(scroll, x, y, w, h, color)
-	local container = UI.Container.create({ parent = UI.Scroll.childHost(scroll),
-		x = x, y = y, w = w, h = h, padding = 0, accent = color,
+	local block = UI.Block.create({ parent = UI.Scroll.childHost(scroll),
+		x = x, y = y, w = w, h = h, paddingX = 8, paddingY = 8,
 		background = { r = 0.08, g = 0.08, b = 0.08, a = 0.72 },
 		border = { r = 0.28, g = 0.28, b = 0.28, a = 0.70 },
 	})
-	return container and container.panel or nil
+	return block and block.panel or nil
 end
 
 local function createProductButton(x, y, w, h, title, target, onClick,
@@ -104,8 +107,8 @@ local function createProductButton(x, y, w, h, title, target, onClick,
 	return button
 end
 
-local function confirmAction(message, onAccept)
-	return UI.Modal.confirm({ message = message, onAccept = onAccept })
+local function confirmAction(message, onAccept, consequences)
+	return Confirmation.show({ question = message, consequences = consequences, onAccept = onAccept })
 end
 
 -- Estos helpers conservan la geometria historica del editor, pero delegan
@@ -129,10 +132,10 @@ local function createHost(parent, x, y, w, h)
 	})
 end
 
-local function createField(text, x, y, w, numeric)
+local function createField(text, x, y, w, numeric, onSubmit)
 	return UI.Controls.field(nil, {
 		x = x, y = y, w = w, h = CONTROL_METRICS.inputHeight,
-		text = text, numeric = numeric == true,
+		text = text, numeric = numeric == true, onSubmit = onSubmit,
 	})
 end
 
@@ -151,13 +154,15 @@ end
 
 function GS_NodeEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
-	UI.Window.applyEditor(self, {
+	UI.Modal.apply(self, {
+		kind = "task", profile = "editor", scroll = false, contentMode = "dock",
 		geometryKey = "nodeEditor",
 		geometryVersion = 2,
 		title = T("IGUI_GS_NodeEditorTitle"),
-		padding = PAD,
 		onReflow = function() self:calculateLayout() end,
 		onClose = function()
+			if self.contentsView then self.contentsView:dispose(); self.contentsView = nil end
+			if self.editorDock then self.editorDock:dispose(); self.editorDock = nil end
 			GlobalStorageSiK.TerminalNodeEditor.instance = nil
 			if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
 				GlobalStorageSiK.NodeHighlight.clear()
@@ -176,14 +181,19 @@ function GS_NodeEditorUI:createChildren()
     -- guard para construir una sola vez (evita elementos huérfanos duplicados).
 	if self._gsChildrenBuilt then return end
 	self._gsChildrenBuilt = true
-	-- SiK.UI.Window.applyEditor() posee el chrome compartido; no duplicarlo.
+	-- SiK.UI.Modal.apply() posee el chrome y el Block fisico compartidos.
 end
 
 --- Actualiza título de ventana con el nombre del nodo en red.
 function GS_NodeEditorUI:syncTitleFromName()
 	local name = self.node and (self.node.displayName or self.node.name) or "?"
-	self._titleText = T("IGUI_GS_NodeEditorTitle") .. ": " .. name
-	if self.setHeader then self:setHeader(self._titleText) end
+	local zoneName = ""
+	for _, zone in ipairs(self.terminal and self.terminal.terminalState and self.terminal.terminalState.zones or {}) do
+		if self.node and zone.id == self.node.zoneId then zoneName = zone.name or ""; break end
+	end
+	self._titleText = T("IGUI_GS_NodeEditorTitle") .. " · " .. name .. (zoneName ~= "" and (" · " .. zoneName) or "")
+	if self.setHeader then self:setHeader({ titleParts = {
+		prefix = T("IGUI_GS_NodeEditorTitle"), name = name, zone = zoneName } }) end
 end
 
 --- Envía cambios de nodo al servidor.
@@ -196,8 +206,8 @@ end
 function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts)
 	local searchQuery = ""
 	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-	if ui and ui.searchEntry and ui.searchEntry.getText then
-		searchQuery = ui.searchEntry:getText() or ""
+	if ui and ui.getSearchQuery then
+		searchQuery = ui:getSearchQuery()
 	end
 	local payload = { nodeId = nodeId, searchQuery = searchQuery }
 	if opts.displayName ~= nil then payload.displayName = opts.displayName end
@@ -216,7 +226,7 @@ end
 function GS_NodeEditorUI:copyConfigTemplate()
 	if not self.node then return end
 	local priority = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
-		or self._editPriority or self.node.priority or 50
+		or tonumber(self._editPriority) or self.node.priority or 50
 	priority = math.floor(priority + 0.5)
 	if priority < 1 then priority = 1 elseif priority > 100 then priority = 100 end
 	GlobalStorageSiK.TerminalNodeEditor.configTemplate = {
@@ -238,6 +248,7 @@ function GS_NodeEditorUI:pasteConfigTemplate()
 	local rules = cloneRules(template.rules)
 	local priority = tonumber(template.priority) or 50
 	self._editPriority = priority
+	if self.priorityEntry then self.priorityEntry:setText(tostring(priority)) end
 	self.node.rules = cloneRules(rules)
 	self.node.priority = priority
 	self:requestNodeUpdate({
@@ -285,13 +296,13 @@ function GS_NodeEditorUI:confirmExtendToZone()
 	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
 	local count = countOtherZoneNodes(nodes, self.node.zoneId, self.node.id)
 	if count == 0 then return end
-	local message = T("IGUI_GS_NodeExtendToZoneConfirm", count, self.node.zoneName or "?")
+	local message = T("IGUI_GS_NodeExtendToZoneQuestion", count, self.node.zoneName or "?")
 	confirmAction(message, function()
 		GlobalStorageSiK.NetClient.sendCommand("applyNodeTemplateToZone", {
 			zoneId = self.node.zoneId,
 			rules = self.node.rules or {},
 		})
-	end)
+	end, T("IGUI_GS_NodeExtendToZoneConsequences", count, self.node.zoneName or "?"))
 end
 
 --- Confirmacion antes de excluir (dev26, ronda 2 - ver §4.5 del plan): solo
@@ -299,10 +310,10 @@ end
 --- completo de deposito/extraccion hasta que el jugador lo revierta a mano.
 function GS_NodeEditorUI:confirmExclude()
 	if not self.node then return end
-	local message = T("IGUI_GS_NodeExcludeConfirm", self.node.displayName or self.node.name or "?")
+	local message = T("IGUI_GS_NodeExcludeQuestion", self.node.displayName or self.node.name or "?")
 	confirmAction(message, function()
 		self:requestNodeUpdate({ enabled = false, membership = "excluded" })
-	end)
+	end, T("IGUI_GS_NodeExcludeConsequences"))
 end
 
 --- Aplica y persiste inmediatamente un unico campo del formulario.
@@ -334,7 +345,7 @@ end
 --- se llama en cada frame; sin esto reconstruiria todo el formulario cada
 --- frame aunque solo cambiase el alto.
 function GS_NodeEditorUI:layoutForm()
-	if not self._formBuilt or not self.editorScroll then
+	if self._buildingForm or not self._formBuilt or not self.editorScroll then
 		return
 	end
 	local innerW = UI.Scroll.contentWidth(self.editorScroll)
@@ -346,15 +357,10 @@ function GS_NodeEditorUI:layoutForm()
 end
 
 function GS_NodeEditorUI:calculateLayout()
-	local content = self.contentRect and self:contentRect()
-		or { x = PAD, y = self.headerHeight + PAD,
-			w = self.width - PAD * 2, h = self.height - self.headerHeight - PAD * 2 }
-	local bodyH = math.max(120,
-		content.h - UI.Scroll.listBottomGap())
-	if self.editorScroll then
-		self.editorScroll:setX(content.x)
-		self.editorScroll:setY(content.y)
-		UI.Scroll.resize(self.editorScroll, content.w, bodyH)
+	local content = { x = 0, y = 0, w = self.contentHost and self.contentHost.width or 0,
+		h = self.contentHost and self.contentHost.height or 0 }
+	if self.editorDock then
+		self.editorDock:reflow(content)
 		self:layoutForm()
 		self:updateScrollHeight()
 	end
@@ -386,12 +392,12 @@ end
 function GS_NodeEditorUI:confirmRemoveFromNetwork()
 	if not self.node or not self.terminal then return end
 	local nodeName = self.node.displayName or self.node.name or "?"
-	confirmAction(T("IGUI_GS_NodeRemoveConfirm", nodeName), function()
+	confirmAction(T("IGUI_GS_NodeRemoveQuestion", nodeName), function()
 		if self.node and self.terminal then
 			self.terminal:onRemoveNode(self.node.id)
 			GlobalStorageSiK.TerminalNodeEditor.close()
 		end
-	end)
+	end, T("IGUI_GS_NodeRemoveConsequences"))
 end
 
 function GS_NodeEditorUI:requestRebindProposal(targetNodeId)
@@ -409,9 +415,9 @@ function GS_NodeEditorUI:confirmConfigTransferProposal(proposal)
 		or proposal.sourceId ~= self.node.id then return end
 	local sourceName = self.node.displayName or self.node.name or "?"
 	local targetName = proposal.targetName or "?"
-	confirmAction(T("IGUI_GS_NodeTransferConfigConfirm", sourceName, targetName), function()
+	confirmAction(T("IGUI_GS_NodeTransferConfigQuestion", sourceName, targetName), function()
 		self.terminal:onTransferNodeConfiguration(self.node.id, proposal.token)
-	end)
+	end, T("IGUI_GS_NodeTransferConfigConsequences", sourceName, targetName))
 end
 
 -- La lista nunca se infiere en cliente: llega ya filtrada por el servidor y
@@ -437,9 +443,9 @@ function GS_NodeEditorUI:confirmRebindProposal(proposal)
 	local sourceName = self.node.displayName or self.node.name or "?"
 	local targetName = proposal.targetName or "?"
 	self._rebindCandidates = nil
-	confirmAction(T("IGUI_GS_NodeRebindConfirm", sourceName, targetName), function()
+	confirmAction(T("IGUI_GS_NodeRebindQuestion", sourceName, targetName), function()
 		self.terminal:onRebindNode(self.node.id, proposal.rebindToken)
-	end)
+	end, T("IGUI_GS_NodeRebindConsequences", sourceName, targetName))
 end
 
 --- Color de acento (createSectionCard/createButton) por operador -
@@ -495,562 +501,267 @@ end
 
 --- Construye el formulario de edición una sola vez (o reconstruye si _formBuilt=false).
 function GS_NodeEditorUI:ensureForm()
-	local terminal = self.terminal
-	local node = self.node
-	if not terminal or not node or not self.editorScroll then
-		return
-	end
-	if self._formBuilt then
-		self:layoutForm()
-		return
-	end
-
-	local scroll = self.editorScroll
+	if not self.terminal or not self.node or not self.editorScroll then return end
+	if self._buildingForm then return end
+	if self._formBuilt then self:layoutForm(); return end
+	self._buildingForm = true
+	local node, scroll = self.node, self.editorScroll
 	UI.Scroll.clear(scroll, false)
-
-	local pad = 8
-	local y = pad
-	local innerW = UI.Scroll.contentWidth(scroll)
-	local contentW = math.max(1, innerW - pad * 2)
-	local isExcluded       = node.membership == "excluded"
-
-	-- Usar estado de edición pendiente si existe (sobrevive a rebuildForm)
-	local editName     = self._editName     or node.displayName or node.name or ""
-	local editNotes    = self._editNotes    or node.notes or ""
-	local editPriority = self._editPriority or node.priority or 50
-
-	-- Con Customizable Containers instalado, nuestro campo "Etiqueta" ES su
-	-- etiqueta (una sola fuente de verdad, no dos campos "sincronizados"): al
-	-- abrir el editor, su etiqueta manda si existe. Si CC no tiene aun
-	-- etiqueta para este contenedor, partimos de nuestra nota guardada.
+	local parent, width = UI.Scroll.childHost(scroll), UI.Scroll.contentWidth(scroll)
+	local bottom = 0
+	local function section(title, help)
+		return UI.Block.create({ parent = parent, x = 0, y = bottom, w = width,
+			title = title, tooltip = help or title, playerNum = self.playerNum })
+	end
+	local function finish(block, column)
+		column:finish()
+		bottom = block.y + block.h + 8
+	end
+	local function label(column, value)
+		local widget = createText(column.parent, 0, 0, column.width, value, PALETTE.textPrimary)
+		column:label(widget, FONT_HGT_SMALL)
+		return widget
+	end
+	local function field(column, title, value, numeric, onSubmit)
+		label(column, title)
+		local widget = createField(value, 0, 0, column.width, numeric, onSubmit)
+		column:block(widget, CONTROL_METRICS.inputHeight)
+		return widget
+	end
+	local function button(column, title, callback, danger)
+		return UI.Controls.button(column.parent, { text = title, onClick = callback,
+			danger = danger == true, playerNum = self.playerNum })
+	end
+	local identity = section(T("IGUI_GS_EditorIdentity"))
+	self.identityBlock = identity
+	local form = identity:beginColumn()
+	self.nameEntry = field(form, T("IGUI_GS_NodeRenameLabel"),
+		self._editName or node.displayName or node.name or "", false, function()
+			self._editName = self.nameEntry:getText()
+			self:requestNodeUpdate({ displayName = self._editName })
+		end)
+	self.priorityEntry = field(form, T("IGUI_GS_NodePriorityLabel"),
+		tostring(self._editPriority or node.priority or 50), true, function()
+			local value = tonumber(self.priorityEntry:getText())
+			if not value then return end
+			value = math.max(1, math.min(100, math.floor(value + 0.5)))
+			self._editPriority = value
+			self.priorityEntry:setText(tostring(value))
+			self:requestNodeUpdate({ priority = value })
+		end)
+	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_NodePriorityHint"))
+	local function priority(value)
+		self._editPriority = value
+		self.priorityEntry:setText(tostring(value))
+		self:requestNodeUpdate({ priority = value })
+	end
+	self.priorityPresetHighBtn = button(form, T("IGUI_GS_NodePriorityPresetHigh"), function() priority(10) end)
+	self.priorityPresetNormalBtn = button(form, T("IGUI_GS_NodePriorityPresetNormal"), function() priority(50) end)
+	self.priorityPresetLowBtn = button(form, T("IGUI_GS_NodePriorityPresetLow"), function() priority(90) end)
+	form:row(CONTROL_METRICS.buttonHeight, {
+		{ widget = self.priorityPresetHighBtn }, { widget = self.priorityPresetNormalBtn },
+		{ widget = self.priorityPresetLowBtn } })
+	-- Preserve the product's optional physical-container label integration.
+	local notes = self._editNotes or node.notes or ""
 	if self._editNotes == nil then
-		local ccLabel = GlobalStorageSiK.CompatMods.getContainerLabelText(node, getSpecificPlayer(0))
-		if ccLabel and ccLabel ~= "" then
-			editNotes = ccLabel
-			self._editNotes = ccLabel
-		end
+		notes = GlobalStorageSiK.CompatMods.getContainerLabelText(node, getSpecificPlayer(self.playerNum or 0)) or notes
 	end
+	self._editNotes = notes
+	finish(identity, form)
 
-	-- ── Linea informativa (dev26, ronda 3): objetos y tipos ya conocidos
-	-- para este contenedor (reutiliza GlobalStorageSiK.Client.nodeContentsCache,
-	-- ya poblado por requestNodeContents - sin llamada de red aparte). Sin
-	-- % de ocupacion todavia: no existe ninguna lectura de peso/capacidad a
-	-- nivel de UN contenedor en el mod, solo agregada de red completa (ver
-	-- GS_NetworkCapacity.lua) - queda para una ronda dedicada aparte.
-	local itemCount, typeCount = nodeItemStats(self.node)
-	self.statsLbl = createText(nil, pad, y, contentW,
-		T("IGUI_GS_NodeStatsLine", itemCount, typeCount), PALETTE.textMuted)
-	UI.Scroll.addChild(scroll, self.statsLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.occupancyLbl = createText(nil, pad, y, contentW,
-		occupancyLabelText(nodeCapacityInfo(node)), PALETTE.textMuted)
-	UI.Scroll.addChild(scroll, self.occupancyLbl)
-	y = y + FONT_HGT_SMALL + 10
-	if node.offline == true then
-		local recoveryBody = T("IGUI_GS_NodeRecoveryBody")
-		local recoveryW = math.max(1, contentW - 16)
-		local bodyLines = UI.Controls.wrapText(recoveryBody, recoveryW, UIFont.Small)
-		local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(node.rules or {}, recoveryW,
+	local rulesBlock = section(T("IGUI_GS_EditorRules"), T("IGUI_GS_EditorRulesHint"))
+	self.rulesBlock = rulesBlock
+	local rulesColumn = rulesBlock:beginColumn()
+	local function nested(title, help)
+		return UI.Block.create({ parent = rulesColumn.parent, w = rulesColumn.width,
+			title = title, tooltip = help or title, playerNum = self.playerNum })
+	end
+	local zone = findZoneById(self.terminal, node.zoneId)
+	if zone and #(zone.rules or {}) > 0 then
+		local inherited = nested(T("IGUI_GS_NodeInheritedFromZone", zone.name or "?"))
+		local inheritedColumn = inherited:beginColumn()
+		local summary = GlobalStorageSiK.RulesUI.layoutSummary(zone.rules, inheritedColumn.width,
 			UIFont.Small, PALETTE.textSecondary)
-		local cardH = FONT_HGT_SMALL + (#bodyLines + summaryLayout.lineCount) * (FONT_HGT_SMALL + 2)
-			+ CONTROL_METRICS.buttonHeight * 2 + 28
-		local card = createSectionCard(scroll, pad, y, contentW, cardH,
-			PALETTE.statusDanger)
-		UI.Scroll.addChild(scroll, card)
-		local cy = y + 8
-		local title = createText(nil, pad + 8, cy, recoveryW,
-			T("IGUI_GS_NodeRecoveryTitle"), { 0.92, 0.35, 0.3, 1 })
-		UI.Scroll.addChild(scroll, title); cy = cy + FONT_HGT_SMALL + 3
-		for _, line in ipairs(bodyLines) do
-			local label = createText(nil, pad + 8, cy, recoveryW, line,
-				{ 0.72, 0.74, 0.78, 1 })
-			UI.Scroll.addChild(scroll, label); cy = cy + FONT_HGT_SMALL + 2
-		end
-		self.recoverySummaryHost = createHost(nil, pad + 8, cy, recoveryW,
-			math.max(FONT_HGT_SMALL, summaryLayout.lineCount * (FONT_HGT_SMALL + 2)))
-		UI.Scroll.addChild(scroll, self.recoverySummaryHost)
-		addSummaryRuns(self.recoverySummaryHost, summaryLayout, 0)
-		cy = cy + self.recoverySummaryHost.height + 2
-		self.recoveryTransferBtn = createBtn(pad + 8, cy + 3, recoveryW, T("IGUI_GS_NodeBtnTransferConfig"), scroll, function()
-			self:requestConfigTransferProposal()
+		self.inheritedZoneHost = createHost(inheritedColumn.parent, 0, 0, inheritedColumn.width,
+			math.max(FONT_HGT_SMALL, summary.lineCount * (FONT_HGT_SMALL + 2)))
+		addSummaryRuns(self.inheritedZoneHost, summary, 0)
+		inheritedColumn:block(self.inheritedZoneHost, self.inheritedZoneHost.height)
+		self.editZoneFromNodeBtn = button(inheritedColumn, T("IGUI_GS_NodeInheritedEditZoneBtn"), function()
+			GlobalStorageSiK.TerminalZoneEditor.open(self.terminal, zone,
+				self.terminal.terminalState and self.terminal.terminalState.nodes or {})
 		end)
-		UI.Controls.setTooltip(self.recoveryTransferBtn, T("IGUI_GS_NodeTransferConfigTip"))
-		UI.Scroll.addChild(scroll, self.recoveryTransferBtn)
-		self.recoveryRemoveBtn = createProductButton(
-			pad + 8, cy + CONTROL_METRICS.buttonHeight + 7,
-			recoveryW, CONTROL_METRICS.buttonHeight,
-			T("IGUI_GS_NodeBtnRemove"), scroll, function()
-			self:confirmRemoveFromNetwork()
-		end, PALETTE.statusDanger, true)
-		UI.Controls.setTooltip(self.recoveryRemoveBtn, T("IGUI_GS_NodeRemoveTooltip"))
-		UI.Scroll.addChild(scroll, self.recoveryRemoveBtn)
-		y = y + cardH + 10
+		inheritedColumn:block(self.editZoneFromNodeBtn, CONTROL_METRICS.buttonHeight)
+		rulesColumn:block(inherited, inheritedColumn:finish())
 	end
+	local protocol = nested(T("IGUI_GS_NodeRulesTitle"), T("IGUI_GS_NodeRulesHint"))
+	local protocolColumn = protocol:beginColumn()
+	local summary = GlobalStorageSiK.RulesUI.layoutSummary(node.rules or {}, protocolColumn.width,
+		UIFont.Small, PALETTE.textSecondary)
+	self.rulesSummaryHost = createHost(protocolColumn.parent, 0, 0, protocolColumn.width,
+		math.max(FONT_HGT_SMALL, summary.lineCount * (FONT_HGT_SMALL + 2)))
+	protocolColumn:block(self.rulesSummaryHost, self.rulesSummaryHost.height)
+	rulesColumn:block(protocol, protocolColumn:finish())
 
-	-- ── Nombre (Aplicar unificado mas abajo, junto a Prioridad y Notas) ─────
-	self.nameLbl = createSectionLabel(pad, y, T("IGUI_GS_NodeRenameLabel"))
-	UI.Scroll.addChild(scroll, self.nameLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.nameEntry = createField(editName, pad, y, contentW, false)
-	UI.Scroll.addChild(scroll, self.nameEntry)
-	y = y + CONTROL_METRICS.inputHeight + 12
-
-	-- ── Prioridad de llenado (escala 1-100, 1 = maxima) - dev26 ronda 3:
-	-- movida a ser el SEGUNDO campo (justo tras el nombre), antes quedaba
-	-- despues de todo el protocolo de reglas. Mismo esqueleto de frase que
-	-- GS_TerminalUI_ZoneEditor.lua (solo cambia "contenedor"/"zona") -────
-	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
-		T("IGUI_GS_NodePriorityLabel"), T("IGUI_GS_NodePriorityHint"), scroll)
-	y = y + self.priorityLbl.height + 4
-
-	self.priorityEntry = createField(tostring(editPriority), pad, y, contentW, true)
-	UI.Scroll.addChild(scroll, self.priorityEntry)
-	y = y + CONTROL_METRICS.inputHeight + 4
-
-	-- Atajos rapidos: fijan el valor Y lo aplican de inmediato (accion
-	-- explicita de un solo valor conocido, no arriesga perder otro campo).
-	local function applyPriorityValue(n)
-		n = math.floor(n + 0.5)
-		if n < 1 then n = 1 elseif n > 100 then n = 100 end
-		self._editPriority = n
-		if self.priorityEntry then self.priorityEntry:setText(tostring(n)) end
-		self:applyField("priority", n)
+	local cache = GlobalStorageSiK.Client.nodeContentsCache or {}
+	local payload = cache[node.id]
+	local suggested = payload and payload.suggestedNativePath
+	self._sugCardMissingData = payload == nil
+	local present = false
+	for _, rule in ipairs(node.rules or {}) do
+		local condition = rule.condition or {}
+		if condition.type == "category" and
+			(condition.nativePath == suggested or condition.value == suggested) then present = true end
 	end
-	local presetW = math.floor((contentW - 8) / 3)
-	self.priorityPresetHighBtn = createBtn(pad, y, presetW, T("IGUI_GS_NodePriorityPresetHigh"), scroll, function() applyPriorityValue(10) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetHighBtn)
-	self.priorityPresetNormalBtn = createBtn(pad + presetW + 4, y, presetW, T("IGUI_GS_NodePriorityPresetNormal"), scroll, function() applyPriorityValue(50) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetNormalBtn)
-	self.priorityPresetLowBtn = createBtn(pad + (presetW + 4) * 2, y, presetW, T("IGUI_GS_NodePriorityPresetLow"), scroll, function() applyPriorityValue(90) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetLowBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 14
-
-	-- ── Heredado de tu zona (dev26, ronda 2 - ver §4.4-sexies del plan) ─────
-	-- Bloque de solo lectura: si la zona de este contenedor tiene sus
-	-- propias reglas, se muestran aqui con un enlace directo a su editor -
-	-- la zona se evalua SIEMPRE antes que el contenedor (ver
-	-- GS_Router.zoneRulesAllow), sin este bloque el jugador no tendria forma
-	-- de saber por que un item "deberia" entrar aqui pero nunca llega.
-	local zone = findZoneById(self.terminal, self.node.zoneId)
-	if zone and zone.rules and #zone.rules > 0 then
-		local inheritedLines = UI.Controls.wrapText(
-			T("IGUI_GS_NodeInheritedFromZone", zone.name or "?"), contentW, UIFont.Small)
-		local inheritedNeutral = { 0.6, 0.63, 0.67 }
-		local inheritedLayout = GlobalStorageSiK.RulesUI.layoutSummary(
-			zone.rules, contentW, UIFont.Small, inheritedNeutral)
-		local hostH = (#inheritedLines + inheritedLayout.lineCount)
-			* (FONT_HGT_SMALL + 2)
-		self.inheritedZoneHost = createHost(nil, pad, y, contentW, hostH)
-		UI.Scroll.addChild(scroll, self.inheritedZoneHost)
-		local iy = 0
-		for i, line in ipairs(inheritedLines) do
-			local r, g, b = 0.6, 0.63, 0.67
-			if i == 1 then r, g, b = 0.55, 0.75, 0.95 end
-			createText(self.inheritedZoneHost, 0, iy, contentW, line,
-				{ r, g, b, 1 })
-			iy = iy + FONT_HGT_SMALL + 2
-		end
-		addSummaryRuns(self.inheritedZoneHost, inheritedLayout, iy)
-		y = y + hostH + 4
-		self.editZoneFromNodeBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeInheritedEditZoneBtn"), scroll, function()
-			local zoneNodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
-			GlobalStorageSiK.TerminalZoneEditor.open(self.terminal, zone, zoneNodes)
-		end)
-		UI.Scroll.addChild(scroll, self.editZoneFromNodeBtn)
-		y = y + CONTROL_METRICS.buttonHeight + 12
-	end
-
-	-- ── Protocolo de aceptación (motor AND/OR/NOT, dev26) ──────────────────
-	-- Sustituye a los antiguos bloques "Categorias aceptadas"/"Filtros
-	-- personalizados": un unico protocolo con tres grupos de reglas
-	-- combinadas por operador (ver GS_Router.evaluateContainerRules y
-	-- Documentacion/GS_FilterRedesign_Plan.md). Contenedores nunca abiertos
-	-- con este editor siguen el camino legacy sin cambios (ver
-	-- GlobalStorageSiK.Router.matchSpecificity) - abrir este editor migra el
-	-- contenedor al nuevo modelo (mismo patron ya usado para canonicalizar
-	-- categorias legacy en setNode, mas abajo).
-	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
-		T("IGUI_GS_NodeRulesTitle"), T("IGUI_GS_NodeRulesHint"), scroll)
-	y = y + self.rulesTitleLbl.height + 8
-
-	-- Resumen legible: se recalcula en rebuildRuleChips, aqui solo se reserva
-	-- el hueco con el texto inicial para calcular su altura real (regla 7,
-	-- CLAUDE.md: texto de longitud variable, nunca ISLabel de una sola linea).
-	self._rulesSummaryY = y
-	local summaryW = contentW
-	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(self.node.rules,
-		summaryW, UIFont.Small, PALETTE.textSecondary)
-	self.rulesSummaryHost = createHost(nil, pad, y, summaryW,
-		math.max(FONT_HGT_SMALL, summaryLayout.lineCount * (FONT_HGT_SMALL + 2)))
-	UI.Scroll.addChild(scroll, self.rulesSummaryHost)
-	y = y + self.rulesSummaryHost:getHeight() + 8
-
-	-- ── Ruta nativa sugerida (basada en el contenido actual) ────────────────
-	-- El servidor solo propone una ruta nativa útil. La ausencia de sugerencia
-	-- no se sustituye por una categoría técnica, externa o inferida.
-	local _sugCache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
-	local _sugPayload = self.node and _sugCache[self.node.id]
-	local suggestedNativePath = _sugPayload and _sugPayload.suggestedNativePath
-	local sugKey = suggestedNativePath and suggestedNativePath ~= "" and suggestedNativePath or nil
-	-- El contenido del nodo (y con el, la sugerencia) llega ASYNC del
-	-- servidor y puede no haber llegado todavia cuando se construye el
-	-- formulario por primera vez al abrir el editor - `refreshContents()` se
-	-- reejecuta solo con el bloque de "Contenido del contenedor", nunca con
-	-- este bloque de reglas. Marcamos que faltaba dato para que
-	-- `onContentsReceived` pueda pedir un `rebuildForm()` completo UNA vez
-	-- cuando de verdad llegue la sugerencia (ver mas abajo en este fichero).
-	self._sugCardMissingData = not sugKey
-	if sugKey and sugKey ~= "" then
-		local alreadyPresent = false
-		for _, rule in ipairs(self.node.rules or {}) do
-			if rule.condition and rule.condition.type == "category" then
-				local existingNative = string.lower(tostring(rule.condition.nativePath or ""))
-				local existingValue = string.lower(tostring(rule.condition.value or ""))
-				if existingValue == string.lower(tostring(sugKey))
-					or (suggestedNativePath
-						and existingNative == string.lower(tostring(suggestedNativePath))) then
-					alreadyPresent = true
-					break
-				end
+	if suggested and suggested ~= "" and not present then
+		local suggestion = nested(T("IGUI_GS_NodeSuggestedCat") .. " " .. categoryDisplayLabel(suggested))
+		local suggestionColumn = suggestion:beginColumn()
+		local function applySuggested(op)
+			local condition = { type = "category", value = suggested }
+			if GlobalStorageSiK.NativeProduct.decodePath(suggested) then condition.nativePath = suggested end
+			local newRule = { op = op, condition = condition }
+			local function apply()
+				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = node.id, addRule = newRule })
 			end
+			local conflict = GlobalStorageSiK.RulesUI.detectContradiction(node.rules, newRule)
+			if conflict then
+				confirmAction(T("IGUI_GS_RuleContradictionQuestion", conflict.op,
+					describeCondition(conflict.condition), op, describeCondition(condition)), apply,
+					T("IGUI_GS_RuleContradictionConsequences", conflict.op,
+						describeCondition(conflict.condition), op, describeCondition(condition)))
+			else apply() end
 		end
-		if not alreadyPresent then
-			-- Rediseño (2026-08-25, protocolo de aceptación §07, "Categoría
-			-- sugerida"): pasa de etiqueta+botón sueltos a una tarjeta más,
-			-- la PRIMERA del bloque de reglas (justo encima de OR) - mismo
-			-- patrón visual que las tarjetas OR/AND/NOT (createSectionCard),
-			-- color L1 derivado siempre de suggestedNativePath; el prefijo queda
-			-- neutro porque no forma parte de la categoria. Dos botones (OR/AND,
-			-- sin NOT - excluir por
-			-- una sugerencia automática no tiene caso de uso real), los dos
-			-- pasan por el mismo detector de contradicciones que cualquier
-			-- otro camino de añadir regla (GS_FilterEditor.lua:onAddClicked)
-			-- - antes el único botón (solo OR) se lo saltaba (bug real
-			-- cerrado en la auditoria pre-release del mismo día).
-			local pal = PALETTE
-			local neutral = GlobalStorageSiK.RulesUI.conditionColor({
-				type = "category", value = sugKey,
-				nativePath = suggestedNativePath,
-			}, pal.textMuted)
-			local cardPad = 8
-			local cardX = pad
-			local cardW = contentW
-			local cardTop = y
-			local cy = cardTop + cardPad
-			local cx = pad + cardPad + 4
-
-			local sugCard = createSectionCard(scroll, cardX, cardTop, cardW, 10, neutral)
-			UI.Scroll.addChild(scroll, sugCard)
-
-			local sugPrefix = T("IGUI_GS_NodeSuggestedCat") .. " "
-			local prefixColor = pal.textSecondary
-			local sugPrefixLbl = createText(nil, cx, cy, cardW - cardPad * 2,
-				sugPrefix, prefixColor)
-			UI.Scroll.addChild(scroll, sugPrefixLbl)
-			local sugValueX = cx + getTextManager():MeasureStringX(UIFont.Small, sugPrefix)
-			local sugValue = UI.Controls.truncateText(
-				categoryDisplayLabel(sugKey), cardW - (sugValueX - cardX) - cardPad,
-				UIFont.Small)
-			local sugValueLbl = createText(nil, sugValueX, cy,
-				math.max(1, cardW - (sugValueX - cardX) - cardPad), sugValue, neutral)
-			UI.Scroll.addChild(scroll, sugValueLbl)
-			cy = cy + FONT_HGT_SMALL + 6
-
-			local function applySuggested(op)
-				if not self.node then return end
-				local condition = { type = "category", value = sugKey }
-				if GlobalStorageSiK.NativeProduct.decodePath(suggestedNativePath) then
-					condition.nativePath = suggestedNativePath
-				elseif GlobalStorageSiK.NativeProduct.decodePath(sugKey) then
-					condition.nativePath = sugKey
-				end
-				local newRule = { op = op, condition = condition }
-			local function applyRule()
-				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, addRule = newRule })
-			end
-				local conflict = GlobalStorageSiK.RulesUI.detectContradiction(self.node.rules, newRule)
-				if not conflict then
-					applyRule()
-					return
-				end
-				local existingLabel = describeCondition(conflict.condition)
-				local newLabel = describeCondition(newRule.condition)
-				local message = T("IGUI_GS_RuleContradictionConfirm", conflict.op, existingLabel, newRule.op, newLabel)
-				confirmAction(message, applyRule)
-			end
-
-			local btnGap = 6
-			local btnW = math.floor((cardW - cardPad * 2 - 4 - btnGap) / 2)
-			local orBtn = createBtn(cx, cy, btnW, T("IGUI_GS_NodeApplySuggestedOr"), scroll, function()
-				applySuggested("OR")
-			end)
-			UI.Controls.setTooltip(orBtn, T("IGUI_GS_NodeApplySuggestedOrTooltip"))
-			UI.Scroll.addChild(scroll, orBtn)
-			local andBtn = createBtn(cx + btnW + btnGap, cy, btnW, T("IGUI_GS_NodeApplySuggestedAnd"), scroll, function()
-				applySuggested("AND")
-			end)
-			UI.Controls.setTooltip(andBtn, T("IGUI_GS_NodeApplySuggestedAndTooltip"))
-			UI.Scroll.addChild(scroll, andBtn)
-			cy = cy + CONTROL_METRICS.buttonHeight + cardPad
-
-			UI.Layout.apply(sugCard, { x = cardX, y = cardTop,
-				w = cardW, h = cy - cardTop })
-			y = cy + 8
-		end
+		suggestionColumn:row(CONTROL_METRICS.buttonHeight, {
+			{ widget = button(suggestionColumn, T("IGUI_GS_NodeApplySuggestedOr"), function() applySuggested("OR") end) },
+			{ widget = button(suggestionColumn, T("IGUI_GS_NodeApplySuggestedAnd"), function() applySuggested("AND") end) } })
+		rulesColumn:block(suggestion, suggestionColumn:finish())
 	end
-
 	for _, op in ipairs(RULE_OPS) do
-		y = self:buildRuleSection(scroll, pad, contentW, y, op)
+		local ruleBlock = self:buildRuleSection(rulesBlock, op)
+		rulesColumn:block(ruleBlock, ruleBlock.h)
 	end
-	-- Firma del numero de reglas usada para dimensionar tarjetas/hosts en
-	-- ESTE build (ver syncFormButtons) - dev26 ronda 4quater: anadir una
-	-- regla dispara `rebuildForm()` de inmediato via el callback de
-	-- GS_FilterEditor.lua ANTES de que node.rules tenga la regla nueva
-	-- (llega despues, async, por el siguiente sync de terminalState) - ese
-	-- sync solo repintaba los chips (rebuildRuleChips) sin volver a llamar
-	-- resizeSectionCard, dejando el chip nuevo fuera de la tarjeta, tapado
-	-- por el boton "+ Anadir regla" (bug real con captura del usuario).
-	self._ruleCountAtBuild = #(self.node and self.node.rules or {})
+	finish(rulesBlock, rulesColumn)
+	self._ruleCountAtBuild = #(node.rules or {})
+	self._rulesLayoutAtBuild = GlobalStorageSiK.RulesUI.layoutSignature(node.rules)
 
-	-- ── Notas / ubicacion (Aplicar unificado mas abajo) ─────────────────────
-	self.notesLbl = createSectionLabel(pad, y, T("IGUI_GS_NodeNotesLabel"))
-	UI.Scroll.addChild(scroll, self.notesLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.notesEntry = createField(editNotes, pad, y, contentW, false)
-	UI.Controls.setTooltip(self.notesEntry, T("IGUI_GS_NodeNotesHint"))
-	UI.Scroll.addChild(scroll, self.notesEntry)
-	y = y + CONTROL_METRICS.inputHeight + 8
-
-	-- ── Acciones (dev26, ronda 3): plantilla (copiar/pegar/extender a la
-	-- zona) baja aqui desde el principio de la ventana, agrupada junto a
-	-- Aplicar y Excluir - antes vivia arriba del todo, separada del resto de
-	-- acciones del contenedor.
-	local templateSectionTitle = createSectionLabel(pad, y, T("IGUI_GS_NodeConfigTemplateTitle"))
-	UI.Scroll.addChild(scroll, templateSectionTitle)
-	y = y + FONT_HGT_SMALL + 4
-	local template = GlobalStorageSiK.TerminalNodeEditor.configTemplate
-	local templateStatus = template
-		and T("IGUI_GS_NodeConfigTemplateReadyRules", template.sourceName or "?", #(template.rules or {}), template.priority or 50)
-		or T("IGUI_GS_NodeConfigTemplateEmpty")
-	local statusText = UI.Controls.truncateText(templateStatus, contentW, UIFont.Small)
-	self.configTemplateStatusLbl = createText(nil, pad, y, contentW,
-		statusText, PALETTE.textMuted)
-	UI.Scroll.addChild(scroll, self.configTemplateStatusLbl)
-	y = y + FONT_HGT_SMALL + 6
-	-- Copiar/Pegar en pareja (2 botones a mitad de ancho - encajaban bien asi
-	-- antes de ronda 2), Extender a la zona en su propia fila a ancho
-	-- completo: 3 botones apretados en una sola fila truncaban su texto
-	-- (createButton se ajusta al ancho pasado pero nunca lo supera).
-	local templateGap = 4
-	local templateBtnW = math.floor((contentW - templateGap) / 2)
-	self.copyConfigBtn = createBtn(pad, y, templateBtnW, T("IGUI_GS_NodeConfigCopy"), scroll, function()
-		self:copyConfigTemplate()
-	end)
-	UI.Controls.setTooltip(self.copyConfigBtn, T("IGUI_GS_NodeConfigCopyTooltip"))
-	UI.Scroll.addChild(scroll, self.copyConfigBtn)
-	self.pasteConfigBtn = createBtn(pad + templateBtnW + templateGap, y, templateBtnW, T("IGUI_GS_NodeConfigPaste"), scroll, function()
-		self:pasteConfigTemplate()
-	end)
-	self.pasteConfigBtn:setEnable(template ~= nil)
-	UI.Controls.setTooltip(self.pasteConfigBtn, T("IGUI_GS_NodeConfigPasteTooltip"))
-	UI.Scroll.addChild(scroll, self.pasteConfigBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 6
-	-- "Extender a la zona" (dev26, ronda 2 - ver
-	-- Documentacion/GS_FilterRedesign_Plan.md §4.4-quater): sustituye a la
-	-- antigua seccion "Plantilla" del editor de ZONA (ya retirada) - aplica
-	-- el protocolo de aceptacion de ESTE contenedor a todos los demas de su
-	-- misma zona, con confirmacion previa. Nunca toca la prioridad.
-	self.extendToZoneBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeConfigExtendToZone"), scroll, function()
-		self:confirmExtendToZone()
-	end)
-	UI.Controls.setTooltip(self.extendToZoneBtn, T("IGUI_GS_NodeConfigExtendToZoneTooltip"))
-	UI.Scroll.addChild(scroll, self.extendToZoneBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 12
-
-	-- ── Aplicar TODO junto (nombre + prioridad + notas) ─────────────────────
-	-- Antes cada campo tenia su propio "Aplicar"; si el jugador cambiaba
-	-- varios y solo pulsaba uno, los demas quedaban sin guardar - un solo
-	-- boton que manda TODO junto en un unico updateNode evita ese riesgo.
-	self.applyAllBtn = createBtn(pad, y, contentW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
-		if not self.node then return end
-		local name = self.nameEntry and self.nameEntry:getText() or ""
-		local notes = self.notesEntry and self.notesEntry:getText() or ""
-		local n = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
-		self._editName = name
-		self._editNotes = notes
-		GlobalStorageSiK.CompatMods.pushContainerLabelText(self.node, getSpecificPlayer(0), notes)
-		local opts = { displayName = name, notes = notes }
-		if n then
-			n = math.floor(n + 0.5)
-			if n < 1 then n = 1 elseif n > 100 then n = 100 end
-			self._editPriority = n
-			self.priorityEntry:setText(tostring(n))
-			opts.priority = n
+	if node.offline == true then
+		local recovery = section(T("IGUI_GS_NodeRecoveryTitle"), T("IGUI_GS_NodeRecoveryBody"))
+		local recoveryColumn = recovery:beginColumn()
+		local lines = UI.Controls.wrapText(T("IGUI_GS_NodeRecoveryBody"), recoveryColumn.width, UIFont.Small)
+		for i = 1, #lines do label(recoveryColumn, lines[i]) end
+		self.recoveryTransferBtn = button(recoveryColumn, T("IGUI_GS_NodeBtnTransferConfig"),
+			function() self:requestConfigTransferProposal() end)
+		recoveryColumn:block(self.recoveryTransferBtn, CONTROL_METRICS.buttonHeight)
+		self.removeBtn = button(recoveryColumn, T("IGUI_GS_NodeBtnRemove"),
+			function() self:confirmRemoveFromNetwork() end, true)
+		recoveryColumn:block(self.removeBtn, CONTROL_METRICS.buttonHeight)
+		self.rebindBtn = button(recoveryColumn, T("IGUI_GS_NodeBtnRebind"),
+			function() self:requestRebindProposal() end)
+		recoveryColumn:block(self.rebindBtn, CONTROL_METRICS.buttonHeight)
+		for i = 1, #(self._rebindCandidates or {}) do
+			local candidate = self._rebindCandidates[i]
+			local text = T("IGUI_GS_NodeRebindCandidate", candidate.name or "?",
+				candidate.x or "?", candidate.y or "?", candidate.z or "?")
+			recoveryColumn:block(button(recoveryColumn, text,
+				function() self:requestRebindProposal(candidate.nodeId) end), CONTROL_METRICS.buttonHeight)
 		end
-		self:requestNodeUpdate(opts)
-		self:syncTitleFromName()
-	end)
-	UI.Controls.setTooltip(self.applyAllBtn, T("IGUI_GS_ApplyAllChangesTooltip"))
-	UI.Scroll.addChild(scroll, self.applyAllBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 12
-
-	-- ── Botón acción: excluir/incluir (dev26, ronda 2 - ver §4.5 del plan) ──
-	-- "Desactivar contenedor" se retira por completo: enabled=false sin
-	-- exclusion se revertia solo con el siguiente rescan de zona (ver
-	-- GS_ZoneRefresh.lua:105-108, existing.enabled=true si membership no es
-	-- "excluded") - era un boton que aparentaba funcionar pero no persistia
-	-- nada. Excluir sigue siendo la unica forma real de sacar un contenedor
-	-- de la red, ahora con confirmacion explicita (solo al excluir, nunca al
-	-- volver a incluir).
-	local membLabel = isExcluded and T("IGUI_GS_NodeBtnInclude") or T("IGUI_GS_NodeBtnExclude")
-	-- Rojo (mismo PALETTE.statusDanger que el resto del terminal) SOLO
-	-- cuando la accion es excluir - al volver a incluir el boton se queda en
-	-- su estilo normal, no tiene sentido pintar de peligro una accion segura.
-	local membActiveColor = (not isExcluded) and PALETTE.statusDanger or nil
-	self.membBtn = createProductButton(pad, y, contentW,
-		CONTROL_METRICS.buttonHeight, membLabel, scroll, function()
-		if self.node and self.node.membership == "excluded" then
-			self:requestNodeUpdate({ enabled = true, membership = "active" })
-		else
-			self:confirmExclude()
-		end
-	end, membActiveColor, true)
-	UI.Controls.setTooltip(self.membBtn, T("IGUI_GS_NodeExcludeTooltip"))
-	UI.Scroll.addChild(scroll, self.membBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 6
-
-	self.removeBtn = createProductButton(pad, y, contentW,
-		CONTROL_METRICS.buttonHeight,
-		T("IGUI_GS_NodeBtnRemove"), scroll, function()
-			self:confirmRemoveFromNetwork()
-		end, PALETTE.statusDanger, true)
-	UI.Controls.setTooltip(self.removeBtn, T("IGUI_GS_NodeRemoveTooltip"))
-	UI.Scroll.addChild(scroll, self.removeBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 6
-	if node and node.offline == true then
-		self.rebindBtn = createBtn(pad, y, contentW, T("IGUI_GS_NodeBtnRebind"), scroll, function()
-			self:requestRebindProposal()
-		end)
-		UI.Controls.setTooltip(self.rebindBtn, T("IGUI_GS_NodeRebindTooltip"))
-		UI.Scroll.addChild(scroll, self.rebindBtn)
-		y = y + CONTROL_METRICS.buttonHeight + 6
-		if self._rebindCandidates and #self._rebindCandidates > 0 then
-			local chooseLbl = createSectionLabel(pad, y,
-				T("IGUI_GS_NodeRebindChooseTarget"))
-			UI.Scroll.addChild(scroll, chooseLbl)
-			y = y + FONT_HGT_SMALL + 4
-			for i = 1, #self._rebindCandidates do
-				local candidate = self._rebindCandidates[i]
-				local label = T("IGUI_GS_NodeRebindCandidate", candidate.name or "?",
-					candidate.x or "?", candidate.y or "?", candidate.z or "?")
-				local choiceBtn = createBtn(pad, y, contentW, label, scroll, function()
-					self:requestRebindProposal(candidate.nodeId)
-				end)
-				UI.Controls.setTooltip(choiceBtn, T("IGUI_GS_NodeRebindCandidateTooltip"))
-				UI.Scroll.addChild(scroll, choiceBtn)
-				y = y + CONTROL_METRICS.buttonHeight + 4
-			end
-		end
+		finish(recovery, recoveryColumn)
 	end
-	y = y + 6
-
-	-- ── Contenido del contenedor ──────────────────────────────────────────
-	local contentsTitle = createSectionLabel(pad, y, T("IGUI_GS_NodeContentsTitle"))
-	self.contentsTitleLbl = contentsTitle
-	UI.Scroll.addChild(scroll, contentsTitle)
-	y = y + FONT_HGT_SMALL + 8
-
-	self._contentsStartY = y
+	self._contentsStartY = bottom
 	self._contentsFingerprint = nil
 	self._formBuilt = true
 	self:syncTitleFromName()
 	self:refreshRulesSummary()
-	for _, op in ipairs(RULE_OPS) do
-		self:rebuildRuleChips(op)
-	end
+	for _, op in ipairs(RULE_OPS) do self:rebuildRuleChips(op) end
+	self:mountFixedActions()
 	self:refreshContents()
+	self._lastLayoutW = width
+	self._buildingForm = false
 end
 
---- Construye una seccion de reglas (OR/AND/NOT): tarjeta de fondo coloreada
---- por operador (createSectionCard, mismo patron "fondo decorativo + hijos
---- independientes en coordenadas absolutas del scroll" que el resto del
---- terminal - ver GS_TerminalUI_NetworkZones.lua), titulo en el mismo color,
---- panel de chips (altura calculada desde node.rules) y boton "+ Anadir
---- regla <op>".
----@param scroll table
----@param pad number
----@param contentW number
----@param y number
----@param op string "OR"|"AND"|"NOT"
----@return number newY
-function GS_NodeEditorUI:buildRuleSection(scroll, pad, contentW, y, op)
-	local rules = (self.node and self.node.rules) or {}
-	local count = 0
-	for i = 1, #rules do
-		if rules[i].op == op then count = count + 1 end
+function GS_NodeEditorUI:mountFixedActions()
+	if not self.editorDock then return end
+	if self.actionsBlock then self.actionsBlock:dispose() end
+	local rect = self.editorDock:getFixedBottomRect()
+	local block = UI.Block.create({ parent = self.editorDock.fixedBottomHost,
+		w = rect.w, title = T("IGUI_GS_PermColActions"), tooltip = T("IGUI_GS_ApplyAllChangesTooltip"),
+		playerNum = self.playerNum })
+	self.actionsBlock = block
+	local column = block:beginColumn()
+	local function action(title, callback, danger, tooltip)
+		return UI.Controls.button(column.parent, { text = title, onClick = callback,
+			danger = danger == true, tooltip = tooltip, playerNum = self.playerNum })
 	end
-	local CHIP_H, CHIP_PAD = FONT_HGT_SMALL + 8, 3
-	local chipsH = (count == 0)
-		and (CHIP_PAD + FONT_HGT_SMALL + CHIP_PAD * 2)
-		or  (CHIP_PAD + count * (CHIP_H + CHIP_PAD) + CHIP_PAD)
-
-	local cardPad = 8
-	local cardX = pad
-	local cardW = contentW
-	local cardTop = y
-	local cy = y + cardPad
-	local cx = pad + cardPad + 4
-	local color = RULE_OP_COLOR[op]
-
-	-- Tarjeta de fondo SiK.UI insertada
-	-- ANTES que su contenido (mismo patron que GS_TerminalUI_NetworkZones.lua:
-	-- card primero con alto provisional, setBounds al final con el
-	-- alto real) - si se insertara despues, taparia el titulo/chips/boton en
-	-- vez de quedar detras.
-	local card = createSectionCard(scroll, cardX, cardTop, cardW, 10, color)
-	UI.Scroll.addChild(scroll, card)
-	self._ruleCards = self._ruleCards or {}
-	self._ruleCards[op] = card
-
-	local titleLbl = createText(nil, cx, cy, cardW - cardPad * 2 - 4,
-		T(RULE_OP_TITLE_KEY[op]), color)
-	UI.Scroll.addChild(scroll, titleLbl)
-	cy = cy + FONT_HGT_SMALL + 6
-
-	local host = createHost(nil, cx, cy, cardW - cardPad * 2 - 4, chipsH)
-	UI.Scroll.addChild(scroll, host)
-	self._ruleChipsHosts = self._ruleChipsHosts or {}
-	self._ruleChipsHosts[op] = host
-	cy = cy + chipsH + 6
-
-	local addBtn = createBtn(cx, cy, cardW - cardPad * 2 - 4, T(RULE_OP_ADD_KEY[op]), scroll, function()
+	local template = GlobalStorageSiK.TerminalNodeEditor.configTemplate
+	self.copyConfigBtn = action(T("IGUI_GS_NodeConfigCopy"), function() self:copyConfigTemplate() end,
+		false, T("IGUI_GS_NodeConfigCopyTooltip"))
+	local pasteLabel = T("IGUI_GS_NodeConfigPaste") .. (template and (" · " .. tostring(template.sourceName or "?")) or "")
+	self.pasteConfigBtn = action(pasteLabel, function() self:pasteConfigTemplate() end, false,
+		template and T("IGUI_GS_NodeConfigTemplateReadyRules", template.sourceName or "?",
+			#(template.rules or {}), template.priority or 50) or T("IGUI_GS_NodeConfigTemplateEmpty"))
+	self.pasteConfigBtn:setEnable(template ~= nil)
+	self.extendToZoneBtn = action(T("IGUI_GS_NodeConfigExtendToZone"),
+		function() self:confirmExtendToZone() end, false, T("IGUI_GS_NodeConfigExtendToZoneTooltip"))
+	column:row(CONTROL_METRICS.buttonHeight, {
+		{ widget = self.copyConfigBtn }, { widget = self.pasteConfigBtn }, { widget = self.extendToZoneBtn } })
+	local excluded = self.node.membership == "excluded"
+	self.membBtn = action(T(excluded and "IGUI_GS_NodeBtnInclude" or "IGUI_GS_NodeExcludeContainer"), function()
+		if self.node.membership == "excluded" then
+			self:requestNodeUpdate({ enabled = true, membership = "active" })
+		else self:confirmExclude() end
+	end, not excluded, T("IGUI_GS_NodeExcludeTooltip"))
+	self.applyAllBtn = action(T("IGUI_GS_ApplyAllChanges"), function()
 		if not self.node then return end
-		local scopeRules = {}
-		local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
-		for i = 1, #nodes do
-			local sibling = nodes[i]
-			if sibling.id ~= self.node.id and sibling.zoneId == self.node.zoneId then
-				for j = 1, #(sibling.rules or {}) do
-					scopeRules[#scopeRules + 1] = sibling.rules[j]
+		self._editName = self.nameEntry:getText()
+		local priority = tonumber(self.priorityEntry:getText())
+		local opts = { displayName = self._editName, notes = self._editNotes }
+		if priority then
+			priority = math.max(1, math.min(100, math.floor(priority + 0.5)))
+			self._editPriority, opts.priority = priority, priority
+			self.priorityEntry:setText(tostring(priority))
+		end
+		GlobalStorageSiK.CompatMods.pushContainerLabelText(self.node,
+			getSpecificPlayer(self.playerNum or 0), self._editNotes)
+		self:requestNodeUpdate(opts)
+		self:syncTitleFromName()
+	end, false, T("IGUI_GS_ApplyAllChangesTooltip"))
+	column:row(CONTROL_METRICS.buttonHeight, { { widget = self.membBtn }, { widget = self.applyAllBtn } })
+	self.editorDock:setFixedBottomHeight(column:finish())
+end
+
+--- Each operator owns its controls inside the shared Rules Block.
+function GS_NodeEditorUI:buildRuleSection(parentBlock, op)
+	local rules = self.node.rules or {}
+	local count = 0
+	for i = 1, #rules do if rules[i].op == op then count = count + 1 end end
+	local chipH, chipGap = UI.Controls.dismissibleRowHeight({ profile = "editor" }), 8
+	local chipsH = math.max(FONT_HGT_SMALL, count * (chipH + chipGap) - chipGap)
+	local card = UI.Block.create({ parent = parentBlock.childParent,
+		w = parentBlock:getContentRect().w, title = T(RULE_OP_TITLE_KEY[op]),
+		accent = RULE_OP_COLOR[op],
+		tooltip = T("IGUI_GS_NodeRulesHint"), playerNum = self.playerNum })
+	local column = card:beginColumn()
+	local host = createHost(column.parent, 0, 0, column.width, chipsH)
+	column:block(host, chipsH)
+	self._ruleCards, self._ruleChipsHosts, self._ruleAddBtns =
+		self._ruleCards or {}, self._ruleChipsHosts or {}, self._ruleAddBtns or {}
+	self._ruleCards[op], self._ruleChipsHosts[op] = card, host
+	local add = UI.Controls.button(column.parent, { text = T(RULE_OP_ADD_KEY[op]),
+		playerNum = self.playerNum, onClick = function()
+			if not self.node then return end
+			local scopeRules = {}
+			for _, sibling in ipairs(self.terminal.terminalState.nodes or {}) do
+				if sibling.id ~= self.node.id and sibling.zoneId == self.node.zoneId then
+					for _, rule in ipairs(sibling.rules or {}) do scopeRules[#scopeRules + 1] = rule end
 				end
 			end
-		end
-		GlobalStorageSiK.FilterEditor.show({ kind = "node", id = self.node.id, rules = self.node.rules, scopeRules = scopeRules }, op, function()
-			self:rebuildForm()
-		end)
-	end)
-	UI.Scroll.addChild(scroll, addBtn)
-	self._ruleAddBtns = self._ruleAddBtns or {}
-	self._ruleAddBtns[op] = addBtn
-	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
-
-	UI.Layout.apply(card, { x = cardX, y = cardTop,
-		w = cardW, h = cy - cardTop })
-	y = cy + 8
-	return y
+			GlobalStorageSiK.FilterEditor.show({ kind = "node", id = self.node.id,
+				rules = self.node.rules, scopeRules = scopeRules }, op,
+				function() self:rebuildForm() end)
+		end })
+	self._ruleAddBtns[op] = add
+	column:block(add, CONTROL_METRICS.buttonHeight)
+	column:finish()
+	return card
 end
 
 --- Recalcula la frase-resumen del protocolo dentro de rulesSummaryHost. El
@@ -1061,8 +772,11 @@ function GS_NodeEditorUI:refreshRulesSummary()
 	if not host then return end
 	for i = #(host.childrenInOrder or {}), 1, -1 do
 		local ch = host.childrenInOrder[i]
-		host:removeChild(ch)
-		if ch.removeFromUIManager then ch:removeFromUIManager() end
+		if ch.dispose then ch:dispose()
+		else
+			host:removeChild(ch)
+			if ch.removeFromUIManager then ch:removeFromUIManager() end
+		end
 	end
 	local rules = (self.node and self.node.rules) or {}
 	local layout = GlobalStorageSiK.RulesUI.layoutSummary(rules, host.width,
@@ -1085,12 +799,10 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 	end
 
 	local allRules = (self.node and self.node.rules) or {}
-	local CHIP_H, CHIP_PAD = FONT_HGT_SMALL + 8, 3
-	local cy = CHIP_PAD
+	local CHIP_H, CHIP_PAD = UI.Controls.dismissibleRowHeight({ profile = "editor" }), 8
+	local cy = 0
 	local hostW = host.width
 	local removeText = T("IGUI_GS_Remove")
-	local removeBtnW = UI.Controls.measureButtonWidth(removeText, UIFont.Small, 20, 52, 120)
-	local labelMaxW = math.max(20, hostW - removeBtnW - 12)
 
 	local shown = 0
 	for realIdx = 1, #allRules do
@@ -1098,24 +810,21 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 		if rule.op == op then
 			shown = shown + 1
 			local label = describeCondition(rule.condition)
-			label = UI.Controls.truncateText(label, labelMaxW, UIFont.Small)
 			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
 				rule.condition, PALETTE.textPrimary)
-			createText(host, 4, cy + 2, labelMaxW, label, labelColor)
 
 			local capturedIdx = realIdx
-			local removeBtn = createProductButton(
-				hostW - removeBtnW - 2, cy, removeBtnW, CHIP_H,
-				removeText, host,
-				function()
+			UI.Controls.dismissibleRow(host, {
+				x = 0, y = cy, w = hostW, h = CHIP_H, profile = "editor",
+				text = label, tooltip = label, actionTooltip = removeText, playerNum = self.playerNum,
+				tone = "ruleText", theme = { ruleText = { r = labelColor[1],
+					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } },
+				onRemove = function()
 					if not self.node then return end
 					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id, removeRuleIndex = capturedIdx })
 					table.remove(self.node.rules, capturedIdx)
 					self:rebuildForm()
-				end
-			)
-			UI.Controls.setTooltip(removeBtn, removeText)
-			host:addChild(removeBtn)
+				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end
 	end
@@ -1133,8 +842,7 @@ function GS_NodeEditorUI:rebuildForm()
 	if self.nameEntry  then self._editName  = self.nameEntry:getText()  end
 	if self.notesEntry then self._editNotes = self.notesEntry:getText() end
 	if self.priorityEntry then
-		local n = tonumber(self.priorityEntry:getText())
-		if n then self._editPriority = n end
+		self._editPriority = self.priorityEntry:getText()
 	end
 	local savedOffset = UI.Scroll.getScrollOffset(self.editorScroll)
 	self:resetForm()
@@ -1153,26 +861,27 @@ function GS_NodeEditorUI:syncFormButtons()
 	if not self.node then
 		return
 	end
-	-- El numero de reglas puede haber cambiado desde el ultimo build (ver
-	-- _ruleCountAtBuild en ensureForm) - las tarjetas/hosts de
+	-- Cantidad, distribucion OR/AND/NOT o texto pueden cambiar desde el build.
+	-- La firma visible detecta tambien sustituciones con el mismo conteo. Los
+	-- hosts de
 	-- OR/AND/NOT solo se dimensionan de verdad en un build completo
 	-- (buildRuleSection -> setBounds); si solo repintasemos los
 	-- chips aqui (rebuildRuleChips) con un conteo distinto al que se uso
 	-- para dimensionar, el chip nuevo (o el hueco de uno quitado) queda
 	-- fuera de la tarjeta, tapado por/separado del boton "+ Anadir regla".
-	if self._ruleCountAtBuild ~= nil and #(self.node.rules or {}) ~= self._ruleCountAtBuild then
+	if self._rulesLayoutAtBuild ~= GlobalStorageSiK.RulesUI.layoutSignature(self.node.rules) then
 		self:rebuildForm()
 		return
 	end
 	local excluded = self.node.membership == "excluded"
 	if self.membBtn then
-		local label = excluded and T("IGUI_GS_NodeBtnInclude") or T("IGUI_GS_NodeBtnExclude")
+		local label = excluded and T("IGUI_GS_NodeBtnInclude") or T("IGUI_GS_NodeExcludeContainer")
 		if self.membBtn.setText then self.membBtn:setText(label)
 		elseif self.membBtn.setTitle then self.membBtn:setTitle(label) end
 		local color = (not excluded) and UI.Theme.color("danger")
 			or UI.Theme.color("surfaceAlt")
-		self.membBtn.backgroundColor = { r = color[1], g = color[2],
-			b = color[3], a = color[4] or 0.92 }
+		self.membBtn.backgroundColor = { r = color.r, g = color.g,
+			b = color.b, a = color.a }
 	end
 	if self.statsLbl then
 		local itemCount, typeCount = nodeItemStats(self.node)
@@ -1221,25 +930,34 @@ function GS_NodeEditorUI:refreshContents()
 	local scroll = self.editorScroll
 	local savedOffset = UI.Scroll.getScrollOffset(scroll)
 	local innerW = UI.Scroll.contentWidth(scroll)
-	local contentW = math.max(1, innerW - 16)
+	local contentW = math.max(1, innerW)
 
 	self:ensureContentsHost()
 	if not self.contentsHost then
 		return
 	end
 
-	self.contentsHost:setX(8)
+	self.contentsHost:setX(0)
 	self.contentsHost:setY(self._contentsStartY or 0)
 	self.contentsHost:setWidth(contentW)
-	self:clearContentsHost()
-	self:syncFormButtons()
-
-	local yEnd = GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(
-		self.contentsHost, self.terminal, self.node, 0, 8, contentW, { plainHost = true }
-	)
-
-	self.contentsHost:setHeight(math.max(40, yEnd + 4))
-	self._lastContentBottom = (self._contentsStartY or 0) + self.contentsHost:getHeight() + 8
+        self:syncFormButtons()
+        if not self.contentsView then
+                self.contentsView = ContainerInventory.mount(self.contentsHost, self, self.node, {
+                        x = 0, y = 0, w = contentW,
+                        onHeightChanged = function(view)
+                                local height = view and view:getHeight() or 40
+                                self.contentsHost:setHeight(math.max(40, height))
+                                self._lastContentBottom = (self._contentsStartY or 0)
+                                        + self.contentsHost:getHeight()
+                                self:updateScrollHeight(self._lastContentBottom)
+                        end,
+                })
+        elseif self.contentsView.refresh then
+                self.contentsView:refresh(self.node)
+        end
+        local viewH = self.contentsView and self.contentsView:getHeight() or 40
+        self.contentsHost:setHeight(math.max(40, viewH))
+	self._lastContentBottom = (self._contentsStartY or 0) + self.contentsHost:getHeight()
 	self:updateScrollHeight(self._lastContentBottom)
 	UI.Scroll.setScrollOffset(scroll, savedOffset)
 end
@@ -1258,7 +976,11 @@ function GS_NodeEditorUI:updateScrollHeight(contentBottom)
 	if not bottom then
 		bottom = self._lastContentBottom or self._contentsStartY or 0
 	end
-	UI.Scroll.setContentHeight(self.editorScroll, bottom)
+	if self.editorDock then
+		self.editorDock:setContentHeight(bottom)
+	else
+		UI.Scroll.setContentHeight(self.editorScroll, bottom)
+	end
 end
 
 --- Reconstruye formulario al cambiar de nodo (preserva _editName, etc. - las
@@ -1287,6 +1009,7 @@ function GS_NodeEditorUI:resetForm()
 	self._ruleAddBtns    = nil
 	self._ruleCards      = nil
 	self._ruleCountAtBuild = nil
+	self._rulesLayoutAtBuild = nil
 	self.membBtn         = nil
 	self.priorityLbl     = nil
 	self.priorityHintLbl = nil
@@ -1304,7 +1027,9 @@ function GS_NodeEditorUI:resetForm()
 	self.inheritedZoneHost = nil
 	self.editZoneFromNodeBtn = nil
 	self.contentsTitleLbl = nil
-	self.contentsHost    = nil
+        self.contentsHost    = nil
+        if self.contentsView and self.contentsView.dispose then self.contentsView:dispose() end
+        self.contentsView    = nil
 	self._contentsStartY = 0
 	self._contentsFingerprint = nil
 	self._lastContentBottom = nil
@@ -1338,9 +1063,9 @@ function GS_NodeEditorUI:ensureContentsHost()
 	if not scroll then
 		return
 	end
-	local pad = 8
+	local pad = 0
 	local innerW = UI.Scroll.contentWidth(scroll)
-	local contentW = math.max(1, innerW - pad * 2)
+	local contentW = math.max(1, innerW)
 	self.contentsHost = createHost(nil, pad, self._contentsStartY or 0, contentW, 40)
 	self.contentsHost.clipChildren = false
 	UI.Scroll.addChild(scroll, self.contentsHost)
@@ -1384,8 +1109,12 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 		self:resetForm()
 	end
 
-	if not self.editorScroll then
-		self.editorScroll = UI.Scroll.create(self, PAD, 0, 400, 200, "panel")
+	if not self.editorDock then
+		self.editorDock = ScrollDock.create({
+			parent = self.contentHost or self, x = 0, y = 0, w = 400, h = 200,
+			padding = 0, gap = 8, contentHeight = 0, playerNum = self.playerNum,
+		})
+		self.editorScroll = self.editorDock and self.editorDock.scroll
 	end
 
 	self:calculateLayout()
@@ -1403,7 +1132,6 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 		self._contentsFingerprint = nil
 		self:refreshContents()
 	end
-	self:requestNodeContents(node.id)
 end
 
 --- Abre editor modal para un contenedor.
@@ -1433,7 +1161,7 @@ function GlobalStorageSiK.TerminalNodeEditor.open(terminal, node, categories)
 
 	local ui = GS_NodeEditorUI:new(x, y, w, h)
 	ui:initialise()
-	ui:addToUIManager()
+	UI.Modal.show(ui)
 	ui:setNode(terminal, node, categories)
 	GlobalStorageSiK.TerminalNodeEditor.instance = ui
 	-- Verificación de solapes del modal al abrir (gated por DebugMode).
@@ -1464,6 +1192,7 @@ end
 --- Refresca contenido tras respuesta del servidor.
 ---@param args table|nil
 function GlobalStorageSiK.TerminalNodeEditor.onContentsReceived(args)
+	if args and args.detailPage then return end
 	local ui = GlobalStorageSiK.TerminalNodeEditor.instance
 	if not ui or not ui.node then
 		return
@@ -1480,7 +1209,7 @@ function GlobalStorageSiK.TerminalNodeEditor.onContentsReceived(args)
 	-- llegado la sugerencia del servidor, forzamos un unico rebuildForm()
 	-- completo ahora que sí ha llegado, para que la tarjeta aparezca sin
 	-- tener que cerrar y reabrir el editor.
-	if ui._sugCardMissingData and ui.rebuildForm then
+	if ui._sugCardMissingData and args and args.suggestedNativePath and ui.rebuildForm then
 		ui:rebuildForm()
 	end
 end
@@ -1499,9 +1228,11 @@ function GlobalStorageSiK.TerminalNodeEditor.syncNodeData(terminal, nodes)
 			ui.node = updated
 			-- Sincronizar estado de edición con datos del servidor (las
 			-- reglas ya no tienen mirror local, se leen de updated.rules directamente)
-			ui._editName     = updated.displayName or updated.name or ""
-			ui._editNotes    = updated.notes or ""
-			ui._editPriority = updated.priority or 50
+			ui._editName = ui.nameEntry and ui.nameEntry:getText() or ui._editName
+				or updated.displayName or updated.name or ""
+			ui._editNotes = ui._editNotes or updated.notes or ""
+			ui._editPriority = ui.priorityEntry and ui.priorityEntry:getText()
+				or ui._editPriority or updated.priority or 50
 			ui:syncTitleFromName()
 			ui:syncFormButtons()
 			if GlobalStorageSiK.NodeNaming and GlobalStorageSiK.NodeNaming.applyToNode then

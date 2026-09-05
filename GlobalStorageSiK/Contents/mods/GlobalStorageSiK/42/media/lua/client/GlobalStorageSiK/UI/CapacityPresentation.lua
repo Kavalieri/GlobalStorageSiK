@@ -24,8 +24,9 @@ local function numberText(value)
 	return string.format("%.1f", numeric)
 end
 
-function CapacityPresentation.fromState(capacity)
+function CapacityPresentation.fromState(capacity, options)
 	local cap = type(capacity) == "table" and capacity or {}
+	options = options or {}
 	local used = tonumber(cap.usedWeight) or 0
 	local total = tonumber(cap.effectiveCapacity) or tonumber(cap.totalCapacity)
 		or tonumber(cap.capacity) or 0
@@ -41,10 +42,17 @@ function CapacityPresentation.fromState(capacity)
 
 	local label
 	if total > 0 then
-		label = text("IGUI_GS_WeightUsage", numberText(used), numberText(total),
+		label = text("IGUI_GS_CapacityUsage", numberText(used), numberText(total),
 			tostring(math.floor(percent + 0.5)) .. "%")
 	else
 		label = text("IGUI_GS_WeightUsedOnly", numberText(used))
+	end
+	local count = tonumber(options.count)
+	local containers = options.kind == "containers"
+	if count == nil then count = tonumber(containers and cap.containerCount or cap.itemCount) end
+	if count ~= nil then
+		local key = containers and "IGUI_GS_CapacityContainerCount" or "IGUI_GS_CapacityItemCount"
+		label = text(key, tostring(math.max(0, math.floor(count)))) .. " · " .. label
 	end
 	local personalBonus = tonumber(cap.personalBonus) or 0
 	if personalBonus > 0 then

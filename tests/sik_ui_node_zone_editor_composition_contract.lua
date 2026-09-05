@@ -1,4 +1,4 @@
--- The node and zone editors keep one vanilla root host for Window.applyEditor;
+-- The node and zone editors keep one vanilla root host for Modal.apply;
 -- every visible child is constructed and owned by the public SiK.UI facade.
 local root = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
 
@@ -37,20 +37,28 @@ for index = 1, #files do
 	local source = read(root .. name)
 	contains(source, 'local UI = require "GS_UI_Framework"',
 		name .. " enters through the public facade")
-	contains(source, "UI.Window.applyEditor", name .. " uses the canonical editor shell")
-	contains(source, "UI.Scroll.create", name .. " uses the public scroll region")
+	contains(source, "UI.Modal.apply", name .. " uses the canonical modal shell")
+	contains(source, "scroll = false", name .. " avoids a duplicate outer scroll owner")
+	contains(source, "self.contentHost or self", name .. " mounts its editor inside the physical Block")
+	contains(source, "UI.Modal.show", name .. " enters the shared focus and Escape stack")
+	contains(source, "local ScrollDock = UI.ScrollDock",
+		name .. " uses the public ScrollDock composition")
+	contains(source, "ScrollDock.create", name .. " owns one canonical editor scroll region")
+	contains(source, "self.editorDock and self.editorDock.scroll",
+		name .. " obtains the scroll only from its ScrollDock")
+	contains(source, "padding = 0, gap = 8",
+		name .. " leaves the inner Block as the sole padding owner")
+	contains(source, "UI.Scroll.setOnContentRectChanged",
+		name .. " reflows only when the canonical content rectangle changes")
+	contains(source, "UI.Scroll.setContentHeight",
+		name .. " reports final composition height to the canonical scroll")
 	contains(source, "UI.Controls.copyText", name .. " delegates copy rendering")
 	contains(source, "UI.Controls.field", name .. " delegates editable fields")
 	contains(source, "UI.Controls.panel", name .. " delegates transparent child hosts")
-	contains(source, "UI.Controls.sectionTitle", name .. " delegates section headings")
-	contains(source, "local function createInfoSectionTitle",
-		name .. " composes help through the canonical Info then Title control")
-	excludes(source, "local function addBlockInfoBtn",
-		name .. " must not append a local info button after the title")
 	contains(source, "UI.Controls.button", name .. " delegates actions")
-	contains(source, "UI.Container.create", name .. " delegates generic accented containers")
-	contains(source, "local function createSectionCard", name .. " keeps one product composition adapter")
-	contains(source, "UI.Modal.confirm", name .. " delegates confirmations")
+	contains(source, "UI.Block.create", name .. " delegates semantic section blocks")
+	contains(source, ":beginColumn()", name .. " composes child controls through a Block column")
+	contains(source, "local function finish", name .. " finalizes each Block column without a trailing gap")
 
 	contains(source, "UI.Window.newInstance", name .. "delegates the root host")
 	excludes(source, "ISPanel", name .. "has no direct window primitive")

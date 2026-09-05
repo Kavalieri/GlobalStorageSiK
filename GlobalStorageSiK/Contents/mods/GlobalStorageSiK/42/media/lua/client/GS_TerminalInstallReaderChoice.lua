@@ -225,13 +225,14 @@ end
 ---@param textW number
 ---@return number y tras el bloque
 function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
-	local pad = PAD
+	local host = self.contentHost or self
+	local pad = 0
 	local rows = self.networkRows or {}
 
 	-- createSectionLabel (pedido 2026-08-26, "ajustarse a la nueva UI y las
 	-- herramientas ya generadas") en vez del ISLabel suelto con color a mano
 	-- que tenia antes - mismo titulo de bloque que el resto del proyecto.
-	self.linkTitle = UI.Controls.sectionTitle(self, {
+	self.linkTitle = UI.Controls.sectionTitle(host, {
 		x = pad, y = y, w = textW, text = T("IGUI_GS_InstallReaderLinkTitle"),
 		playerNum = self.playerNum,
 	})
@@ -242,7 +243,7 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 	self.networkCombo = nil
 	self.networkActionBtn = nil
 	if #rows == 0 then
-		self.noNetworksLbls, y = addWrappedLabel(self, pad, y, textW,
+		self.noNetworksLbls, y = addWrappedLabel(host, pad, y, textW,
 			T("IGUI_GS_InstallReaderNoNetworks"), "warning")
 		y = y + 4
 	else
@@ -256,7 +257,7 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 				value = row,
 			}
 		end
-		self.networkCombo = UI.Controls.combo(self, {
+		self.networkCombo = UI.Controls.combo(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.inputHeight, items = comboItems,
 			playerNum = self.playerNum,
 			onChange = function() refreshRecoverySelection(self) end,
@@ -264,14 +265,14 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 		y = y + CONTROL_METRICS.inputHeight + 6
 
 		for i = 1, NETWORK_INFO_LINE_COUNT do
-			local lbl = UI.Controls.copyText(self, {
+			local lbl = UI.Controls.copyText(host, {
 				x = pad, y = y, w = textW, text = "", tone = "textMuted",
 				lineGap = LINE_GAP, playerNum = self.playerNum,
 			})
 			self.networkInfoLbls[#self.networkInfoLbls + 1] = lbl
 			y = y + FONT_HGT_SMALL + LINE_GAP
 		end
-		self.networkActionBtn = UI.Controls.button(self, {
+		self.networkActionBtn = UI.Controls.button(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
 			text = T("IGUI_GS_NetLinkAction"), fullWidth = true,
 			playerNum = self.playerNum, onClick = function()
@@ -286,14 +287,15 @@ function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
 end
 
 function GS_TerminalInstallReaderChoice:buildLayout()
-	local pad = PAD
-	local rect = self:contentRect()
+	local host = self.contentHost or self
+	local pad = 0
+	local rect = { x = 0, y = 0, w = host.width or 0, h = host.height or 0 }
 	local y = rect.y
 	local textW = rect.w
 	local x = rect.x
 
 	local linkRange = GlobalStorageSiK.Sandbox.getTerminalNetworkRange()
-	local intro = UI.Controls.copyText(self, {
+	local intro = UI.Controls.copyText(host, {
 		x = x, y = y, w = textW,
 		text = T("IGUI_GS_InstallReaderIntro", linkRange),
 		tone = "textMuted", lineGap = LINE_GAP, playerNum = self.playerNum,
@@ -302,13 +304,13 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	y = y + 6
 
 	-- ── Bloque "Red nueva": nombre + Crear, un solo clic ────────────────────
-	self.newTitle = UI.Controls.sectionTitle(self, {
+	self.newTitle = UI.Controls.sectionTitle(host, {
 		x = x, y = y, w = textW, text = T("IGUI_GS_InstallReaderNewTitle"),
 		playerNum = self.playerNum,
 	})
 	y = y + self.newTitle.height + 4
 
-	self.createBtn = UI.Controls.button(self, {
+	self.createBtn = UI.Controls.button(host, {
 		x = x + textW - 100, y = y, w = 100, h = CONTROL_METRICS.inputHeight,
 		text = T("IGUI_GS_InstallReaderCreateBtn"), playerNum = self.playerNum,
 		onClick = function()
@@ -321,14 +323,14 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	})
 	local createW = self.createBtn.width
 	self.createBtn:setX(x + textW - createW)
-	self.nameEntry = UI.Controls.field(self, {
+	self.nameEntry = UI.Controls.field(host, {
 		x = x, y = y, w = textW - createW - 6, h = CONTROL_METRICS.inputHeight,
 		text = T("IGUI_GS_InstallReaderNameDefault"), playerNum = self.playerNum,
 	})
 	y = y + CONTROL_METRICS.inputHeight + SECTION_GAP
 
 	-- ── Separador visual entre los dos bloques ──────────────────────────────
-	self.sepLine = UI.Controls.panel(self, {
+	self.sepLine = UI.Controls.panel(host, {
 		x = x, y = y, w = textW, h = 1, drawBackground = true,
 		backgroundColor = { r = 0.3, g = 0.32, b = 0.36, a = 0.6 },
 		controlId = "readerChoiceSeparator", playerNum = self.playerNum,
@@ -340,7 +342,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	y = self:buildLinkSection(y, textW)
 	y = y + 6
 
-	self.statusLabel = UI.Controls.status(self, {
+	self.statusLabel = UI.Controls.status(host, {
 		x = x, y = y, w = textW, h = FONT_HGT_SMALL,
 		text = self.statusMsg or "", tone = "warning", playerNum = self.playerNum,
 	})
@@ -358,8 +360,9 @@ end
 --- Reconstruye solo el bloque "Red existente" al llegar datos del servidor
 --- (mantiene el nombre ya escrito en el campo "Red nueva").
 function GS_TerminalInstallReaderChoice:rebuildLinkSection()
-	local pad = PAD
-	local textW = self.width - pad * 2
+	local host = self.contentHost or self
+	local pad = 0
+	local textW = host.width or 0
 	local startY = self.sepLine and (self.sepLine:getY() + 1 + SECTION_GAP) or nil
 	if not startY then
 		return
@@ -373,14 +376,14 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 	end
 	for _, w in ipairs(toRemove) do
 		if w and w.dispose then w:dispose()
-		elseif w then self:removeChild(w) end
+		elseif w then host:removeChild(w) end
 	end
 	for _, btn in ipairs(self.networkBtns or {}) do
-		if btn.dispose then btn:dispose() else self:removeChild(btn) end
+		if btn.dispose then btn:dispose() else host:removeChild(btn) end
 	end
 	if self.networkCombo then
 		if self.networkCombo.dispose then self.networkCombo:dispose()
-		else self:removeChild(self.networkCombo) end
+		else host:removeChild(self.networkCombo) end
 	end
 	self.linkTitle, self.noNetworksLbls, self.networkBtns, self.networkInfoLbls = nil, nil, {}, {}
 	self.networkCombo, self.networkActionBtn = nil, nil

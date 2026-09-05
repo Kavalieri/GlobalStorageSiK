@@ -45,8 +45,8 @@ for _, id in ipairs({ "network-root", "network-rescan-block" }) do
 end
 local tableView = assert(tree.nodes["network-table"])
 assert(tableView._sikUiComponent == "table", "Red rows must use the SiK Table")
-assert(tableView.block.panel.drawBackground == false
-	and tableView.block.panel.borderColor.a == 0,
+assert(tableView.root.panel.drawBackground == false
+	and tableView.root.panel.borderColor.a == 0,
 	"embedded Red table must not paint a second frame inside its Block")
 local row = assert(tableView.list.pool[1], "representative Red row was not mounted")
 local paints = {}
@@ -58,7 +58,7 @@ assert(#paints >= 2 and paints[1].w == row.width and paints[1].h == row.height,
 	"Red rows must paint a complete framework-owned surface")
 assert(paints[2].y == row.height - 1 and paints[2].h == 1,
 	"Red rows must paint the canonical divider")
-assert(tableView.header.width == tableView.block:getContentRect().w,
+assert(tableView.header.width == tableView.root:getContentRect().w,
 	"Red header and rows must share the same final content rectangle")
 local progress = assert(tree.nodes["network-rescan-progress"])
 assert(progress._sikUiControl == "progress", "network scan must mount the framework progress control")

@@ -18,7 +18,7 @@ GlobalStorageSiK.PCAcquireUI.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
 local PAD = 14
-local LINE_GAP = 4
+local BLOCK_GAP = 8
 local CONTROL_METRICS = UI.Controls.metrics("task")
 local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
 
@@ -45,7 +45,7 @@ local function buildStatusLines(player)
 	local status = GlobalStorageSiK.PCAcquire.status(player)
 	local lines = {}
 	lines[#lines + 1] = {
-		text = (status.manual and T("IGUI_GS_PCAcquireHasManual") or T("IGUI_GS_PCAcquireNeedManual")),
+		text = T("IGUI_GS_ProgrammingRecipeRequirement", GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.PCAcquire.MANUAL_ITEM)),
 		ok = status.manual,
 		icon = GlobalStorageSiK.PCAcquire.MANUAL_ITEM,
 	}
@@ -133,51 +133,51 @@ local function requirementTexture(icon)
 	return icon
 end
 
+local function requirementsSignature(lines)
+	local parts = {}
+	for _, spec in ipairs(lines) do
+		parts[#parts + 1] = table.concat({ spec.text or "", spec.ok and "1" or "0" }, "|")
+	end
+	return table.concat(parts, "")
+end
+
 --- (Re)construye todo el contenido a partir del estado actual. Se llama al
 --- abrir y cada vez que cambia el inventario/se termina de leer el manual
 --- mientras la ventana está abierta (ver ensureEvents más abajo).
 function GS_PCAcquireUI:buildLayout()
 	clearContent(self)
-	local rect = self:contentRect()
-	local pad = PAD
+	local host = self.contentHost or self
+	local rect = { x = 0, y = 0, w = host.width or 0, h = host.height or 0 }
 	local textW = rect.w
-	local y = rect.y
-
-	local intro = own(self, UI.Controls.copyText(self, {
-		x = rect.x, y = y, w = textW, text = T("IGUI_GS_PCAcquireIntro"),
-		tone = "textMuted", lineGap = 2, playerNum = self.playerNum,
+	local requirements = own(self, UI.Block.create({
+		parent = host, x = rect.x, y = rect.y, w = textW,
+		title = T("IGUI_GS_AcquireRequirements"),
+		tooltip = not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled()
+			and T("IGUI_GS_SolderingIronFindHint") or T("IGUI_GS_AcquireRequirements"), playerNum = self.playerNum,
 	}))
-	y = y + intro.height
-	y = y + 6
+	local requirementColumn = requirements:beginColumn()
 
 	local lines, allReady = buildStatusLines(self.player)
-	local sigParts = {}
-	for _, spec in ipairs(lines) do
-		sigParts[#sigParts + 1] = spec.ok and "1" or "0"
-		local row = own(self, UI.Controls.requirementRow(self, {
-			x = rect.x, y = y, w = textW, texture = requirementTexture(spec.icon),
-			text = spec.text, state = spec.ok and "met" or "missing",
-			playerNum = self.playerNum,
-		}))
-		y = y + row.height + 2
-	end
-	self._lastSig = table.concat(sigParts, "")
-	y = y + 10
+	local reqRect = requirements:getContentRect()
+	local function row(spec) return { text = spec.text, texture = requirementTexture(spec.icon),
+		tone = spec.ok and "success" or "danger" } end
+	local groups = { { rows = { row(lines[1]), row(lines[2]), row(lines[#lines - 1]), row(lines[#lines]) } },
+		{ rows = {} } }
+	for i = 3, #lines - 2 do groups[2].rows[#groups[2].rows + 1] = row(lines[i]) end
+	self.requirementsHandle = UI.Requirements.create({ parent = requirementColumn.parent,
+		x = 0, y = 0, w = reqRect.w, groups = groups, playerNum = self.playerNum })
+	requirementColumn:block(self.requirementsHandle.panel, self.requirementsHandle.height)
+	self._lastSig = requirementsSignature(lines)
+	self._layoutWidth = textW
 
-	-- Nota "vas a necesitar un soldador" (pedido 2026-08-26, "puertas de
-	-- entrada" del ecosistema) - solo cuando EnableSolderingIronCraft esta
-	-- desactivado (por defecto): el jugador ve el requisito en rojo en el
-	-- checklist de arriba pero no sabe POR QUE no puede fabricarlo el mismo -
-	-- reutiliza el mismo texto ya usado en el tooltip del propio soldador
-	-- (GS_ItemNetworkTooltip.lua), sin duplicar la redaccion.
-	if not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled() then
-		local hint = own(self, UI.Controls.copyText(self, {
-			x = rect.x, y = y, w = textW, text = T("IGUI_GS_SolderingIronFindHint"),
-			tone = "textMuted", lineGap = LINE_GAP, playerNum = self.playerNum,
-		}))
-		y = y + hint.height
-		y = y + 6
-	end
+	requirementColumn:finish()
+
+	local actions = own(self, UI.Block.create({
+		parent = host, x = rect.x, y = requirements.y + requirements.h + BLOCK_GAP,
+		w = textW, title = T("IGUI_GS_PermColActions"),
+		tooltip = T("IGUI_GS_PermColActions"), playerNum = self.playerNum,
+	}))
+	local actionColumn = actions:beginColumn()
 
 	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
 	-- criterio aplicado a Programacion/disquetera): antes el boton se dejaba
@@ -187,8 +187,8 @@ function GS_PCAcquireUI:buildLayout()
 	-- bloqueado de verdad mientras falte cualquier requisito, con el motivo
 	-- en el tooltip - la revalidacion en el momento del clic deja de hacer
 	-- falta porque un boton bloqueado no puede pulsarse.
-	self.craftBtn = own(self, UI.Controls.button(self, {
-		x = rect.x, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
+	self.craftBtn = UI.Controls.button(actionColumn.parent, {
+		x = 0, y = 0, w = textW, h = CONTROL_METRICS.buttonHeight,
 		text = T("IGUI_GS_PCAcquireCraftBtn"), fullWidth = true,
 		enabled = allReady, locked = not allReady,
 		tooltip = not allReady and T("IGUI_GS_CraftMissing") or nil,
@@ -197,15 +197,16 @@ function GS_PCAcquireUI:buildLayout()
 		ISTimedActionQueue.add(GS_AcquirePCAction:new(self.player))
 		self:destroy()
 	end,
-	}))
-	y = y + CONTROL_METRICS.buttonHeight + pad
+	})
+	actionColumn:block(self.craftBtn, CONTROL_METRICS.buttonHeight)
+	actionColumn:finish()
 
 	-- fitContent resuelve el viewport una vez; los refrescos conservan la
 	-- posicion a la que el jugador haya arrastrado la ventana.
 	local previousX = self:getX()
 	local previousY = self:getY()
 	local wasPositioned = self._positioned == true
-	UI.Modal.fitContent(self, y, {
+	UI.Modal.fitContent(self, actions.y + actions.h, {
 		contentBottom = true, bottomPadding = 0, center = not wasPositioned,
 	})
 	if wasPositioned then
@@ -238,12 +239,10 @@ function GS_PCAcquireUI:refresh(force)
 		return
 	end
 	local lines = buildStatusLines(self.player)
-	local sigParts = {}
-	for i = 1, #lines do
-		sigParts[#sigParts + 1] = lines[i].ok and "1" or "0"
-	end
-	local sig = table.concat(sigParts, "")
-	if not force and sig == self._lastSig then
+	local sig = requirementsSignature(lines)
+	local host = self.contentHost or self
+	local widthChanged = self._layoutWidth ~= (host.width or 0)
+	if not force and not widthChanged and sig == self._lastSig then
 		return
 	end
 	self._lastSig = sig

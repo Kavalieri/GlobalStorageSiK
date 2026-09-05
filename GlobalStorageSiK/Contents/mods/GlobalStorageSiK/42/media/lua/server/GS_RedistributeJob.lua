@@ -150,6 +150,10 @@ local function finishJob(networkId, job, reason)
 	local msg
 	if reason == "network_busy" or reason == "stalled" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError")
+	elseif reason == "no_permission" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole")
+	elseif reason == "source_unavailable" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_TransferSourceUnavailable")
 	elseif reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
 		msg = GlobalStorageSiK.Redistribute.formatSummaryMessage(summary)
 	elseif job.moved == 0 and job.failed == 0 then
@@ -161,6 +165,7 @@ local function finishJob(networkId, job, reason)
 	local ok = reason ~= "remote_disabled" and reason ~= "no_power"
 		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
 		and reason ~= "network_busy" and reason ~= "stalled"
+		and reason ~= "no_permission" and reason ~= "source_unavailable"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
@@ -175,6 +180,11 @@ local function finishJob(networkId, job, reason)
 			message = msg,
 			jobType = "redistribute",
 			jobState = "finished",
+			transfer = job.options and job.options.sourceNodeId and {
+				op = "redistribute", sourceNodeId = job.options.sourceNodeId,
+				networkId = networkId, moved = job.moved, pending = job.blocked or 0,
+				reason = (not ok and reason) or job.blockedReason,
+			} or nil,
 			redistributeTiers = tiers,
 			redistributeTopTypes = topTypes,
 		})
@@ -244,7 +254,7 @@ onTick = function()
 	job.busyRetries = 0
 	local ok, summary, session = pcall(function()
 		return GlobalStorageSiK.InventorySync.withBatch(function()
-			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing)
+			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing, job.options)
 		end)
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
@@ -265,6 +275,8 @@ onTick = function()
 
 	job.moved   = job.moved   + (summary.moved   or 0)
 	job.failed  = job.failed  + (summary.failed  or 0)
+	job.blocked = (job.blocked or 0) + (summary.blocked or 0)
+	job.blockedReason = summary.blockedReason or job.blockedReason
 	job.skipped = job.skipped + (summary.skipped or 0)
 	job.inspected = (job.inspected or 0) + (summary.inspected or 0)
 	job.budgetExhaustions = (job.budgetExhaustions or 0) + (summary.budgetExhaustions or 0)
@@ -327,7 +339,7 @@ end
 ---@param player IsoPlayer
 ---@param networkId string|nil
 ---@return boolean started
-function GlobalStorageSiK.RedistributeJob.start(player, networkId)
+function GlobalStorageSiK.RedistributeJob.start(player, networkId, options)
 	if not player or not networkId then
 		return false
 	end
@@ -338,6 +350,7 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 	ensureTickInstalled()
 	local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	jobs[networkId] = {
+		options = options and { sourceNodeId = options.sourceNodeId } or nil,
 		username  = player:getUsername(),
 		nextRunMs = 0,
 		moved     = 0,

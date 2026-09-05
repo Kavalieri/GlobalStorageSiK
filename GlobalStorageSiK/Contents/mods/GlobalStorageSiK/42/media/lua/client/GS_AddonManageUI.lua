@@ -25,6 +25,7 @@ require "GS_AddonRecipes"
 require "GS_CraftUtils"
 require "GS_TerminalRecipeCards"
 require "GS_Sandbox"
+require "GS_Confirmation"
 require "TimedActions/GS_AddonInstallAction"
 require "TimedActions/ISTimedActionQueue"
 
@@ -107,9 +108,11 @@ local function requirementTexture(spec)
 	return spec.icon
 end
 
-local function addRequirementCard(owner, y, width, title, rows)
+-- Legacy helper retained temporarily for addon extensions. Core layout uses
+-- beginColumn below; do not allocate speculative 1000 px panels here.
+local function addRequirementCard(owner, parent, y, width, title, rows)
 	local card = assert(UI.Block.create({
-		parent = owner, x = owner.padding, y = y, w = width, h = 1000,
+		parent = parent, x = 0, y = y, w = width, h = 0,
 		title = title, variant = "section",
 		playerNum = owner.playerNum,
 	}))
@@ -129,7 +132,7 @@ local function addRequirementCard(owner, y, width, title, rows)
 	end
 	local reserved = title and (CONTROL_METRICS.rowHeight + 8) or 0
 	local height = 16 + reserved + rowY
-	card:reflow({ x = owner.padding, y = y, w = width, h = height })
+	card:reflow({ x = 0, y = y, w = width, h = height })
 	return height
 end
 
@@ -229,7 +232,7 @@ function GS_AddonManageUI:initialise()
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
 	local def = addonDefinition(self.addonId)
 	UI.Modal.apply(self, {
-		kind = "task", padding = PAD,
+		kind = "task", padding = PAD, contentMode = "dock",
 		title = def and T(def.titleKey or "IGUI_GS_AddonUnknown") or "",
 		onClose = function()
 			GlobalStorageSiK.AddonManageUI.instance = nil
@@ -240,7 +243,21 @@ function GS_AddonManageUI:initialise()
 end
 
 function GS_AddonManageUI:destroy()
+	if self.contentScroll then
+		if self.contentScroll._sikScrollInstance and self.contentScroll._sikScrollInstance.dispose then
+			self.contentScroll._sikScrollInstance:dispose()
+		end
+		self.contentScroll = nil
+	end
 	UI.Modal.close(self, "product")
+end
+
+function GS_AddonManageUI:onResize()
+	if not self.contentScroll or self._reflowing or self._buildingLayout then return end
+	self._reflowing = true
+	UI.Scroll.resize(self.contentScroll, self.contentHost.width, self.contentHost.height)
+	self:buildLayout()
+	self._reflowing = false
 end
 
 function GS_AddonManageUI:onKeyRelease(key)
@@ -255,13 +272,14 @@ end
 --- de CADA bloque (instalacion O desinstalacion), en vez de siempre al
 --- final del todo.
 ---@param self GS_AddonManageUI
----@param y number
+---@param parent ISUIElement
+---@param width number
 ---@param def table
 ---@param isInstalled boolean
 ---@param canInstall boolean
 ---@param canUninstall boolean
----@return number newY
-local function createAddonActionButton(self, y, def, isInstalled, canInstall, canUninstall)
+---@return ISButton|nil actionButton
+local function createAddonActionButton(self, parent, width, def, isInstalled, canInstall, canUninstall)
 	-- BUG REAL cerrado (2026-08-22, reportado en Steam Workshop: "requisitos
 	-- en verde pero el boton nunca aparece" - un jugador incluso publico un
 	-- parche no oficial para esto): esto exigia self.isOwner, una lectura de
@@ -284,10 +302,9 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	-- se calculan y se usan solo para habilitar/deshabilitar el boton, nunca
 	-- para decidir si existe.
 	if not def then
-		return y
+		return nil
 	end
-	local pad = self.padding
-	local textW = self.width - pad * 2
+	local textW = width or parent.width or 0
 	local btnLabel = isInstalled and T("IGUI_GS_AddonUninstallBtn") or T("IGUI_GS_AddonInstallBtn")
 	local searchQuery = self.terminal and self.terminal.searchEntry and self.terminal.searchEntry:getText() or ""
 	-- Ancho total + boton "bloqueado" (2026-08-26, pedido explicito del
@@ -299,8 +316,8 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 	-- refrescos, igual que ya se acepto en Programacion/PC/disquetera al
 	-- migrar a este mismo patron.
 	local locked = isInstalled and (canUninstall ~= true) or (not isInstalled and canInstall ~= true)
-	local actionBtn = UI.Controls.button(self, {
-		x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
+	local actionBtn = UI.Controls.button(parent, {
+		x = 0, y = 0, w = textW, h = CONTROL_METRICS.buttonHeight,
 		text = btnLabel, fullWidth = true, locked = locked,
 		onClick = function()
 		-- BUG REAL encontrado (reportado: "si no tenemos antena en el
@@ -340,57 +357,84 @@ local function createAddonActionButton(self, y, def, isInstalled, canInstall, ca
 			-- desinstalacion aqui mismo antes de enviar, en vez de
 			-- descubrir el fallo solo por el mensaje del servidor con la
 			-- ventana ya cerrada.
-			if not canUninstall then
-				if self.player then
+				local uninstallDiskItem = GlobalStorageSiK.Addons.uninstallDiskItem()
+				local inv = self.player and self.player:getInventory()
+				local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
+				local hasDisk = not uninstallDiskItem or (inv
+						and (inv:getItemCountRecurse(uninstallDiskItem) or 0) >= 1)
+				local requiredSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+				local hasSkill = requiredSkill <= 0 or (self.player
+						and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= requiredSkill)
+				if not (hasReader and hasDisk and hasSkill) then
+					if self.player then
 					GlobalStorageSiK.UIFeedback.halo(self.player, T("IGUI_GS_CraftMissing"),
 						220, 180, 100, 300, { tone = "warning" })
 				end
 				return
 			end
-			ISTimedActionQueue.add(GS_AddonInstallAction:new(self.player, def.id, "uninstall", self.networkId, self.anchor, searchQuery))
-		end
-		self:destroy()
+				GlobalStorageSiK.Confirmation.show({
+					playerNum = self.playerNum,
+					title = T("IGUI_GS_AddonUninstallBtn"),
+					question = T("IGUI_GS_AddonUninstallQuestion", def.titleKey and T(def.titleKey) or def.id),
+					consequences = T("IGUI_GS_AddonUninstallConsequences"),
+					onAccept = function()
+						local currentDisk = GlobalStorageSiK.Addons.uninstallDiskItem()
+						local currentInv = self.player and self.player:getInventory()
+						local currentReader = GlobalStorageSiK.Addons.hasReaderAvailable(self.player, self.networkId, self.anchor)
+						local currentDiskOk = not currentDisk or (currentInv
+								and (currentInv:getItemCountRecurse(currentDisk) or 0) >= 1)
+						local currentSkill = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
+						local currentSkillOk = currentSkill <= 0 or (self.player
+								and GlobalStorageSiK.CraftUtils.getElectricityLevel(self.player) >= currentSkill)
+						if not (currentReader and currentDiskOk and currentSkillOk) then
+							GlobalStorageSiK.UIFeedback.halo(self.player, T("IGUI_GS_CraftMissing"),
+									220, 180, 100, 300, { tone = "warning" })
+							return
+						end
+						ISTimedActionQueue.add(GS_AddonInstallAction:new(self.player, def.id,
+								"uninstall", self.networkId, self.anchor, searchQuery))
+						self:destroy()
+					end,
+				})
+				return
+			end
+			self:destroy()
 	end })
 	if locked then
 		UI.Controls.setTooltip(actionBtn, T("IGUI_GS_CraftMissing"))
 	end
 	self._actionBtn = actionBtn
-	return y + CONTROL_METRICS.buttonHeight + pad
+	return actionBtn
 end
 
 --- (Re)construye todo el contenido a partir del estado actual.
 function GS_AddonManageUI:buildLayout()
-	for i = #(self._sikCards or {}), 1, -1 do
-		self._sikCards[i]:dispose()
+	if self._buildingLayout then return end
+	self._buildingLayout = true
+	-- The Scroll owner decides whether a gutter is needed. Measure again
+	-- against its resolved width, never compensate the consumer by 24 px.
+	for pass = 1, 3 do
+		local measuredWidth = self:buildLayoutPass()
+		if not self.contentScroll or not measuredWidth then break end
+		if UI.Scroll.contentWidth(self.contentScroll) == measuredWidth then break end
 	end
-	self._sikCards = {}
-	for i = #(self.childrenInOrder or {}), 1, -1 do
-		local child = self.childrenInOrder[i]
-		local chrome = child == self.closeControl or child == self.titleControl
-			or child == self.headerStatusControl
-		if not chrome then
-			self:removeChild(child)
-			if child.removeFromUIManager then child:removeFromUIManager() end
-		end
-	end
+	self._buildingLayout = false
+end
 
+function GS_AddonManageUI:buildLayoutPass()
+	local savedOffset = self.contentScroll and UI.Scroll.getScrollOffset(self.contentScroll) or 0
+	if not self.contentScroll then
+		self.contentScroll = UI.Scroll.create(self.contentHost, 0, 0,
+			self.contentHost.width, self.contentHost.height)
+		self.contentScroll._sikContentPad = 0
+	else
+		UI.Scroll.clear(self.contentScroll, true)
+	end
 	local def = addonDefinition(self.addonId)
-	if not def then
-		self:destroy()
-		return
-	end
-
-	local pad = self.padding
-	local textW = self.width - pad * 2
-	local y = self.headerHeight + pad
-
-	local description = UI.Controls.copyText(self, {
-		x = pad, y = y, w = textW,
-		text = T(def.descKey or "IGUI_GS_AddonDescGeneric"),
-		tone = "textMuted", playerNum = self.playerNum,
-	})
-	y = y + description.height + 6
-
+	if not def then self:destroy(); return end
+	local host = UI.Scroll.childHost(self.contentScroll)
+	local textW = host.width or 0
+	local y = 0
 	local modActive = addonIsActive(def.id)
 	-- BUG REAL encontrado (reportado: "aparece como instalado en la bahia
 	-- pero la ventana dice Instalar en vez de Desinstalar"): esto llamaba a
@@ -402,28 +446,36 @@ function GS_AddonManageUI:buildLayout()
 	-- para pintar el icono, así que ambos SIEMPRE coinciden.
 	local installed = self.installed or {}
 	local isInstalled = installed[def.id] ~= nil
-
-	if not modActive then
-		local status = UI.Controls.status(self, {
-			x = pad, y = y, text = T("IGUI_GS_AddonStatusModOff"),
-			tone = "danger", playerNum = self.playerNum,
-		})
-		y = y + status.height + 8
-	end
-
 	-- Que item CONCRETO esta instalado (igual que en la bahia/panel Addons -
 	-- ver GS_TerminalUI_Addons.lua, mismo dato, misma resolucion de nombre).
 	-- El nombre real del item YA incluye el tier (ver
 	-- gssik_addon_tablet/Translate/*/ItemName.json: "Antena WiFi GS T2"), asi
 	-- que esto ya informa del tier sin nada mas que añadir aqui.
 	local installedItemType = isInstalled and installed[def.id].itemType or nil
+	local title = isInstalled and T("IGUI_GS_AddonReqUninstallTitle")
+		or T("IGUI_GS_AddonReqInstallTitle")
+	local manageBlock = assert(UI.Block.create({ parent = host, x = 0, y = y,
+		w = textW, h = 0, title = title, tooltip = T(def.descKey or "IGUI_GS_AddonDescGeneric"),
+		variant = "section", playerNum = self.playerNum }))
+	local manageColumn = manageBlock:beginColumn()
+	local manageRect = manageBlock:getContentRect()
+	local manageW = manageRect.w
+	if modActive and not isInstalled then
+		local status = UI.Controls.status(manageBlock.childParent, { x = 0, y = 0,
+			text = T("IGUI_GS_ModuleNotInstalled", itemDisplayName(def.itemType)),
+			tone = "warning", playerNum = self.playerNum })
+		manageColumn:label(status, status.height)
+	end
+	if not modActive then
+		local status = UI.Controls.status(manageBlock.childParent, { x = 0, y = 0,
+			text = T("IGUI_GS_AddonStatusModOff"), tone = "danger", playerNum = self.playerNum })
+		manageColumn:label(status, status.height)
+	end
 	if installedItemType then
-		local itemName = GlobalStorageSiK.I18n.typeDisplayName(installedItemType)
-		local status = UI.Controls.status(self, {
-			x = pad, y = y, text = T("IGUI_GS_AddonInstalledItem", itemName),
-			tone = "success", playerNum = self.playerNum,
-		})
-		y = y + status.height + 8
+		local status = UI.Controls.status(manageBlock.childParent, { x = 0, y = 0,
+			text = T("IGUI_GS_AddonInstalledItem", GlobalStorageSiK.I18n.typeDisplayName(installedItemType)),
+			tone = "success", playerNum = self.playerNum })
+		manageColumn:label(status, status.height)
 	end
 
 	-- Cadena de tiers (ver def.tierItems, hoy solo la usa la Antena WiFi GS
@@ -445,7 +497,13 @@ function GS_AddonManageUI:buildLayout()
 				ok = isActiveTier or owned,
 			}
 		end
-		y = y + addRequirementCard(self, y, textW, nil, rows) + 10
+		for i = 1, #rows do
+			local row = UI.Controls.requirementRow(manageBlock.childParent, {
+				x = 0, y = 0, w = manageW, text = rows[i].text,
+				texture = requirementTexture(rows[i]), state = rows[i].ok, playerNum = self.playerNum,
+			})
+			manageColumn:label(row, row.height)
+		end
 	end
 
 	-- Bloque de instalacion, claramente diferenciado (pedido explicitamente:
@@ -488,11 +546,15 @@ function GS_AddonManageUI:buildLayout()
 			rows[#rows + 1] = { texture = skillIcon,
 				text = T("IGUI_GS_AddonReqSkill", requiredSkill), ok = hasSkill }
 		end
-		y = y + addRequirementCard(self, y, textW,
-			T("IGUI_GS_AddonReqUninstallTitle"), rows) + 10
-		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
-		-- tiene sentido detras de todas las recetas).
-		y = createAddonActionButton(self, y, def, true, canInstall, canUninstall)
+		for i = 1, #rows do
+			local row = UI.Controls.requirementRow(manageBlock.childParent, {
+				x = 0, y = 0, w = manageW, text = rows[i].text,
+				texture = requirementTexture(rows[i]), state = rows[i].ok, playerNum = self.playerNum,
+			})
+			manageColumn:label(row, row.height)
+		end
+		local action = createAddonActionButton(self, manageBlock.childParent, manageW, def, true, canInstall, canUninstall)
+		manageColumn:label(action, action.height)
 	end
 	if modActive and not isInstalled then
 		local inv = self.player and self.player:getInventory()
@@ -531,24 +593,57 @@ function GS_AddonManageUI:buildLayout()
 			rows[#rows + 1] = { itemType = def.installDiskItem,
 				text = itemDisplayName(def.installDiskItem), ok = hasDisk }
 		end
-		rows[#rows + 1] = { itemType = def.magazineType,
-			text = itemDisplayName(def.magazineType), ok = hasMagazine }
-		y = y + addRequirementCard(self, y, textW,
-			T("IGUI_GS_AddonReqInstallTitle"), rows) + 10
-		-- Boton justo debajo de SU bloque de requisitos (pedido explicito: no
-		-- tiene sentido detras de todas las recetas).
-		y = createAddonActionButton(self, y, def, false, canInstall, canUninstall)
+                rows[#rows + 1] = { itemType = def.magazineType, knowledge = true,
+                        text = T("IGUI_GS_ProgrammingRecipeRequirement", itemDisplayName(def.magazineType)), ok = hasMagazine }
+		if requiredSkill > 0 then
+			local skillIcon = GlobalStorageSiK.CraftUtils.getPerkTexture
+					and GlobalStorageSiK.CraftUtils.getPerkTexture(Perks and Perks.Electricity)
+			rows[#rows + 1] = { texture = skillIcon, knowledge = true,
+				text = T("IGUI_GS_AddonReqSkill", requiredSkill), ok = hasSkill }
+		end
+		local groups = { { rows = {} }, { rows = {} } }
+		for i = 1, #rows do
+			local spec = rows[i]
+			local target = groups[spec.knowledge and 1 or 2].rows
+			target[#target + 1] = { text = spec.text, texture = requirementTexture(spec),
+				state = spec.ok and "met" or "missing" }
+		end
+		local requirements = UI.Requirements.create({ parent = manageBlock.childParent,
+			w = manageW, groups = groups, playerNum = self.playerNum })
+		manageColumn:block(requirements.panel, requirements.height)
+		local action = createAddonActionButton(self, manageBlock.childParent, manageW, def, false, canInstall, canUninstall)
+		manageColumn:label(action, action.height)
 	end
+	local manageHeight = manageColumn:finish()
+	y = manageBlock.y + manageHeight + 8
 
-	if modActive then
+	if modActive and not isInstalled then
 		local recipe = nil
 		if self.player then
 			recipe = GlobalStorageSiK.AddonRecipes.serializeModuleForClient(self.player, def.id)
 		end
 		if recipe then
-			local cardW = textW
-			local cardH = GlobalStorageSiK.TerminalRecipeCards.addCard(self, recipe, y, cardW, self.terminal)
-			y = y + cardH + 10
+			local recipeBlock = assert(UI.Block.create({ parent = host, x = 0, y = y,
+				w = textW, h = 0, title = T("IGUI_GS_ModuleFabricationTitle"),
+				tooltip = recipe.manualDisplay, variant = "section",
+				playerNum = self.playerNum }))
+			local recipeColumn = recipeBlock:beginColumn()
+			local recipeRect = recipeBlock:getContentRect()
+			local requirements = GlobalStorageSiK.TerminalRecipeCards.createRequirements(
+				recipeBlock.childParent, recipe, recipeRect.w, self.playerNum)
+			recipeColumn:block(requirements.panel, requirements.height)
+			local action = UI.Controls.button(recipeBlock.childParent, {
+				x = 0, y = 0, w = recipeRect.w, text = T("IGUI_GS_ModuleFabricateAction", recipe.outputDisplay),
+				enabled = recipe.canCraft == true, locked = recipe.canCraft ~= true,
+				playerNum = self.playerNum, onClick = function()
+					if self.terminal and self.terminal.onCraftModRecipe then
+						self.terminal:onCraftModRecipe(recipe.id)
+					end
+				end,
+			})
+			recipeColumn:block(action, action.height)
+			local recipeHeight = recipeColumn:finish()
+			y = recipeBlock.y + recipeHeight + 8
 		end
 	end
 
@@ -558,7 +653,7 @@ function GS_AddonManageUI:buildLayout()
 	-- capacidad al mover el resto del panel a esta ventana.
 	if def.onRenderPanel and modActive and isInstalled then
 		local state = self.terminal and self.terminal.terminalState
-		local ok, nextY = pcall(def.onRenderPanel, self, self.terminal, state, pad, y, textW)
+		local ok, nextY = pcall(def.onRenderPanel, host, self.terminal, state, 0, y, textW)
 		if ok and type(nextY) == "number" then
 			y = nextY
 		end
@@ -572,7 +667,7 @@ function GS_AddonManageUI:buildLayout()
 		-- y ya apunta al final del contenido, pero el modal necesita conservar
 		-- tambien su margen inferior real. Sin esta reserva el clamp de Window
 		-- podia dejar el boton de accion unos pixeles fuera del padre.
-		contentBottom = true, bottomPadding = pad,
+		contentBottom = false, bottomPadding = 0,
 	})
 	if wasPositioned then
 		self:setX(previousX)
@@ -580,10 +675,14 @@ function GS_AddonManageUI:buildLayout()
 	else
 		self._positioned = true
 	end
+	UI.Scroll.resize(self.contentScroll, self.contentHost.width, self.contentHost.height)
+	UI.Scroll.setContentHeight(self.contentScroll, y)
+	UI.Scroll.setScrollOffset(self.contentScroll, savedOffset)
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "AddonManageUI")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "AddonManageUI")
 	end
+	return textW
 end
 
 --- Helper local de etiqueta envuelta (mismo patron que el resto del terminal).
@@ -596,7 +695,7 @@ end
 ---@param b number
 ---@return number
 function GS_AddonManageUI:addWrappedLabel(x, y, text, maxW, r, g, b)
-	local copy = UI.Controls.copyText(self, {
+	local copy = UI.Controls.copyText(self.contentHost or self, {
 		x = x, y = y, w = maxW, text = text,
 		tone = "text", playerNum = self.playerNum,
 	})
@@ -649,6 +748,7 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	-- ya no depende de una lectura de permisos calculada en el cliente.
 	local ui = GS_AddonManageUI:new(0, 0, PANEL_W, 200)
 	ui.player = player
+	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	ui.addonId = addonId
 	ui.networkId = networkId
 	ui.anchor = anchor

@@ -75,6 +75,19 @@ local function container(name, values, capacity)
 end
 
 GlobalStorageSiK = {
+	Utils = {
+		getObjectContainer = function(object) return object end,
+		isNetworkStorageContainer = function(object) return object ~= nil end,
+	},
+	Network = {
+		findWorldObject = function(entry) return entry and entry.worldObject end,
+	},
+	Permissions = {
+		shouldEnforce = function() return false end,
+		canAccess = function() return true end,
+		canAccessZone = function() return true end,
+		isAdminPlayer = function() return true end,
+	},
 	Sandbox = {
 		autoSortEnabled = function() return true end,
 		rejectDepositIfNoMatch = function() return strictNoMatch end,
@@ -127,7 +140,10 @@ GlobalStorageSiK = {
 	},
 	Log = { debug = function() end, detail = function() end },
 	Power = { networkPowered = function() return true end },
-	Network = { getLiveContainers = function() return activeLiveNodes end },
+	Network = {
+		getLiveContainers = function() return activeLiveNodes end,
+		findWorldObject = function(entry) return entry and entry.worldObject end,
+	},
 	Zones = { getRegistry = function() return activeRegistry end },
 	ZonePriority = { ensurePriorities = function() end },
 	I18n = { remote = function(key) return key end },
@@ -140,7 +156,8 @@ GlobalStorageSiK = {
 
 dofile(shared .. "GS_Router.lua")
 package.loaded["GS_Router"] = true
-dofile(shared .. "GS_Redistribute.lua")
+	package.preload["GS_Permissions"] = function() return GlobalStorageSiK.Permissions end
+	dofile(shared .. "GS_Redistribute.lua")
 
 local function categoryRule(op, nativePath)
 	return { op = op, condition = { type = "category", nativePath = nativePath } }
@@ -165,6 +182,7 @@ local function createLive(spec)
 		zoneEnabled = spec.zoneEnabled,
 		zonePriority = spec.zonePriority,
 	}
+	live.entry.worldObject = live.container
 	return live
 end
 
@@ -197,16 +215,20 @@ local function autoSortDestination(case)
 		zoneEnabled = false,
 		zonePriority = 50,
 	}
+	source.entry.worldObject = source.container
 	activeLiveNodes = { source }
 	local candidates = makeCandidates(case.nodes)
 	for i = 1, #candidates do activeLiveNodes[#activeLiveNodes + 1] = candidates[i] end
 	activeRegistry = { networks = { net = { id = "net" } }, zones = {}, nodes = {} }
 	activeRegistry.zones.zone_source = { id = "zone_source", networkId = "net", priority = 50 }
+	activeRegistry.nodes.source = activeLiveNodes[1].entry
 	for i = 1, #candidates do
 		local live = candidates[i]
 		activeRegistry.zones[live.entry.zoneId] = {
 			id = live.entry.zoneId, networkId = "net", priority = live.zonePriority or 50,
+			rules = live.zoneRules,
 		}
+		activeRegistry.nodes[live.entry.id] = live.entry
 	end
 
 	local session = nil

@@ -28,6 +28,9 @@ local handlerSource = section(serverSource,
 local factorySource = [[
 return function(deps)
 	local GlobalStorageSiK = deps.GlobalStorageSiK
+	local inventorySnapshotMeta = {}
+	local invalidateCatalogCache = function() end
+	local serverNowMs = function() return 1000 end
 	local forEachOnlinePlayer = deps.forEachOnlinePlayer
 	local isTerminalWatcher = deps.isTerminalWatcher
 	local scheduleSnapshotSync = deps.scheduleSnapshotSync
@@ -62,6 +65,7 @@ local function newHarness(currentRevision)
 					networkId = networkId, revision = revision,
 				}
 			end,
+			contentSignature = function() return "fixture-signature" end,
 		},
 		PlayerUtils = {
 			resolveByUsername = function(username)

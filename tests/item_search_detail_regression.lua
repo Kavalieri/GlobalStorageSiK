@@ -172,6 +172,9 @@ GlobalStorageSiK.ItemSnapshot = {
 		return rows
 	end,
 }
+UI = { Controls = {
+	effectiveSearchQuery = function(query) return query end,
+} }
 dofile(shared .. "GS_Index.lua")
 
 local rows = GlobalStorageSiK.Index.buildRows("net", {})

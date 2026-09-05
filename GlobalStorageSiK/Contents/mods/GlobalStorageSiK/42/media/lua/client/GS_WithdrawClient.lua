@@ -210,6 +210,7 @@ local function dispatchCurrent()
 		.. " count=" .. tostring(current.rowData.count)
 		.. " destination=" .. tostring(current.targetKey))
 	local sent = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
+		sourceNodeId = current.rowData.sourceNodeId,
 		fullType = current.rowData.fullType,
 		-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando la fila
 		-- retirada es una cinta VHS/radio, esta fila representa SOLO las
@@ -320,6 +321,7 @@ end
 function GlobalStorageSiK.WithdrawClient.onTerminalState(state)
 	if not current or current.awaitingFreshSelection ~= true or not state then return false end
 	if state.networkId ~= current.networkId then return false end
+	if state.sourceNodeId ~= current.rowData.sourceNodeId then return false end
 	local freshRevision = tonumber(state.inventoryRevision)
 	local staleRevision = tonumber(current.staleSelectionRevision)
 	if not freshRevision or (staleRevision and freshRevision <= staleRevision) then return false end
@@ -446,7 +448,7 @@ local function coalesceExactRows(rows)
 		local row = rows[i]
 		local ids = row and row.itemIds or nil
 		if row and row.fullType and ids and #ids > 0 then
-			local key = tostring(row.fullType)
+			local key = tostring(row.sourceNodeId or "") .. ":" .. tostring(row.fullType)
 			local merged = grouped[key]
 			if not merged then
 				merged = {}
@@ -493,7 +495,7 @@ end
 ---@param targetKey string|nil
 ---@param searchQuery string|nil
 ---@return boolean
-function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetKey, searchQuery)
+function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetKey, searchQuery, options)
 	if not rows or #rows == 0 then return false end
 	local coalescedRows = coalesceExactRows(rows)
 	if #queue + (current and 1 or 0) + #coalescedRows > MAX_QUEUED_REQUESTS then
@@ -503,9 +505,23 @@ function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetK
 		return false
 	end
 	local okAny = false
+	local remaining, moved, failed, failureReason = #coalescedRows, 0, false, nil
+	local requestOptions = nil
+	if options then
+		requestOptions = { networkId = options.networkId, onComplete = function(ok, result)
+			remaining = remaining - 1
+			moved = moved + (tonumber(result and result.moved) or 0)
+			if not ok then failed = true; failureReason = result and result.reason or failureReason end
+			if remaining == 0 and options.onComplete then
+				options.onComplete(not failed, { moved = moved, reason = failureReason })
+			end
+		end }
+	end
 	for i = 1, #coalescedRows do
-		if enqueueWithdraw(coalescedRows[i], amount, targetKey, searchQuery, nil) then
+		if enqueueWithdraw(coalescedRows[i], amount, targetKey, searchQuery, requestOptions) then
 			okAny = true
+		elseif requestOptions then
+			requestOptions.onComplete(false, { reason = "queue_rejected", moved = 0 })
 		end
 	end
 	if okAny and not current then startNext() end
@@ -559,8 +575,9 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		current.selectionSequence = 1
 		responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
 		nextDispatchMs = math.huge
-		local refreshSent = GlobalStorageSiK.NetClient.sendCommand("requestItemIndex", {
-			networkId = current.networkId, searchQuery = current.searchQuery or "",
+		local sourceNodeId = current.rowData.sourceNodeId
+		local refreshSent = GlobalStorageSiK.NetClient.sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex", {
+			networkId = current.networkId, nodeId = sourceNodeId, searchQuery = current.searchQuery or "",
 		})
 		if not refreshSent then
 			GlobalStorageSiK.WithdrawClient.cancelAll("selection_refresh_failed")

@@ -95,7 +95,9 @@ function TabWarehouseContext.create(terminal, panel)
 	local searchDueMs = nil
 	local SEARCH_DEBOUNCE_MS = 180
 	local function nowMs()
-		return type(getTimestampMs) == "function" and getTimestampMs() or 0
+		if type(getTimestampMs) == "function" then return getTimestampMs() end
+		if type(getTimestamp) == "function" then return getTimestamp() * 1000 end
+		return nil
 	end
 	local function removeSearchTick()
 		if context.searchTickInstalled and Events and Events.OnTick then
@@ -118,14 +120,16 @@ function TabWarehouseContext.create(terminal, panel)
 	end
 	context.searchTick = function()
 		if context.disposed then removeSearchTick(); return end
-		if searchDueMs and nowMs() >= searchDueMs then
+		local now = nowMs()
+		if searchDueMs and (not now or now >= searchDueMs) then
 			removeSearchTick()
 			captureLiveSearchText()
 			if type(terminal.onSearch) == "function" then terminal:onSearch(false) end
 		end
 	end
 	local function scheduleSearch()
-		searchDueMs = nowMs() + SEARCH_DEBOUNCE_MS
+		local now = nowMs()
+		searchDueMs = now and now + SEARCH_DEBOUNCE_MS or 0
 		if not context.searchTickInstalled and Events and Events.OnTick then
 			context.searchTickInstalled = true
 			Events.OnTick.Add(context.searchTick)
@@ -218,6 +222,8 @@ function TabWarehouseContext.create(terminal, panel)
 			self.resourceFingerprint = fingerprint
 		end
 		local availability = self.resource:snapshot()
+		local itemCount = 0
+		for i = 1, #catalogItems do itemCount = itemCount + (tonumber(catalogItems[i].count) or 0) end
 		if availability.state == "empty" then
 			availability.reason = availableCount > 0 and "no-match" or "no-data"
 		end
@@ -225,7 +231,7 @@ function TabWarehouseContext.create(terminal, panel)
 			data = { warehouse = {
 				headerActions = { redistribution.action },
 				capacity = CapacityPresentation.fromState(
-					terminal.terminalState and terminal.terminalState.capacity),
+					terminal.terminalState and terminal.terminalState.capacity, { count = itemCount }),
 				search = { query = terminal._warehouseQuery or "" },
 				filters = {
 					family = { items = filterItems(text("IGUI_GS_FilterCategoryAll"), main), selected = mainKey },

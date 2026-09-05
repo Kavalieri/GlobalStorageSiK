@@ -87,6 +87,37 @@ local function mergeInventorySyncState(incoming, prev)
 	return merged
 end
 
+local function inventoryCatalogKey(playerNum, networkId)
+	return tostring(tonumber(playerNum) or 0) .. "\30" .. tostring(networkId or "")
+end
+
+local function applyInventoryCatalog(incoming, playerNum)
+	if not incoming or not incoming.networkId then return incoming end
+	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork =
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local key = inventoryCatalogKey(playerNum, incoming.networkId)
+	local cached = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key]
+	if incoming.notModified == true then
+		if cached and cached.inventoryRevision == incoming.inventoryRevision
+			and cached.catalogScope == incoming.catalogScope then
+			incoming.items = cached.items
+			incoming.itemTypeCount = cached.itemTypeCount
+			incoming.catalogRestored = true
+		end
+	elseif type(incoming.items) == "table" and incoming.inventoryRevision ~= nil
+		and type(incoming.catalogScope) == "string" then
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = {
+			playerNum = tonumber(playerNum) or 0,
+			networkId = incoming.networkId,
+			items = incoming.items,
+			itemTypeCount = incoming.itemTypeCount or #incoming.items,
+			inventoryRevision = incoming.inventoryRevision,
+			catalogScope = incoming.catalogScope,
+		}
+	end
+	return incoming
+end
+
 local function safeRequire(name)
 	local ok, err = pcall(require, name)
 	if not ok then
@@ -173,6 +204,8 @@ local function onServerCommand(module, command, args)
 			continuing = GlobalStorageSiK.WithdrawClient.onActionResult(args) == true or continuing
 		end
 		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
+		local capacityPopup = (require "GS_TransferFeedback").showResult(args)
+		if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onActionResult(args) end
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
 		end
@@ -181,7 +214,7 @@ local function onServerCommand(module, command, args)
 		end
 		-- Cada cola consume exclusivamente su operation ID. Una respuesta de
 		-- otra acción nunca libera ni hace avanzar depósitos o retiradas.
-		if not continuing then
+		if not continuing and not capacityPopup then
 			local failed = args and args.ok == false
 			local showOperation = not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
 				or GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
@@ -336,6 +369,7 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "terminalState" then
 		local playerNum = tonumber(args and args.playerNum) or 0
+		args = applyInventoryCatalog(args, playerNum)
 		GlobalStorageSiK.Client.terminalStateByPlayer =
 			GlobalStorageSiK.Client.terminalStateByPlayer or {}
 		local previousState = GlobalStorageSiK.Client.terminalStateByPlayer[playerNum]
@@ -418,6 +452,7 @@ local function onServerCommand(module, command, args)
 		end
 		if not deferVisibleRefresh then
 			GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = args
+			if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onTerminalState(args) end
 			local currentUi = terminalUiForPlayer(playerNum)
 			local currentPlayerNum = currentUi and tonumber(currentUi.playerNum) or 0
 			if currentPlayerNum == playerNum then
@@ -578,6 +613,13 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.TerminalUI.onRemoteNetworkCandidates(args)
 		end
 	elseif command == "nodeContents" then
+		if args and args.nodeId and GlobalStorageSiK.ContainerInventory then
+			GlobalStorageSiK.ContainerInventory.receive(args)
+		end
+		if args and args.catalogRows and GlobalStorageSiK.WithdrawClient then
+			GlobalStorageSiK.WithdrawClient.onTerminalState({ networkId = args.networkId,
+				sourceNodeId = args.nodeId, inventoryRevision = args.inventoryRevision, items = args.catalogRows })
+		end
 		GlobalStorageSiK.Client.nodeContentsCache = GlobalStorageSiK.Client.nodeContentsCache or {}
 		local activeState = GlobalStorageSiK.Client.cachedTerminalState
 		local sameNetwork = not activeState or not args or not args.networkId
@@ -774,6 +816,9 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Client.cachedTerminalState = nil
 		end
 		if GlobalStorageSiK.Client.clearTransientCaches then
+			if GlobalStorageSiK.Client.clearInventoryCatalog then
+				GlobalStorageSiK.Client.clearInventoryCatalog(blockedPlayerNum, args and args.networkId)
+			end
 			GlobalStorageSiK.Client.clearTransientCaches(blockedPlayerNum)
 		end
 		local player = GlobalStorageSiK.NetClient.getPlayer(blockedPlayerNum)
@@ -875,6 +920,7 @@ GlobalStorageSiK.Client = GlobalStorageSiK.Client or {}
 GlobalStorageSiK.Client.lastItemIndex = {}
 GlobalStorageSiK.Client.cachedTerminalState = nil
 GlobalStorageSiK.Client.terminalStateByPlayer = {}
+GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork = {}
 GlobalStorageSiK.Client.nodeContentsCache = {}
 GlobalStorageSiK.Client.pendingTerminalOpen = false
 GlobalStorageSiK.Client.pendingTerminalOpenByPlayer = {}
@@ -884,6 +930,30 @@ GlobalStorageSiK.Client.terminalOpenSeqByPlayer = {}
 GlobalStorageSiK.Client.terminalManifest = nil
 GlobalStorageSiK.Client.activeNetworkId = nil
 GlobalStorageSiK.Client.activeNetworkIdByPlayer = {}
+
+function GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
+	payload = payload or {}
+	networkId = networkId or payload.networkId
+	if not networkId then return payload end
+	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local entry = cache[inventoryCatalogKey(playerNum, networkId)]
+	if entry then
+		payload.knownInventoryRevision = entry.inventoryRevision
+		payload.knownCatalogScope = entry.catalogScope
+	end
+	return payload
+end
+
+function GlobalStorageSiK.Client.clearInventoryCatalog(playerNum, networkId)
+	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local remove = {}
+	for key, entry in pairs(cache) do
+		local samePlayer = playerNum == nil or entry.playerNum == (tonumber(playerNum) or 0)
+		local sameNetwork = networkId == nil or entry.networkId == networkId
+		if samePlayer and sameNetwork then remove[#remove + 1] = key end
+	end
+	for i = 1, #remove do cache[remove[i]] = nil end
+end
 
 --- Registro neutral y acotado para que addons limpien UI/callbacks efímeros
 --- cuando Core cierra una sesión, una vida o un jugador local. La clave estable
@@ -927,6 +997,7 @@ function GlobalStorageSiK.Client.clearTransientCaches(playerNum)
 	if playerNum == nil then
 		GlobalStorageSiK.Client.terminalStateByPlayer = {}
 		GlobalStorageSiK.Client.cachedTerminalState = nil
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork = {}
 	else
 		playerNum = tonumber(playerNum) or 0
 		GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = nil

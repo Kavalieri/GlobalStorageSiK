@@ -78,10 +78,28 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 		UI.Modal.input({
 			title = title,
 			text = defaultText,
+			fieldTitle = maxVal and (T("IGUI_GS_QuantityAvailableNow") .. ": " .. tostring(maxVal))
+				or T("IGUI_GS_QuantityPrompt"),
+			fieldTooltip = maxVal and T("IGUI_GS_QuantityRangeHelp", minVal, maxVal)
+				or T("IGUI_GS_QuantityActionsHelp"),
+			actionsTitle = T("IGUI_GS_PermColActions"),
+			actionsTooltip = T("IGUI_GS_QuantityActionsHelp"),
+			acceptText = options.acceptText,
+			acceptActive = true,
 			playerNum = playerNum,
 			width = UI.Modal.STANDARD_MODAL_W,
 			numeric = true,
 			maxLength = math.max(1, #tostring(maxVal or 999999999)),
+			quantity = {
+				min = minVal,
+				max = maxVal,
+				step = 1,
+				decrementText = "−",
+				incrementText = "+",
+				decrementTooltip = T("IGUI_GS_QuantityDecrease"),
+				incrementTooltip = T("IGUI_GS_QuantityIncrease"),
+				maxText = T("IGUI_GS_QuantityMaximum") .. " · " .. tostring(maxVal or minVal),
+			},
 			validate = function(text)
 				local amount = GlobalStorageSiK.QuantityPrompt.parseAmount(text, minVal, maxVal)
 				if not amount then return false, "invalid_quantity" end

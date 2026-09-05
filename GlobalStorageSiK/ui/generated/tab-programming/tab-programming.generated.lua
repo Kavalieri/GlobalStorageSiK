@@ -14,6 +14,10 @@ return {
   },
   ["componentFactories"] = {
     {
+      ["runtimeFactory"] = "SiK.UI.Container.create",
+      ["typeId"] = "container"
+    },
+    {
       ["runtimeFactory"] = "SiK.UI.Block.create",
       ["typeId"] = "block"
     },
@@ -29,7 +33,7 @@ return {
   ["documentKind"] = "sik-ui-runtime-surface",
   ["frameworkRef"] = {
     ["id"] = "SiKUIFramework",
-    ["manifestSha256"] = "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6",
+    ["manifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     ["manifestVersion"] = "0.1.0-preview",
     ["namespace"] = "SiK.UI"
   },
@@ -49,6 +53,24 @@ return {
         {
           ["locale"] = "es",
           ["text"] = "Graba programas disponibles en disquetes en blanco desde la red."
+        }
+      }
+    },
+    {
+      ["id"] = "programming.resources.title",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Recursos de grabación"
+        }
+      }
+    },
+    {
+      ["id"] = "programming.programs.title",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Programas"
         }
       }
     }
@@ -78,13 +100,13 @@ return {
     }
   },
   ["provenance"] = {
-    ["frameworkManifestSha256"] = "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6",
-    ["generatorSha256"] = "ffa0454ab9bad8b845f2cb8d036d918182a315e7b9c1b7e8f7bf49589da737a4",
+    ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "f4e5f7a85e5254720a58a9b3b5648beec555de6d60c4cc3589ccd0c8c845895f",
+    ["surfaceSpecSha256"] = "487b760e730f13c6b23ddaf42e5855042f391c032b55c5043f139a64753d8d02",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
-    ["visualSubtreeSha256"] = "eec2be774b1a90407db806793aedecd39ad28e7519b63ec7828ae229df91c1bc"
+    ["visualMasterSha256"] = "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
+    ["visualSubtreeSha256"] = "df54539090c9c1cfac89dd5a53a3ee9fda0ffbc2ac33d1ad0fb6c31996a7ba26"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -110,80 +132,149 @@ return {
     },
     ["root"] = {
       ["actions"] = {},
-      ["capabilities"] = {
-        {
-          ["id"] = "block.header",
-          ["props"] = {
-            {
-              ["name"] = "info-visible",
-              ["value"] = {
-                ["kind"] = "literal",
-                ["value"] = true
-              }
-            }
-          }
-        }
-      },
+      ["capabilities"] = {},
       ["children"] = {
         {
           ["actions"] = {},
-          ["children"] = {},
-          ["id"] = "programming-status",
-          ["layout"] = {
-            ["base"] = {
-              {
-                ["name"] = "fill",
-                ["value"] = {
-                  ["kind"] = "literal",
-                  ["value"] = true
+          ["capabilities"] = {
+            {
+              ["id"] = "block.header",
+              ["props"] = {
+                {
+                  ["name"] = "info-visible",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = true
+                  }
                 }
               }
-            },
-            ["mode"] = "row",
-            ["overrides"] = {}
-          },
-          ["props"] = {
-            {
-              ["name"] = "kind",
-              ["value"] = {
-                ["kind"] = "literal",
-                ["value"] = "feedback"
-              }
-            },
-            {
-              ["name"] = "data",
-              ["value"] = {
-                ["kind"] = "data",
-                ["path"] = "programming.status"
-              }
             }
           },
-          ["type"] = "control",
-          ["variant"] = "info"
-        },
-        {
-          ["actions"] = {
+          ["children"] = {
             {
-              ["actionId"] = "programming.run",
-              ["event"] = "activate"
-            }
-          },
-          ["children"] = {},
-          ["id"] = "programming-cards",
-          ["layout"] = {
-            ["base"] = {
-              {
-                ["name"] = "fill",
-                ["value"] = {
-                  ["kind"] = "literal",
-                  ["value"] = true
+              ["actions"] = {},
+              ["children"] = {
+                {
+                  ["actions"] = {},
+                  ["children"] = {},
+                  ["id"] = "programming-reader-resource",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "fill",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = true
+                        }
+                      },
+                      {
+                        ["name"] = "grow",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 1
+                        }
+                      }
+                    },
+                    ["mode"] = "column",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "requirement-row"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "programming.resources.reader"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "resource"
+                },
+                {
+                  ["actions"] = {},
+                  ["children"] = {},
+                  ["id"] = "programming-blank-disk-resource",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "fill",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = true
+                        }
+                      },
+                      {
+                        ["name"] = "grow",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 1
+                        }
+                      }
+                    },
+                    ["mode"] = "column",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "requirement-row"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "programming.resources.blankDisk"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "resource"
                 }
               },
+              ["id"] = "programming-resources-row",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "fill",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = true
+                    }
+                  },
+                  {
+                    ["name"] = "gap",
+                    ["value"] = {
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
+                    }
+                  }
+                },
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {},
+              ["type"] = "container",
+              ["variant"] = "resource-row"
+            }
+          },
+          ["id"] = "programming-resources",
+          ["layout"] = {
+            ["base"] = {
               {
-                ["name"] = "grow",
+                ["name"] = "fill",
                 ["value"] = {
                   ["kind"] = "literal",
-                  ["value"] = 1
+                  ["value"] = true
                 }
               }
             },
@@ -192,36 +283,128 @@ return {
           },
           ["props"] = {
             {
-              ["name"] = "items",
+              ["name"] = "title",
               ["value"] = {
-                ["kind"] = "data",
-                ["path"] = "programming.cards"
+                ["kind"] = "i18n",
+                ["ref"] = "programming.resources.title"
               }
             },
             {
-              ["name"] = "maxColumns",
+              ["name"] = "help",
               ["value"] = {
-                ["kind"] = "literal",
-                ["value"] = 2
-              }
-            },
-            {
-              ["name"] = "columns",
-              ["value"] = {
-                ["kind"] = "literal",
-                ["value"] = 2
-              }
-            },
-            {
-              ["name"] = "exactColumns",
-              ["value"] = {
-                ["kind"] = "literal",
-                ["value"] = true
+                ["kind"] = "i18n",
+                ["ref"] = "programming.help"
               }
             }
           },
-          ["type"] = "card-collection",
-          ["variant"] = "summary"
+          ["type"] = "block",
+          ["variant"] = "standard"
+        },
+        {
+          ["actions"] = {},
+          ["capabilities"] = {
+            {
+              ["id"] = "block.header",
+              ["props"] = {
+                {
+                  ["name"] = "info-visible",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = true
+                  }
+                }
+              }
+            }
+          },
+          ["children"] = {
+            {
+              ["actions"] = {
+                {
+                  ["actionId"] = "programming.run",
+                  ["event"] = "activate"
+                }
+              },
+              ["children"] = {},
+              ["id"] = "programming-cards",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "fill",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = true
+                    }
+                  }
+                },
+                ["mode"] = "column",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "items",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "programming.cards"
+                  }
+                },
+                {
+                  ["name"] = "maxColumns",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = 2
+                  }
+                },
+                {
+                  ["name"] = "columns",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = 2
+                  }
+                },
+                {
+                  ["name"] = "exactColumns",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = true
+                  }
+                }
+              },
+              ["type"] = "card-collection",
+              ["variant"] = "output"
+            }
+          },
+          ["id"] = "programming-programs",
+          ["layout"] = {
+            ["base"] = {
+              {
+                ["name"] = "fill",
+                ["value"] = {
+                  ["kind"] = "literal",
+                  ["value"] = true
+                }
+              }
+            },
+            ["mode"] = "column",
+            ["overrides"] = {}
+          },
+          ["props"] = {
+            {
+              ["name"] = "title",
+              ["value"] = {
+                ["kind"] = "i18n",
+                ["ref"] = "programming.programs.title"
+              }
+            },
+            {
+              ["name"] = "help",
+              ["value"] = {
+                ["kind"] = "i18n",
+                ["ref"] = "programming.help"
+              }
+            }
+          },
+          ["type"] = "block",
+          ["variant"] = "standard"
         }
       },
       ["id"] = "programming-root",
@@ -245,24 +428,9 @@ return {
         ["mode"] = "column",
         ["overrides"] = {}
       },
-      ["props"] = {
-        {
-          ["name"] = "title",
-          ["value"] = {
-            ["kind"] = "i18n",
-            ["ref"] = "programming.title"
-          }
-        },
-        {
-          ["name"] = "help",
-          ["value"] = {
-            ["kind"] = "i18n",
-            ["ref"] = "programming.help"
-          }
-        }
-      },
-      ["type"] = "block",
-      ["variant"] = "fill"
+      ["props"] = {},
+      ["type"] = "container",
+      ["variant"] = "surface-root"
     }
   },
   ["surfaceReferences"] = {},

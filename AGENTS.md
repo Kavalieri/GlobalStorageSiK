@@ -1,6 +1,6 @@
 # GlobalStorageSiK — directrices para Codex
 
-Leer también las instrucciones del workspace y el `CLAUDE.md` más cercano antes de editar.
+Leer también el `AGENTS.md` raíz del workspace antes de editar. Los archivos `CLAUDE.md` están deprecados y no forman parte de la jerarquía operativa.
 
 ## Frontera Core/addons
 

@@ -172,7 +172,7 @@ contains(completion, "scheduleSnapshotSync(networkId, retryPlayer, currentRevisi
 contains(completion, 'overrideTerminalState(networkId, "FAILED", "snapshot_stale")',
 	"unstable capture is not explicitly rejected")
 local unstable = section(completion, discardCondition,
-	"-- Un scan estable")
+	'if summary._terminalState == "FAILED" then')
 contains(unstable, "return", "unstable capture can fall through to COMPLETED")
 excludes(unstable, '"COMPLETED"', "unstable directed delta is accepted as complete")
 excludes(unstable, '"complete"', "unstable directed delta reports complete")

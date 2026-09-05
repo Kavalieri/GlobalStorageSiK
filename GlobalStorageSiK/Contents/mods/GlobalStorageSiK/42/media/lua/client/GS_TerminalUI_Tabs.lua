@@ -18,10 +18,6 @@ require "GS_Sandbox"
 
 local T = GlobalStorageSiK.I18n.text
 
-local function railProfile()
-	return UI.Metrics.profile(0, "terminal")
-end
-
 local function copyDefinition(definition)
 	local copy = {}
 	for key, value in pairs(definition or {}) do copy[key] = value end
@@ -32,8 +28,8 @@ local function navigationItem(definition, pinned)
 	local title = T(definition.titleKey)
 	local item = {
 		key = definition.key, text = title, tooltip = title,
-		icon = { path = definition.iconPath, width = 76, height = 76 },
-		iconSize = 76, iconExact = false, iconOnly = true, payload = definition,
+		icon = { path = definition.iconPath, width = 56, height = 56 },
+		iconSize = 56, iconExact = true, iconOnly = true, payload = definition,
 	}
 	if pinned then item.pin = "end" end
 	return item
@@ -52,31 +48,9 @@ local function navigationItems(terminal)
 end
 
 local function navigationOptions(terminal, items)
-	local profile = railProfile()
 	return {
 		placement = "left", activeKey = terminal.activeTabKey or "items",
-		items = items, extent = profile.window.railWidth,
-		contentPadding = 12,
-		iconOnly = true, itemExtent = profile.window.railItemHeight,
-		iconSize = profile.window.railItemHeight, iconFit = "fill", iconPadding = 0,
-		barPadding = profile.window.railPadding, itemGap = profile.window.railGap,
-		separator = true, separatorOffset = 6,
-		selectionStyle = "border",
-		backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.96 },
-		selectedBackgroundColor = { r = 0.12, g = 0.10, b = 0.08, a = 0.96 },
-		hoverBackgroundColor = { r = 0.10, g = 0.10, b = 0.10, a = 0.96 },
-		pressedBackgroundColor = { r = 0.08, g = 0.07, b = 0.06, a = 0.96 },
-		borderColor = { r = 0, g = 0, b = 0, a = 0 },
-		selectedBorderColor = { r = 0.95, g = 0.55, b = 0.15, a = 0.90 },
-		iconColor = { r = 0.88, g = 0.88, b = 0.88, a = 0.88 },
-		hoverIconColor = { r = 0.92, g = 0.92, b = 0.92, a = 1 },
-		selectedIconColor = { r = 0.95, g = 0.55, b = 0.15, a = 1 },
-		hoverIconScale = 1,
-		separatorColor = { r = 0.35, g = 0.35, b = 0.35, a = 0.45 },
-		tooltipMode = "flyout", tooltipSide = "before", tooltipGap = 4,
-		tooltipBackgroundColor = { r = 0.10, g = 0.10, b = 0.10, a = 0.95 },
-		tooltipBorderColor = { r = 0.40, g = 0.40, b = 0.40, a = 0.90 },
-		tooltipTextColor = { r = 0.92, g = 0.94, b = 0.96, a = 1 },
+		items = items, iconOnly = true, railTooltip = true,
 		onActivate = function(context)
 			local item = context and context.value
 			if item and terminal.activateTab then terminal:activateTab(item.key) end

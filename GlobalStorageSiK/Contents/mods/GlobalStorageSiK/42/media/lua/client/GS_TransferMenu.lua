@@ -59,6 +59,7 @@ local function promptCustomTransfer(playerArg, item)
 	local maxCount = math.max(1, stackCount(item))
 	GlobalStorageSiK.QuantityPrompt.show({
 		title = T("IGUI_GS_TransferAmountPrompt"),
+		acceptText = T("IGUI_GS_QuantityDeposit"),
 		default = 1,
 		min = 1,
 		max = maxCount,

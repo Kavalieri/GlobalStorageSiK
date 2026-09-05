@@ -56,8 +56,10 @@ assert(actionGroup:find("normalized.width = nil", 1, true)
 	"equal ActionGroup must ignore construction widths and distribute the row")
 assert(actionGroup:find('options.fillParentWidth = mode == "equal" or mode == "stack"', 1, true),
 	"structural action groups must follow their parent final width")
-assert(block:find("reflowNestedContainers(self.content)", 1, true),
-	"Block reflow must synchronously propagate final geometry to nested containers")
+assert(block:find("function BlockInstance:_notify", 1, true)
+	and block:find("function BlockInstance:subscribe", 1, true)
+		and block:find("self:_notify(reason, previous)", 1, true),
+	"Block bounds must synchronously notify subscribed nested containers")
 assert(scroll:find("return instance:scrollBy((tonumber(delta)", 1, true),
 	"compatibility scroll regions must preserve the B42 runtime wheel direction")
 assert(controls:find('DEFAULT_INFO_ICON = "sik.info.24"', 1, true),

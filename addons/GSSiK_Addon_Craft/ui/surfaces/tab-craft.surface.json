@@ -2,13 +2,13 @@
   "documentKind": "product-surface-spec",
   "schemaId": "sik-ui-catalog-v1",
   "schemaVersion": 1,
-  "frameworkRef": { "id": "SiKUIFramework", "manifestSha256": "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6" },
+  "frameworkRef": { "id": "SiKUIFramework", "manifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad" },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
+    "masterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
     "selector": "[data-surface-id=\"tab-craft\"]",
     "canonicalizer": "sik-ui-dom-v2",
-    "subtreeSha256": "68799ba212b6330587e21524005ab225966702b4a7d141f0d77ef5b84108d6a5",
+    "subtreeSha256": "09af53f74d8b483706fa1ad8b14e2a6f30834fef2b1e14f9412c956315fc3cb3",
     "validation": "HTML_VALIDATED_BY_KAVA"
   },
   "product": { "id": "gssik-addon-craft", "namespace": "GSSiK_Addon_Craft" },

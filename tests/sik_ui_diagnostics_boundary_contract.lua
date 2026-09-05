@@ -16,7 +16,8 @@ assert(framework:find("function Diagnostics.checkOverlaps", 1, true),
 	"framework must own overlap inspection")
 assert(framework:find("function Diagnostics.inspectMount", 1, true),
 	"framework must own mounted-content diagnosis")
-assert(navigation:find("host.mountedContent:setVisible(active)", 1, true),
+assert(navigation:find("self.mountedContents", 1, true)
+	and navigation:find("panel:setVisible(contentKey == key)", 1, true),
 	"navigation activation must update adopted content visibility")
 assert(framework:find('Diagnostics.registerSink("SiK.UI.Framework"', 1, true),
 	"framework must own its diagnostic sink")

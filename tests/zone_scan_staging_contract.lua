@@ -58,6 +58,9 @@ GlobalStorageSiK = {
 		getInventoryRevision = function(networkId)
 			return revisionByNetwork[networkId] or 0
 		end,
+		contentSignature = function(networkId)
+			return "fixture-signature:" .. tostring(networkId)
+		end,
 	},
 	TransferLock = {
 		acquire = function()

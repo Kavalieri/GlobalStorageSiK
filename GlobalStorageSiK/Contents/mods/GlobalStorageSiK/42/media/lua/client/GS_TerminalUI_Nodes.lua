@@ -153,6 +153,27 @@ local function nodeRow(node, zoneRules)
 	}
 end
 
+function Nodes.zoneRows(nodes, zone)
+        local rows = {}
+        for index = 1, #(nodes or {}) do
+                local node = nodes[index]
+                if node and zone and node.zoneId == zone.id then
+                        rows[#rows + 1] = nodeRow(node, zone.rules)
+                end
+        end
+        return rows
+end
+
+function Nodes.columns()
+        return {
+                { key = "name", label = "Nombre", weight = 3 },
+                { key = "protocol", label = "Protocolo", weight = 3 },
+                { key = "priority", label = "Prio", weight = 1 },
+                { key = "status", label = "Estado", weight = 2 },
+                { key = "occupancy", label = "%", weight = 1 },
+        }
+end
+
 local function zoneRow(id, list, names, priorities, enabled, rules, occupancy, sources)
 	local protocol, r, g, b = nodeProtocolInfo(rules[id], nil)
 	local incident = incidentInfo(list)

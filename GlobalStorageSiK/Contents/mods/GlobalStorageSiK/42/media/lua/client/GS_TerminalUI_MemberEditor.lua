@@ -24,13 +24,13 @@ require "GS_I18n"
 require "GS_NetClient"
 require "GS_Permissions"
 local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.TerminalMemberEditor = {}
 GlobalStorageSiK.TerminalMemberEditor.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local PAD = 14
 local LINE_GAP = 6
 local CONTROL_METRICS = UI.Controls.metrics("compact")
 local PANEL_W = UI.Modal.STANDARD_MODAL_W
@@ -69,13 +69,22 @@ function GS_MemberEditorUI:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	UI.Modal.apply(self, {
-		kind = "compact", padding = PAD, resizable = false,
+		kind = "compact", resizable = false,
 		title = T("IGUI_GS_MemberEditorTitle"),
 		onClose = function()
 			GlobalStorageSiK.TerminalMemberEditor.instance = nil
 		end,
 	})
 	self:buildLayout()
+end
+
+local function layoutHost(panel)
+	local host = panel.contentHost or panel
+	local rect = panel:contentRect()
+	if not rect then
+		rect = { x = 0, y = 0, w = panel.width or 0, h = panel.height or 0 }
+	end
+	return host, rect
 end
 
 function GS_MemberEditorUI:destroy()
@@ -146,8 +155,10 @@ function GS_MemberEditorUI:onRemoveAccess()
 		end
 		self:closeAfterAction()
 	end
-	UI.Modal.confirm({
-		message = T("IGUI_GS_PermRemoveConfirm", data.displayName or data.name or "?"),
+	Confirmation.show({
+		title = T("IGUI_GS_MemberEditorTitle"),
+		question = T("IGUI_GS_PermRemoveQuestion", data.displayName or data.name or "?"),
+		consequences = T("IGUI_GS_PermRemoveConsequences", data.displayName or data.name or "?"),
 		onAccept = doRemove,
 	})
 end
@@ -158,8 +169,10 @@ end
 function GS_MemberEditorUI:onLeaveNetwork()
 	if not self.terminal or not self.terminal.onLeaveNetwork then return end
 	local terminal = self.terminal
-	UI.Modal.confirm({
-		message = T("IGUI_GS_MemberEditorLeaveConfirm"),
+	Confirmation.show({
+		title = T("IGUI_GS_MemberEditorTitle"),
+		question = T("IGUI_GS_MemberEditorLeaveQuestion"),
+		consequences = T("IGUI_GS_MemberEditorLeaveConsequences"),
 		onAccept = function()
 			terminal:onLeaveNetwork()
 			if terminal.refreshNetworkPanel then terminal:refreshNetworkPanel() end
@@ -169,7 +182,7 @@ function GS_MemberEditorUI:onLeaveNetwork()
 end
 
 function GS_MemberEditorUI:buildLayout()
-	local content = self:contentRect()
+	local host, content = layoutHost(self)
 	local pad = content.x
 	local y = content.y
 	local textW = content.w
@@ -177,18 +190,18 @@ function GS_MemberEditorUI:buildLayout()
 	local viewerRole = self.viewerRole or "member"
 	local isOwnerViewer = viewerRole == "owner"
 	local isAdminViewer = viewerRole == "admin" or isOwnerViewer
-	local nameCopy = UI.Controls.copyText(self, {
+	local nameCopy = UI.Controls.copyText(host, {
 		x = pad, y = y, w = textW, text = data.displayName or data.name or "?",
 		tone = "text", playerNum = self.playerNum,
 	})
 	y = y + nameCopy.height
 
-	y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberEditorCurrentRole", roleLabel(data.kind)),
+	y = addWrappedLine(host, pad, y, textW, T("IGUI_GS_MemberEditorCurrentRole", roleLabel(data.kind)),
 		"textMuted")
 	y = y + LINE_GAP + 4
 
 	if self.isSelf then
-		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberEditorSelfNote"), "textMuted")
+		y = addWrappedLine(host, pad, y, textW, T("IGUI_GS_MemberEditorSelfNote"), "textMuted")
 		y = y + LINE_GAP
 	end
 
@@ -197,12 +210,12 @@ function GS_MemberEditorUI:buildLayout()
 	-- solo se aplican a miembros normales; admins y owner tienen acceso total.
 	local canManageZones = isAdminViewer and data.kind == "user"
 	if canManageZones then
-		local zoneTitle = UI.Controls.sectionTitle(self, {
+		local zoneTitle = UI.Controls.sectionTitle(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.rowHeight,
 			text = T("IGUI_GS_MemberZoneAccessTitle"), playerNum = self.playerNum,
 		})
 		y = y + zoneTitle.height + 3
-		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberZoneAccessHint"), "textMuted")
+		y = addWrappedLine(host, pad, y, textW, T("IGUI_GS_MemberZoneAccessHint"), "textMuted")
 		y = y + 4
 
 		local zones = (self.terminal.terminalState and self.terminal.terminalState.zones) or {}
@@ -212,14 +225,14 @@ function GS_MemberEditorUI:buildLayout()
 			return tostring(a.name or a.id or "") < tostring(b.name or b.id or "")
 		end)
 		if #sortedZones == 0 then
-			y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_NoZonesYet"), "textMuted")
+			y = addWrappedLine(host, pad, y, textW, T("IGUI_GS_NoZonesYet"), "textMuted")
 			y = y + LINE_GAP
 		else
 			local denied = {}
 			for i = 1, #(data.deniedZoneIds or {}) do denied[tostring(data.deniedZoneIds[i])] = true end
 			local rowH = FONT_HGT_SMALL + 10
 			local listH = math.min(#sortedZones, 6) * rowH + 2
-			local listPanel = UI.Controls.panel(self, {
+			local listPanel = UI.Controls.panel(host, {
 				x = pad, y = y, w = textW, h = listH,
 				playerNum = self.playerNum,
 			})
@@ -269,19 +282,19 @@ function GS_MemberEditorUI:buildLayout()
 			y = y + listH + 5
 
 			local halfW = math.floor((textW - 6) / 2)
-			self.selectAllZonesBtn = UI.Controls.button(self, {
+			self.selectAllZonesBtn = UI.Controls.button(host, {
 				x = pad, y = y, w = halfW, h = CONTROL_METRICS.buttonHeight,
 				text = T("IGUI_GS_MemberZoneSelectAll"), fullWidth = true,
 				onClick = function() self:setAllZonesAllowed(true) end,
 			})
-			self.deselectAllZonesBtn = UI.Controls.button(self, {
+			self.deselectAllZonesBtn = UI.Controls.button(host, {
 				x = pad + halfW + 6, y = y, w = textW - halfW - 6,
 				h = CONTROL_METRICS.buttonHeight,
 				text = T("IGUI_GS_MemberZoneDeselectAll"), fullWidth = true,
 				onClick = function() self:setAllZonesAllowed(false) end,
 			})
 			y = y + CONTROL_METRICS.buttonHeight + 5
-			self.saveZonesBtn = UI.Controls.button(self, {
+			self.saveZonesBtn = UI.Controls.button(host, {
 				x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
 				text = T("IGUI_GS_MemberZoneSave"), fullWidth = true,
 				onClick = function() self:onSaveZoneAccess() end,
@@ -295,14 +308,14 @@ function GS_MemberEditorUI:buildLayout()
 	local canChangeRole = isOwnerViewer and not self.isSelf
 		and (data.kind == "user" or data.kind == "admin")
 	if canChangeRole then
-		local roleTitle = UI.Controls.sectionTitle(self, {
+		local roleTitle = UI.Controls.sectionTitle(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.rowHeight,
 			text = T("IGUI_GS_MemberEditorRoleLabel"), playerNum = self.playerNum,
 		})
 		y = y + roleTitle.height + 4
 
 		local applyW = 110
-		self.roleCombo = UI.Controls.combo(self, {
+		self.roleCombo = UI.Controls.combo(host, {
 			x = pad, y = y, w = textW - applyW - 6,
 			h = CONTROL_METRICS.inputHeight, playerNum = self.playerNum,
 			items = {
@@ -312,7 +325,7 @@ function GS_MemberEditorUI:buildLayout()
 			selected = data.kind == "admin" and "admin" or "member",
 		})
 
-		self.applyRoleBtn = UI.Controls.button(self, {
+		self.applyRoleBtn = UI.Controls.button(host, {
 			x = pad + textW - applyW, y = y, w = applyW,
 			h = CONTROL_METRICS.inputHeight,
 			text = T("IGUI_GS_MemberEditorApplyRoleBtn"),
@@ -325,7 +338,7 @@ function GS_MemberEditorUI:buildLayout()
 	-- sea uno mismo) ────────────────────────────────────────────────────
 	local canTransfer = isOwnerViewer and not self.isSelf and data.kind == "user"
 	if canTransfer then
-		self.transferBtn = UI.Controls.button(self, {
+		self.transferBtn = UI.Controls.button(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
 			text = T("IGUI_GS_MemberEditorTransferBtn", data.displayName or data.name or "?"),
 			fullWidth = true, onClick = function() self:onTransferOwnership(true) end,
@@ -344,7 +357,7 @@ function GS_MemberEditorUI:buildLayout()
 		end
 	end
 	if canRemove then
-		self.removeBtn = UI.Controls.button(self, {
+		self.removeBtn = UI.Controls.button(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
 			text = T("IGUI_GS_MemberEditorRemoveBtn"), danger = true,
 			fullWidth = true, onClick = function() self:onRemoveAccess() end,
@@ -356,7 +369,7 @@ function GS_MemberEditorUI:buildLayout()
 	-- dispara sucesion automatica igual que al morir) ──────────────────
 	local canLeave = self.isSelf and data.kind ~= "faction"
 	if canLeave then
-		self.leaveBtn = UI.Controls.button(self, {
+		self.leaveBtn = UI.Controls.button(host, {
 			x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
 			text = T("IGUI_GS_MemberEditorLeaveBtn"), danger = true,
 			fullWidth = true, onClick = function() self:onLeaveNetwork() end,
@@ -365,7 +378,7 @@ function GS_MemberEditorUI:buildLayout()
 	end
 
 	if not canManageZones and not canChangeRole and not canTransfer and not canRemove and not canLeave then
-		y = addWrappedLine(self, pad, y, textW, T("IGUI_GS_MemberEditorNoActions"), "textMuted")
+		y = addWrappedLine(host, pad, y, textW, T("IGUI_GS_MemberEditorNoActions"), "textMuted")
 		y = y + LINE_GAP
 	end
 

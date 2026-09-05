@@ -214,9 +214,15 @@ function GlobalStorageSiK.TerminalSync.requestInventoryRefresh(searchQuery)
 	if not ui or not ui.getIsVisible or not ui:isVisible() then
 		return false
 	end
-	return GlobalStorageSiK.NetClient.sendCommand("searchItems", {
+	local payload = {
 		searchQuery = searchQuery or currentSearchQuery(),
-	})
+	}
+	local networkId = ui.terminalState and ui.terminalState.networkId
+	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
+			ui.playerNum or 0, networkId)
+	end
+	return GlobalStorageSiK.NetClient.sendCommand("searchItems", payload)
 end
 
 --- Programa pull de inventario (debounced).

@@ -255,6 +255,7 @@ local function finishJob(networkId, job)
 	if state == "COMPLETED" then job.totals._freshSnapshotScope = job.zoneId or "network" end
 	job.totals._background = job.background == true
 	job.totals._startRevision = job.startRevision or 0
+	job.totals._startContentSignature = job.startContentSignature
 	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error" or "complete")
 	if not job.totals._stagedDiscarded and GlobalStorageSiK.RegistryStore
 		and GlobalStorageSiK.RegistryStore.notifyChanged then
@@ -391,6 +392,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		lastProgressMs = nowMs(),
 		phase = "preparing",
 		startRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+		startContentSignature = GlobalStorageSiK.Index.contentSignature(networkId),
 		nextRunMs = 0,
 		watchers = {},
 		distinctTypeSet = {},

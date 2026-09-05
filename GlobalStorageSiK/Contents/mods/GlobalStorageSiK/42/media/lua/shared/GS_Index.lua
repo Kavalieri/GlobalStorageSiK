@@ -363,7 +363,7 @@ end
 ---@param player IsoPlayer|nil limita el indice a sus zonas autorizadas
 ---@param freshSnapshotScope string|nil "network" o zoneId cuyo snapshot acaba de actualizarse
 ---@return table rows Lista ordenada { fullType, displayName, category, count, nodeId }
-function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
+function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope, sourceNodeId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
 	local byType = {}
@@ -374,6 +374,7 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	for i = 1, #live do
 		local liveEntry = live[i]
 		local nodeId = liveEntry.entry and liveEntry.entry.id or ("node_" .. i)
+		if sourceNodeId == nil or sourceNodeId == nodeId then
 		liveIds[nodeId] = true
 		local node = registry.nodes and registry.nodes[nodeId]
 		local snapshotAvailable = node and node.itemSnapshot
@@ -388,13 +389,14 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 			-- paga una lectura viva. El siguiente scan lo deja cacheado.
 			mergeLiveContainer(byType, liveEntry.container, nodeId)
 		end
+		end
 	end
 
 	for _, node in pairs(registry.nodes or {}) do
 		local zone = registry.zones and registry.zones[node.zoneId]
 		if zone and zone.networkId == networkId and node.membership ~= "excluded" and node.enabled ~= false and node.offline ~= true
 			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
-			if not liveIds[node.id] then
+			if not liveIds[node.id] and (sourceNodeId == nil or sourceNodeId == node.id) then
 				mergeNodeSnapshot(byType, node)
 			end
 		end
@@ -408,6 +410,7 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope)
 	-- que snapshots posteriores no vuelven a invocar al clasificador.
 	for i = 1, #rows do
 		rows[i].selectionRevision = selectionRevision
+		rows[i].sourceNodeId = sourceNodeId
 		local resolution = nil
 		if not rows[i].mixedVariants or rows[i].nativePath then
 			resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
@@ -437,7 +440,7 @@ end
 ---@param page number|nil
 ---@param pageSize number|nil
 ---@return table
-function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page, pageSize)
+function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page, pageSize, sourceNodeId)
 	page = math.max(1, math.floor(tonumber(page) or 1))
 	pageSize = math.max(1, math.min(25, math.floor(tonumber(pageSize) or 15)))
 	local details = {}
@@ -446,7 +449,8 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	for _, node in pairs(registry.nodes or {}) do
 		local zone = registry.zones and registry.zones[node.zoneId]
-		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+		if (sourceNodeId == nil or sourceNodeId == node.id)
+			and zone and zone.networkId == networkId and node.membership ~= "excluded"
 			and node.enabled ~= false and node.offline ~= true
 			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
 			for _, row in pairs(node.itemSnapshot or {}) do
@@ -466,6 +470,7 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 							count = 1,
 							displayName = row.mediaTitle or row.displayName,
 							nodeId = node.id, zoneId = node.zoneId,
+							sourceNodeId = sourceNodeId,
 							detailKind = detailKind, variantKey = row.variantKey,
 							mediaIndex = unit and unit.mediaIndex or row.mediaIndex,
 							mediaTitle = unit and unit.mediaTitle or row.mediaTitle,
@@ -591,17 +596,20 @@ end
 --- resolver el objeto de mundo de nuevo.
 ---@param entry table nodo del registro (registry.nodes[id], referencia real)
 ---@param container ItemContainer contenedor ya resuelto de ese nodo
+---@return boolean captured
 function GlobalStorageSiK.Index.syncNodeSnapshot(entry, container)
 	if not GlobalStorageSiK.isAuthoritative() then
-		return
+		return false
 	end
 	if not entry or not container then
-		return
+		return false
 	end
 	local ok, snap = pcall(GlobalStorageSiK.ItemSnapshot.fromContainer, container)
-	if ok and snap then
+	if ok and type(snap) == "table" then
 		entry.itemSnapshot = snap
+		return true
 	end
+	return false
 end
 
 --- Actualiza itemSnapshot de TODOS los nodos activos con contenedor vivo de
@@ -641,6 +649,120 @@ function GlobalStorageSiK.Index.syncLiveSnapshots(networkId)
 			end
 		end
 	end
+end
+
+-- Serializa solo el estado fisico que determina el catalogo. No incluye
+-- nombres traducidos, categorias de presentacion ni ninguna referencia Java.
+-- La cadena puede ser grande, pero solo se construye al principio y al final
+-- de un escaneo fisico, y permite una comparacion exacta sin colisiones.
+local CONTENT_FIELDS = {
+	"fullType", "worldSprite", "count", "mediaIndex", "mediaTitle", "mediaCodes",
+	"dynamicSignature", "dynamicStateKey", "dynamicPercent", "fluidState", "foodState",
+	"shapeFamily", "productFamilyKey", "shapeKey", "conditionSignature", "condition",
+	"conditionMax", "variantKey", "totalWeight", "totalFluidAmount", "totalFluidCapacity",
+	"itemIds", "unitDetails",
+}
+
+local function stableScalar(value)
+	local kind = type(value)
+	if kind == "nil" then return "n" end
+	if kind == "boolean" then return value and "b1" or "b0" end
+	if kind == "number" then return "d" .. string.format("%.17g", value) end
+	local text = tostring(value)
+	return "s" .. tostring(#text) .. ":" .. text
+end
+
+local function stableValue(value, depth)
+	if type(value) ~= "table" then return stableScalar(value) end
+	if depth >= 6 then return "t0:" end
+	local entries = {}
+	for key, child in pairs(value) do
+		local encodedKey = stableScalar(key)
+		entries[#entries + 1] = encodedKey .. "=" .. stableValue(child, depth + 1)
+	end
+	table.sort(entries)
+	return "t" .. tostring(#entries) .. ":" .. table.concat(entries, ";")
+end
+
+local function stableSet(value)
+	if type(value) ~= "table" then return stableScalar(value) end
+	local entries = {}
+	for _, child in pairs(value) do entries[#entries + 1] = stableValue(child, 0) end
+	table.sort(entries)
+	return "u" .. tostring(#entries) .. ":" .. table.concat(entries, ";")
+end
+
+function GlobalStorageSiK.Index.snapshotSignature(snapshot)
+	local rows = {}
+	for _, row in pairs(snapshot or {}) do
+		local encoded = { stableScalar(row.rowKey or row.fullType) }
+		for i = 1, #CONTENT_FIELDS do
+			local field = CONTENT_FIELDS[i]
+			local value = (field == "itemIds" or field == "mediaCodes")
+				and stableSet(row[field]) or stableValue(row[field], 0)
+			encoded[#encoded + 1] = field .. "=" .. value
+		end
+		rows[#rows + 1] = table.concat(encoded, ";")
+	end
+	table.sort(rows)
+	return table.concat(rows, ";")
+end
+
+---@param networkId string|nil
+---@return string
+function GlobalStorageSiK.Index.contentSignature(networkId)
+	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
+	if not networkId then return "network:nil" end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local nodes = {}
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true then
+			nodes[#nodes + 1] = node
+		end
+	end
+	table.sort(nodes, function(a, b) return tostring(a.id) < tostring(b.id) end)
+	local parts = { "network=", stableScalar(networkId), ";nodes=", tostring(#nodes) }
+	for i = 1, #nodes do
+		local node = nodes[i]
+		parts[#parts + 1] = ";node=" .. stableScalar(node.id)
+		parts[#parts + 1] = ";zone=" .. stableScalar(node.zoneId)
+		local rows = {}
+		for _, row in pairs(node.itemSnapshot or {}) do
+			local encoded = { "row=", stableScalar(row.rowKey or row.fullType) }
+			for k = 1, #CONTENT_FIELDS do
+				local field = CONTENT_FIELDS[k]
+				local value = (field == "itemIds" or field == "mediaCodes")
+					and stableSet(row[field]) or stableValue(row[field], 0)
+				encoded[#encoded + 1] = ";" .. field .. "=" .. value
+			end
+			rows[#rows + 1] = table.concat(encoded)
+		end
+		table.sort(rows)
+		parts[#parts + 1] = ";rows=" .. tostring(#rows)
+		for j = 1, #rows do parts[#parts + 1] = ";" .. rows[j] end
+	end
+	return table.concat(parts)
+end
+
+---@param networkId string|nil
+---@return boolean hasAny
+---@return boolean complete
+function GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
+	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
+	if not networkId then return false, false end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local hasAny = false
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true then
+			hasAny = true
+			if type(node.itemSnapshot) ~= "table" then return true, false end
+		end
+	end
+	return hasAny, hasAny
 end
 
 --- Incrementa revisión de inventario de la red (servidor).
@@ -685,7 +807,7 @@ end
 ---@param selectionRevision number
 ---@return table|nil result
 ---@return string|nil reason
-function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, selectionRevision)
+function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, selectionRevision, sourceNodeId)
 	if type(rowKey) ~= "string" or rowKey == "" then return nil, "invalid_row_key" end
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	if math.floor(tonumber(selectionRevision) or -1) ~= currentRevision then
@@ -695,7 +817,8 @@ function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, sel
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	for _, node in pairs(registry.nodes or {}) do
 		local zone = registry.zones and registry.zones[node.zoneId]
-		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+		if (sourceNodeId == nil or sourceNodeId == node.id)
+			and zone and zone.networkId == networkId and node.membership ~= "excluded"
 			and node.enabled ~= false and node.offline ~= true
 			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
 			for _, row in pairs(node.itemSnapshot or {}) do

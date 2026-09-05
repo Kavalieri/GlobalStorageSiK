@@ -261,9 +261,9 @@ Support.check(suite, "runtime rail fills each 76 px cell with the product icon",
 	assert(profile.window.railPadding == 0, "runtime rail retains forbidden inner padding")
 	assert(profile.window.railItemHeight == 76, "runtime rail cell clips the production icon")
 	assert(profile.window.railGap == 4, "runtime rail gap differs from HTML")
-	contains(tabs, "iconSize = 76", "product rail does not request the full cell extent")
-	contains(tabs, 'iconFit = "fill"', "product rail leaves forbidden inner icon margins")
-	contains(tabs, "iconPadding = 0", "product rail adds forbidden icon padding")
+	contains(tabs, "iconSize = 56", "product rail does not request the current HTML icon extent")
+	contains(tabs, "iconExact = true", "product rail does not preserve exact icon sizing")
+	contains(tabs, "iconOnly = true", "product rail adds forbidden icon padding")
 	return true
 end)
 
@@ -276,8 +276,8 @@ Support.check(suite, "tabs select surfaces inside one common content container",
 		"tab selection still swaps destination containers")
 	contains(frameworkNavigation, "panel:setVisible(contentKey == key)",
 		"tab selection does not swap child surfaces in the common area")
-	contains(tabs, "contentPadding = 12",
-		"main Window does not reserve the validated tab-content margin")
+	contains(tabs, "padding = 0, controlId = \"terminal-surface\"",
+		"main Window does not use the validated flush tab-content host")
 	excludes(terminal, "panel:setWidth(innerW)",
 		"product code overwrites framework-owned content geometry")
 	return true
@@ -286,8 +286,10 @@ end)
 Support.check(suite, "Table consumes its Block rectangle without creating another Block geometry", function()
 	excludes(frameworkTable, "Metrics.blockRects(self.w, self.h",
 		"Table still applies Block padding to its private widget root")
-	contains(frameworkTable, "w = math.max(0, self.w - gutter), h = self.h",
-		"Table does not reserve only its own right scrollbar")
+	contains(frameworkTable, "Block.resolveViewportRect",
+		"Table does not delegate its functional viewport geometry")
+	contains(frameworkTable, "local overflow = not self.directBlock",
+		"Table does not distinguish direct Block ownership from an intermediate host")
 	return true
 end)
 

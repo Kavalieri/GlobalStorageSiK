@@ -16,7 +16,11 @@ require "GS_NetClient"
 require "GS_NodeHighlight"
 require "GS_RulesUI"
 require "GS_FilterEditor"
+require "GS_TerminalUI_Nodes"
+local Confirmation = require "GS_Confirmation"
+local CapacityPresentation = require "GlobalStorageSiK/UI/CapacityPresentation"
 local UI = require "GS_UI_Framework"
+local ScrollDock = UI.ScrollDock
 
 GlobalStorageSiK.TerminalZoneEditor = {}
 GlobalStorageSiK.TerminalZoneEditor.instance = nil
@@ -29,7 +33,6 @@ local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local CONTROL_METRICS = UI.Controls.metrics("editor")
 local PALETTE = UI.Theme.palette()
 local PAD = 10
-local INFO_BTN_SIZE = 24
 
 -- Conserva los rectangulos aprobados del editor y deja a SiK.UI la
 -- construccion, el chrome y el lifecycle de las hojas visibles.
@@ -52,10 +55,10 @@ local function createHost(parent, x, y, w, h)
 	})
 end
 
-local function createField(text, x, y, w, numeric)
+local function createField(text, x, y, w, numeric, onSubmit)
 	return UI.Controls.field(nil, {
 		x = x, y = y, w = w, h = CONTROL_METRICS.inputHeight,
-		text = text, numeric = numeric == true,
+		text = text, numeric = numeric == true, onSubmit = onSubmit,
 	})
 end
 
@@ -66,49 +69,6 @@ local function addSummaryRuns(host, layout)
 		createText(host, run.x, (run.line - 1) * (FONT_HGT_SMALL + 2),
 			math.max(1, host.width - run.x), run.text, color)
 	end
-end
-
---- Coloca un boton "?" justo despues de un titulo de bloque ya creado, con
---- el texto largo que antes vivia siempre visible debajo como parrafo -
---- dev26 ronda 4, mismo helper que GS_TerminalUI_NodeEditor.lua.
----@param scroll table
----@param pad number
----@param y number
----@param titleText string
----@param tooltip string
----@param target any
-local function createInfoSectionTitle(scroll, pad, y, width, titleText, tooltip, target)
-	local title = UI.Controls.sectionTitle(nil, {
-		x = pad, y = y, w = width, h = INFO_BTN_SIZE,
-		text = titleText, info = { tooltip = tooltip, payload = target },
-	})
-	UI.Scroll.addChild(scroll, title)
-	return title
-end
-
--- fullWidth=true, mismo motivo que GS_TerminalUI_NodeEditor.lua.
-local function createBtn(x, y, w, title, target, onClick)
-	return UI.Controls.button(nil, {
-		x = x, y = y, w = w, h = CONTROL_METRICS.buttonHeight,
-		text = title, fullWidth = true, payload = target,
-		onClick = function() return onClick(target) end,
-	})
-end
-
-local function createSectionLabel(x, y, text)
-	local width = getTextManager():MeasureStringX(UIFont.Small, text) + 2
-	return UI.Controls.sectionTitle(nil, {
-		x = x, y = y, w = width, h = FONT_HGT_SMALL, text = text,
-	})
-end
-
-local function createSectionCard(scroll, x, y, w, h, color)
-	local container = UI.Container.create({ parent = UI.Scroll.childHost(scroll),
-		x = x, y = y, w = w, h = h, padding = 0, accent = color,
-		background = { r = 0.08, g = 0.08, b = 0.08, a = 0.72 },
-		border = { r = 0.28, g = 0.28, b = 0.28, a = 0.70 },
-	})
-	return container and container.panel or nil
 end
 
 local function createProductButton(x, y, w, h, title, target, onClick,
@@ -126,8 +86,9 @@ local function createProductButton(x, y, w, h, title, target, onClick,
 	return button
 end
 
-local function confirmAction(message, onAccept)
-	return UI.Modal.confirm({ message = message, onAccept = onAccept })
+local function confirmAction(title, question, consequences, onAccept)
+	return Confirmation.show({ title = title, question = question,
+		consequences = consequences, onAccept = onAccept })
 end
 
 --- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua,
@@ -203,15 +164,11 @@ function GS_ZoneEditorUI:layoutForm()
 end
 
 function GS_ZoneEditorUI:calculateLayout()
-	local content = self.contentRect and self:contentRect()
-		or { x = PAD, y = self.headerHeight + PAD,
-			w = self.width - PAD * 2, h = self.height - self.headerHeight - PAD * 2 }
-	local bodyH = math.max(120,
-		content.h - UI.Scroll.listBottomGap())
-	if self.editorScroll then
-		self.editorScroll:setX(content.x)
-		self.editorScroll:setY(content.y)
-		UI.Scroll.resize(self.editorScroll, content.w, bodyH)
+	local content = self.contentHost and { x = 0, y = 0,
+		w = self.contentHost.width, h = self.contentHost.height }
+		or { x = 0, y = 0, w = self.width, h = self.height }
+	if self.editorDock then
+		self.editorDock:reflow(content)
 		self:layoutForm()
 		self:updateScrollHeight()
 	end
@@ -219,13 +176,14 @@ end
 
 function GS_ZoneEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
-	UI.Window.applyEditor(self, {
+	UI.Modal.apply(self, {
+		kind = "task", profile = "editor", scroll = false, contentMode = "dock",
 		geometryKey = "zoneEditor",
 		geometryVersion = 2,
 		title = T("IGUI_GS_ZoneEditorTitle"),
-		padding = PAD,
 		onReflow = function() self:calculateLayout() end,
 		onClose = function()
+			if self.editorDock then self.editorDock:dispose(); self.editorDock = nil end
 			GlobalStorageSiK.TerminalZoneEditor.instance = nil
 			if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
 				GlobalStorageSiK.NodeHighlight.clear()
@@ -242,7 +200,7 @@ end
 function GS_ZoneEditorUI:createChildren()
 	if self._gsChildrenBuilt then return end
 	self._gsChildrenBuilt = true
-	-- El chrome se construye una sola vez por SiK.UI.Window.applyEditor().
+	-- El chrome y el Block fisico se construyen una sola vez por Modal.apply().
 	-- Crear otra X aquí registraba un segundo control que PZ podía conservar
 	-- como raíz al cerrar el editor.
 end
@@ -274,7 +232,7 @@ function GS_ZoneEditorUI:applyAll()
 		self.terminal:onRenameZone(self.zone.id, name)
 		self.zone.name = name
 		if self.setHeader then
-			self:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. name)
+			self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = name } })
 		end
 	end
 	local n = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
@@ -298,145 +256,169 @@ function GS_ZoneEditorUI:ensureForm()
 
 	local scroll = self.editorScroll
 	UI.Scroll.clear(scroll, false)
-
-	local pad = 8
-	local y = pad
-	local innerW = UI.Scroll.contentWidth(scroll)
-	local contentW = math.max(1, innerW - pad * 2)
-
-	-- ── Linea informativa (dev26, ronda 3): cuantos contenedores tiene esta
-	-- zona - ver zoneContainerCount arriba para por que NO intenta sumar
-	-- objetos/tipos todavia (esa cuenta agregada es trabajo aparte). dev26
-	-- ronda 4ter: movida ANTES del nombre (mismo orden que
-	-- GS_TerminalUI_NodeEditor.lua - el bloque de informacion siempre
-	-- precede al campo editable, en las dos ventanas).
-	local zContainerCount = zoneContainerCount(self.zone, self.terminal)
-	self.statsLbl = createText(nil, pad, y, contentW,
-		T("IGUI_GS_ZoneStatsLine", zContainerCount), PALETTE.textMuted)
-	UI.Scroll.addChild(scroll, self.statsLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.occupancyLbl = createText(nil, pad, y, contentW,
-		occupancyLabelText(self.capacityInfo), PALETTE.textMuted)
-	UI.Scroll.addChild(scroll, self.occupancyLbl)
-	y = y + FONT_HGT_SMALL + 10
-
-	self.nameLbl = createSectionLabel(pad, y, T("IGUI_GS_ZoneRenameLabel"))
-	UI.Scroll.addChild(scroll, self.nameLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	-- Nombre y prioridad ya NO tienen cada uno su propio "Aplicar": un solo
-	-- clic en "Aplicar cambios" (mas abajo) manda ambos juntos - ver applyAll.
-	self.nameEntry = createField(self.zone and self.zone.name or "", pad, y, contentW, false)
-	UI.Scroll.addChild(scroll, self.nameEntry)
-	y = y + CONTROL_METRICS.inputHeight + 12
-
-	-- Mismo esqueleto de frase pedagogica que GS_TerminalUI_NodeEditor.lua
-	-- (solo cambia "zona" por "contenedor") - texto largo, envuelto linea a
-	-- linea con wrapTextLines: una sola ISLabel se
-	-- saldria del ancho del panel.
-	self.priorityLbl = createInfoSectionTitle(scroll, pad, y, contentW,
-		T("IGUI_GS_ZonePriorityLabel"), T("IGUI_GS_ZonePriorityHint"), scroll)
-	y = y + self.priorityLbl.height + 4
-
-	self.priorityEntry = createField(tostring((self.zone and self.zone.priority) or 50),
-		pad, y, contentW, true)
-	UI.Scroll.addChild(scroll, self.priorityEntry)
-	y = y + CONTROL_METRICS.inputHeight + 4
-
-	local presetW = math.floor((contentW - 8) / 3)
-	self.priorityPresetHighBtn = createBtn(pad, y, presetW, T("IGUI_GS_NodePriorityPresetHigh"), scroll, function() self:applyPriority(10) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetHighBtn)
-	self.priorityPresetNormalBtn = createBtn(pad + presetW + 4, y, presetW, T("IGUI_GS_NodePriorityPresetNormal"), scroll, function() self:applyPriority(50) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetNormalBtn)
-	self.priorityPresetLowBtn = createBtn(pad + (presetW + 4) * 2, y, presetW, T("IGUI_GS_NodePriorityPresetLow"), scroll, function() self:applyPriority(90) end)
-	UI.Scroll.addChild(scroll, self.priorityPresetLowBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 16
-
-	-- ── Protocolo de aceptación de zona (dev26, ronda 2) ────────────────────
-	-- Puerta binaria evaluada ANTES que las reglas de cada contenedor de esta
-	-- zona (ver GS_Router.zoneRulesAllow) - sustituye a la antigua sección
-	-- "Plantilla" (aplicar categorías/filtros/prioridad copiados a toda la
-	-- zona de una vez), ahora cubierta por "Extender a la zona" desde el
-	-- propio editor de contenedor (ver GS_TerminalUI_NodeEditor.lua).
-	self.rulesTitleLbl = createInfoSectionTitle(scroll, pad, y, contentW,
-		T("IGUI_GS_ZoneRulesTitle"), T("IGUI_GS_ZoneRulesHint"), scroll)
-	y = y + self.rulesTitleLbl.height + 8
-
-	local summaryLayout = GlobalStorageSiK.RulesUI.layoutSummary(
-		self.zone and self.zone.rules, contentW, UIFont.Small,
-		PALETTE.textSecondary)
-	local summaryHost = createHost(nil, pad, y, contentW,
-		summaryLayout.lineCount * (FONT_HGT_SMALL + 2))
-	UI.Scroll.addChild(scroll, summaryHost)
-	addSummaryRuns(summaryHost, summaryLayout)
-	y = y + summaryHost:getHeight()
-	y = y + 6
-
-	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
-		y = self:buildRuleSection(scroll, pad, contentW, y, op)
+	local parent, width = UI.Scroll.childHost(scroll), UI.Scroll.contentWidth(scroll)
+	local bottom = 0
+	local function section(title, tooltip)
+		return UI.Block.create({ parent = parent, x = 0, y = bottom, w = width,
+			title = title, tooltip = tooltip or title, playerNum = self.playerNum })
 	end
-	y = y + 6
+	local function finish(block, column)
+		column:finish()
+		bottom = block.y + block.h + 8
+	end
+	local function label(column, text, color)
+		local widget = createText(column.parent, 0, 0, column.width, text, color or PALETTE.textPrimary)
+		column:label(widget, FONT_HGT_SMALL)
+		return widget
+	end
+	local function field(column, title, value, numeric, onSubmit)
+		label(column, title)
+		local widget = createField(value, 0, 0, column.width, numeric, onSubmit)
+		column:block(widget, CONTROL_METRICS.inputHeight)
+		return widget
+	end
+	local function button(column, title, callback, danger, tooltip)
+		return UI.Controls.button(column.parent, { text = title, onClick = callback,
+			danger = danger == true, tooltip = tooltip, playerNum = self.playerNum })
+	end
+
+	-- Identity owns its capacity presentation and editable zone fields.
+	local count = zoneContainerCount(zone, terminal)
+	local identity = section(T("IGUI_GS_ZoneIdentity"))
+	self.identityBlock = identity
+	local identityColumn = identity:beginColumn()
+	local presentation = CapacityPresentation.fromState(self.capacityInfo, { count = count, kind = "containers" })
+	self.capacityBar = UI.Controls.progress(identityColumn.parent, {
+		w = identityColumn.width, h = CONTROL_METRICS.rowHeight,
+	})
+	self.capacityBar:setProgress(presentation)
+	identityColumn:block(self.capacityBar, CONTROL_METRICS.rowHeight)
+	self.nameEntry = field(identityColumn, T("IGUI_GS_ZoneRenameLabel"), zone.name or "", false, function()
+		local name = self.nameEntry:getText()
+		if self.zone and name ~= "" and self.terminal and self.terminal.onRenameZone then
+			self.terminal:onRenameZone(self.zone.id, name)
+		end
+	end)
+	self.priorityEntry = field(identityColumn, T("IGUI_GS_ZonePriorityLabel"), tostring(zone.priority or 50), true, function()
+		local value = tonumber(self.priorityEntry:getText())
+		if value then self:applyPriority(value) end
+	end)
+	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_ZonePriorityHint"))
+	self.priorityPresetHighBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetHigh"), function() self:applyPriority(10) end)
+	self.priorityPresetNormalBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetNormal"), function() self:applyPriority(50) end)
+	self.priorityPresetLowBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetLow"), function() self:applyPriority(90) end)
+	identityColumn:row(CONTROL_METRICS.buttonHeight, {
+		{ widget = self.priorityPresetHighBtn }, { widget = self.priorityPresetNormalBtn },
+		{ widget = self.priorityPresetLowBtn },
+	})
+	finish(identity, identityColumn)
+
+	-- Rules is a parent Block. Protocol and operator groups are real child Blocks.
+	local rulesBlock = section(T("IGUI_GS_EditorRules"), T("IGUI_GS_EditorRulesHint"))
+	self.rulesBlock = rulesBlock
+	local rulesColumn = rulesBlock:beginColumn()
+	local protocol = UI.Block.create({ parent = rulesColumn.parent, w = rulesColumn.width,
+		title = T("IGUI_GS_ZoneRulesTitle"), tooltip = T("IGUI_GS_ZoneRulesHint"), playerNum = self.playerNum })
+	local protocolColumn = protocol:beginColumn()
+	local summary = GlobalStorageSiK.RulesUI.layoutSummary(zone.rules or {}, protocolColumn.width,
+		UIFont.Small, PALETTE.textSecondary)
+	self.rulesSummaryHost = createHost(protocolColumn.parent, 0, 0, protocolColumn.width,
+		math.max(FONT_HGT_SMALL, summary.lineCount * (FONT_HGT_SMALL + 2)))
+	addSummaryRuns(self.rulesSummaryHost, summary)
+	protocolColumn:block(self.rulesSummaryHost, self.rulesSummaryHost.height)
+	rulesColumn:block(protocol, protocolColumn:finish())
+	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
+		local group = self:buildRuleSection(rulesBlock, op)
+		rulesColumn:block(group, group.h)
+	end
+	finish(rulesBlock, rulesColumn)
 	-- Firma del numero de reglas usada para dimensionar tarjetas/hosts en
 	-- ESTE build (ver GlobalStorageSiK.TerminalZoneEditor.syncZoneData) -
 	-- mismo bug/mismo fix que GS_TerminalUI_NodeEditor.lua: anadir una regla
 	-- dispara rebuildForm() de inmediato via el callback de
 	-- GS_FilterEditor.lua ANTES de que zone.rules tenga la regla nueva.
-	self._ruleCountAtBuild = #(self.zone and self.zone.rules or {})
+        self._ruleCountAtBuild = #(self.zone and self.zone.rules or {})
+	self._rulesLayoutAtBuild = GlobalStorageSiK.RulesUI.layoutSignature(zone.rules)
 
-	-- ── Acciones (dev26, ronda 3) ────────────────────────────────────────
-	-- Aplicar/Excluir/Eliminar agrupados al final, mismo criterio que el
-	-- editor de contenedor - antes Aplicar/Excluir vivian arriba, separados
-	-- de Eliminar por todo el bloque de protocolo.
-	self.applyAllBtn = createBtn(pad, y, contentW, T("IGUI_GS_ApplyAllChanges"), scroll, function()
-		self:applyAll()
-	end)
-	UI.Scroll.addChild(scroll, self.applyAllBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 6
-
-	local role = self.terminal and self.terminal.terminalState
-		and self.terminal.terminalState.permissions and self.terminal.terminalState.permissions.myRole
-	if role == "owner" or role == "admin" then
-		self.rescanZoneBtn = createProductButton(
-			pad, y, contentW, CONTROL_METRICS.buttonHeight,
-			T("IGUI_GS_ZoneCtxRescan"), scroll, function()
-				if self.zone and self.terminal and self.terminal.onRescanZone then
-					self.terminal:onRescanZone(self.zone.id)
-				end
-			end)
-		UI.Controls.setTooltip(self.rescanZoneBtn, T("IGUI_GS_ZonesManageHint"))
-		UI.Scroll.addChild(scroll, self.rescanZoneBtn)
-		y = y + CONTROL_METRICS.buttonHeight + 6
-	end
-
-	-- Simetrico al de contenedor: unica forma real de sacar TODA una zona
-	-- (y por tanto sus contenedores) de deposito/extraccion - ver
-	-- GS_Router.matchWithZoneGate. Rojo (PALETTE.statusDanger) SOLO cuando
-	-- la accion es excluir, confirmación solo al excluir.
-	local zoneExcluded = self.zone and self.zone.enabled == false
-	local zoneMembLabel = zoneExcluded and T("IGUI_GS_ZoneBtnInclude") or T("IGUI_GS_ZoneBtnExclude")
-	local zoneMembActiveColor = (not zoneExcluded) and PALETTE.statusDanger or nil
-	self.zoneMembBtn = createProductButton(pad, y, contentW,
-		CONTROL_METRICS.buttonHeight, zoneMembLabel, scroll, function()
-		if self.zone and self.zone.enabled == false then
-			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = true })
-		else
-			self:confirmExcludeZone()
-		end
-	end, zoneMembActiveColor, true)
-	UI.Controls.setTooltip(self.zoneMembBtn, T("IGUI_GS_ZoneExcludeTooltip"))
-	UI.Scroll.addChild(scroll, self.zoneMembBtn)
-	y = y + CONTROL_METRICS.buttonHeight + 6
-
-	self.deleteBtn = createProductButton(pad, y, contentW,
-		CONTROL_METRICS.buttonHeight, T("IGUI_GS_DeleteZone"), scroll, function()
-		self:confirmDelete()
-	end, PALETTE.statusDanger, true)
-	UI.Scroll.addChild(scroll, self.deleteBtn)
-	y = y + CONTROL_METRICS.buttonHeight + pad
+	-- Flat table: it is an action surface, not a disclosure hierarchy.
+	local containers = section(T("IGUI_GS_NativeTax_containers"), T("IGUI_GS_ZonesPriorityHint"))
+	self.containersBlock = containers
+	local containersColumn = containers:beginColumn()
+	local zoneRows = GlobalStorageSiK.TerminalNodes.zoneRows(
+		terminal.terminalState and terminal.terminalState.nodes or {}, zone)
+	local tableH = UI.Table.intrinsicHeight and UI.Table.intrinsicHeight(#zoneRows, { minRows = 1 })
+		or math.max(56, (#zoneRows + 1) * CONTROL_METRICS.buttonHeight)
+	self.zoneNodesTable = UI.Table.create({ parent = containersColumn.parent, x = 0, y = 0,
+		w = containersColumn.width, h = tableH, columns = GlobalStorageSiK.TerminalNodes.columns(),
+		rows = zoneRows, allRowsVisible = true, selectionMode = "single",
+		keyOf = function(row) return row.id end,
+		onRowClick = function(payload)
+			local row = payload and payload.item
+			if row and row.sourceNode then GlobalStorageSiK.TerminalNodeEditor.open(terminal, row.sourceNode, {}) end
+		end,
+	})
+	containersColumn:block(self.zoneNodesTable, self.zoneNodesTable:getHeight())
+	finish(containers, containersColumn)
 
 	self._formBuilt = true
-	self:updateScrollHeight(y)
+	self._actionsStartY = bottom
+	self:mountFixedActions()
+	self:updateScrollHeight(containers.y + containers.h)
+end
+
+-- Refresh the flat inventory of nodes without replacing edited field values.
+function GS_ZoneEditorUI:refreshZoneNodes()
+	if not self.zoneNodesTable or not self.containersBlock or not self.zone then return end
+	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
+	self.zoneNodesTable:setRows(GlobalStorageSiK.TerminalNodes.zoneRows(nodes, self.zone), true)
+	local column = self.containersBlock:beginColumn()
+	column:block(self.zoneNodesTable, self.zoneNodesTable:getHeight())
+	column:finish()
+	self:updateScrollHeight(self.containersBlock.y + self.containersBlock.h)
+end
+
+function GS_ZoneEditorUI:mountFixedActions()
+        if not self.editorDock or not self.editorDock.fixedBottomHost then return end
+        if self.actionsBlock then self.actionsBlock:dispose() end
+        local rect = self.editorDock:getFixedBottomRect()
+        local block = UI.Block.create({ parent = self.editorDock.fixedBottomHost,
+                w = rect.w, title = T("IGUI_GS_PermColActions"),
+                tooltip = T("IGUI_GS_ZonesManageHint"), playerNum = self.playerNum })
+        self.actionsBlock = block
+        local column = block:beginColumn()
+        local function action(title, callback, danger, tooltip)
+                return UI.Controls.button(column.parent, { text = title, onClick = callback,
+                        danger = danger == true, tooltip = tooltip, playerNum = self.playerNum })
+        end
+        local role = self.terminal and self.terminal.terminalState
+                and self.terminal.terminalState.permissions and self.terminal.terminalState.permissions.myRole
+        if role == "owner" or role == "admin" then
+                self.rescanZoneBtn = action(T("IGUI_GS_ZoneCtxRescan"), function()
+                        if self.zone and self.terminal and self.terminal.onRescanZone then
+                                self.terminal:onRescanZone(self.zone.id)
+                        end
+                end, false, T("IGUI_GS_ZonesManageHint"))
+        end
+        local excluded = self.zone and self.zone.enabled == false
+        self.zoneMembBtn = action(T(excluded and "IGUI_GS_ZoneBtnInclude" or "IGUI_GS_ZoneBtnExclude"), function()
+                if self.zone and self.zone.enabled == false then
+                        GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = true })
+                else self:confirmExcludeZone() end
+        end, not excluded, T("IGUI_GS_ZoneExcludeTooltip"))
+        if self.rescanZoneBtn then
+                column:row(CONTROL_METRICS.buttonHeight, {
+                        { widget = self.rescanZoneBtn }, { widget = self.zoneMembBtn },
+                })
+        else
+                column:block(self.zoneMembBtn, CONTROL_METRICS.buttonHeight)
+        end
+        self.deleteBtn = action(T("IGUI_GS_DeleteZone"), function() self:confirmDelete() end, true)
+        self.applyAllBtn = action(T("IGUI_GS_ApplyAllChanges"), function() self:applyAll() end,
+                false, T("IGUI_GS_ApplyAllChangesTooltip"))
+        column:row(CONTROL_METRICS.buttonHeight, {
+                { widget = self.deleteBtn }, { widget = self.applyAllBtn },
+        })
+        self.editorDock:setFixedBottomHeight(column:finish())
 end
 
 --- Crea/actualiza el zona activa del editor (igual que
@@ -449,15 +431,19 @@ function GS_ZoneEditorUI:setZone(terminal, zone)
 	self.terminal = terminal
 	self.zone = zone
 	if self.setHeader then
-		self:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. (zone.name or "?"))
+		self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = zone.name or "?" } })
 	end
 	if not sameZone then
 		self:resetForm()
 		self.capacityInfo = nil
 		GlobalStorageSiK.NetClient.sendCommand("getZoneCapacity", { zoneId = zone.id })
 	end
-	if not self.editorScroll then
-		self.editorScroll = UI.Scroll.create(self, PAD, 0, 400, 200, "panel")
+	if not self.editorDock then
+		self.editorDock = ScrollDock.create({
+			parent = self.contentHost or self, x = 0, y = 0, w = 400, h = 200,
+			padding = 0, gap = 8, contentHeight = 0,
+		})
+		self.editorScroll = self.editorDock and self.editorDock.scroll
 	end
 	self:calculateLayout()
 	self:ensureForm()
@@ -471,15 +457,18 @@ function GS_ZoneEditorUI:setZone(terminal, zone)
 end
 
 --- Respuesta de GS_Server.lua:getZoneCapacity (ver GS_Client.lua:onServerCommand,
---- caso "zoneCapacity") - actualiza SOLO el texto de la etiqueta ya creada,
+--- caso "zoneCapacity") - actualiza SOLO la barra ya creada,
 --- sin reconstruir el formulario (evitaria perder texto pendiente de
 --- "Aplicar cambios").
 ---@param capacity table|nil
 function GS_ZoneEditorUI:onCapacityReceived(capacity)
-	self.capacityInfo = capacity
-	if self.occupancyLbl then
-		self.occupancyLbl:setText(occupancyLabelText(capacity))
-	end
+        self.capacityInfo = capacity
+        if self.capacityBar then
+                local presentation = CapacityPresentation.fromState(capacity, {
+                        count = zoneContainerCount(self.zone, self.terminal), kind = "containers",
+                })
+                self.capacityBar:setProgress(presentation)
+        end
 end
 
 --- Recalcula altura scrollable del panel.
@@ -490,7 +479,11 @@ function GS_ZoneEditorUI:updateScrollHeight(bottom)
 	end
 	bottom = bottom or self._lastContentBottom or 0
 	self._lastContentBottom = bottom
-	UI.Scroll.setContentHeight(self.editorScroll, bottom)
+	if self.editorDock then
+		self.editorDock:setContentHeight(bottom)
+	else
+		UI.Scroll.setContentHeight(self.editorScroll, bottom)
+	end
 end
 
 --- Vacía el contenido del scroll y limpia referencias a widgets del
@@ -504,6 +497,7 @@ function GS_ZoneEditorUI:resetForm()
 	self.nameEntry = nil
 	self.statsLbl = nil
 	self.occupancyLbl = nil
+	self.capacityBar = nil
 	self.priorityLbl = nil
 	self.priorityEntry = nil
 	self.priorityPresetHighBtn = nil
@@ -517,6 +511,11 @@ function GS_ZoneEditorUI:resetForm()
 	self._ruleChipsHosts = nil
 	self._ruleCards = nil
 	self._ruleCountAtBuild = nil
+	self._rulesLayoutAtBuild = nil
+	self.identityBlock = nil
+	self.rulesBlock = nil
+	self.containersBlock = nil
+	self.zoneNodesTable = nil
 end
 
 --- Construye una sección de reglas de zona (OR/AND/NOT): título, panel de
@@ -528,46 +527,30 @@ end
 ---@param y number
 ---@param op string "OR"|"AND"|"NOT"
 ---@return number newY
-function GS_ZoneEditorUI:buildRuleSection(scroll, pad, contentW, y, op)
+function GS_ZoneEditorUI:buildRuleSection(parentBlock, op)
 	local rules = (self.zone and self.zone.rules) or {}
 	local count = 0
 	for i = 1, #rules do
 		if rules[i].op == op then count = count + 1 end
 	end
-	local CHIP_H, CHIP_PAD = FONT_HGT_SMALL + 8, 3
-	local chipsH = (count == 0)
-		and (CHIP_PAD + FONT_HGT_SMALL + CHIP_PAD * 2)
-		or  (CHIP_PAD + count * (CHIP_H + CHIP_PAD) + CHIP_PAD)
-
-	local cardPad = 8
-	local cardTop = y
-	local cy = y + cardPad
-	local cx = pad + cardPad + 4
-	local innerContentW = contentW - cardPad * 2 - 4
+	local chipH, chipGap = UI.Controls.dismissibleRowHeight({ profile = "editor" }), 8
+	local chipsH = math.max(FONT_HGT_SMALL, count * (chipH + chipGap) - chipGap)
 	local color = RULE_OP_COLOR[op]
-
-	-- Tarjeta de fondo insertada ANTES que su contenido, redimensionada al
-	-- final con el alto real (mismo patron que GS_TerminalUI_NodeEditor.lua
-	-- y GS_TerminalUI_NetworkZones.lua) - si se insertara despues, taparia
-	-- el titulo/chips/boton en vez de quedar detras.
-	local card = createSectionCard(scroll, pad, cardTop, contentW, 10, color)
-	UI.Scroll.addChild(scroll, card)
+	local card = UI.Block.create({ parent = parentBlock.childParent,
+		w = parentBlock:getContentRect().w, title = T(GlobalStorageSiK.RulesUI.OP_TITLE_KEY[op]),
+		tooltip = T("IGUI_GS_ZoneRulesHint"), playerNum = self.playerNum,
+		accent = color })
+	local column = card:beginColumn()
+	local host = createHost(column.parent, 0, 0, column.width, chipsH)
+	column:block(host, chipsH)
 	self._ruleCards = self._ruleCards or {}
 	self._ruleCards[op] = card
-
-	local titleLbl = createText(nil, cx, cy, innerContentW,
-		T(GlobalStorageSiK.RulesUI.OP_TITLE_KEY[op]), color)
-	UI.Scroll.addChild(scroll, titleLbl)
-	cy = cy + FONT_HGT_SMALL + 6
-
-	local host = createHost(nil, cx, cy, innerContentW, chipsH)
-	UI.Scroll.addChild(scroll, host)
 	self._ruleChipsHosts = self._ruleChipsHosts or {}
 	self._ruleChipsHosts[op] = host
 	self:rebuildRuleChips(op)
-	cy = cy + chipsH + 6
 
-	local addBtn = createBtn(cx, cy, innerContentW, T(GlobalStorageSiK.RulesUI.OP_ADD_KEY[op]), scroll, function()
+	local addBtn = UI.Controls.button(column.parent, { text = T(GlobalStorageSiK.RulesUI.OP_ADD_KEY[op]),
+		playerNum = self.playerNum, onClick = function()
 		if not self.zone then return end
 		-- containerGroups (dev26, ronda 2 - §4.4-quinquies, caso cruzado
 		-- zona->contenedor): un contenedor por cada nodo de esta zona con
@@ -594,14 +577,10 @@ function GS_ZoneEditorUI:buildRuleSection(scroll, pad, contentW, y, op)
 		GlobalStorageSiK.FilterEditor.show({ kind = "zone", id = self.zone.id, rules = self.zone.rules, containerGroups = containerGroups, scopeRules = scopeRules }, op, function()
 			self:rebuildForm()
 		end)
-	end)
-	UI.Scroll.addChild(scroll, addBtn)
-	cy = cy + CONTROL_METRICS.buttonHeight + cardPad
-
-	UI.Layout.apply(card, { x = pad, y = cardTop,
-		w = contentW, h = cy - cardTop })
-	y = cy + 8
-	return y
+	end })
+	column:block(addBtn, CONTROL_METRICS.buttonHeight)
+	column:finish()
+	return card
 end
 
 --- Rellena los chips de UN grupo de reglas (OR/AND/NOT) de la zona. Quitar
@@ -614,17 +593,18 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 	if not host then return end
 	for i = #(host.childrenInOrder or {}), 1, -1 do
 		local ch = host.childrenInOrder[i]
-		host:removeChild(ch)
-		if ch.removeFromUIManager then ch:removeFromUIManager() end
+		if ch.dispose then ch:dispose()
+		else
+			host:removeChild(ch)
+			if ch.removeFromUIManager then ch:removeFromUIManager() end
+		end
 	end
 
 	local allRules = (self.zone and self.zone.rules) or {}
-	local CHIP_H, CHIP_PAD = FONT_HGT_SMALL + 8, 3
-	local cy = CHIP_PAD
+	local CHIP_H, CHIP_PAD = UI.Controls.dismissibleRowHeight({ profile = "editor" }), 8
+	local cy = 0
 	local hostW = host.width
 	local removeText = T("IGUI_GS_Remove")
-	local removeBtnW = UI.Controls.measureButtonWidth(removeText, UIFont.Small, 20, 52, 120)
-	local labelMaxW = math.max(20, hostW - removeBtnW - 12)
 
 	local shown = 0
 	for realIdx = 1, #allRules do
@@ -632,24 +612,21 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 		if rule.op == op then
 			shown = shown + 1
 			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
-			label = UI.Controls.truncateText(label, labelMaxW, UIFont.Small)
 			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
 				rule.condition, PALETTE.textPrimary)
-			createText(host, 4, cy + 2, labelMaxW, label, labelColor)
 
 			local capturedIdx = realIdx
-			local removeBtn = createProductButton(
-				hostW - removeBtnW - 2, cy, removeBtnW, CHIP_H,
-				removeText, host,
-				function()
+			UI.Controls.dismissibleRow(host, {
+				x = 0, y = cy, w = hostW, h = CHIP_H, profile = "editor",
+				text = label, tooltip = label, actionTooltip = removeText, playerNum = self.playerNum,
+				tone = "ruleText", theme = { ruleText = { r = labelColor[1],
+					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } },
+				onRemove = function()
 					if not self.zone then return end
 					GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.zone.id, removeRuleIndex = capturedIdx })
 					table.remove(self.zone.rules, capturedIdx)
 					self:rebuildForm()
-				end
-			)
-			UI.Controls.setTooltip(removeBtn, removeText)
-			host:addChild(removeBtn)
+				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end
 	end
@@ -681,8 +658,9 @@ end
 --- nunca al volver a incluir).
 function GS_ZoneEditorUI:confirmExcludeZone()
 	if not self.zone then return end
-	local message = T("IGUI_GS_ZoneExcludeConfirm", self.zone.name or "?")
-	confirmAction(message, function()
+	confirmAction(T("IGUI_GS_ZoneEditorTitle"),
+		T("IGUI_GS_ZoneExcludeQuestion", self.zone.name or "?"),
+		T("IGUI_GS_ZoneExcludeConsequences"), function()
 		if self.zone then
 			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = false })
 		end
@@ -695,7 +673,9 @@ function GS_ZoneEditorUI:confirmDelete()
 	for i = 1, #nodes do
 		if self.zone and nodes[i].zoneId == self.zone.id then count = count + 1 end
 	end
-	confirmAction(T("IGUI_GS_ZoneDeleteConfirm", self.zone and self.zone.name or "?", count), function()
+	confirmAction(T("IGUI_GS_ZoneEditorTitle"),
+		T("IGUI_GS_ZoneDeleteQuestion", self.zone and self.zone.name or "?"),
+		T("IGUI_GS_ZoneDeleteConsequences", count), function()
 		if self.zone and self.terminal then
 			self.terminal:onDeleteZone(self.zone.id)
 			GlobalStorageSiK.TerminalZoneEditor.close()
@@ -725,9 +705,9 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
 
 	local ui = GS_ZoneEditorUI:new(x, y, w, h)
 	ui:initialise()
-	ui:addToUIManager()
-	ui:setZone(terminal, zone)
+	UI.Modal.show(ui)
 	GlobalStorageSiK.TerminalZoneEditor.instance = ui
+	ui:setZone(terminal, zone)
 
 	if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.highlightZone then
 		GlobalStorageSiK.NodeHighlight.highlightZone(zone.id, zone.name, allNodes or {})
@@ -766,8 +746,12 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 	for i = 1, #(zones or {}) do
 		if zones[i].id == ui.zone.id then
 			ui.zone = zones[i]
+			local state = ui.terminal and ui.terminal.terminalState
+			local capacity = state and state.capacity and state.capacity.perZone
+				and state.capacity.perZone[ui.zone.id]
+			if capacity then ui:onCapacityReceived(capacity) end
 			if ui.setHeader then
-				ui:setHeader(T("IGUI_GS_ZoneEditorTitle") .. ": " .. (ui.zone.name or "?"))
+				ui:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = ui.zone.name or "?" } })
 			end
 			-- Mismo bug/mismo fix que GS_TerminalUI_NodeEditor.lua:syncFormButtons
 			-- - anadir/quitar una regla dispara rebuildForm() de inmediato
@@ -776,8 +760,10 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 			-- con las tarjetas OR/AND/NOT dimensionadas para el conteo
 			-- ANTIGUO y el chip nuevo no aparecia (o quedaba tapado) hasta el
 			-- siguiente rebuild por otro motivo.
-			if ui._ruleCountAtBuild ~= nil and #(ui.zone.rules or {}) ~= ui._ruleCountAtBuild then
+			if ui._rulesLayoutAtBuild ~= GlobalStorageSiK.RulesUI.layoutSignature(ui.zone.rules) then
 				ui:rebuildForm()
+			else
+				ui:refreshZoneNodes()
 			end
 			return
 		end

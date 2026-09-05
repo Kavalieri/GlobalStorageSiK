@@ -3,6 +3,7 @@
 local Support = dofile("tests/helpers/sik_ui_contract_support.lua")
 local suite = Support.newSuite("sik_ui_table_resize_regression")
 local Table = Support.loadFrameworkModule(suite, "Table")
+local Block = Support.loadFrameworkModule(suite, "Block")
 
 local columns = {
 	{ key = "name", title = "Name", flex = 1, minWidth = 80, sortable = true },
@@ -11,9 +12,10 @@ local columns = {
 	{ key = "count", title = "Count", width = 48, align = "right" },
 }
 local parent = ISPanel:new(0, 0, 500, 360); parent:initialise()
+local block = assert(Block.create({ parent = parent, x = 0, y = 0, w = 420, h = 260 }))
 local sorts, resizeEvents = 0, 0
 local instance = assert(Table.create({
-	parent = parent, x = 0, y = 0, w = 420, h = 260,
+	parent = block.panel, embedded = true, x = 0, y = 0, w = 420, h = 260,
 	columns = columns, gap = 4, rows = {},
 	onSort = function() sorts = sorts + 1 end,
 	onColumnResize = function() resizeEvents = resizeEvents + 1 end,

@@ -72,8 +72,7 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 	local textWIcon = math.max(120, textW - REQ_ICON - REQ_ICON_GAP)
 	if recipe.requireBooks then
 		local bookR, bookG, bookB = recipe.knowsBook and 0.5 or 0.82, recipe.knowsBook and 0.78 or 0.32, recipe.knowsBook and 0.5 or 0.32
-		local bookLine = recipe.knowsBook and T("IGUI_GS_ReqBookOk", recipe.manualDisplay or "?")
-			or T("IGUI_GS_ReqBookMissing", recipe.manualDisplay or "?")
+		local bookLine = T("IGUI_GS_ProgrammingRecipeRequirement", recipe.manualDisplay or "?")
 		table.insert(lines, { text = bookLine, r = bookR, g = bookG, b = bookB, itemType = recipe.manualItem })
 	end
 	if (recipe.skillLevel or 0) > 0 then
@@ -103,7 +102,8 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 			colorR, colorG, colorB = _ip.statusOk[1], _ip.statusOk[2], _ip.statusOk[3]
 		end
 		local line = string.format("%s  %d/%d", ing.displayName or ing.item, ing.have or 0, ing.count or 0)
-		table.insert(lines, { text = line, r = colorR, g = colorG, b = colorB, itemType = ing.item })
+		table.insert(lines, { text = line, r = colorR, g = colorG, b = colorB, itemType = ing.item,
+			material = true, ok = ing.ok or recipe.freeCraft })
 	end
 	return lines
 end
@@ -119,6 +119,17 @@ local function resolveReqIcon(spec)
 		return GlobalStorageSiK.CraftUtils.getItemIconTexture(spec.itemType)
 	end
 	return nil
+end
+
+--- Product classification only; shared framework owns subgroup layout.
+function GlobalStorageSiK.TerminalRecipeCards.createRequirements(parent, recipe, width, playerNum)
+	local groups = { { rows = {} }, { rows = {} } }
+	for _, spec in ipairs(GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, width)) do
+		local rows = groups[spec.material and 2 or 1].rows
+		rows[#rows + 1] = { text = spec.text, texture = resolveReqIcon(spec),
+			state = (spec.ok == true or (spec.ok == nil and (spec.g or 0) > (spec.r or 0))) and "met" or "missing" }
+	end
+	return UI.Requirements.create({ parent = parent, w = width, groups = groups, playerNum = playerNum })
 end
 
 local function lineTheme(spec)
@@ -253,8 +264,11 @@ end
 ---@param y number
 ---@param cardW number
 ---@param owner table UI con craftRecipesState y onCraftModRecipe
+---@param options table|nil { parent=ISUIElement|nil } declarative composition parent
 ---@return number cardHeight
-function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, owner)
+---@return ISPanel card
+function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, owner, options)
+	options = options or {}
 	local pad = 10
 	local textW = math.max(220, cardW - pad * 2)
 	local titleH = FONT_HGT_SMALL + 10
@@ -326,6 +340,10 @@ function GlobalStorageSiK.TerminalRecipeCards.addCard(scroll, recipe, y, cardW, 
 	end
 	syncCard(card, recipe)
 
-	UI.Scroll.addChild(scroll, card)
-	return cardH
+	if options.parent and options.parent.addChild then
+		options.parent:addChild(card)
+	else
+		UI.Scroll.addChild(scroll, card)
+	end
+	return cardH, card
 end

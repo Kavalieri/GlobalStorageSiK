@@ -57,6 +57,7 @@ local tree, reason = SiK.UI.buildSurface(parent, artifact, {
 		admin = { access = { subject = admin.access.subject } } } },
 	conditions = { owner = true, ["owner-without-backup"] = false,
 		["can-claim-as-admin"] = false, ["admin-or-owner"] = true,
+		["tablet-addon-installed"] = true,
 		["add-without-selection"] = false },
 	i18n = {
 		["options.admin.column.connection"] = "Última conexión",
@@ -126,13 +127,16 @@ assert(capacity.width > resource.width and rangeTitle.width > resource.width,
 for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	local tableView = assert(tree.nodes[id], "options table missing: " .. id)
 	assert(tableView._sikUiComponent == "table", "options data degraded outside SiK Table: " .. id)
-	assert(tableView.block.panel.drawBackground == false
-		and tableView.block.panel.borderColor.a == 0,
+	assert(tableView.root.panel.drawBackground == false
+		and tableView.root.panel.borderColor.a == 0,
 		"embedded options table painted a second frame: " .. id)
 	assert(tableView:getHeight() == tableView:getRequiredHeight(),
 		"options table retained unexplained space below its real rows: " .. id)
-	assert(tableView.block.reservedTop == 0 and tableView.block.reservedBottom == 0,
-		"table double-reserved its own header/rows inside the outer block: " .. id)
+	local content = tableView.root:getContentRect()
+	assert(tableView.header.y == content.y,
+		"table header does not begin at the Block content origin: " .. id)
+	assert(tableView.scroll.viewport.y == tableView.header.y + tableView.header.height,
+		"table viewport does not begin immediately below its header: " .. id)
 	local row = assert(tableView.list.pool[1], "options representative row missing: " .. id)
 	local paints = {}
 	row.drawRect = function(_, x, y, w, h)

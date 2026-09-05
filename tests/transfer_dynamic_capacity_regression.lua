@@ -58,14 +58,20 @@ GlobalStorageSiK = {
 	Router = { containerHasSpace = function(dest, value)
 		return dest:getContentsWeight() + value.weight <= dest:getCapacity()
 	end },
-	InventorySync = { moveBetween = function(from, to, value)
+	InventorySync = {
+		containerHasRoom = function(dest, value)
+			local fits = dest:getContentsWeight() + value.weight <= dest:getCapacity()
+			return fits, fits and nil or "no_room"
+		end,
+		moveBetween = function(from, to, value)
 		for i = 1, #from.items do
 			if from.items[i] == value then table.remove(from.items, i) break end
 		end
 		to.items[#to.items + 1] = value
 		value.owner = to
 		return true
-	end },
+		end,
+	},
 	Index = { syncNodeSnapshot = function() end },
 	ItemSnapshot = { recordedMediaTitleFromItem = function() return nil end },
 	FluidTaxonomy = { inspect = function(value) return { identityKey = value.signature } end },

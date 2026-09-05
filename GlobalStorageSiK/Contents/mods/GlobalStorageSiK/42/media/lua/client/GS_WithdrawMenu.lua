@@ -110,6 +110,7 @@ local function promptCustomAmount(player, rowData, onWithdraw)
 	GlobalStorageSiK.QuantityPrompt.show({
 
 		title = T("IGUI_GS_WithdrawAmountPrompt"),
+		acceptText = T("IGUI_GS_QuantityWithdraw"),
 
 		default = 1,
 

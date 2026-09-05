@@ -33,6 +33,7 @@ require "GS_AdminDashboard_Audit"
 require "GS_AdminDashboard_Corpus"
 
 local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.AdminDashboard = GlobalStorageSiK.AdminDashboard or {}
 GlobalStorageSiK.AdminDashboard.instance = nil
@@ -178,14 +179,16 @@ function GS_AdminHistoryUI:initialise()
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
 	UI.Modal.apply(self, {
 		kind = "task", title = T("IGUI_GS_AdminHistoryTitle"),
+		scroll = false,
 		playerNum = self.playerNum or 0, x = self.x, y = self.y,
 		width = self.width, height = self.height, minWidth = HISTORY_MIN_W,
 		minHeight = HISTORY_MIN_H, headerHeight = self.headerHeight,
 		padding = PAD, resizable = true,
 		onResize = function()
 			if self.eventScroll then
+				local content = self.contentBlock:getContentRect()
 				UI.Scroll.resize(self.eventScroll,
-					self.width - PAD * 2, self.height - self.scrollTopY - PAD)
+					content.w, math.max(1, content.y + content.h - self.scrollTopY))
 			end
 		end,
 		onResizeEnd = function()
@@ -195,16 +198,20 @@ function GS_AdminHistoryUI:initialise()
 			GlobalStorageSiK.AdminDashboard.historyInstance = nil
 		end,
 	})
-	local scrollY = self.headerHeight + 4
+	local host = self.contentHost or self
+	local content = self.contentBlock and self.contentBlock:getContentRect()
+		or { x = PAD, y = self.headerHeight + PAD, w = self.width - PAD * 2,
+			h = self.height - self.headerHeight - PAD * 2 }
+	local scrollY = content.y
 	-- Identificar la red en la propia cabecera (pedido explicito 2026-08-22:
 	-- "por si nos hacen capturas, poder ver a que red pertenece ese
 	-- historial") - mismo label que el combo de red, envuelto (regla del
 	-- proyecto: texto de longitud variable siempre con wrap real).
 	if self.networkLabel and self.networkLabel ~= "" then
-		local labelW = self.width - PAD * 2
-                for _, line in ipairs(UI.Controls.wrapText(self.networkLabel, labelW, UIFont.Small)) do
-                        UI.Controls.copyText(self, {
-                                x = PAD, y = scrollY, w = labelW, text = line,
+		local labelW = content.w
+				for _, line in ipairs(UI.Controls.wrapText(self.networkLabel, labelW, UIFont.Small)) do
+						UI.Controls.copyText(host, {
+								x = content.x, y = scrollY, w = labelW, text = line,
                                 tone = "textMuted", font = UIFont.Small, lineGap = 2,
                         })
                         scrollY = scrollY + FONT_HGT_SMALL + 2
@@ -214,21 +221,21 @@ function GS_AdminHistoryUI:initialise()
 	-- Fila de acciones (2026-08-26, pedido explicito): copiar el historial
 	-- reciente al portapapeles y borrarlo si se quiere empezar de cero -
 	-- ninguna de las dos toca redes/permisos, solo el registro de auditoria.
-	local actionBtnW = math.floor((self.width - PAD * 2 - 8) / 2)
+	local actionBtnW = math.floor((content.w - 8) / 2)
 	self.copyBtn = createButton(
-		PAD, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryCopy"), function()
+		content.x, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryCopy"), function()
 			self:onCopyRecent()
 		end)
-	self:addChild(self.copyBtn)
+	host:addChild(self.copyBtn)
 	self.clearBtn = createButton(
-		PAD + actionBtnW + 8, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryClear"), function()
+		content.x + actionBtnW + 8, scrollY, actionBtnW, BTN_H, T("IGUI_GS_AdminHistoryClear"), function()
 			self:onClearHistory()
 		end, true)
-	self:addChild(self.clearBtn)
+	host:addChild(self.clearBtn)
 	scrollY = scrollY + BTN_H + LINE_GAP
 	self.scrollTopY = scrollY
 	self.eventScroll = UI.Scroll.create(
-		self, PAD, scrollY, self.width - PAD * 2, self.height - scrollY - PAD)
+		host, content.x, scrollY, content.w, content.y + content.h - scrollY)
 	UI.Scroll.setOnContentRectChanged(self.eventScroll, function()
 		if self._historyRelayout then return end
 		self._historyRelayout = true
@@ -284,7 +291,7 @@ end
 ---@param events table[]
 function GS_AdminHistoryUI:refreshEvents()
 	local scroll = self.eventScroll
-	UI.Scroll.clear(scroll)
+	UI.Scroll.clear(scroll, true)
 	local w = UI.Scroll.contentWidth(scroll)
 	local y = 4
 	local events = self.events or {}
@@ -375,9 +382,10 @@ function GS_AdminMemberEditorUI:onKeyRelease(key)
 end
 
 function GS_AdminMemberEditorUI:buildLayout()
-	local pad = PAD
-	local y = self.headerHeight + 4
-	local textW = self.width - pad * 2
+	local host = self.contentHost or self
+	local pad = 0
+	local y = 0
+	local textW = host.width or 0
 	local m = self.member
 
 	-- El rol es la unica fuente de verdad, incluido "muerto" (ROLE_DEAD, ver
@@ -386,7 +394,7 @@ function GS_AdminMemberEditorUI:buildLayout()
         local isDead = (m.role == GlobalStorageSiK.Permissions.ROLE_DEAD)
         local nameText = "[" .. roleLabel(m.role) .. "] " .. memberLabel(m)
         for _, line in ipairs(UI.Controls.wrapText(nameText, textW, UIFont.Small)) do
-                UI.Controls.copyText(self, {
+				UI.Controls.copyText(host, {
                         x = pad, y = y, w = textW, text = line,
                         tone = "text", font = UIFont.Small, lineGap = 2,
                 })
@@ -397,7 +405,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 	-- staff a diagnosticar un caso "colgado" (diedAt nunca llegado a marcar
 	-- por un crash, desconexion sucia, etc.).
         local seenText = connectionLabel(m)
-        UI.Controls.copyText(self, {
+		UI.Controls.copyText(host, {
                 x = pad, y = y, w = textW, text = seenText,
                 tone = m.online and "success"
                         or (isDead and "warning" or "textMuted"),
@@ -413,7 +421,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 		-- Un miembro fallecido no admite ninguna accion desde aqui (nada de
 		-- marcado manual, ver rechazo explicito 2026-08-22) - de solo lectura,
 		-- se conserva unicamente como registro consultable/auditable.
-                UI.Controls.copyText(self, {
+				UI.Controls.copyText(host, {
                         x = pad, y = y, w = textW,
                         text = T("IGUI_GS_AdminMemberEditorDeadHint"),
                         tone = "textMuted", font = UIFont.Small, lineGap = 2,
@@ -427,7 +435,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 				dashboard:onSetMemberRole(m.id, toggleTo)
 				self:destroy()
 			end)
-		self:addChild(roleBtn)
+		host:addChild(roleBtn)
 		y = y + BTN_H + ROW_GAP
 
 		local ownerBtn = createButton(
@@ -435,7 +443,7 @@ function GS_AdminMemberEditorUI:buildLayout()
 				dashboard:onSetOwner(m.id)
 				self:destroy()
 			end)
-		self:addChild(ownerBtn)
+		host:addChild(ownerBtn)
 		y = y + BTN_H + ROW_GAP
 
 		local removeBtn = createButton(
@@ -443,10 +451,10 @@ function GS_AdminMemberEditorUI:buildLayout()
 				dashboard:onRemoveMember(m.id)
 				self:destroy()
 			end, true)
-		self:addChild(removeBtn)
+		host:addChild(removeBtn)
 		y = y + BTN_H + ROW_GAP
 	else
-                UI.Controls.copyText(self, {
+				UI.Controls.copyText(host, {
                         x = pad, y = y, w = textW,
                         text = T("IGUI_GS_AdminMemberEditorOwnerHint"),
                         tone = "textMuted", font = UIFont.Small, lineGap = 2,
@@ -458,10 +466,10 @@ function GS_AdminMemberEditorUI:buildLayout()
 		pad, y, btnW, BTN_H, T("IGUI_GS_Close"), function()
 			self:destroy()
 		end)
-	self:addChild(closeBtn)
+	host:addChild(closeBtn)
 	y = y + BTN_H + pad
 
-	self:setSize(self.width, y)
+	UI.Modal.fitContent(self, y, { contentBottom = true, bottomPadding = 0, center = true })
 end
 
 ---@param dashboard table
@@ -1236,8 +1244,10 @@ function GS_AdminDashboardUI:onDeleteNetworkConfirm()
 	end
 	local networkId = self._selectedNetworkId
 	local dashboard = self
-	UI.Modal.confirm({
-		message = T("IGUI_GS_AdminDeleteNetworkConfirm", networkId),
+	Confirmation.show({
+		title = T("IGUI_GS_AdminDeleteNetwork"),
+		question = T("IGUI_GS_AdminDeleteNetworkQuestion", networkId),
+		consequences = T("IGUI_GS_AdminDeleteNetworkConsequences"),
 		playerNum = self.playerNum or 0,
 		onAccept = function()
 			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then

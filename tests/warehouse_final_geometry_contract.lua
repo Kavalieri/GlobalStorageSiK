@@ -66,12 +66,12 @@ assert(search.x >= 0 and searchButton.x + searchButton.width <= searchForm.panel
 assert(family.x >= 0 and detail.x + detail.width <= filterForm.panel.width,
 	"filter controls must stay inside their final parent rectangle")
 assert(tableView._sikUiComponent == "table", "Warehouse rows must use the SiK Table")
-assert(tableView.block.panel.drawBackground == false
-	and tableView.block.panel.borderColor.a == 0,
+assert(tableView.root.panel.drawBackground == false
+	and tableView.root.panel.borderColor.a == 0,
 	"embedded Warehouse table must not paint a second frame inside its Block")
 assert(searchButton.iconSource == "sik.search.18" and searchButton.iconSize == 18,
 	"Warehouse search must consume the native pre-sized framework icon")
-assert(tableView.header.width == tableView.block:getContentRect().w,
+assert(tableView.header.width == tableView.root:getContentRect().w,
 	"table header and rows must consume the same final content rectangle")
 
 local root = assert(tree.nodes["warehouse-root"])

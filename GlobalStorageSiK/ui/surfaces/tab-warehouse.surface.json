@@ -4,7 +4,7 @@
   "schemaVersion": 1,
   "frameworkRef": {
     "id": "SiKUIFramework",
-    "manifestSha256": "a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6"
+    "manifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad"
   },
   "product": {
     "id": "global-storage-sik",
@@ -12,9 +12,9 @@
   },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9",
+    "masterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
     "selector": "[data-surface-id=\"tab-warehouse\"]",
-    "subtreeSha256": "c7eb946e9f6b30e0d9c486268945e3171ffbeb86dd592244f593a984d7d47f53",
+    "subtreeSha256": "752b081fb1d4bba990b37045e47ef2b21c46d90ecd66f6b4565f6586986d8890",
     "canonicalizer": "sik-ui-dom-v2",
     "validation": "HTML_VALIDATED_BY_KAVA"
   },
@@ -342,7 +342,7 @@
       "repository": "global-storage-sik",
       "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua",
       "symbol": "GlobalStorageSiK.TerminalItems",
-      "builderSymbol": "SiK.UI.buildSurface"
+      "builderSymbol": "SiK.UI.SurfaceHost.mount"
     },
     "callers": [
       {

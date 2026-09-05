@@ -3,6 +3,7 @@
 
 require "GS_I18n"
 require "GS_Addons"
+require "GS_Config"
 require "GS_DiskProgramming"
 require "GS_CraftUtils"
 require "GS_NetClient"
@@ -49,6 +50,32 @@ local function countBlankDisksNearby(player)
 	return total
 end
 
+local function inventoryCount(player, fullType)
+	if not player or not player.getInventory or not fullType then return 0 end
+	local inventory = player:getInventory()
+	if not inventory or not inventory.getItemCount then return 0 end
+	local ok, count = pcall(function() return inventory:getItemCount(fullType) end)
+	return ok and math.max(0, tonumber(count) or 0) or 0
+end
+
+local function readerResource(terminal, player)
+	local state = terminal and terminal.terminalState or {}
+	local installed = GlobalStorageSiK.Addons and GlobalStorageSiK.Addons.isInstalled
+		and GlobalStorageSiK.Addons.isInstalled(state.networkId, state.terminalAnchor, "Reader") == true
+	local inInventory = inventoryCount(player, GlobalStorageSiK.Config.ITEM_TERMINAL_READER) > 0
+	local availability = installed and "installed" or (inInventory and "inventory" or "unavailable")
+	local labelKey = availability == "installed" and "IGUI_GS_ProgrammingReaderInstalled"
+		or (availability == "inventory" and "IGUI_GS_ProgrammingReaderInventory"
+			or "IGUI_GS_ProgrammingReaderUnavailable")
+	return {
+		text = GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.Config.ITEM_TERMINAL_READER)
+			.. " · " .. T(labelKey),
+		icon = "media/textures/Item_GS_TerminalReader.png",
+		state = availability == "unavailable" and "missing" or "success",
+		availability = availability,
+	}
+end
+
 local function programReadiness(player, id)
 	local known = GlobalStorageSiK.DiskProgramming.knowsProgram(player, id)
 	local disk = player ~= nil and GlobalStorageSiK.CraftUtils.findItemTypeNearby(
@@ -59,43 +86,54 @@ end
 function Programming.context(terminal)
 	local player = playerFor(terminal)
 	local blankCount = countBlankDisksNearby(player)
+	local reader = readerResource(terminal, player)
+	local canProgram = reader.availability ~= "unavailable"
 	local cards = {}
 	local ids = orderedProgramIds()
 	for i = 1, #ids do
 		local id = ids[i]
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
 		local known, hasDisk = programReadiness(player, id)
-		local ready = known and hasDisk
+		local ready = canProgram and known and hasDisk
 		local recording = Programming.recordingProgramId == id
 		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
-		local requirement = not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName)
-			or (not hasDisk and T("IGUI_GS_ProgrammingNeedsBlankDisk") or "")
-		local status = recording and T("IGUI_GS_ProgrammingButton")
-			or (ready and T("IGUI_GS_ProgrammingReady") or "")
-		local tone = recording and "warning" or (ready and "success" or "warning")
 		local title = T(def.menuTextKey or id)
 		cards[#cards + 1] = {
-			variant = "process", title = title,
+			variant = "output", title = title,
 			description = def.descKey and T(def.descKey) or "", icon = def.iconPath,
-			requirement = requirement, actionLabel = T("IGUI_GS_ProgrammingButton"),
-			status = status, statusTone = tone,
-			locked = not ready or recording, tooltip = requirement ~= "" and requirement or status,
+			requirement = {
+				text = T("IGUI_GS_ProgrammingRecipeRequirement", manualName),
+				icon = "media/textures/Item_MagazineElectronics03.png",
+				state = known and "success" or "missing",
+				iconSize = 32,
+			},
+			actionLabel = T("IGUI_GS_ProgrammingButton"),
+			locked = not ready or recording,
+			tooltip = (not canProgram and reader.text)
+				or (not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName))
+				or (not hasDisk and T("IGUI_GS_ProgrammingNeedsBlankDisk") or nil),
 			payload = { programId = id, state = recording and "recording"
-				or (ready and "available") or "unknown" },
+				or (ready and "available") or "unavailable" },
 		}
 	end
 	return {
 		playerNum = terminal and terminal.playerNum or 0,
 		i18n = {
-			["programming.title"] = T("IGUI_GS_SectionProgramming"),
+			["programming.resources.title"] = T("IGUI_GS_ProgrammingResourcesTitle"),
+			["programming.programs.title"] = T("IGUI_GS_SectionProgramming"),
 			["programming.help"] = T("IGUI_GS_TabProgramming"),
 		},
 		data = { programming = {
-			status = {
-				text = T("IGUI_GS_ProgrammingReaderInstalled") .. " | "
-					.. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1"),
-				kind = blankCount > 0 and "success" or "warning",
+			resources = {
+				reader = reader,
+				blankDisk = {
+					text = GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.DiskProgramming.BLANK_DISK)
+						.. " · " .. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1"),
+					icon = "media/textures/Item_GS_FloppyDisk_Blank.png",
+					state = blankCount > 0 and "success" or "missing",
+				},
 			},
+			canProgram = canProgram,
 			cards = cards,
 		} },
 		actions = {
@@ -117,9 +155,7 @@ function Programming.context(terminal)
 end
 
 local function isVisible(terminal)
-	local state = terminal and terminal.terminalState or {}
-	return GlobalStorageSiK.Addons and GlobalStorageSiK.Addons.isInstalled(
-		state.networkId, state.terminalAnchor, "Reader") == true
+	return terminal ~= nil and terminal.terminalState ~= nil
 end
 
 GlobalStorageSiK.TerminalExtensions.registerDefinition("programming", {

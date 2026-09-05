@@ -64,12 +64,14 @@ local MOVABLE_PRESENTATION_CACHE = GlobalStorageSiK.CatalogManager
 	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 
 function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
+	if terminal and terminal.requestInventoryDetails then return terminal:requestInventoryDetails(row, page) end
 	if not terminal or not row or not row.rowKey or not row.expandable then return false end
 	local state = terminal.terminalState or {}
 	if not state.networkId then return false end
 	local sent = GlobalStorageSiK.NetClient.sendCommand("getItemDetails", {
 		networkId = state.networkId,
 		rowKey = row.rowKey,
+		inventoryRevision = state.inventoryRevision,
 		page = math.max(1, math.floor(tonumber(page) or 1)),
 		pageSize = 15,
 	})
@@ -87,8 +89,8 @@ function GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted)
 	end
 end
 
-function GlobalStorageSiK.TerminalItems.getDetails(rowKey)
-	local pages = detailPagesByRowKey()
+function GlobalStorageSiK.TerminalItems.getDetails(rowKey, panel)
+	local pages = panel and panel._detailPages or detailPagesByRowKey()
 	return rowKey and pages and pages[rowKey] or nil
 end
 
@@ -1127,8 +1129,8 @@ local function buildDisplayRows(panel, terminal, parents)
 		parent._gsDepth = 0
 		out[#out + 1] = parent
 		if parent.expandable and panel._expandedKeys[key] then
-			local wantedPage = panel._detailPageByKey[key] or 1
-			local pages = detailPagesByRowKey()
+			local wantedPage = panel._allDetails and 1 or panel._detailPageByKey[key] or 1
+			local pages = panel._detailPages or detailPagesByRowKey()
 			local detailPage = pages and pages[key] or nil
 			local stale = not detailPage or detailPage.page ~= wantedPage
 				or detailPage.networkId ~= networkId
@@ -1743,7 +1745,7 @@ local function updateRemoteMediaTitle(row, detail, listPanel, terminal)
 		end
 		applyToRows(listPanel and listPanel._itemsCatalog)
 		applyToRows(listPanel and listPanel._lastItems)
-		local pages = detailPagesByRowKey()
+		local pages = listPanel and listPanel._detailPages or detailPagesByRowKey()
 		for _, page in pairs(pages or {}) do applyToRows(page.items) end
 		if mediaIndex then
 			MEDIA_TITLE_CACHE[recordedMediaCacheKey(row.itemData,
@@ -1855,7 +1857,7 @@ local function itemRowAdapter(listPanel, terminal)
 			local multi = #selection > 1 and isRowSelected(listPanel, rowIdentity(data))
 			local dragState = GlobalStorageSiK.TerminalItems.buildDragState(
 				listPanel, data, multi and selection or nil)
-			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, 0,
+			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, terminal and terminal.playerNum or 0,
 				dragState.payloadRows, dragState.visualRows, row)
 			return true
 		end,
@@ -1941,7 +1943,7 @@ local function itemTableOptions(panel, terminal)
 			pageSize = 15,
 			external = true,
 			stateOf = function(parent, key)
-				local detailPage = GlobalStorageSiK.TerminalItems.getDetails(key)
+				local detailPage = GlobalStorageSiK.TerminalItems.getDetails(key, panel)
 				local wantedPage = panel._detailPageByKey and panel._detailPageByKey[key] or 1
 				local revision = terminal and terminal.terminalState
 					and terminal.terminalState.inventoryRevision or 0
@@ -1976,7 +1978,7 @@ local function itemTableOptions(panel, terminal)
 			panel._expandedKeys[context.key] = context.expanded and true or nil
 			if context.expanded then
 				local page = panel._detailPageByKey and panel._detailPageByKey[context.key] or 1
-				local cached = GlobalStorageSiK.TerminalItems.getDetails(context.key)
+				local cached = GlobalStorageSiK.TerminalItems.getDetails(context.key, panel)
 				if not cached and not (panel._detailPending and panel._detailPending[context.key]) then
 					panel._detailPending = panel._detailPending or {}
 					panel._detailPending[context.key] = true
@@ -2002,6 +2004,19 @@ end
 ---@return table
 function GlobalStorageSiK.TerminalItems.tableOptions(panel, terminal)
 	return itemTableOptions(panel, terminal)
+end
+
+function GlobalStorageSiK.TerminalItems.columns(options)
+	local columns = {}
+	for i = 1, #ITEM_TABLE_COLUMNS do
+		local source = ITEM_TABLE_COLUMNS[i]
+		if not (options and options.hideZone and source.key == "zone") then
+			local column = {}
+			for key, value in pairs(source) do column[key] = value end
+			columns[#columns + 1] = column
+		end
+	end
+	return columns
 end
 
 local function warehouseBounds(panel, width, height)

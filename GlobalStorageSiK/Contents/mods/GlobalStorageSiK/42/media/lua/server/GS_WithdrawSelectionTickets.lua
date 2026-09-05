@@ -9,9 +9,12 @@ local MAX_TICKETS_PER_PLAYER = 4
 local MAX_REFS = 100000
 local serial = 0
 local records = {}
+local nextSweepMs = 0
 
 local function nowMs()
-	return getTimestampMs and getTimestampMs() or 0
+	if getTimestampMs then return tonumber(getTimestampMs()) or 0 end
+	if getTimestamp then return (tonumber(getTimestamp()) or 0) * 1000 end
+	return 0
 end
 
 local function playerKey(player)
@@ -27,7 +30,8 @@ end
 local function sweepExpired(now)
 	local expired = {}
 	for ticketId, ticket in pairs(records) do
-		if now - (ticket.touchedMs or ticket.createdMs or 0) > TTL_MS then
+		if now <= 0 or now < (ticket.touchedMs or 0)
+			or now - (ticket.touchedMs or ticket.createdMs or 0) > TTL_MS then
 			expired[#expired + 1] = ticketId
 		end
 	end
@@ -42,15 +46,24 @@ local function countForPlayer(key)
 	return count
 end
 
+--- Called by the existing authoritative scheduler; no additional event hook.
+function Tickets.update()
+	local now = nowMs()
+	if now > 0 and now < nextSweepMs and nextSweepMs - now <= 1000 then return end
+	nextSweepMs = now + 1000
+	sweepExpired(now)
+end
+
 ---@return table|nil ticket
 ---@return string|nil reason
-function Tickets.start(player, networkId, targetKey, pacingId, rowKey, revision, pacing)
+function Tickets.start(player, networkId, targetKey, pacingId, rowKey, revision, pacing, sourceNodeId)
 	local now = nowMs()
 	sweepExpired(now)
+	if now <= 0 then return nil, "clock_unavailable" end
 	local key = playerKey(player)
 	if countForPlayer(key) >= MAX_TICKETS_PER_PLAYER then return nil, "ticket_limit" end
 	local selection, reason = GlobalStorageSiK.Index.resolveExactGroup(
-		networkId, player, rowKey, revision)
+		networkId, player, rowKey, revision, sourceNodeId)
 	if not selection then return nil, reason end
 	if #selection.refs > MAX_REFS then return nil, "selection_too_large" end
 	serial = serial + 1
@@ -59,6 +72,7 @@ function Tickets.start(player, networkId, targetKey, pacingId, rowKey, revision,
 		id = ticketId,
 		playerKey = key,
 		networkId = networkId,
+		sourceNodeId = sourceNodeId,
 		targetKey = tostring(targetKey or ""),
 		pacingId = tostring(pacingId or ""),
 		rowKey = rowKey,
@@ -105,9 +119,10 @@ end
 
 ---@return table|nil batch
 ---@return string|nil reason
-function Tickets.take(player, ticketId, networkId, targetKey, pacingId, sequence, limit)
+function Tickets.take(player, ticketId, networkId, targetKey, pacingId, sequence, limit, sourceNodeId)
 	local ticket, reason = boundTicket(player, ticketId, networkId, targetKey, pacingId)
 	if not ticket then return nil, reason end
+	if ticket.sourceNodeId ~= sourceNodeId then return nil, "ticket_mismatch" end
 	if math.floor(tonumber(sequence) or -1) ~= ticket.sequence then
 		return nil, "ticket_sequence"
 	end

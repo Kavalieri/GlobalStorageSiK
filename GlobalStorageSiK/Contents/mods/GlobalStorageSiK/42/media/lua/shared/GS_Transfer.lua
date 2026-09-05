@@ -233,7 +233,7 @@ local function logWithdrawCapacity(source, dest, item, sourceNodeId, networkId, 
 			.. " result=" .. tostring(result))
 end
 
-local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes)
+local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, requestedSourceNodeId)
 
 	destContainer = destContainer or player:getInventory()
 
@@ -251,6 +251,16 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	local movedItemIds = {}
 
 	local sourceNodeIds = {}
+	if requestedSourceNodeId ~= nil then
+		local scoped = {}
+		for i = 1, #live do
+			if live[i].entry and live[i].entry.id == requestedSourceNodeId then
+				scoped[#scoped + 1] = live[i]
+			end
+		end
+		live = scoped
+		if #live == 0 then return 0, "source_unavailable", {}, {} end
+	end
 
 	local lastReason = nil
 	local requestedIds = nil
@@ -270,6 +280,7 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	-- Nodos realmente tocados en este micro-lote, para refrescar su
 	-- itemSnapshot UNA sola vez cada uno al final (no por item movido).
 	local touchedNodes = {}
+	local snapshotsUpdated = true
 
 	for i = 1, #live do
 
@@ -337,7 +348,8 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 
 					elseif not GlobalStorageSiK.Router.containerHasSpace(destContainer, toMove, player) then
 
-						lastReason = "no_room"
+						local _, capacityReason = GlobalStorageSiK.InventorySync.containerHasRoom(destContainer, toMove, player)
+						lastReason = capacityReason or "destination_full"
 						logWithdrawCapacity(sourceContainer, destContainer, toMove,
 							sourceNodeId, networkId, capacityBefore, "no_room", "rejected")
 
@@ -355,10 +367,11 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 
 							sourceNodeIds[#sourceNodeIds + 1] = sourceNodeId and tostring(sourceNodeId) or ""
 
-							if sourceNodeId and not touchedNodes[sourceNodeId] then
-								touchedNodes[sourceNodeId] = { entry = live[i].entry, container = container }
-							end
-
+						end
+						if sourceNodeId then
+							touchedNodes[sourceNodeId] = { entry = live[i].entry, container = container }
+						else
+							snapshotsUpdated = false
 						end
 
 					else
@@ -381,12 +394,14 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	-- realmente afectados en este micro-lote, una vez cada uno (no por item),
 	-- sin repetir getLiveContainers() para toda la red en afterTransferSync.
 	for _, touched in pairs(touchedNodes) do
-		GlobalStorageSiK.Index.syncNodeSnapshot(touched.entry, touched.container)
+		if GlobalStorageSiK.Index.syncNodeSnapshot(touched.entry, touched.container) ~= true then
+			snapshotsUpdated = false
+		end
 	end
 
 	if moved > 0 then
 
-		return moved, lastReason, movedItemIds, sourceNodeIds
+		return moved, lastReason, movedItemIds, sourceNodeIds, snapshotsUpdated
 
 	end
 
@@ -519,9 +534,9 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 		-- nodo, ya resuelto aqui mismo - evita repetir el barrido de
 		-- getLiveContainers() que afterTransferSync hacia antes para toda la
 		-- red (hasta 64 nodos) solo para volver a encontrar este mismo nodo.
-		GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container)
+		local snapshotsUpdated = GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container) == true
 
-		return true, nil
+		return true, nil, snapshotsUpdated
 
 	end
 
@@ -553,7 +568,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, maxUnits)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, maxUnits, sourceNodeId)
 
 	if not player or not fullType or fullType == "" then
 
@@ -587,9 +602,9 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 
 
-	local moved, reason, movedItemIds, sourceNodeIds = withdrawUnits(
+	local moved, reason, movedItemIds, sourceNodeIds, snapshotsUpdated = withdrawUnits(
 		player, fullType, networkId, target, destContainer, mediaTitle, dynamicSignature,
-		requestedItemIds, mediaIndex, familyFullTypes)
+		requestedItemIds, mediaIndex, familyFullTypes, sourceNodeId)
 
 	if moved > 0 then
 
@@ -597,11 +612,11 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 		if moved < target and reason then
 
-			return true, "partial:" .. tostring(reason), moved, movedItemIds, sourceNodeIds
+			return true, "partial:" .. tostring(reason), moved, movedItemIds, sourceNodeIds, snapshotsUpdated
 
 		end
 
-		return true, nil, moved, movedItemIds, sourceNodeIds
+		return true, nil, moved, movedItemIds, sourceNodeIds, snapshotsUpdated
 
 	end
 

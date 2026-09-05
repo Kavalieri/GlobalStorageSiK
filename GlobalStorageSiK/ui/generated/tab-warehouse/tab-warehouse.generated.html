@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;a35db979fef0382a6be5469a1642c763d58b8b4ecb8c3b17040d57f0f088bea6&quot;,
-  &quot;generatorSha256&quot;: &quot;ffa0454ab9bad8b845f2cb8d036d918182a315e7b9c1b7e8f7bf49589da737a4&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
+  &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;0295dcbf622549ae907638c693b64fa978809ac1171b46c962dfc42c21dd0716&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;cc74854e8606036ce9930b9ffa2b3c2d92eff5ae6ff988dc72b10ee0d5f617cd&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;43385818fad1dd71330fd657ed23a4550073c50f1889225e51bb7d96771efda9&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;c7eb946e9f6b30e0d9c486268945e3171ffbeb86dd592244f593a984d7d47f53&quot;
+  &quot;visualMasterSha256&quot;: &quot;3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;752b081fb1d4bba990b37045e47ef2b21c46d90ecd66f6b4565f6586986d8890&quot;
 }">
   <title>tab-warehouse</title>
   <style>:root {
@@ -30,7 +30,7 @@
   --sik-window-title-size: 16px;
   --sik-window-meta-size: 12px;
   --sik-window-status-size: 12px;
-  --sik-window-padding: 14px;
+  --sik-window-padding: 12px;
   --sik-window-content-inset: var(--sik-window-padding);
   --sik-resize-grip: 14px;
   --sik-rail-icon-size: 56px;
@@ -59,8 +59,8 @@
   --sik-scrollbar-gap: 10px;
   --sik-scroll-gutter: 24px;
   --sik-safe: 16px;
-  --sik-title-content-gap: 12px;
-  --sik-tabs-content-gap: 12px;
+  --sik-title-content-gap: 8px;
+  --sik-tabs-content-gap: 8px;
   --sik-field-content-gap: 8px;
   --sik-info-size: 24px;
   --sik-title-gap: 6px;
@@ -130,7 +130,7 @@ button:disabled { cursor: default; }
 }
 
 .sik-window-title { flex: 0 0 auto; font-size: var(--sik-window-title-size); font-weight: 700; letter-spacing: .015em; line-height: 1; }
-.sik-window-header > :first-child:not(.sik-window-title):not(button) { font-size: var(--sik-window-title-size); font-weight: 700; letter-spacing: .015em; }
+.sik-window-header > :first-child:not(.sik-window-title):not(button) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--sik-window-title-size); font-weight: 700; letter-spacing: .015em; }
 .sik-window-separator { flex: 0 0 auto; margin: 0 2px; color: #596168; }
 .sik-window-live-status { min-width: 0; display: inline-flex; align-items: center; gap: var(--sik-space-2); overflow: hidden; font-size: var(--sik-window-status-size); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; line-height: 1; }
 .sik-window-operation { min-width: 0; display: inline-flex; align-items: center; gap: var(--sik-space-2); color: var(--sik-text-soft); font-size: var(--sik-window-status-size); font-weight: 600; white-space: nowrap; line-height: 1; }
@@ -146,6 +146,7 @@ button:disabled { cursor: default; }
 }
 
 .sik-window-close {
+  flex-shrink: 0;
   width: var(--sik-window-close-size);
   height: var(--sik-window-close-size);
   margin-left: auto;
@@ -160,11 +161,20 @@ button:disabled { cursor: default; }
   opacity: .82;
 }
 
+.sik-confirm-dialog { padding: 0; border: 0; background: transparent; color: var(--sik-text); max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
+.sik-confirm-dialog::backdrop { background: #0009; }
+.sik-confirm-dialog .sik-modal { max-width: 100%; margin: 0; }
+.sik-node-dialog { width: min(1080px, calc(100vw - 48px)); height: calc(100vh - 48px); }
+.sik-table-row[data-open-node] { cursor: pointer; }
+.sik-table-row[data-open-node]:hover { background: #242424; }
+.sik-table-row[data-open-node]:focus-visible { outline: 2px solid var(--sik-accent); outline-offset: -2px; }
 .sik-window-close:hover { border-color: var(--sik-border); background-color: #242424; opacity: 1; }
 .sik-window-close:focus-visible { outline: 2px solid #e9c37d; outline-offset: -3px; border-color: var(--sik-accent); background-color: #242424; }
 .sik-icon { width: 18px; height: 18px; display: inline-block; background-position: center; background-repeat: no-repeat; }
 .sik-icon--close { background-image: var(--sik-icon-close); }
 .sik-icon--check { background-image: var(--sik-icon-check); }
+.sik-button--icon { display: inline-flex; align-items: center; justify-content: center; }
+.sik-button--icon > .sik-icon { flex: 0 0 18px; }
 .sik-icon--info { background-image: var(--sik-icon-info); }
 .sik-icon--search { background-image: var(--sik-icon-search); }
 
@@ -209,7 +219,7 @@ button:disabled { cursor: default; }
 
 .sik-rail {
   min-height: 0;
-  padding: 4px;
+  padding: var(--sik-window-content-inset) 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -231,11 +241,10 @@ button:disabled { cursor: default; }
   isolation: isolate;
 }
 
-.sik-rail-tab[data-dynamic="true"] { border-style: solid; }
 .sik-rail-tab[data-footer="true"] { margin-top: auto; }
-.sik-rail-tab::after { content: ""; position: absolute; inset: 1px; z-index: 1; pointer-events: none; border: 1px solid transparent; background: transparent; }
+.sik-rail-tab::after { content: ""; position: absolute; inset: 1px; z-index: 1; pointer-events: none; border: 1px solid var(--sik-border); background: transparent; }
 .sik-rail-tab.is-active::after { border-color: var(--sik-accent); background: linear-gradient(135deg, rgba(214,139,47,.16), rgba(0,0,0,.08)); box-shadow: inset 0 0 0 1px rgba(255,230,184,.22); }
-.sik-rail-tab.is-active::before { content: ""; position: absolute; z-index: 2; pointer-events: none; right: -4px; top: 17px; width: 4px; height: 22px; background: var(--sik-accent); box-shadow: 0 0 0 1px rgba(0,0,0,.7); }
+.sik-rail-tab.is-active::before { content: ""; position: absolute; z-index: 2; pointer-events: none; right: 1px; top: 17px; width: 3px; height: 22px; background: var(--sik-accent); }
 .sik-rail-tab:hover:not(.is-active)::after { border-color: rgba(214,139,47,.48); background: rgba(214,139,47,.06); }
 .sik-rail-tab:focus-visible { z-index: 4; outline: 2px solid #e9c37d; outline-offset: 2px; }
 
@@ -317,7 +326,7 @@ button:disabled { cursor: default; }
 .sik-block:has(> .sik-block-header) {
   display: flex;
   flex-direction: column;
-  gap: var(--sik-space-4);
+  gap: var(--sik-title-content-gap);
 }
 .sik-block > .sik-block-header { width: 100%; margin: 0; }
 .sik-block > .sik-block-header ~ * { width: 100%; min-width: 0; margin-left: 0; margin-right: 0; }
@@ -481,6 +490,9 @@ button:disabled { cursor: default; }
 .sik-button:hover { background: #252525; border-color: #5b5b5b; }
 .sik-button.is-active { color: var(--sik-accent); border-color: #7a512b; background: var(--sik-accent-bg); }
 .sik-button.is-danger { color: #f18a81; border-color: #743833; background: #291514; }
+.sik-button.is-success { color: var(--sik-success); border-color: #386b46; background: #14291a; }
+.sik-button--label-icon { display: inline-flex; align-items: center; justify-content: center; gap: var(--sik-space-3); }
+.sik-button--label-icon > .sik-icon { flex: 0 0 18px; }
 .sik-button:disabled { opacity: .42; }
 .sik-button--full { width: 100%; }
 .sik-button--field-action { min-width: 120px; flex: 0 0 auto; }
@@ -624,6 +636,7 @@ button:disabled { cursor: default; }
 .sik-addon-slot > .sik-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
 .sik-program-card { min-width: 0; display: flex; flex-direction: column; gap: var(--sik-space-2); }
 .sik-program-card .sik-program-main { flex: 1 1 auto; }
+.sik-program-resource-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sik-space-3); }
 .sik-program-main { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: var(--sik-space-3); align-items: start; }
 .sik-program-state { color: var(--sik-text-soft); font-size: 11px; }
 .sik-program-state.is-ready { color: var(--sik-good); }
@@ -676,8 +689,8 @@ button:disabled { cursor: default; }
 .sik-pager-arrow { width: 14px; height: 14px; display: block; background: center no-repeat url("icons/sik-arrow-right-14.png"); }
 .sik-pager-arrow--previous { transform: rotate(180deg); }
 
-html[data-active-tab="blocked"] .sik-terminal-shell { grid-template-columns: minmax(0, 1fr); }
-:root[data-profile][data-active-tab="blocked"] .sik-terminal-shell { grid-template-columns: minmax(0, 1fr); }
+html[data-active-tab="blocked"] .sik-shell-body { grid-template-columns: minmax(0, 1fr); }
+:root[data-profile][data-active-tab="blocked"] .sik-shell-body { grid-template-columns: minmax(0, 1fr); }
 html[data-active-tab="blocked"] .sik-rail { display: none; }
 .sik-footer-blocked { display: none; }
 html[data-active-tab="blocked"] .sik-footer-normal { display: none !important; }
@@ -913,15 +926,26 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 }
 .sik-modal-layer.is-open { display: grid; }
 .sik-modal {
-  width: min(460px, calc(100vw - 32px));
-  min-width: min(360px, calc(100vw - 32px));
-  max-width: min(560px, calc(100vw - 32px));
+  width: min(720px, calc(100vw - 32px));
+  min-width: min(560px, calc(100vw - 32px));
+  max-width: min(900px, calc(100vw - 32px));
 }
 .sik-modal-body { padding: var(--sik-window-content-inset); text-align: left; }
 .sik-modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sik-space-2); margin-top: var(--sik-space-5); }
+.sik-modal-actions.sik-block { margin-top: 0; }
+.sik-modal-actions.sik-block > .sik-block-header { grid-column: 1 / -1; }
+.sik-modal-actions.sik-block > .sik-control-row { grid-column: 1 / -1; }
 .sik-editor-state { overflow: hidden; }
-.sik-editor-preview { width: 100%; height: 100%; display: grid; grid-template-rows: var(--sik-window-header-height) minmax(0, 1fr); box-shadow: none; }
+.sik-editor-preview { width: min(1080px, 100%); min-width: min(560px, 100%); height: 100%; margin: 0 auto; display: grid; grid-template-rows: var(--sik-window-header-height) minmax(0, 1fr); box-shadow: none; }
 .sik-editor-body { min-width: 0; min-height: 0; padding: var(--sik-window-content-inset); overflow-y: auto; overflow-x: hidden; }
+.sik-editor-body.sik-scroll-dock {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) max-content;
+  gap: var(--sik-space-3);
+  overflow: hidden;
+}
+.sik-scroll-dock-content { min-width: 0; min-height: 0; }
+.sik-scroll-dock-bottom { min-width: 0; }
 .sik-editor-summary { color: var(--sik-text-soft); }
 
 .sik-catalog-window {
@@ -1078,7 +1102,8 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   .sik-metric-grid,
   .sik-layout-grid--2,
   .sik-addon-grid,
-  .sik-program-grid { grid-template-columns: 1fr; }
+  .sik-program-grid,
+  .sik-program-resource-row { grid-template-columns: 1fr; }
   .sik-capacity-summary { align-items: flex-start; flex-direction: column; }
   .sik-block-header-actions { gap: var(--sik-space-2); }
   .sik-action-status { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
@@ -1090,14 +1115,14 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 }
 
 
-    .sik-terminal-shell { --sik-shell-rail-width:64px; --sik-shell-rail-content-gap:0px; --sik-pref-h:900px; --sik-max-h:1600px; height:min(max(var(--sik-pref-h),calc(100vh - 32px)),var(--sik-max-h)); min-height:min(480px,calc(100vh - 32px)); max-height:calc(100vh - 32px); display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
+    .sik-terminal-shell { --sik-shell-rail-width:80px; --sik-shell-rail-content-gap:0px; --sik-pref-h:900px; --sik-max-h:1600px; height:min(max(var(--sik-pref-h),calc(100vh - 32px)),var(--sik-max-h)); min-height:min(480px,calc(100vh - 32px)); max-height:calc(100vh - 32px); display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
     /* La shell canónica no consume los perfiles históricos del tablero: el header siempre abarca rail y contenido. */
     :root[data-profile] .sik-terminal-shell { --sik-pref-h:900px; --sik-max-h:1600px; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
     .sik-shell-body { display:grid; grid-template-columns:var(--sik-shell-rail-width) minmax(0,1fr); gap:var(--sik-shell-rail-content-gap); min-height:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main > .sik-content-host { display:flex; width:100%; height:100%; min-height:0; padding:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main > .sik-content-host > [data-panel] { flex:1 1 auto; min-width:0; min-height:0; }
-    .sik-rail { width:var(--sik-shell-rail-width); padding:4px; gap:4px; }
+    .sik-rail { width:var(--sik-shell-rail-width); }
     .sik-addon-grid--slots { grid-template-columns:repeat(2,minmax(0,1fr)); }
     .sik-addon-grid--slots .sik-addon-slot {
       grid-template-columns:96px minmax(0,1fr); min-height:132px; text-align:left;
@@ -1125,7 +1150,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
             <div class="sik-block-header" data-help="Consulta y transfiere el inventario agregado de la red. Las filas padre agrupan unidades equivalentes y se despliegan para elegir variantes o copias exactas."><span class="sik-block-header-title">Inventario de red</span><span class="sik-block-header-actions"><button class="sik-button" type="button">Auto-ordenar</button></span></div>
             <div class="sik-warehouse-body" data-state-view="warehouse-list warehouse-drop">
               <div class="sik-stack">
-                <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-state="warning" data-capacity-personal-bonus data-capacity-partial-estimate role="progressbar" aria-label="Capacidad del almacén" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">3843 / 4620 kg · 83%</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
+                <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-item-count="326" data-capacity-state="warning" data-capacity-personal-bonus="1066.2" role="progressbar" aria-label="Capacidad del almacén" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">326 objetos · 3843 / 4620 kg · 83% (+1066,2 kg personal)</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
                 <div class="sik-control-row">
                   <input class="sik-search" data-warehouse-search value="" placeholder="Buscar ítem..." aria-label="Buscar ítem">
                   <button class="sik-button sik-search-button" type="button" aria-label="Buscar"></button>
@@ -1323,6 +1348,19 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 
   function installBlockHelp() {
     document.querySelectorAll(".sik-block-header[data-help]").forEach((header) => {
+      const alert = header.querySelector(".sik-alert");
+      if (alert) {
+        header.querySelector(".sik-info")?.remove();
+        alert.setAttribute("data-control-tooltip", "");
+        let tooltip = alert.querySelector(".sik-tooltip");
+        if (!tooltip) {
+          tooltip = document.createElement("span");
+          tooltip.className = "sik-tooltip";
+          alert.appendChild(tooltip);
+        }
+        tooltip.textContent = header.dataset.help;
+        return;
+      }
       if (header.querySelector(".sik-info")) return;
       const button = document.createElement("button");
       button.className = "sik-info";
@@ -1337,12 +1375,13 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   }
 
   function installFloatingTooltips() {
-    const triggers = document.querySelectorAll(".sik-info, .sik-rail-tab, .sik-addon-slot, .sik-status-code");
+    const triggers = document.querySelectorAll(".sik-info, .sik-rail-tab, .sik-addon-slot, .sik-status-code, [data-control-tooltip]");
     triggers.forEach((trigger) => {
       if (trigger.dataset.floatingTooltipBound === "true") return;
       trigger.dataset.floatingTooltipBound = "true";
       let floating = null;
-      trigger.addEventListener("pointerenter", () => {
+      const show = () => {
+        if (floating) return;
         const source = trigger.querySelector(":scope > .sik-tooltip, :scope > .sik-row-tooltip");
         if (!source) return;
         floating = source.cloneNode(true);
@@ -1359,11 +1398,16 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
         if (top + tipRect.height > window.innerHeight - 12) top = rect.top - tipRect.height - 6;
         floating.style.left = left + "px";
         floating.style.top = Math.max(12, top) + "px";
-      });
-      trigger.addEventListener("pointerleave", () => {
+      };
+      const hide = () => {
         if (floating) floating.remove();
         floating = null;
-      });
+      };
+      trigger.addEventListener("pointerenter", show);
+      trigger.addEventListener("pointerleave", hide);
+      trigger.addEventListener("focus", show);
+      trigger.addEventListener("blur", hide);
+      trigger.closest("dialog")?.addEventListener("close", hide);
     });
   }
 
@@ -1375,7 +1419,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       row.addEventListener("pointerenter", () => {
         const cells = Array.from(row.children).slice(0, 4);
         const title = cells[0]?.textContent.trim() || "Objeto";
-        const count = cells[3]?.textContent.trim() || "1";
+        const count = row.querySelector('[data-key="count"]')?.textContent.trim() || "1";
         const networkName = document.querySelector(".sik-window-context")?.textContent.trim() || "SiK Test Network";
         floating = document.createElement("div");
         floating.className = "sik-item-tooltip sik-item-tooltip-preview sik-floating-tooltip";
@@ -1474,6 +1518,57 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   }
 
   document.addEventListener("click", (event) => {
+    const nodeRow = event.target.closest("[data-open-node]");
+    if (nodeRow && !event.target.closest(".sik-column-resizer")) {
+      const source = document.querySelector('[data-surface-id="editor-node"] .sik-editor-preview');
+      if (source) {
+        const dialog = document.createElement("dialog");
+        dialog.className = "sik-confirm-dialog sik-node-dialog";
+        dialog.setAttribute("aria-label", "Editar contenedor · " + nodeRow.dataset.nodeName);
+        const editor = source.cloneNode(true);
+        editor.querySelector(".sik-window-header > span").textContent =
+          "Editar contenedor · " + nodeRow.dataset.nodeName + " · " + nodeRow.dataset.zoneName;
+        editor.querySelector('input[aria-label="Nombre del contenedor"]').value = nodeRow.dataset.nodeName;
+        editor.querySelector(".sik-priority-field").value = nodeRow.querySelector('[data-key="priority"]').textContent;
+        editor.querySelectorAll("[data-floating-tooltip-bound], [data-item-tooltip-bound]").forEach((node) => {
+          delete node.dataset.floatingTooltipBound;
+          delete node.dataset.itemTooltipBound;
+        });
+        editor.querySelectorAll(".sik-column-resizer").forEach((node) => node.remove());
+        dialog.appendChild(editor);
+        document.body.appendChild(dialog);
+        editor.querySelector(".sik-window-close").addEventListener("click", () => dialog.close());
+        dialog.addEventListener("close", () => { dialog.remove(); nodeRow.focus(); });
+        installFloatingTooltips();
+        installItemTooltips();
+        editor.querySelectorAll("[data-sik-table]").forEach(configureTable);
+        dialog.showModal();
+        editor.querySelector('input[aria-label="Nombre del contenedor"]').focus();
+        refreshOverflow();
+      }
+    }
+    const zoneDelete = event.target.closest("[data-confirm-zone]");
+    if (zoneDelete) {
+      const source = document.querySelector('[data-state-view="modal-confirm"] .sik-modal');
+      if (source) {
+        const dialog = document.createElement("dialog");
+        dialog.className = "sik-confirm-dialog";
+        dialog.setAttribute("aria-label", "Confirmar eliminación de zona");
+        dialog.appendChild(source.cloneNode(true));
+        dialog.querySelectorAll("[data-floating-tooltip-bound]").forEach((node) => {
+          delete node.dataset.floatingTooltipBound;
+        });
+        document.body.appendChild(dialog);
+        installBlockHelp();
+        installFloatingTooltips();
+        dialog.querySelectorAll(".sik-window-close, .sik-modal-actions .sik-button").forEach((button) => {
+          button.addEventListener("click", () => dialog.close());
+        });
+        dialog.addEventListener("close", () => { dialog.remove(); zoneDelete.focus(); });
+        dialog.showModal();
+        dialog.querySelector(".sik-modal-actions .sik-button")?.focus();
+      }
+    }
     const tab = event.target.closest("[data-tab]");
     if (tab) activateTab(tab);
 
@@ -1540,6 +1635,10 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   });
 
   document.addEventListener("keydown", (event) => {
+    if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-open-node]")) {
+      event.preventDefault();
+      event.target.click();
+    }
     if (event.key === "Escape") setModal(false);
     if (event.key === "Escape") document.querySelectorAll("[data-combo].is-open").forEach((candidate) => candidate.classList.remove("is-open"));
   });

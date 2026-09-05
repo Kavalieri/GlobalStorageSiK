@@ -54,7 +54,7 @@ local modInfo = readFile(modInfoPath)
 local config = readFile(configPath)
 local modVersion = assert(modInfo:match("modversion=([^\r\n]+)"))
 local configVersion = assert(config:match('GSSiK_Addon_Builder.VERSION%s*=%s*"([^"]+)"'))
-assert(modVersion == "1.0.9-dev1.5", "unexpected Builder candidate version: " .. modVersion)
+assert(modVersion == "1.0.9-dev1.6", "unexpected Builder candidate version: " .. modVersion)
 assert(configVersion == modVersion,
 	"Builder config/mod.info version mismatch: " .. configVersion .. " vs " .. modVersion)
 

@@ -792,11 +792,10 @@ function GS_TerminalUI:refreshFromState(state)
 	elseif state and not state.openUi and prev.accessMode then
 		self.terminalState.accessMode = prev.accessMode
 	end
-	if state and state.searchQuery and self.searchEntry then
-		local entryText = self.searchEntry:getText() or ""
-		if entryText == "" and state.searchQuery ~= "" then
-			self.searchEntry:setText(state.searchQuery)
-		end
+	-- Search belongs to this player's UI, never to a remote inventory update.
+	-- Empty is an intentional query too; do not resurrect another watcher's echo.
+	if self._warehouseQuery == nil then
+		self._warehouseQuery = self.searchEntry and self.searchEntry:getText() or ""
 	end
 	self:refreshNetworkPanel()
 	local cap = self.terminalState.capacity
@@ -975,7 +974,7 @@ function GS_TerminalUI:onRescanZone(zoneId)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("rescanZone", {
 		zoneId = zoneId,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1001,6 +1000,10 @@ function GS_TerminalUI:onRequestOpen()
 	}, self.terminalState and self.terminalState.networkId
 		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkIdByPlayer
 			and GlobalStorageSiK.Client.activeNetworkIdByPlayer[self.playerNum]))
+	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload, self.playerNum,
+			payload.networkId or (self.terminalState and self.terminalState.networkId))
+	end
 	GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload, player)
 end
 
@@ -1080,7 +1083,7 @@ function GS_TerminalUI:onRedistributeNetwork()
 	end
 	self:setRedistributeState(true, T("IGUI_GS_RedistributingNetwork"), "warn")
 	self:sendCommand("redistributeNetwork", {
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1111,6 +1114,7 @@ end
 --- Texto actual del buscador de ítems.
 ---@return string
 function GS_TerminalUI:getSearchQuery()
+	if self._warehouseQuery ~= nil then return self._warehouseQuery end
 	return self.searchEntry and self.searchEntry:getText() or ""
 end
 
@@ -1128,8 +1132,8 @@ function GS_TerminalUI:applyItemsFilter(rows)
 	rows = GlobalStorageSiK.TerminalItems.filterByMainCategory(rows, self:getMainCategoryFilterKey())
 	rows = GlobalStorageSiK.TerminalItems.filterBySubCategory(rows, self:getSubCategoryFilterKey())
 	rows = GlobalStorageSiK.TerminalItems.filterByLeafCategory(rows, self:getLeafCategoryFilterKey())
-	local q = self:getSearchQuery()
-	if q == "" then
+	local q = UI.Controls.effectiveSearchQuery(self:getSearchQuery())
+	if not q or q == "" then
 		return rows
 	end
 	-- El filtro localizado es puro y opera sobre el snapshot ya disponible;
@@ -1381,7 +1385,7 @@ function GS_TerminalUI:onWithdrawRow(row, amount, targetKey)
 		row,
 		amount or 1,
 		targetKey,
-		self.searchEntry and self.searchEntry:getText() or ""
+		self:getSearchQuery()
 	)
 end
 
@@ -1399,7 +1403,7 @@ function GS_TerminalUI:onSetZonePriority(zoneId, priority)
 	self:sendCommand("setZonePriority", {
 		zoneId = zoneId,
 		priority = priority,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1408,7 +1412,7 @@ function GS_TerminalUI:onRenameZone(zoneId, name)
 	self:sendCommand("renameZone", {
 		zoneId = zoneId,
 		name = name,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1416,7 +1420,7 @@ function GS_TerminalUI:onDeleteZone(zoneId)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("deleteZone", {
 		zoneId = zoneId,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1424,7 +1428,7 @@ function GS_TerminalUI:onRemoveNode(nodeId)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("removeNode", {
 		nodeId = nodeId,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1432,7 +1436,7 @@ function GS_TerminalUI:onRequestRebindProposal(nodeId, targetNodeId)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("requestRebindProposal", {
 		nodeId = nodeId, targetNodeId = targetNodeId,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1440,7 +1444,7 @@ function GS_TerminalUI:onRebindNode(nodeId, rebindToken)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("rebindNode", {
 		nodeId = nodeId, rebindToken = rebindToken,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1448,7 +1452,7 @@ function GS_TerminalUI:onRequestConfigTransferProposal(nodeId, targetNodeId)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("requestConfigTransferProposal", {
 		nodeId = nodeId, targetNodeId = targetNodeId,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1456,7 +1460,7 @@ function GS_TerminalUI:onTransferNodeConfiguration(nodeId, transferToken)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("transferNodeConfiguration", {
 		nodeId = nodeId, transferToken = transferToken,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1466,7 +1470,7 @@ function GS_TerminalUI:onUpdateNode(nodeId, displayName, category, enabled, memb
 		nodeId = nodeId,
 		displayName = displayName,
 		category = category or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	}
 	if enabled ~= nil then
 		payload.enabled = enabled
@@ -1487,7 +1491,7 @@ function GS_TerminalUI:onTransferOwnership(newOwner, keepFormer, characterId, us
 		characterId = characterId or "",
 		username = username or "",
 		keepFormerOwner = keepFormer == true,
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1586,7 +1590,7 @@ function GS_TerminalUI:onAddCategory(name)
 	if not self:canEditNetworkConfig(true) then return end
 	self:sendCommand("addCategory", {
 		name = name or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1596,7 +1600,7 @@ function GS_TerminalUI:onAddPermissionUser(characterName, characterId, factionUs
 		username = characterName or "",
 		characterId = characterId or "",
 		factionUsername = factionUsername or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1609,7 +1613,7 @@ end
 --- resuelve la red desde la sesion activa del terminal ya abierto.
 function GS_TerminalUI:onClaimAsAdmin()
 	self:sendCommand("adminClaimOwnership", {
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1629,34 +1633,34 @@ end
 
 function GS_TerminalUI:onAddFactionMembers()
 	self:sendCommand("addFactionMembers", {
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onAddPermissionFaction(factionName)
 	self:sendCommand("addPermissionFaction", {
 		factionName = factionName or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onRemovePermissionFaction(factionName)
 	self:sendCommand("removePermissionFaction", {
 		factionName = factionName or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onRenameNetwork(name)
 	self:sendCommand("renameNetwork", {
 		name = name or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
 function GS_TerminalUI:onLeaveNetwork()
 	self:sendCommand("leaveNetwork", {
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1664,7 +1668,7 @@ function GS_TerminalUI:onRemovePermissionUser(username, characterId)
 	self:sendCommand("removePermissionUser", {
 		username = username or "",
 		characterId = characterId or "",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1673,7 +1677,7 @@ function GS_TerminalUI:onSetMemberRole(username, role, characterId)
 		username = username or "",
 		characterId = characterId or "",
 		role = role or "member",
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1682,7 +1686,7 @@ function GS_TerminalUI:onSetMemberZoneAccess(username, characterId, deniedZoneId
 		username = username or "",
 		characterId = characterId or "",
 		deniedZoneIds = deniedZoneIds or {},
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end
 
@@ -1690,6 +1694,6 @@ function GlobalStorageSiK.TerminalUI:onToggleFactionOnly()
 	local perms = self.terminalState and self.terminalState.permissions or {}
 	self:sendCommand("setFactionOnly", {
 		enabled = not (perms.factionOnly == true),
-		searchQuery = self.searchEntry and self.searchEntry:getText() or "",
+		searchQuery = self:getSearchQuery(),
 	})
 end

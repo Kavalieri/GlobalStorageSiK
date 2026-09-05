@@ -46,7 +46,7 @@ for _, name in ipairs({ "GS_PCAcquireUI.lua", "GS_ReaderAcquireUI.lua" }) do
 	local lua = source(name)
 	check(name .. " composes public task modal and requirements",
 		lua:find("UI.Modal.apply", 1, true) ~= nil
-		and lua:find("UI.Controls.requirementRow", 1, true) ~= nil
+		and lua:find("UI.Requirements.create", 1, true) ~= nil
 		and lua:find("UI.Controls.button", 1, true) ~= nil
 		and lua:find("UI.Modal.fitContent", 1, true) ~= nil)
 	check(name .. " is owner-scoped and explicitly fixed-size",

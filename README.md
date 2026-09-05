@@ -1,6 +1,6 @@
 # GlobalStorageSiK
 
-Documentación para desarrolladores: [API de addons](docs/ADDON_API.md) · [diagnóstico y logs](docs/DEBUGGING.md)
+Documentación para desarrolladores: [API pública de producto](docs/GSSIK_API.md) · [contrato de addons](docs/ADDON_API.md) · [framework SiK UI](docs/SIK_UI_API.md) · [inventario de arquitectura y API](docs/ARCHITECTURE_AND_API_INVENTORY.md) · [diagnóstico y logs](docs/DEBUGGING.md)
 
 Mod de Project Zomboid (Build 42) que añade almacenamiento de red compartido entre contenedores/terminales.
 
@@ -16,4 +16,8 @@ Cada carpeta contiene el `Contents/` tal y como lo requiere el juego para cargar
 
 ## Contribuir
 
-Las incidencias y sugerencias son bienvenidas vía Issues. Si vas a proponer un cambio, ten en cuenta que los addons dependen del Core mediante una API pública expuesta en `GlobalStorageSiK.CraftSession` (ver `GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_NetworkCraftSession.lua`).
+Las incidencias y sugerencias son bienvenidas vía Issues. Los addons e
+integraciones consumen la API pública `GSSiK.API`, documentada en
+[`docs/GSSIK_API.md`](docs/GSSIK_API.md). La sesión compartida de Craft y
+Builder se expone como `GSSiK.API.WorkSession`; el antiguo
+`GlobalStorageSiK.CraftSession` no es una API pública.

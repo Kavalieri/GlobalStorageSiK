@@ -37,7 +37,10 @@ GlobalStorageSiK = {
 			return nil
 		end,
 	},
-	Permissions = { isAdminPlayer = function() return true end },
+	Permissions = {
+		isAdminPlayer = function() return true end,
+		shouldEnforce = function() return true end,
+	},
 	I18n = { remote = function(keyName) return keyName end },
 	Log = { debug = function() end, error = function() end },
 	InventorySync = {

@@ -56,6 +56,19 @@ function GlobalStorageSiK.RulesUI.describeCondition(condition)
 	return GlobalStorageSiK.NodeFilters.describe(condition)
 end
 
+-- A count alone cannot detect moving a rule between OR/AND/NOT or replacing
+-- its label with a longer one. Both change the measured editor layout.
+function GlobalStorageSiK.RulesUI.layoutSignature(rules)
+	local parts = {}
+	for index = 1, #(rules or {}) do
+		local rule = rules[index]
+		local op = tostring(rule.op or "OR")
+		local label = tostring(GlobalStorageSiK.RulesUI.describeCondition(rule.condition))
+		parts[#parts + 1] = tostring(#op) .. ":" .. op .. tostring(#label) .. ":" .. label
+	end
+	return table.concat(parts)
+end
+
 ---@param condition table|nil
 ---@param fallback table|nil
 ---@return table RGB

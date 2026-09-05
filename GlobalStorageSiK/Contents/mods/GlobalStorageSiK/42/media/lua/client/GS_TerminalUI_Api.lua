@@ -424,10 +424,14 @@ function GlobalStorageSiK.TerminalUI.requestOpenNetwork(networkId, playerArg, ca
 	GlobalStorageSiK.TerminalUI._remoteOpenRequests[playerNum] = {
 		requestId = openSeq, networkId = networkId, callback = callback,
 	}
-	local sent = GlobalStorageSiK.NetClient.sendNetworkCommand("openTerminal", networkId, {
+	local payload = {
 		openSeq = openSeq,
 		remoteAccess = true,
-	}, player)
+	}
+	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
+	end
+	local sent = GlobalStorageSiK.NetClient.sendNetworkCommand("openTerminal", networkId, payload, player)
 	if not sent then
 		GlobalStorageSiK.TerminalUI._remoteOpenRequests[playerNum] = nil
 		clearPendingOpen(playerNum, openSeq)
@@ -468,6 +472,10 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 				terminalHint = hint,
 				networkId = openNetworkId,
 			}
+			if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+				payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
+					player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
+			end
 			GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 		end
 		return
@@ -523,6 +531,10 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 			networkId = openNetworkId,
 			terminalHint = hint or terminal,
 		}, openNetworkId)
+		if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+			payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
+				player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
+		end
 		GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 	end
 end
