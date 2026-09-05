@@ -348,7 +348,8 @@ function GS_ZoneEditorUI:ensureForm()
 		terminal.terminalState and terminal.terminalState.nodes or {}, zone)
 	local tableH = UI.Table.intrinsicHeight and UI.Table.intrinsicHeight(#zoneRows, { minRows = 1 })
 		or math.max(56, (#zoneRows + 1) * CONTROL_METRICS.buttonHeight)
-	self.zoneNodesTable = UI.Table.create({ parent = containersColumn.parent, x = 0, y = 0,
+	local zoneNodesTable, tableReason = UI.Table.create({
+		parent = containersColumn.parent, x = 0, y = 0, embedded = true,
 		w = containersColumn.width, h = tableH, columns = GlobalStorageSiK.TerminalNodes.columns(),
 		rows = zoneRows, allRowsVisible = true, selectionMode = "single",
 		keyOf = function(row) return row.id end,
@@ -357,6 +358,10 @@ function GS_ZoneEditorUI:ensureForm()
 			if row and row.sourceNode then GlobalStorageSiK.TerminalNodeEditor.open(terminal, row.sourceNode, {}) end
 		end,
 	})
+	if not zoneNodesTable then
+		error("SiK.UI.Table.create(zone.containers): " .. tostring(tableReason))
+	end
+	self.zoneNodesTable = zoneNodesTable
 	containersColumn:block(self.zoneNodesTable, self.zoneNodesTable:getHeight())
 	finish(containers, containersColumn)
 

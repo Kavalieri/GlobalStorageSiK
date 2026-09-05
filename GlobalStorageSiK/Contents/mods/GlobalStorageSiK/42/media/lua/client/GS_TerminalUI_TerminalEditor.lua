@@ -172,7 +172,8 @@ function GS_TerminalEditorUI:buildLayout()
 	self.statusLabel = addCopy(identity.childParent, 0, 0, host.width,
 		T("IGUI_GS_TerminalEditorStatus", statusText(row),
 			row.controller and T("IGUI_GS_TerminalController") or T("IGUI_GS_TerminalSecondary"))
-		.. " · " .. string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0), "textMuted")
+		.. " " .. T("IGUI_GS_PunctuationMiddleDot") .. " "
+		.. string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0), "textMuted")
 	self.actionsBlock = UI.Block.create({ parent = self.editorDock.fixedBottomHost,
 		w = host.width, title = T("IGUI_GS_PermColActions"),
 		tooltip = T("IGUI_GS_TerminalActionsHint"), playerNum = self.playerNum })

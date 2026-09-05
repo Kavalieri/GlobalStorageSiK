@@ -185,7 +185,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_AddonStatusInstalled = "Installed on this terminal.",
 	IGUI_GS_AddonStatusNeedMagazine = "Read the addon magazine first.",
 	IGUI_GS_AddonBayTitle = "Expansion bay",
-	IGUI_GS_AddonBayHint = "M = manual read · + = module installed · border shows readiness.",
+	IGUI_GS_AddonBayHint = "M = manual read - + = module installed - border shows readiness.",
 	IGUI_GS_AddonMagOk = "Manual: recipes unlocked.",
 	IGUI_GS_AddonMagMissing = "Manual: read the addon magazine to unlock the module recipe.",
 	IGUI_GS_AddonModuleOk = "Module: ready in your inventory.",
@@ -640,7 +640,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodeTransferConfigConfirm = "Transfer the saved configuration from {1} to the new {2}? Its contents, capacity and zone will not change.",
 	IGUI_GS_NodeBtnTransferConfig = "Transfer configuration…",
 	IGUI_GS_NodeTransferConfigTip = "Offer the configuration to a new container detected in the same position.",
-	IGUI_GS_NodeRecoveryTitle = "Recovery · OFFLINE",
+	IGUI_GS_NodeRecoveryTitle = "Recovery - OFFLINE",
 	IGUI_GS_NodeRecoveryBody = "The previous container is no longer available. A new container in the same position may inherit its saved configuration.",
 	IGUI_GS_NodeExclude = "Exclude",
 	IGUI_GS_NodeInclude = "Include",
@@ -718,9 +718,9 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_TerminalSuspended = "In inventory / suspended",
 	IGUI_GS_NetBlockNetworks = "GS Networks",
 	IGUI_GS_NetSelected = "Selected network",
-	IGUI_GS_NetResourceSummary = "{1} containers · {2} types",
+	IGUI_GS_NetResourceSummary = "{1} containers - {2} types",
 	IGUI_GS_NetCapacityAvailable = "Network capacity: available",
-	IGUI_GS_NetCapacityLine = "Capacity · {1} / {2} kg",
+	IGUI_GS_NetCapacityLine = "Capacity - {1} / {2} kg",
 	IGUI_GS_NetUseSelected = "Use network",
 	IGUI_GS_NetCreateNew = "New network",
 	IGUI_GS_NetLinkTerminal = "Link terminal here",
@@ -835,10 +835,25 @@ end
 --- Devuelve plantilla traducida sin argumentos de formato (seguro en B42).
 ---@param key string
 ---@return string
-function GlobalStorageSiK.I18n.getTemplate(key)
+function GlobalStorageSiK.I18n.getTemplate(key, argumentCount)
 	if type(getText) == "function" then
-		local ok, value = pcall(getText, key)
+		local count = math.max(0, math.floor(tonumber(argumentCount) or 0))
+		local markers = {}
+		for index = 1, count do
+			markers[index] = "__GS_I18N_ARG_" .. tostring(index) .. "__"
+		end
+		-- B42 reports a MissingFormatArgumentException even when getText() is
+		-- used only to retrieve a localized template.  Supplying inert ASCII
+		-- markers lets Translator complete its own formatting first; below we
+		-- restore the neutral %1/%2 contract consumed by formatTemplate().
+		local ok, value = pcall(function()
+			return getText(key, unpack(markers))
+		end)
 		if ok and value and value ~= key then
+			for index = 1, count do
+				value = GlobalStorageSiK.I18n.plainReplace(value, markers[index],
+					"%" .. tostring(index))
+			end
 			return GlobalStorageSiK.I18n.normalizeTemplate(value)
 		end
 	end
@@ -851,7 +866,7 @@ end
 ---@return string
 function GlobalStorageSiK.I18n.text(key, ...)
 	local argCount = select("#", ...)
-	local template = GlobalStorageSiK.I18n.getTemplate(key)
+	local template = GlobalStorageSiK.I18n.getTemplate(key, argCount)
 	if argCount <= 0 then
 		return template
 	end

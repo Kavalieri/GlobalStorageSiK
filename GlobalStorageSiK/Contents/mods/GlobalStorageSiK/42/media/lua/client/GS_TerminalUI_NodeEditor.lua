@@ -191,7 +191,9 @@ function GS_NodeEditorUI:syncTitleFromName()
 	for _, zone in ipairs(self.terminal and self.terminal.terminalState and self.terminal.terminalState.zones or {}) do
 		if self.node and zone.id == self.node.zoneId then zoneName = zone.name or ""; break end
 	end
-	self._titleText = T("IGUI_GS_NodeEditorTitle") .. " · " .. name .. (zoneName ~= "" and (" · " .. zoneName) or "")
+	local separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " "
+	self._titleText = T("IGUI_GS_NodeEditorTitle") .. separator .. name
+		.. (zoneName ~= "" and (separator .. zoneName) or "")
 	if self.setHeader then self:setHeader({ titleParts = {
 		prefix = T("IGUI_GS_NodeEditorTitle"), name = name, zone = zoneName } }) end
 end
@@ -357,8 +359,9 @@ function GS_NodeEditorUI:layoutForm()
 end
 
 function GS_NodeEditorUI:calculateLayout()
-	local content = { x = 0, y = 0, w = self.contentHost and self.contentHost.width or 0,
-		h = self.contentHost and self.contentHost.height or 0 }
+	local content = self.contentHost and { x = 0, y = 0,
+			w = self.contentHost.width, h = self.contentHost.height }
+			or { x = 0, y = 0, w = self.width, h = self.height }
 	if self.editorDock then
 		self.editorDock:reflow(content)
 		self:layoutForm()
@@ -694,7 +697,9 @@ function GS_NodeEditorUI:mountFixedActions()
 	local template = GlobalStorageSiK.TerminalNodeEditor.configTemplate
 	self.copyConfigBtn = action(T("IGUI_GS_NodeConfigCopy"), function() self:copyConfigTemplate() end,
 		false, T("IGUI_GS_NodeConfigCopyTooltip"))
-	local pasteLabel = T("IGUI_GS_NodeConfigPaste") .. (template and (" · " .. tostring(template.sourceName or "?")) or "")
+	local pasteLabel = T("IGUI_GS_NodeConfigPaste") .. (template and (" "
+		.. T("IGUI_GS_PunctuationMiddleDot") .. " "
+		.. tostring(template.sourceName or "?")) or "")
 	self.pasteConfigBtn = action(pasteLabel, function() self:pasteConfigTemplate() end, false,
 		template and T("IGUI_GS_NodeConfigTemplateReadyRules", template.sourceName or "?",
 			#(template.rules or {}), template.priority or 50) or T("IGUI_GS_NodeConfigTemplateEmpty"))

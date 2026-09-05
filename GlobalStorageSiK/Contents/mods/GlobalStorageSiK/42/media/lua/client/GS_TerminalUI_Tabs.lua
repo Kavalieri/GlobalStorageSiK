@@ -55,6 +55,7 @@ local function navigationOptions(terminal, items)
 	return {
 		placement = "left", activeKey = terminal.activeTabKey or "items",
 		profile = "terminal",
+		railCrossInset = 10,
 		items = items, iconOnly = true, railTooltip = true,
 		onActivate = function(context)
 			local item = context and context.value

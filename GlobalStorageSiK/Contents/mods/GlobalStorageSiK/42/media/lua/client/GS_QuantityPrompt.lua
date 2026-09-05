@@ -98,7 +98,8 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 				incrementText = "+",
 				decrementTooltip = T("IGUI_GS_QuantityDecrease"),
 				incrementTooltip = T("IGUI_GS_QuantityIncrease"),
-				maxText = T("IGUI_GS_QuantityMaximum") .. " · " .. tostring(maxVal or minVal),
+				maxText = T("IGUI_GS_QuantityMaximum") .. " "
+					.. T("IGUI_GS_PunctuationMiddleDot") .. " " .. tostring(maxVal or minVal),
 			},
 			validate = function(text)
 				local amount = GlobalStorageSiK.QuantityPrompt.parseAmount(text, minVal, maxVal)

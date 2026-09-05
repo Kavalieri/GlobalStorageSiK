@@ -16,6 +16,7 @@ local Surface = require "GlobalStorageSiK/UI/Generated/TabProgramming"
 GlobalStorageSiK.TerminalProgramming = GlobalStorageSiK.TerminalProgramming or {}
 local Programming = GlobalStorageSiK.TerminalProgramming
 local T = GlobalStorageSiK.I18n.text
+local MIDDLE_DOT = T("IGUI_GS_PunctuationMiddleDot")
 local KNOWN_PROGRAM_ORDER = { "network", "uninstall", "driveinstall", "craft", "builder", "tablet" }
 
 local function orderedProgramIds()
@@ -69,7 +70,7 @@ local function readerResource(terminal, player)
 			or "IGUI_GS_ProgrammingReaderUnavailable")
 	return {
 		text = GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.Config.ITEM_TERMINAL_READER)
-			.. " · " .. T(labelKey),
+			.. " " .. MIDDLE_DOT .. " " .. T(labelKey),
 		icon = "media/textures/Item_GS_TerminalReader.png",
 		state = availability == "unavailable" and "missing" or "success",
 		availability = availability,
@@ -107,7 +108,7 @@ function Programming.context(terminal)
 				state = known and "success" or "missing",
 				iconSize = 32,
 			},
-			actionLabel = T("IGUI_GS_ProgrammingButton"),
+			actionLabel = T("IGUI_GS_ProgrammingButton", title),
 			locked = not ready or recording,
 			tooltip = (not canProgram and reader.text)
 				or (not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName))
@@ -128,7 +129,8 @@ function Programming.context(terminal)
 				reader = reader,
 				blankDisk = {
 					text = GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.DiskProgramming.BLANK_DISK)
-						.. " · " .. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount), "1"),
+						.. " " .. MIDDLE_DOT .. " "
+						.. T("IGUI_GS_ProgrammingBlankDiskCount", tostring(blankCount)),
 					icon = "media/textures/Item_GS_FloppyDisk_Blank.png",
 					state = blankCount > 0 and "success" or "missing",
 				},

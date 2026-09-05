@@ -9,6 +9,7 @@ GlobalStorageSiK.UI = GlobalStorageSiK.UI or {}
 
 local CapacityPresentation = {}
 GlobalStorageSiK.UI.CapacityPresentation = CapacityPresentation
+local MIDDLE_DOT = GlobalStorageSiK.I18n.text("IGUI_GS_PunctuationMiddleDot")
 
 local function text(key, ...)
 	local i18n = GlobalStorageSiK.I18n
@@ -52,7 +53,8 @@ function CapacityPresentation.fromState(capacity, options)
 	if count == nil then count = tonumber(containers and cap.containerCount or cap.itemCount) end
 	if count ~= nil then
 		local key = containers and "IGUI_GS_CapacityContainerCount" or "IGUI_GS_CapacityItemCount"
-		label = text(key, tostring(math.max(0, math.floor(count)))) .. " · " .. label
+		label = text(key, tostring(math.max(0, math.floor(count))))
+			.. " " .. MIDDLE_DOT .. " " .. label
 	end
 	local personalBonus = tonumber(cap.personalBonus) or 0
 	if personalBonus > 0 then
