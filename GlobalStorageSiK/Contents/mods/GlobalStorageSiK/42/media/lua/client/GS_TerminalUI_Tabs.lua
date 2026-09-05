@@ -18,6 +18,10 @@ require "GS_Sandbox"
 
 local T = GlobalStorageSiK.I18n.text
 
+local function terminalProfile(width)
+	return UI.Metrics.profile(width or 0, "terminal")
+end
+
 local function copyDefinition(definition)
 	local copy = {}
 	for key, value in pairs(definition or {}) do copy[key] = value end
@@ -50,6 +54,7 @@ end
 local function navigationOptions(terminal, items)
 	return {
 		placement = "left", activeKey = terminal.activeTabKey or "items",
+		profile = "terminal",
 		items = items, iconOnly = true, railTooltip = true,
 		onActivate = function(context)
 			local item = context and context.value
@@ -175,8 +180,8 @@ end
 ---@return number
 
 function GlobalStorageSiK.TerminalTabs.measureRailWidth(terminal)
-
-	return railProfile().window.railWidth
+	local profile = terminalProfile(terminal and terminal.width)
+	return profile.window.railWidth
 
 end
 

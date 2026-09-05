@@ -6,12 +6,28 @@ local T = GlobalStorageSiK.I18n.text
 local Inventory = {}
 GlobalStorageSiK.ContainerInventory = Inventory
 local views = {}
+local cleanupRegistered = false
+
+function Inventory.installCleanup()
+	if cleanupRegistered then return true end
+	local client = GlobalStorageSiK.Client
+	if not client or type(client.registerTransientCleanup) ~= "function" then return false end
+	cleanupRegistered = client.registerTransientCleanup("containerInventory", function(playerNum)
+		local snapshot = {}
+		for view in pairs(views) do
+			if playerNum == nil or view.playerNum == playerNum then snapshot[#snapshot + 1] = view end
+		end
+		for i = 1, #snapshot do snapshot[i]:dispose() end
+	end) == true
+	return cleanupRegistered
+end
 
 local function move(widget, x, y, w, h)
 	widget:setX(x); widget:setY(y); widget:setWidth(w); widget:setHeight(h)
 end
 
 function Inventory.mount(parent, editor, node, options)
+	Inventory.installCleanup()
 	options = options or {}
 	local view = { node = node, editor = editor, options = options, rows = {}, disposed = false, detailQueue = {} }
 	local width = options.w or parent.width or 1
@@ -229,16 +245,6 @@ function Inventory.onActionResult(args)
 		if view.networkId == transfer.networkId and view.node.id == transfer.sourceNodeId
 			and view.playerNum == (tonumber(args.playerNum) or 0) then view:request() end
 	end
-end
-
-if GlobalStorageSiK.Client.registerTransientCleanup then
-	GlobalStorageSiK.Client.registerTransientCleanup("containerInventory", function(playerNum)
-		local snapshot = {}
-		for view in pairs(views) do
-			if playerNum == nil or view.playerNum == playerNum then snapshot[#snapshot + 1] = view end
-		end
-		for i = 1, #snapshot do snapshot[i]:dispose() end
-	end)
 end
 
 return Inventory
