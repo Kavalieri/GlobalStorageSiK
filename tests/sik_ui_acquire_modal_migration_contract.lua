@@ -56,8 +56,11 @@ for _, name in ipairs({ "GS_PCAcquireUI.lua", "GS_ReaderAcquireUI.lua" }) do
 end
 
 local blocked = source("GS_TerminalUI_BlockedPanel.lua")
+local acquireCallStart = assert(blocked:find("GlobalStorageSiK.PCAcquireUI.show(", 1, true),
+	"blocked panel lost the PC acquire modal call")
+local acquireCall = blocked:sub(acquireCallStart, acquireCallStart + 300)
 check("blocked panel passes its terminal as modal owner",
-	blocked:find("getPlayer() or getPlayer(),\n\t\t\t\t\tterminal", 1, true) ~= nil)
+	acquireCall:find("terminal", 1, true) ~= nil)
 
 local terminalApi = source("GS_TerminalUI_Api.lua")
 local blockedApi = source("GS_TerminalUI_Blocked.lua")

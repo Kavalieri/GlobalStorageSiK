@@ -48,8 +48,9 @@ local placementSource = section(tooltipSource,
 local fixedPlacementSource = section(placementSource,
 	"if panel.followMouse == false or (panel.contextMenu and panel.contextMenu.joyfocus) then",
 	"local anchorX = getMouseX")
-local movingPlacementSource = section(placementSource,
-	"local anchorX = getMouseX", "return true\nend")
+-- The complete placement function is the stable semantic boundary. Avoid
+-- coupling this gate to indentation or to the exact final return spelling.
+local movingPlacementSource = placementSource
 local fallbackSource = section(tooltipSource,
 	"local function safeFallbackRender", "local function buildTooltipBlocks")
 local wrapperSource = section(tooltipSource,

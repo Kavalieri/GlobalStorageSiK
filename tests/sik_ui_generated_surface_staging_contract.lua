@@ -86,9 +86,14 @@ assert(hasFactory(options, "table", "SiK.UI.Table.create"),
     "tab-options tables must resolve through the public framework")
 for _, nodeId in ipairs({
     "options-network-block", "options-network-selector", "options-network-actions",
-    "options-operational-block", "options-resources-block", "options-palette-block",
-    "options-terminals-block", "options-members-block", "options-succession-hint",
-    "options-backup-warning", "options-claim-ownership", "options-access-form",
+    "options-summary-block", "options-information-host", "options-information-card",
+    "options-capacity", "options-info-terminals", "options-info-zones",
+    "options-info-containers", "options-info-members", "options-summary-cards",
+    "options-energy-card", "options-range-card", "options-palette-block",
+    "options-terminals-block", "options-terminals-table", "options-members-block",
+    "options-members-table", "options-succession-hint", "options-backup-warning",
+    "options-claim-ownership", "options-access-copy", "options-access-form",
+    "options-access-warning", "options-palette-options",
 }) do
     assert(findNode(options.surface.root, nodeId),
         "tab-options staged artifact is missing current runtime node " .. nodeId)
