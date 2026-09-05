@@ -99,10 +99,11 @@ function Programming.context(terminal)
 		local recording = Programming.recordingProgramId == id
 		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
 		local title = T(def.menuTextKey or id)
-		local actionLabel = T("IGUI_GS_ProgrammingButton", title)
-		-- Keep product labels complete even if the host Translator returns a
-		-- numbered placeholder literally on a particular locale/runtime.
-		actionLabel = GlobalStorageSiK.I18n.plainReplace(actionLabel, "%1", title)
+		-- menuTextKey already contains the complete localized action (for
+		-- example, "Grabar disco de red"). Formatting it through a second
+		-- "Grabar %1" template duplicates the verb and leaks %1 on runtimes
+		-- whose Translator does not expand numbered placeholders.
+		local actionLabel = title
 		cards[#cards + 1] = {
 			variant = "output", title = title,
 			description = def.descKey and T(def.descKey) or "", icon = def.iconPath,

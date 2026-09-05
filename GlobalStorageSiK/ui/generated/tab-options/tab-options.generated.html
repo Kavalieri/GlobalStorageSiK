@@ -7,10 +7,10 @@
   &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;fafce194d8031c76ff76556cb3384d1ac0e0ef2534338fcba393af1f178dfdd9&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;6c9309244b3d133cfcc5cb7f4f798de60626d4263df827b80097ea84a593004c&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;559cbd9457d46f416b56a673f1b54ee0c75b3df89e5314adc01cae3085a18fe8&quot;
+  &quot;visualMasterSha256&quot;: &quot;a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;c251c81a773274ddf9ebe3c36e240b3a1e314881d910bf35b488e9dd954b6e49&quot;
 }">
   <title>tab-options</title>
   <style>:root {
@@ -644,6 +644,7 @@ button:disabled { cursor: default; }
 .sik-role-owner { color: var(--sik-accent); font-weight: 600; }
 .sik-role-admin { color: var(--sik-warn); font-weight: 600; }
 .sik-state-online { color: var(--sik-good); }
+.sik-state-warning { color: var(--sik-warn); }
 .sik-state-offline { color: var(--sik-text-muted); }
 .sik-state-cell { font-weight: 600; white-space: nowrap; }
 .sik-state-cell.is-ok { color: var(--sik-good); }
@@ -1130,76 +1131,58 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     .sik-addon-grid--slots .sik-addon-slot > img {
       width:88px; height:88px; object-fit:contain;
     }
-    [data-state-view="estado"] > .sik-stack { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-    [data-options-block="network"], [data-options-block="palette"] { grid-column:1 / -1; }
-    [data-options-block="operational"], [data-options-block="resources"] { min-height:224px; }
+    .sik-options-information-card { min-height:0; }
+    .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .sik-options-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .sik-options-summary-card { min-height:132px; }
     .sik-palette-selector { grid-template-columns:repeat(3,minmax(0,1fr)); }
     @media (max-width:899px) {
       .sik-terminal-shell { min-height:min(480px,calc(100vh - 32px)); }
-      .sik-addon-grid--slots, [data-state-view="estado"] > .sik-stack { grid-template-columns:1fr; }
-      [data-options-block="network"], [data-options-block="palette"] { grid-column:auto; }
+      .sik-addon-grid--slots, .sik-options-summary-grid { grid-template-columns:1fr; }
+      .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     @media (max-width:620px) { .sik-palette-selector { grid-template-columns:1fr; } }
   </style>
 </head>
 <body data-sik-surface="tab-options">
 <section class="sik-surface-root" data-panel="options" data-surface-id="tab-options" hidden>
-            <div class="sik-surface-panel sik-surface-panel--fill sik-surface-frame" data-state-group data-state="estado">
-              <div class="sik-subtabs">
-                <button class="sik-subtab is-active" type="button" data-state-option="estado">Estado</button>
-                <button class="sik-subtab" type="button" data-state-option="admin">Admin</button>
-              </div>
-              <div class="sik-block-viewport" data-state-view="estado">
+            <div class="sik-surface-panel sik-surface-panel--fill">
+              <div class="sik-block-viewport">
                 <div class="sik-stack">
                   <div class="sik-block" data-options-block="network">
                     <div class="sik-block-header" data-help="Selecciona una red accesible para esta sesión. Usar red no inicia un reescaneo ni modifica la configuración compartida.">Red seleccionada</div>
                     <div class="sik-block-body">
-                      <div class="sik-capacity-head"><strong>SiK Test Network</strong><span class="sik-state-online">Estado: activa</span></div>
-                      <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-selected="sik-test-network" type="button">SiK Test Network</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="sik-test-network">SiK Test Network</div><div class="sik-combo-option" data-value="refugio-kava">Refugio de Kava</div></div></div>
-                      <div class="sik-info-grid">
-                        <div class="sik-info-item">Zonas: <strong>6</strong> · Contenedores: <strong>64</strong></div>
-                        <div class="sik-info-item">Última ubicación del terminal: <strong>312, 180, 0</strong></div>
-                      </div>
+                      <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-selected="sik-test-network" type="button">SiK Test Network</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="sik-test-network">SiK Test Network</div></div></div>
                       <div class="sik-control-row sik-control-row--equal sik-control-row--wrap"><button class="sik-button" type="button">Usar red</button><button class="sik-button" type="button">Actualizar lista</button></div>
                     </div>
                   </div>
-                  <div class="sik-block" data-options-block="operational">
-                    <div class="sik-block-header" data-help="Resume las cuatro condiciones que permiten usar esta red. Cada indicador cambia con el estado autoritativo recibido.">Estado operativo</div>
-                    <div class="sik-status-grid">
-                      <div class="sik-status-item"><span class="sik-feedback-mark"></span><span>Energía: suministro activo</span></div>
-                      <div class="sik-status-item"><span class="sik-feedback-mark"></span><span>Terminal: detectado en la red</span></div>
-                      <div class="sik-status-item"><span class="sik-feedback-mark"></span><span>Zonas: 6 configuradas</span></div>
-                      <div class="sik-status-item"><span class="sik-feedback-mark"></span><span>Red operativa y accesible</span></div>
-                    </div>
-                  </div>
-                  <div class="sik-block sik-resource-block" data-options-block="resources">
-                    <div class="sik-block-header" data-help="Muestra la actividad agregada de la red, el modo de acceso, el consumo y la capacidad recibidos del estado actual.">Recursos y actividad</div>
-                    <div class="sik-block-body">
+                  <div class="sik-block" data-options-block="summary">
+                    <div class="sik-block-header" data-help="Resume el suministro eléctrico y el alcance configurado de la red seleccionada.">Resumen</div>
+                    <div class="sik-block sik-options-information-card">
+                      <div class="sik-block-header" data-help="Resume la capacidad y las cantidades principales de la red seleccionada.">Información</div>
+                      <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-item-count="326" data-capacity-state="warning" data-capacity-personal-bonus="1066.2" role="progressbar" aria-label="Capacidad total del almacén" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">326 objetos · 3843 / 4620 kg · 83% (+1066,2 kg personal)</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
                       <div class="sik-info-grid">
-                        <div class="sik-info-item"><strong>64 contenedores · 58 tipos</strong></div>
-                        <div class="sik-info-item"><strong>Acceso: terminal colocado</strong></div>
-                        <div class="sik-info-item"><strong>Consumo: 12.00 /h</strong></div>
-                        <div class="sik-info-item"><strong>Capacidad de red: disponible</strong></div>
+                        <div class="sik-info-item">Terminales: <strong>3</strong></div>
+                        <div class="sik-info-item">Zonas: <strong>6</strong></div>
+                        <div class="sik-info-item">Contenedores: <strong>64</strong></div>
+                        <div class="sik-info-item">Miembros: <strong>3</strong></div>
                       </div>
-                      <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-item-count="326" data-capacity-state="warning" data-capacity-personal-bonus="1066.2" role="progressbar" aria-label="Capacidad de red" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">326 objetos · 3843 / 4620 kg · 83% (+1066,2 kg personal)</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
-                      <div class="sik-action-section">
-                        <div class="sik-subheading">Alcance</div>
+                    </div>
+                    <div class="sik-options-summary-grid">
+                      <div class="sik-block sik-options-summary-card">
+                        <div class="sik-block-header" data-help="Indica si la red dispone del suministro necesario para operar.">Energía</div>
+                        <div class="sik-status-item"><span class="sik-feedback-mark"></span><span>Suministro activo</span></div>
+                      </div>
+                      <div class="sik-block sik-options-summary-card">
+                        <div class="sik-block-header" data-help="Compara el alcance actualmente usado con el alcance de red y el aportado por la antena WiFi instalada.">Alcance configurado</div>
                         <div class="sik-info-grid">
                           <div class="sik-info-item">Uso: <strong>2 casillas</strong></div>
                           <div class="sik-info-item">Red: <strong>40 casillas</strong></div>
-                          <div class="sik-info-item" data-visible-when="tablet-addon-installed">Antena wifi: <strong>8 casillas</strong></div>
+                          <div class="sik-info-item" data-visible-when="tablet-addon-installed">WiFi: <strong>8 casillas</strong></div>
                         </div>
                       </div>
                     </div>
                   </div>
-                  <div class="sik-block" data-options-block="palette">
-                    <div class="sik-block-header" data-help="Preferencia visual local por personaje. Solo modifica colores neutrales; estados, peligro y operadores conservan su significado.">Paleta de interfaz</div>
-                    <div class="sik-block-body"><div class="sik-palette-selector"><button class="sik-palette-option is-palette-graphite is-active" type="button" aria-pressed="true"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Grafito</strong></button><button class="sik-palette-option is-palette-blue" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Azul apagado</strong></button><button class="sik-palette-option is-palette-purple" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Púrpura apagado</strong></button><button class="sik-palette-option is-palette-green" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Verde apagado</strong></button><button class="sik-palette-option is-palette-wine" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Vino apagado</strong></button><button class="sik-palette-option is-palette-amber" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Ámbar apagado</strong></button></div></div>
-                  </div>
-                </div>
-              </div>
-              <div class="sik-block-viewport" data-state-view="admin" hidden>
-                <div class="sik-stack">
                   <div class="sik-block" data-options-block="terminals">
                     <div class="sik-block-header" data-help="Lista los terminales registrados. Pulsa una fila para renombrar, cambiar el principal, suspender o retirar ese terminal.">Terminales</div>
                     <div class="sik-table" data-sik-table>
@@ -1239,6 +1222,10 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                         <div class="sik-feedback is-warning" data-visible-when="add-without-selection" hidden><span class="sik-feedback-mark"></span><span>Nada seleccionado.</span></div>
                       </div>
                     </div>
+                  </div>
+                  <div class="sik-block" data-options-block="palette">
+                    <div class="sik-block-header" data-help="Preferencia visual local por personaje. Solo modifica colores neutrales; estados, peligro y operadores conservan su significado.">Paleta de interfaz</div>
+                    <div class="sik-block-body"><div class="sik-palette-selector"><button class="sik-palette-option is-palette-graphite is-active" type="button" aria-pressed="true"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Grafito</strong></button><button class="sik-palette-option is-palette-blue" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Azul apagado</strong></button><button class="sik-palette-option is-palette-purple" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Púrpura apagado</strong></button><button class="sik-palette-option is-palette-green" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Verde apagado</strong></button><button class="sik-palette-option is-palette-wine" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Vino apagado</strong></button><button class="sik-palette-option is-palette-amber" type="button" aria-pressed="false"><span class="sik-palette-preview" aria-hidden="true"><i></i><i></i><i></i><i></i></span><strong>Ámbar apagado</strong></button></div></div>
                   </div>
                 </div>
               </div>

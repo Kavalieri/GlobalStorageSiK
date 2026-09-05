@@ -142,7 +142,7 @@ local function resolveConnectionPresentation(state)
 		return T("IGUI_GS_AccessTerminalUnlinked"), "danger"
 	end
 	if state.powered == false then
-		return T("IGUI_GS_PowerOff"), "warning"
+		return T("IGUI_GS_HeaderNoPower"), "warning"
 	end
 	return T("IGUI_GS_Connected"), "success"
 end
@@ -785,13 +785,8 @@ function GS_TerminalUI:refreshFromState(state)
 	if GlobalStorageSiK.Sandbox.requiresPower()
 		and self.terminalState.powered == false
 		and (self.activeTabKey == nil or self.activeTabKey == "items" or self.activeTabKey == "addons") then
-		-- dev41: el resumen con el indicador de energia vive ahora en
-		-- Configuracion -> "Estado" (antes Red -> "Red"), tras mudar esa
-		-- sub-pestaña fuera de la pestaña Red (que se quedo solo con "Zonas y
-		-- nodos"). Mismo redirect, nueva casa.
-		if self.configPanel then
-			self.configPanel.activeSubTab = "estado"
-		end
+		-- El resumen con el indicador de energia vive en la pestaña normal de
+		-- Opciones. Sin suministro, el redirect conserva visible el diagnostico.
 		self:activateTab("config")
 	end
 	self:setRedistributeState(self.terminalState.redistributeActive == true,

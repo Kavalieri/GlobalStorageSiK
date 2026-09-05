@@ -32,7 +32,9 @@ assert(contains(callerSource, "TabOptionsContext.create"),
 assert(contains(callerSource, ":snapshot("),
 	"the caller updates the surface from immutable context snapshots")
 assert(contains(callerSource, ":dispose("),
-	"the caller must release its context with the surface")
+        "the caller must release its context with the surface")
+assert(not contains(generatedSource, "options.change-subtab"),
+        "the single Options surface must not retain Estado/Admin subtab actions")
 
 local FORBIDDEN_CALLER = {
 	"GS_TerminalUI_Scroll",
@@ -175,16 +177,7 @@ local calls = {
 	surfaceDispose = 0, contextDispose = 0,
 }
 local lastSnapshot, lastReflow
-local surfaceDouble = {
-	nodes = {
-		["options-tabs"] = {
-			setActive = function(_, key, notify)
-				calls.activeKey, calls.activeNotify = key, notify
-				return true
-			end,
-		},
-	},
-}
+local surfaceDouble = { nodes = {} }
 function surfaceDouble:refresh(snapshot)
 	calls.update = calls.update + 1
 	lastSnapshot = snapshot
@@ -292,10 +285,6 @@ assert(Options.layout(runtimeTerminal, 1000, 700) == true,
 assert(calls.reflow == 2 and lastReflow.w == 1000 and lastReflow.h == 700
 	and calls.build == 1,
 	"reflow reconstructed the surface or lost explicit bounds")
-assert(Options.activateSubTab(runtimeTerminal, "admin") == true
-	and calls.activeKey == "admin" and calls.activeNotify == true,
-	"tab activation bypassed the generated surface node")
-
 assert(Options.dispose(runtimeTerminal) == true,
 	"first options dispose did not release surface and context")
 assert(calls.surfaceDispose == 1 and calls.contextDispose == 1

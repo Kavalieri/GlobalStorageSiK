@@ -34,7 +34,7 @@ retainRegistration("terminal-tab", Terminal.registerTab({
 	builder = TerminalModule.builder,
 	contextFactory = TerminalModule.contextFactory,
 	titleKey = "IGUI_GS_TabCraft",
-	iconPath = "media/ui/GS/GS_TabCraft.png",
+	iconPath = "media/ui/GSSiK_Addon_Craft/sik-rail-craft.png",
 	panelField = "craftPanel",
 	enabledStateKey = "craftTabEnabled",
 	order = 10,

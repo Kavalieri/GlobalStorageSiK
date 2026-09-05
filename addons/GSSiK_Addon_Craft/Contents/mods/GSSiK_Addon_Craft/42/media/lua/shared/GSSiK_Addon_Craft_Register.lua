@@ -77,8 +77,8 @@ local definition = {
 
 	-- Icono REAL del periferico (impresora 3D) para la bahia de expansion -
 	-- ver nota identica en GSSiK_Addon_Tablet_Register.lua. El icono de la
-	-- pestaña Craft del terminal sigue siendo GS_TabCraft.png, definido
-	-- aparte en GSSiK_Addon_Craft_Client.lua - no se toca, es correcto.
+	-- pestaña Craft del terminal usa el derivado canónico propiedad del addon,
+	-- suministrado al Tab neutral por el cliente sin acoplar Core a este asset.
 	iconPath = "media/textures/Item_GS_Printer3D.png",
 
 	-- Ingredientes del boton "crafteo instantaneo" de la pestaña Addons:

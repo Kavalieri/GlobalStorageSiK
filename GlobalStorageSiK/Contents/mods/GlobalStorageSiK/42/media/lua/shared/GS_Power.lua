@@ -10,6 +10,23 @@ require "GS_Network"
 
 GlobalStorageSiK.Power = {}
 
+-- B42 distingue la electricidad de red del edificio (`hasGridPower`) de la
+-- electricidad efectiva aportada por otras fuentes (`haveElectricity`). La
+-- propia UI vanilla consulta ambas rutas. Mirar solo `haveElectricity` deja
+-- falsos negativos en interiores que siguen conectados a la red municipal.
+local function squareReportsPower(square)
+	if not square then return false end
+	if square.hasGridPower then
+		local okGrid, gridPowered = pcall(function() return square:hasGridPower() end)
+		if okGrid and gridPowered then return true end
+	end
+	if square.haveElectricity then
+		local okPower, powered = pcall(function() return square:haveElectricity() end)
+		if okPower and powered then return true end
+	end
+	return false
+end
+
 --- Comprueba electricidad en una baldosa.
 ---@param x number
 ---@param y number
@@ -29,10 +46,10 @@ function GlobalStorageSiK.Power.squareHasPower(x, y, z)
 		-- Chunk descargado: estado de energía desconocido; conservar operabilidad hasta verificar.
 		return true
 	end
-	if not square.haveElectricity then
+	if not square.haveElectricity and not square.hasGridPower then
 		return true
 	end
-	return square:haveElectricity()
+	return squareReportsPower(square)
 end
 
 --- Comprueba electricidad en un radio alrededor de una baldosa, usando el
@@ -43,7 +60,7 @@ end
 --- la baldosa exacta del terminal sin electricidad propia) bloquee la red
 --- entera cuando el resto del edificio/generador sí la tiene. No
 --- reimplementa la propagacion de generadores (eso ya lo hace vanilla
---- internamente sobre square:haveElectricity()) - solo amplia DONDE
+--- internamente sobre la electricidad efectiva de la baldosa) - solo amplia DONDE
 --- miramos, de una unica baldosa a su entorno inmediato.
 ---@param x number
 ---@param y number
@@ -60,7 +77,7 @@ function GlobalStorageSiK.Power.areaHasPower(x, y, z)
 		for dy = -range, range do
 			if dx ~= 0 or dy ~= 0 then
 				local sq = cell:getGridSquare(x + dx, y + dy, z)
-				if sq and sq.haveElectricity and sq:haveElectricity() then
+				if squareReportsPower(sq) then
 					return true
 				end
 			end
@@ -91,8 +108,8 @@ end
 --- Busca un generador vanilla encendido con combustible en un radio
 --- alrededor de una baldosa (mismo alcance que areaHasPower). Se usa SOLO
 --- para el consumo de combustible (GS_FuelConsumption.lua) - nunca para
---- decidir si la red tiene electricidad (eso ya lo hace vanilla via
---- square:haveElectricity(), independientemente de la fuente).
+--- decidir si la red tiene electricidad (eso ya lo hace vanilla mediante
+--- hasGridPower/haveElectricity, independientemente de la fuente).
 ---@param x number
 ---@param y number
 ---@param z number
@@ -323,8 +340,11 @@ end
 --- la intencion explicita del jugador al elegir esa opcion.
 ---@return boolean
 local function elecNeverShutsOff()
-	local ok, val = pcall(function() return SandboxVars and SandboxVars.ElecShut end)
-	return ok and val == 9
+	local ok, raw, modifier = pcall(function()
+		return SandboxVars and SandboxVars.ElecShut,
+			SandboxVars and SandboxVars.ElecShutModifier
+	end)
+	return ok and (raw == 9 or (tonumber(modifier) or 0) < 0)
 end
 
 --- Indica si la red tiene energía suficiente para operar.
@@ -361,7 +381,7 @@ function GlobalStorageSiK.Power.networkPowered(networkId)
 		local obj = live[i].object
 		if obj and obj.getSquare then
 			local sq = obj:getSquare()
-			if sq and sq.haveElectricity and sq:haveElectricity() then
+			if squareReportsPower(sq) then
 				return true
 			end
 		end

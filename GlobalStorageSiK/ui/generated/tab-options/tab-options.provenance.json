@@ -3,14 +3,14 @@
     "frameworkManifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     "generatorSha256": "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     "schemaSha256": "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    "surfaceSpecSha256": "fafce194d8031c76ff76556cb3384d1ac0e0ef2534338fcba393af1f178dfdd9",
+    "surfaceSpecSha256": "6c9309244b3d133cfcc5cb7f4f798de60626d4263df827b80097ea84a593004c",
     "visualCanonicalizer": "sik-ui-dom-v2",
-    "visualMasterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
-    "visualSubtreeSha256": "559cbd9457d46f416b56a673f1b54ee0c75b3df89e5314adc01cae3085a18fe8"
+    "visualMasterSha256": "a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a",
+    "visualSubtreeSha256": "c251c81a773274ddf9ebe3c36e240b3a1e314881d910bf35b488e9dd954b6e49"
   },
   "outputs": {
-    "htmlSha256": "a753af7042203aec42600c5c69aec41be073c90bcd1b9b5f69326e3dab045b76",
-    "luaSha256": "64140225037e963596410377af52255f1aa1d3bc0b248aa8b475956d135516c6"
+    "htmlSha256": "3fd104478d35db0433fcb36df78be8dc1d35ef7241337a8c4d4dfdc495b6d830",
+    "luaSha256": "27b36af3383c3c1fe70d6b6c55ab40a489c49a7d04508bdae667d600c35cea6c"
   },
   "runtime": {
     "artifact": {
@@ -32,6 +32,6 @@
       "symbol": "GlobalStorageSiK.TerminalOptions"
     }
   },
-  "runtimePolicy": "required",
+  "runtimePolicy": "staged",
   "surfaceId": "tab-options"
 }

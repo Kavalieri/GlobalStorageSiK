@@ -73,8 +73,8 @@ check("programming supplies data, actions and refresh lifecycle",
 	and programming:find("cards = cards", 1, true) ~= nil
 	and programming:find("programReadiness(player, id)", 1, true) ~= nil
 	and programming:find('variant = "output"', 1, true) ~= nil
-	and programming:find('local actionLabel = T("IGUI_GS_ProgrammingButton", title)', 1, true) ~= nil
-	and programming:find('plainReplace(actionLabel, "%1", title)', 1, true) ~= nil)
+	and programming:find("local actionLabel = title", 1, true) ~= nil
+	and programming:find('T("IGUI_GS_ProgrammingButton", title)', 1, true) == nil)
 
 io.write(string.format("RESULT %d passed, %d failed\n", passed, failed))
 if failed > 0 then os.exit(1) end

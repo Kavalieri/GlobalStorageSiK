@@ -1,4 +1,4 @@
--- Final mounted contract for Opciones > Estado palette cards. This catches
+-- Final mounted contract for the single Opciones surface. This catches
 -- regressions where the data exists but the runtime collapses it into plain
 -- labels or loses the six validated colour previews.
 
@@ -32,7 +32,8 @@ local state = {
 	resourceSummary = { text = "Resources" }, accessMode = { text = "Physical" },
 	consumption = { text = "0" }, capacityAvailable = { text = "Available" },
 	capacity = { value = 20, max = 100, percent = 20, unit = "kg" },
-	terminalRange = { text = "2" }, networkRange = { text = "8" }, palettes = palettes,
+	terminalRange = { text = "2" }, networkRange = { text = "40" },
+	antennaRange = { text = "8" }, palettes = palettes,
 }
 local admin = {
 	terminalHeaderActions = {}, terminals = {
@@ -46,7 +47,7 @@ local admin = {
 	access = { subject = { items = {}, selected = nil } }, accessActions = {},
 }
 local actions = {}
-for _, id in ipairs({ "options.change-subtab", "options.select-network",
+for _, id in ipairs({ "options.select-network",
 	"options.use-network", "options.refresh-networks", "options.open-terminal",
 	"options.open-member", "options.claim-ownership", "options.select-access",
 	"options.add-access", "options.change-palette" }) do actions[id] = function() return true end end
@@ -74,15 +75,15 @@ assert(tree, reason)
 local collection = assert(tree.nodes["options-palette-options"], "palette collection missing")
 assert(collection.panel and collection.childParent == collection.panel,
 	"palette cards must have one real collection parent")
-for _, id in ipairs({ "options-network-block", "options-operational-block",
-	"options-resources-block", "options-palette-block", "options-terminals-block",
-	"options-members-block" }) do
+for _, id in ipairs({ "options-network-block", "options-summary-block",
+	"options-information-card", "options-energy-card", "options-range-card",
+	"options-palette-block", "options-terminals-block", "options-members-block" }) do
 	local block = assert(tree.nodes[id], "options block missing: " .. id)
 	assert(block.panel.drawBackground == true and block.panel.backgroundColor.a > 0
 		and block.panel.borderColor.a > 0, "options block lost its SiK frame: " .. id)
 end
 assert(collection.cards and #collection.cards == 6, "exactly six validated palette cards must be mounted")
-assert(collection.columns == 3, "standard Estado layout must keep three palette cards per row")
+assert(collection.columns == 3, "standard Options layout must keep three palette cards per row")
 for index = 1, 6 do
 	local card = assert(collection.cards[index], "palette card missing: " .. index)
 	assert(card.variant == "palette", "palette item degraded to a generic/plain card")
@@ -101,28 +102,34 @@ assert(collection.cards[6].panel.parent == collection.panel,
 	"lower palette row must be parented inside the collection")
 
 local power = assert(tree.nodes["options-power-status"], "power status missing")
-local terminal = assert(tree.nodes["options-terminal-status"], "terminal status missing")
-local zones = assert(tree.nodes["options-zones-status"], "zones status missing")
-local access = assert(tree.nodes["options-access-status"], "access status missing")
-assert(power._sikUiControl == "statusIndicator" and terminal._sikUiControl == "statusIndicator"
-	and zones._sikUiControl == "statusIndicator" and access._sikUiControl == "statusIndicator",
-	"operational dashboard must use the semantic status-dot component")
-assert(power.y == terminal.y and zones.y == access.y and zones.y > power.y,
-	"operational dashboard must remain a compact two-by-two grid")
-assert(terminal.x > power.x and access.x > zones.x,
-	"operational dashboard second column collapsed into vertical loose text")
+local terminal = assert(tree.nodes["options-info-terminals"], "terminal count missing")
+local zones = assert(tree.nodes["options-info-zones"], "zone count missing")
+local containers = assert(tree.nodes["options-info-containers"], "container count missing")
+local membersCount = assert(tree.nodes["options-info-members"], "member count missing")
+assert(power._sikUiControl == "statusIndicator",
+	"power state must retain its semantic status indicator")
+local function isSemanticStatus(control)
+	return control._sikUiControl == "status"
+		or control._sikUiControl == "statusIndicator"
+end
+assert(isSemanticStatus(terminal) and isSemanticStatus(zones)
+	and isSemanticStatus(containers) and isSemanticStatus(membersCount),
+	"information counts must use the compact semantic status control")
+assert(terminal.y == zones.y and zones.y == containers.y and containers.y == membersCount.y,
+	"information counts must remain one horizontal row in the standard profile")
+assert(terminal.x < zones.x and zones.x < containers.x and containers.x < membersCount.x,
+	"information counts lost their validated order")
 
-local resource = assert(tree.nodes["options-resource-summary"], "resource summary missing")
-local accessMode = assert(tree.nodes["options-resource-access"], "access mode missing")
-local consumption = assert(tree.nodes["options-resource-consumption"], "consumption missing")
-local availability = assert(tree.nodes["options-resource-capacity-availability"], "capacity availability missing")
-assert(resource.y == accessMode.y and consumption.y == availability.y
-	and accessMode.x > resource.x and availability.x > consumption.x,
-	"resources dashboard must remain a compact two-column grid")
 local capacity = assert(tree.nodes["options-capacity"], "capacity bar missing")
-local rangeTitle = assert(tree.nodes["options-range-title"], "range title missing")
-assert(capacity.width > resource.width and rangeTitle.width > resource.width,
-	"capacity and reach summary must span both resource columns")
+assert(capacity.width > terminal.width,
+	"capacity bar must span the full information card above the count row")
+local terminalRange = assert(tree.nodes["options-terminal-range"], "terminal range missing")
+local networkRange = assert(tree.nodes["options-network-range"], "network range missing")
+local antennaRange = assert(tree.nodes["options-antenna-range"], "antenna range missing")
+assert(terminalRange.y == networkRange.y and networkRange.x > terminalRange.x,
+	"configured range lost its two-column first row")
+assert(antennaRange.y > terminalRange.y,
+	"WiFi range must remain below the first configured-range row")
 
 for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	local tableView = assert(tree.nodes[id], "options table missing: " .. id)

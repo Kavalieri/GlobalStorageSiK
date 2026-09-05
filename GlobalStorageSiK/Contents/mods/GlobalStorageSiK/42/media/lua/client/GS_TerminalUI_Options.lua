@@ -74,16 +74,6 @@ function Options.buildSection(terminal, optionsPanel)
 	return surface
 end
 
-function Options.activateSubTab(terminal, key)
-	local panel = terminal and terminal.configPanel
-	local surface = panel and panel._sikOptionsSurface
-	local tree = surface and surface.getTree and surface:getTree() or surface
-	local tabs = tree and tree.nodes and tree.nodes["options-tabs"]
-	if not tabs or type(tabs.setActive) ~= "function" then return false, "options_tabs_unavailable" end
-	local normalized = key == "admin" and "admin" or "estado"
-	return tabs:setActive(normalized, true)
-end
-
 function Options.refreshActiveTab(terminal, state)
 	return Options.refreshScroll(terminal, state)
 end

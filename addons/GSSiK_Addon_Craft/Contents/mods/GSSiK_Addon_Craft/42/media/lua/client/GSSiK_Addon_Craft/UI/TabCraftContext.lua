@@ -36,15 +36,19 @@ function Context.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal_context" end
 	local actions = { craft = {
 		["open-main"] = function()
-			local callback = isModActive("Neat_Crafting") and terminal.onOpenNeatCraft
-				or terminal.onOpenVanillaCraft
-			if type(callback) ~= "function" then return false, "craft_action_unavailable" end
-			callback(terminal)
+			local owner = GSSiK_Addon_Craft and GSSiK_Addon_Craft.TerminalUI
+			if not owner or type(owner.openCraft) ~= "function" then
+				return false, "craft_action_unavailable"
+			end
+			owner.openCraft(terminal, isModActive("Neat_Crafting") and "neat" or "vanilla")
 			return true
 		end,
 		["open-cook"] = function()
-			if type(terminal.onOpenCook) ~= "function" then return false, "cook_action_unavailable" end
-			terminal:onOpenCook()
+			local owner = GSSiK_Addon_Craft and GSSiK_Addon_Craft.TerminalUI
+			if not owner or type(owner.openCook) ~= "function" then
+				return false, "cook_action_unavailable"
+			end
+			owner.openCook(terminal)
 			return true
 		end,
 		["toggle-destination"] = function()

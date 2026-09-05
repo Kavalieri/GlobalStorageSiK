@@ -61,8 +61,8 @@ local definition = {
 	moduleCraftTime = 110,
 	-- Icono REAL del periferico (pizarra digital) para la bahia de expansion -
 	-- ver nota identica en GSSiK_Addon_Tablet_Register.lua. El icono de la
-	-- pestaña Build del terminal sigue siendo GS_TabBuilder.png, definido
-	-- aparte en GSSiK_Addon_Builder_Client.lua - no se toca, es correcto.
+	-- pestaña Build del terminal usa el derivado canónico propiedad del addon,
+	-- suministrado al Tab neutral por el cliente sin acoplar Core a este asset.
 	iconPath = "media/textures/Item_GS_DigitalWhiteboard.png",
 	-- Ingredientes del boton "crafteo instantaneo" de la pestaña Addons: el
 	-- montaje final consume las 3 piezas ya fabricadas (cada una con receta

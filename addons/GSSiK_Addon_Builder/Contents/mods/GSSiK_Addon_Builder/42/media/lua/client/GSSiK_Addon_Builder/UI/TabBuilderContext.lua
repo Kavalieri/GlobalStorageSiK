@@ -34,10 +34,11 @@ end
 function Context.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal_context" end
 	local actions = { builder = { ["open-main"] = function()
-		local callback = isModActive("Neat_Building") and terminal.onOpenNeatBuild
-			or terminal.onOpenVanillaBuild
-		if type(callback) ~= "function" then return false, "build_action_unavailable" end
-		callback(terminal)
+		local owner = GSSiK_Addon_Builder and GSSiK_Addon_Builder.TerminalUI
+		if not owner or type(owner.openBuild) ~= "function" then
+			return false, "build_action_unavailable"
+		end
+		owner.openBuild(terminal, isModActive("Neat_Building") and "neat" or "vanilla")
 		return true
 	end } }
 	local state, statusText, statusTone = sessionPresentation()

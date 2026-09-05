@@ -11,6 +11,10 @@ local luaPath = root .. "Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/"
 local modInfoPath = root .. "Contents/mods/GSSiK_Addon_Builder/42/mod.info"
 local configPath = root .. "Contents/mods/GSSiK_Addon_Builder/42/media/lua/shared/"
 	.. "GSSiK_Addon_Builder_Sandbox.lua"
+local registrationPath = root .. "Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/"
+	.. "GSSiK_Addon_Builder_Client.lua"
+local railAssetPath = root .. "Contents/mods/GSSiK_Addon_Builder/42/media/ui/"
+	.. "GSSiK_Addon_Builder/sik-rail-builder.png"
 
 local source = readFile(luaPath)
 local context = readFile(root .. "Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/"
@@ -43,18 +47,26 @@ assert(not source:find("UI.Scroll", 1, true))
 assert(context:find("actions = actions", 1, true), "context omits declarative actions")
 assert(context:find("conditions =", 1, true), "context omits declarative conditions")
 assert(context:find("i18n =", 1, true), "context omits runtime i18n")
-assert(context:find("terminal.onOpenVanillaBuild", 1, true), "vanilla build action lost")
-assert(context:find("terminal.onOpenNeatBuild", 1, true), "Neat build action lost")
+assert(context:find("owner.openBuild(terminal", 1, true), "Build action must invoke its implemented owner")
+assert(context:find('and "neat" or "vanilla"', 1, true), "Build action must preserve Neat/vanilla routing")
+assert(not context:find("terminal.onOpenVanillaBuild", 1, true), "dead terminal Build callback returned")
 assert(generated:find("Generated data only. Do not edit.", 1, true))
 assert(generated:find('"tab-builder"', 1, true))
 assert(spec:find('"documentKind": "product-surface-spec"', 1, true))
 assert(spec:find('"validation": "HTML_VALIDATED_BY_KAVA"', 1, true))
+local registration = readFile(registrationPath)
+assert(registration:find('iconPath = "media/ui/GSSiK_Addon_Builder/sik-rail-builder.png"', 1, true),
+	"Builder must supply its own rail asset through the neutral terminal-tab contract")
+local assetHandle = assert(io.open(railAssetPath, "rb"), "Builder rail asset is not packaged by its addon")
+assetHandle:close()
+assert(io.open("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/ui/GS/sik-rail-builder.png", "rb") == nil,
+	"Core must not package the Builder rail asset")
 
 local modInfo = readFile(modInfoPath)
 local config = readFile(configPath)
 local modVersion = assert(modInfo:match("modversion=([^\r\n]+)"))
 local configVersion = assert(config:match('GSSiK_Addon_Builder.VERSION%s*=%s*"([^"]+)"'))
-assert(modVersion == "1.0.9-dev1.6", "unexpected Builder candidate version: " .. modVersion)
+assert(modVersion == "1.0.9-dev1.7", "unexpected Builder candidate version: " .. modVersion)
 assert(configVersion == modVersion,
 	"Builder config/mod.info version mismatch: " .. configVersion .. " vs " .. modVersion)
 

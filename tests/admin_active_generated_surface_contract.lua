@@ -1,6 +1,6 @@
--- Authorial contract: the live Options/Admin tab is one generated SiK.UI
--- surface.  Product code supplies data/actions only; the generated artifact
--- owns its two active Admin tables and their framework factories.
+-- Authorial contract: the live Options tab is one generated SiK.UI surface.
+-- Product code supplies data/actions only; the generated artifact owns the
+-- standard block flow and its two active management tables.
 
 local CLIENT = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
 
@@ -66,7 +66,7 @@ assert(spec.surface and spec.surface.id == "tab-options", "generated artifact mu
 assert(spec.frameworkRef and spec.frameworkRef.namespace == "SiK.UI",
 	"generated artifact must target the public SiK.UI namespace")
 assert(spec.provenance and spec.provenance.visualMasterSha256 ==
-	"3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
+	"a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a",
 	"generated artifact must remain pinned to Kava's validated terminal-tabs visual master")
 
 local factories = {}
@@ -89,8 +89,13 @@ local function findById(node, id)
 	return nil
 end
 
-local admin = findById(spec.root or (spec.surface and spec.surface.root), "options-admin-content")
-assert(admin, "generated surface must contain the active options-admin-content subtree")
+local root = spec.root or (spec.surface and spec.surface.root)
+assert(findById(root, "options-network-block"), "Options must start with the selected-network block")
+assert(findById(root, "options-summary-block"), "Options must contain the summary block")
+assert(findById(root, "options-terminals-block"), "Options must contain the Terminales block")
+assert(findById(root, "options-members-block"), "Options must contain the Miembros block")
+assert(findById(root, "options-palette-block"), "Options must finish with the palette block")
+assert(not findById(root, "options-admin-content"), "Retired Options subtabs must not return")
 
 local counts = { table = 0, block = 0, control = 0 }
 local actionIds = {}
@@ -106,11 +111,11 @@ local function inspect(node)
 	local children = node.children or {}
 	for i = 1, #children do inspect(children[i]) end
 end
-inspect(admin)
+inspect(root)
 
-assert(counts.table == 2, "Admin must contain exactly the active Terminales and Miembros tables")
-assert(counts.block > 0, "Admin composition must retain framework blocks")
-assert(counts.control > 0, "Admin composition must retain framework controls")
+assert(counts.table == 2, "Options must contain exactly the Terminales and Miembros tables")
+assert(counts.block > 0, "Options composition must retain framework blocks")
+assert(counts.control > 0, "Options composition must retain framework controls")
 assert(actionIds["options.open-terminal"], "Terminales table rows must expose their generated action")
 assert(actionIds["options.open-member"], "Miembros table rows must expose their generated action")
 

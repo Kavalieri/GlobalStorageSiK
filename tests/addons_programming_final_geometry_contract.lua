@@ -67,12 +67,12 @@ local programCollection = assert(programTree.nodes["programming-cards"])
 assert(#programCollection.cards == 6 and programCollection.columns == 2,
 	"Programming must mount six functional cards in exactly two columns")
 local programA, programB = programCollection.cards[1], programCollection.cards[2]
-assert(programA.variant == "process" and programA.panel.height == 148
+assert(programA.variant == "process" and programA.panel.height == 156
 	and programA.actionButton and programA.actionButton._sikUiControl == "button",
 	"Programming cards must expose the complete process widget")
 assert(programB.panel.x - programA.panel.x - programA.panel.width == 8,
 	"Programming card columns lost the canonical gap")
-assert(programCollection.contentHeight == 148 * 3 + 8 * 2,
+assert(programCollection.contentHeight == 156 * 3 + 8 * 2,
 	"Programming rows must retain their final geometry")
 programTree:dispose()
 

@@ -7,9 +7,9 @@
   &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;cc74854e8606036ce9930b9ffa2b3c2d92eff5ae6ff988dc72b10ee0d5f617cd&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;561067996d212c79a89f703c9dd5d4ad781e3f839d22b6577f520d176057d4a8&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e&quot;,
+  &quot;visualMasterSha256&quot;: &quot;a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;752b081fb1d4bba990b37045e47ef2b21c46d90ecd66f6b4565f6586986d8890&quot;
 }">
   <title>tab-warehouse</title>
@@ -644,6 +644,7 @@ button:disabled { cursor: default; }
 .sik-role-owner { color: var(--sik-accent); font-weight: 600; }
 .sik-role-admin { color: var(--sik-warn); font-weight: 600; }
 .sik-state-online { color: var(--sik-good); }
+.sik-state-warning { color: var(--sik-warn); }
 .sik-state-offline { color: var(--sik-text-muted); }
 .sik-state-cell { font-weight: 600; white-space: nowrap; }
 .sik-state-cell.is-ok { color: var(--sik-good); }
@@ -1130,14 +1131,15 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     .sik-addon-grid--slots .sik-addon-slot > img {
       width:88px; height:88px; object-fit:contain;
     }
-    [data-state-view="estado"] > .sik-stack { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-    [data-options-block="network"], [data-options-block="palette"] { grid-column:1 / -1; }
-    [data-options-block="operational"], [data-options-block="resources"] { min-height:224px; }
+    .sik-options-information-card { min-height:0; }
+    .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .sik-options-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .sik-options-summary-card { min-height:132px; }
     .sik-palette-selector { grid-template-columns:repeat(3,minmax(0,1fr)); }
     @media (max-width:899px) {
       .sik-terminal-shell { min-height:min(480px,calc(100vh - 32px)); }
-      .sik-addon-grid--slots, [data-state-view="estado"] > .sik-stack { grid-template-columns:1fr; }
-      [data-options-block="network"], [data-options-block="palette"] { grid-column:auto; }
+      .sik-addon-grid--slots, .sik-options-summary-grid { grid-template-columns:1fr; }
+      .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     @media (max-width:620px) { .sik-palette-selector { grid-template-columns:1fr; } }
   </style>

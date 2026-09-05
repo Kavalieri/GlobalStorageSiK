@@ -348,7 +348,6 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 		tabKey = "config"
 		forceStatusTab = true
 	end
-	if forceStatusTab and terminal.configPanel then terminal.configPanel.activeSubTab = "estado" end
 
 	if not terminal.tabPanels or not terminal.tabPanels[tabKey]
 		or not terminal.navigationContainer then

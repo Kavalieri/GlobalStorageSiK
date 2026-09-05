@@ -322,7 +322,7 @@ Support.check(suite, "Block reserves the canonical gutter only while content ove
 	return true
 end)
 
-Support.check(suite, "Options uses the generated Estado then Admin declaration once", function()
+Support.check(suite, "Options uses one generated standard surface without internal subtabs", function()
 	local contextPath = CLIENT .. "GlobalStorageSiK/UI/TabOptionsContext.lua"
 	local surface = optionsSurface
 	assert(surface.id == "tab-options", "generated tab-options surfaceId changed")
@@ -333,16 +333,15 @@ Support.check(suite, "Options uses the generated Estado then Admin declaration o
 		"generated tab-options declaration no longer identifies the terminal caller")
 	local tabNode = assert(findNode(surface.root, "options-root"), "generated Options container missing")
 	assert(tabNode.type == "container", "Options root is not the declarative content container")
-	local navigation = nil
-	for _, capability in ipairs(tabNode.capabilities or {}) do
-		if capability.id == "container.navigation" then navigation = capability; break end
-	end
-	assert(navigation, "Options container does not own its navigation capability")
-	assert(#(tabNode.options or {}) == 2, "Options must declare exactly Estado and Admin")
-	assert(tabNode.options[1].id == "estado" and tabNode.options[1].contentId == "options-state-content",
-		"Estado is not the first declared Options state")
-	assert(tabNode.options[2].id == "admin" and tabNode.options[2].contentId == "options-admin-content",
-		"Admin is not the second declared Options state")
+        assert(not tabNode.capabilities and not tabNode.options,
+                "Options retained the removed Estado/Admin navigation")
+        for _, nodeId in ipairs({ "options-network-block", "options-summary-block",
+                "options-terminals-block", "options-members-block", "options-palette-block" }) do
+                assert(findNode(tabNode, nodeId), "Options standard sequence omits " .. nodeId)
+        end
+        assert(not findNode(tabNode, "options-state-content")
+                and not findNode(tabNode, "options-admin-content"),
+                "Options still contains hidden subtab content roots")
 
 	contains(options, 'local TabOptionsSpec = require "GlobalStorageSiK/UI/Generated/TabOptions"',
 		"Options caller does not load the generated declaration")

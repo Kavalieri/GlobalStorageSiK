@@ -58,13 +58,6 @@ local function selectedNetwork(state, selectedId)
 	return rows[1]
 end
 
-local function locationText(row)
-	local point = row and (row.lastLocation or row.anchor)
-	if not point or point.x == nil or point.y == nil then return text("IGUI_GS_NetLocationUnknown") end
-	return string.format("%d, %d, %d", math.floor(point.x), math.floor(point.y),
-		math.floor(point.z or 0))
-end
-
 local function status(value, tone, indicator)
 	return { text = tostring(value or ""), tone = tone or "text", indicator = indicator == true }
 end
@@ -229,12 +222,6 @@ function TabOptionsContext.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal" end
 	local context = { terminal = terminal, terminalRows = {}, memberRows = {}, accessPicks = {}, disposed = false }
 	context.actions = {
-		["options.change-subtab"] = function(envelope)
-			local payload = semantic(envelope)
-			local value = payload.key or payload.value
-			if terminal.configPanel and (value == "estado" or value == "admin") then terminal.configPanel.activeSubTab = value end
-			return true
-		end,
 		["options.select-network"] = function(envelope) context.selectedNetworkId = semantic(envelope).value; return true end,
 		["options.use-network"] = function()
 			if not context.selectedNetworkId then return false, "network_not_selected" end
@@ -299,17 +286,16 @@ function TabOptionsContext.create(terminal)
 		if self.disposed then return nil, "disposed" end
 		local state = serverState or terminal.terminalState or {}
 		local perms = state.permissions or {}
-		local rows = networkRows(state)
 		local activeId = state.activeNetworkId or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
 		local selected = selectedNetwork(state, self.selectedNetworkId)
 		self.selectedNetworkId = networkId(selected) or activeId
 		local networkItems = {}
-		for index = 1, #rows do
-			local row = rows[index]
-			local id, label = networkId(row), networkLabel(row)
-			if row.activeTerminals == 0 then label = label .. " [" .. text("IGUI_GS_TerminalSuspended") .. "]" end
-			if id == activeId then label = "> " .. label end
-			networkItems[#networkItems + 1] = { id = id, value = id, text = label }
+		if selected and self.selectedNetworkId then
+			networkItems[1] = {
+				id = self.selectedNetworkId,
+				value = self.selectedNetworkId,
+				text = networkLabel(selected),
+			}
 		end
 		self.terminalRows, self.memberRows, self.accessPicks = {}, {}, {}
 		local terminals = normalizeTerminalRows(state, self.terminalRows)
@@ -320,13 +306,7 @@ function TabOptionsContext.create(terminal)
 		local terminalCount = #terminals
 		if state.terminalAnchor and state.terminalAnchor.x then terminalCount = math.max(1, terminalCount) end
 		local zoneCount, nodeCount = #(state.zones or {}), #(state.nodes or {})
-		local selectedSummary = ""
-		if selected then
-			selectedSummary = text("IGUI_GS_NetCounts", selected.zoneCount or 0, selected.nodeCount or 0)
-				.. " " .. text("IGUI_GS_PunctuationMiddleDot") .. " "
-				.. text("IGUI_GS_NetLastLocation", locationText(selected))
-		end
-		local fuel, capacity = state.fuelConsumption or {}, state.capacity or {}
+		local capacity = state.capacity or {}
 		local installedAddons = state.installedAddons or {}
 		local antennaInstalled = installedAddons.TabletLink ~= nil
 		local antennaRange = 0
@@ -335,22 +315,18 @@ function TabOptionsContext.create(terminal)
 			antennaRange = GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(
 				playerFor(terminal), self.selectedNetworkId, state.terminalAnchor)
 		end
-		local accessMode = text("IGUI_GS_NetAccessPhysical")
-		if state.accessMode == "wireless" then accessMode = text("IGUI_GS_NetAccessWireless")
-		elseif state.accessMode == "bypass" then accessMode = text("IGUI_GS_NetAccessBypass") end
 		local role = perms.playerRole or perms.role or "member"
 		local isOwner, isAdmin = role == "owner", role == "admin" or role == "owner"
 		return {
 			data = { options = {
 				state = {
-					networkName = status(networkLabel(selected)), selectedNetwork = { items = networkItems, selected = self.selectedNetworkId },
-					networkSummary = status(selectedSummary, "textMuted"), networkActions = {},
+					selectedNetwork = { items = networkItems, selected = self.selectedNetworkId },
+					networkActions = {},
 					power = status(powered and text("IGUI_GS_ValPowerOk") or text("IGUI_GS_ValPowerOff"), powered and "success" or "danger", true),
-					terminalStatus = status(terminalCount > 0 and text("IGUI_GS_ValTerminalOk") or text("IGUI_GS_ValTerminalMissing"), terminalCount > 0 and "success" or "danger", true),
-					zonesStatus = status(zoneCount > 0 and text("IGUI_GS_ValZonesOk", zoneCount) or text("IGUI_GS_ValZonesMissing"), zoneCount > 0 and "success" or "warning", true),
-					accessStatus = status(powered and zoneCount > 0 and text("IGUI_GS_ValNetworkReady") or text("IGUI_GS_ValNetworkBlocked"), powered and zoneCount > 0 and "success" or "danger", true),
-					resourceSummary = status(text("IGUI_GS_NetResourceSummary", nodeCount, state.itemTypeCount or 0)), accessMode = status(accessMode),
-					consumption = status(text("IGUI_GS_StatsFuel", string.format("%.2f", tonumber(fuel.total) or 0))), capacityAvailable = status(text("IGUI_GS_NetCapacityAvailable")),
+					terminalStatus = status(text("IGUI_GS_StatsTerminals", terminalCount)),
+					zonesStatus = status(text("IGUI_GS_StatsZones", zoneCount)),
+					resourceSummary = status(text("IGUI_GS_StatsNodes", nodeCount)),
+					accessStatus = status(text("IGUI_GS_StatsMembers", #members)),
 					capacity = CapacityPresentation.fromState(capacity),
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
 					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
