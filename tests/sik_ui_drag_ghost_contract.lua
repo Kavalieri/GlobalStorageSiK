@@ -175,7 +175,9 @@ Support.check(suite, "stateful group header delegates one semantic selection ind
 	contains(dragSource, "payloadRows or { drag.rowData }", "drop does not use semantic payload")
 	contains(dragSource, "Las paginas son solo presentacion",
 		"group transfer still treats visual pages as transfer authority")
-	contains(dragSource, "GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1]",
+	local sendStart = assert(dragSource:find("GlobalStorageSiK.WithdrawClient.sendWithdraw(", 1, true),
+		"semantic group header does not reach the common withdrawal client")
+	contains(dragSource:sub(sendStart, sendStart + 180), "rows[1]",
 		"semantic group header does not reach the common withdrawal client")
 	excludes(dragSource, "TerminalItems.deferExactWithdraw",
 		"drag still walks visible detail pages before sending the semantic header")

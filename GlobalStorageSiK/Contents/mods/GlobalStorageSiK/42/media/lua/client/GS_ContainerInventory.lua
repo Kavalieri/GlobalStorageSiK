@@ -52,9 +52,23 @@ function Inventory.mount(parent, editor, node, options)
 	-- Aquí la capa superior real es el editor, no la terminal principal.
 	view.controller.contextMenuOwner = editor
 	function view.controller:refreshItemsTab() view:render() end
+	function view.controller:onWithdrawCompleted(ok, result) view:afterWithdraw(ok, result) end
+	function view:afterWithdraw(ok, result)
+		-- Exact child rows are revision-bound. Remove them as soon as the ACK
+		-- arrives so a second gesture cannot reuse an itemId that was just moved.
+		panel._detailPages, panel._detailPending = {}, {}
+		self.detailQueue = {}
+		local revision = result and tonumber(result.inventoryRevision)
+		if revision then self.controller.terminalState.inventoryRevision = revision end
+		self:render()
+		self:request()
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "detail-cache invalidated surface=container-editor"
+			.. " ok=" .. tostring(ok == true) .. " revision=" .. tostring(revision))
+	end
 	function view.controller:onWithdrawRow(row, amount, targetKey)
 		return GlobalStorageSiK.WithdrawClient.sendWithdraw(row, amount, targetKey, "", {
-			networkId = view.networkId, onComplete = function() view:request() end,
+			networkId = view.networkId,
+			onComplete = function(ok, result) view:afterWithdraw(ok, result) end,
 		})
 	end
 	function view.controller:requestInventoryDetails(row, page)
@@ -69,9 +83,10 @@ function Inventory.mount(parent, editor, node, options)
 	view.rowHeight = metrics.rowHeight
 	view.bar = UI.Controls.progress(panel, { x = 8, y = 8, w = width - 16, h = metrics.rowHeight })
 	view.withdraw = UI.Controls.button(panel, { text = T("IGUI_GS_WithdrawContainerAll"),
-		onClick = function()
+			onClick = function()
 			GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(view.rows, 0, nil, "", {
-				networkId = view.networkId, onComplete = function() view:request() end,
+				networkId = view.networkId,
+				onComplete = function(ok, result) view:afterWithdraw(ok, result) end,
 			})
 		end })
 	view.empty = UI.Controls.button(panel, { text = T("IGUI_GS_EmptyContainer"),

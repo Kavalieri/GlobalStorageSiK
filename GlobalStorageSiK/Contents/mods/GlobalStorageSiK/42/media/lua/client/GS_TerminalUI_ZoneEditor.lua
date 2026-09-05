@@ -351,6 +351,7 @@ function GS_ZoneEditorUI:ensureForm()
 		or math.max(56, (#zoneRows + 1) * CONTROL_METRICS.buttonHeight)
 	local zoneNodesTable, tableReason = UI.Table.create({
 		parent = containersColumn.parent, x = 0, y = 0, embedded = true,
+		directBlock = false,
 		w = containersColumn.width, h = tableH, columns = GlobalStorageSiK.TerminalNodes.columns(),
 		rows = zoneRows, allRowsVisible = true, selectionMode = "single",
 		keyOf = function(row) return row.id end,

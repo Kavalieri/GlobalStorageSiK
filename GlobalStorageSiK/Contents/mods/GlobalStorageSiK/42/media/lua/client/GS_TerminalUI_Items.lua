@@ -230,11 +230,12 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
 	if not panel then return end
 	local activeNetwork = terminal.terminalState and terminal.terminalState.networkId
 	if networkId and activeNetwork and networkId ~= activeNetwork then return end
-	-- Las respuestas viejas quedan rechazadas por revision en GS_Client. Solo
-	-- liberamos el pending para que cada grupo expandido vuelva a pedir UNA vez.
-	-- La pagina anterior puede permanecer como referencia visual, pero se marca
-	-- stale y nunca conserva acciones/itemIds utilizables.
-	panel._detailPending = {}
+	-- Una pagina de detalle contiene itemIds fisicos ligados a una revision. No
+	-- puede conservarse ni pintarse tras una mutacion: aunque el pager estuviera
+	-- deshabilitado, sus filas seguian teniendo drag/click y reutilizaban IDs ya
+	-- retirados. Invalida la presentacion y el fallback global de forma atomica.
+	panel._detailPages, panel._detailPending = nil, {}
+	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive()
@@ -244,6 +245,23 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
 		-- captura/tooltip residual antes de que el refresh virtual recicle filas.
 		GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
 	end
+end
+
+-- Cierre comun de cualquier retirada iniciada desde la tabla principal. La
+-- sincronizacion autoritativa sigue perteneciendo a TerminalSync; aqui solo se
+-- retiran inmediatamente filas exactas que ya no son seguras para interactuar.
+function GlobalStorageSiK.TerminalItems.onWithdrawCompleted(panel, terminal, ok, result)
+	if not panel then return end
+	panel._detailPages, panel._detailPending = nil, {}
+	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
+	local revision = result and tonumber(result.inventoryRevision)
+	if revision and terminal and terminal.terminalState then
+		terminal.terminalState.inventoryRevision = revision
+	end
+	GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
+	if terminal and terminal.refreshItemsTab then terminal:refreshItemsTab() end
+	GlobalStorageSiK.Log.debug("ExactWithdraw", "detail-cache invalidated surface=warehouse"
+		.. " ok=" .. tostring(ok == true) .. " revision=" .. tostring(revision))
 end
 
 ---@param panel ISPanel
@@ -1141,6 +1159,7 @@ local function buildDisplayRows(panel, terminal, parents)
 			end
 			local displayable = detailPage and detailPage.page == wantedPage
 				and detailPage.networkId == networkId
+				and tonumber(detailPage.inventoryRevision or -1) == tonumber(revision)
 			if displayable then
 				panel._detailRendered = panel._detailRendered or {}
 				local renderedKey = tostring(key) .. "\31" .. tostring(wantedPage) .. "\31" .. tostring(revision)

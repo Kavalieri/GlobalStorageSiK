@@ -73,6 +73,15 @@ local function textureSize(texture, method)
 	return ok and tonumber(value) or 0
 end
 
+local function widgetSize(widget, method, field)
+	if not widget then return 0 end
+	if type(widget[method]) == "function" then
+		local ok, value = pcall(widget[method], widget)
+		if ok and tonumber(value) then return tonumber(value) end
+	end
+	return tonumber(widget[field]) or 0
+end
+
 local function logIconDiagnostics(terminal)
 	local navigation = terminal.navigationContainer and terminal.navigationContainer.navigation
 	if not navigation then return end
@@ -91,8 +100,8 @@ local function logIconDiagnostics(terminal)
 			.. ",resolved=" .. tostring(texture ~= nil)
 			.. ",native=" .. tostring(textureSize(texture, "getWidth")) .. "x"
 			.. tostring(textureSize(texture, "getHeight"))
-			.. ",slot=" .. tostring(button and button.width or 0) .. "x"
-			.. tostring(button and button.height or 0)
+			.. ",slot=" .. tostring(widgetSize(button, "getWidth", "width")) .. "x"
+			.. tostring(widgetSize(button, "getHeight", "height"))
 	end
 	local signature = table.concat(parts, " | ")
 	if terminal._gsTabIconDiagnosticSignature ~= signature then

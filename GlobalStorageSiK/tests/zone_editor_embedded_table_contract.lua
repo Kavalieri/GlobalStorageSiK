@@ -4,5 +4,7 @@ local source = assert(io.open(path, "rb")):read("*a")
 assert(source:find("UI.Table.create({", 1, true), "ZoneEditor no longer creates its container table")
 assert(source:find("parent = containersColumn.parent, x = 0, y = 0, embedded = true,", 1, true),
 	"ZoneEditor table must use the real embedded contract")
+assert(source:find("directBlock = false", 1, true),
+	"ZoneEditor column must remain the sole geometry owner of its embedded table")
 assert(not source:find("embedded = false", 1, true), "ZoneEditor contains a forbidden fake non-embedded table")
 print("PASS ZoneEditor embedded table contract")

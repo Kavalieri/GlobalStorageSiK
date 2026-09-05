@@ -513,14 +513,18 @@ function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetK
 	end
 	local okAny = false
 	local remaining, moved, failed, failureReason = #coalescedRows, 0, false, nil
+	local inventoryRevision = nil
 	local requestOptions = nil
 	if options then
 		requestOptions = { networkId = options.networkId, onComplete = function(ok, result)
 			remaining = remaining - 1
 			moved = moved + (tonumber(result and result.moved) or 0)
+			local revision = tonumber(result and result.inventoryRevision)
+			if revision then inventoryRevision = math.max(inventoryRevision or 0, revision) end
 			if not ok then failed = true; failureReason = result and result.reason or failureReason end
 			if remaining == 0 and options.onComplete then
-				options.onComplete(not failed, { moved = moved, reason = failureReason })
+				options.onComplete(not failed, { moved = moved, reason = failureReason,
+					inventoryRevision = inventoryRevision })
 			end
 		end }
 	end
@@ -656,6 +660,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		sourceNodeId = transfer.sourceNodeId,
 		networkId = transfer.networkId,
 		fullType = transfer.fullType,
+		inventoryRevision = transfer.inventoryRevision,
 	}
 	local hasNext = finishCurrent(true)
 	runCompletion(completedRequest, completionResult.moved > 0, completionResult)

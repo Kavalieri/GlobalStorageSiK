@@ -311,17 +311,29 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
 	local rows = drag.payloadRows or { drag.rowData }
+	local sourcePanel = drag.sourceWidget and drag.sourceWidget.listPanel or nil
+	local sourceController = drag.captureOwner
 	clearDrag(nil)
 	-- La cabecera conserva exactamente el mismo payload semantico colapsada,
 	-- expandida o paginada. Las paginas son solo presentacion; el servidor
 	-- reconstruye el grupo fisico a partir de rowKey + revision.
+	local function onComplete(ok, result)
+		if sourceController and type(sourceController.onWithdrawCompleted) == "function" then
+			sourceController:onWithdrawCompleted(ok, result)
+		elseif GlobalStorageSiK.TerminalItems.onWithdrawCompleted then
+			GlobalStorageSiK.TerminalItems.onWithdrawCompleted(sourcePanel, sourceController, ok, result)
+		end
+	end
+	local requestOptions = { onComplete = onComplete }
 	local sent
 	GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop target=" .. tostring(key)
 		.. " amount=" .. tostring(drag.amount) .. " rows=" .. tostring(#rows))
 	if #rows > 1 then
-		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
+		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(
+			rows, drag.amount, key, searchQuery, requestOptions)
 	else
-		sent = GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1], drag.amount, key, searchQuery)
+		sent = GlobalStorageSiK.WithdrawClient.sendWithdraw(
+			rows[1], drag.amount, key, searchQuery, requestOptions)
 	end
 	if sent then
 		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.send accepted mode="

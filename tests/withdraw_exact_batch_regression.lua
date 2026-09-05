@@ -44,7 +44,7 @@ GlobalStorageSiK = {
 dofile("tests/helpers/gs_ui_feedback_stub.lua").install()
 dofile("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_WithdrawClient.lua")
 
-local rows = {}
+local rows, batchCompletion = {}, nil
 for i = 1, 28 do
 	rows[#rows + 1] = {
 		fullType = "Base.VHS",
@@ -58,7 +58,9 @@ for i = 1, 28 do
 	}
 end
 
-assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, 0, "player:main", "vhs"),
+assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, 0, "player:main", "vhs", {
+	onComplete = function(ok, result) batchCompletion = { ok = ok, result = result } end,
+}),
 	"exact VHS batch was not queued")
 assert(tick, "withdraw tick was not installed")
 
@@ -68,7 +70,8 @@ local function respond(moved)
 	GlobalStorageSiK.WithdrawClient.onActionResult({
 		ok = true,
 		withdrawId = request.withdrawId,
-		transfer = { op = "withdraw", moved = moved, itemIds = {}, networkId = "network" },
+		transfer = { op = "withdraw", moved = moved, itemIds = {}, networkId = "network",
+			inventoryRevision = 100 + #sent },
 	})
 end
 
@@ -93,6 +96,10 @@ assert(sent[3].sourceNodeId == nil, "last exact micro-batch leaked a source node
 respond(8)
 
 assert(tick == nil, "completed exact batch left an OnTick handler installed")
+assert(batchCompletion and batchCompletion.ok == true and batchCompletion.result.moved == 28,
+	"coalesced exact batch did not emit one successful completion")
+assert(batchCompletion.result.inventoryRevision == 103,
+	"coalesced completion did not preserve the newest inventory revision")
 
 -- The same batcher receives one exact VHS group header. Its visible pages are
 -- deliberately absent: all 34 units share title and media identity, so the
