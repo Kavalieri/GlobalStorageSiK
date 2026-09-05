@@ -84,7 +84,7 @@ local refreshFunction = assert(terminalSource:match(
 	"refreshFromState function missing")
 assert(refreshFunction:find("self.terminalState = state or prev", 1, true),
 	"fresh terminalState is not committed before rendering")
-assert(refreshFunction:find('if tab == "items" and inventoryChanged and not builtNow then', 1, true)
+assert(refreshFunction:find('if tab == "items" and (inventoryChanged or capacityChanged) and not builtNow then', 1, true)
 	and refreshFunction:find("self:refreshItemsTab()", 1, true),
 	"changed authoritative Warehouse state is not refreshed in the existing surface")
 assert(itemsSource:find("local updated, updateReason = surface:refresh(snapshot)", 1, true),

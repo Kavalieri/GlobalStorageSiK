@@ -261,7 +261,7 @@ function GS_TerminalUI:syncHeaderChrome()
 	if self.setVersions then self:setVersions(resolveRuntimeVersionText()) end
 end
 
-local TAB_BG = { r = 0.12, g = 0.12, b = 0.12, a = 1 }
+local TAB_BG = { r = 0, g = 0, b = 0, a = 0 }
 --- Refresca contenido de la pestaña activa (carga diferida).
 ---@param self GS_TerminalUI
 function GS_TerminalUI:refreshActiveTabContent()
@@ -660,9 +660,17 @@ function GS_TerminalUI:applyCapacityState(cap)
 		netScroll._weightLbl.b = b
 	end
 	if self.itemsWeightLbl then
-		if self.itemsWeightLbl.setStatus then
+		if self.itemsWeightLbl.setProgress then
+			self.itemsWeightLbl:setProgress({
+				value = math.max(0, math.min(1, pct / 100)),
+				label = weightText,
+				status = status,
+				tone = tone,
+				mode = "determinate",
+			})
+		elseif self.itemsWeightLbl.setStatus then
 			self.itemsWeightLbl:setStatus(weightText, tone)
-		else
+		elseif self.itemsWeightLbl.setName then
 			self.itemsWeightLbl:setName(weightText)
 			self.itemsWeightLbl.r = r
 			self.itemsWeightLbl.g = g
@@ -700,6 +708,8 @@ function GS_TerminalUI:refreshFromState(state)
 	local inventoryChanged = firstState or (incoming and (
 		(incoming.inventoryRevision ~= nil and incoming.inventoryRevision ~= prev.inventoryRevision)
 		or (incoming.items ~= nil and incoming.items ~= prev.items)))
+	local capacityChanged = firstState or (incoming and incoming.capacity ~= nil
+		and incoming.capacity ~= prev.capacity)
 	local networkChanged = firstState or (incoming and (
 		(incoming.snapshotRevision ~= nil and incoming.snapshotRevision ~= prev.snapshotRevision)
 		or (incoming.nodes ~= nil and incoming.nodes ~= prev.nodes)
@@ -764,6 +774,7 @@ function GS_TerminalUI:refreshFromState(state)
 	end
 	self.terminalState = state or prev
 	self:syncHeaderChrome()
+	if capacityChanged then self:applyCapacityState(self.terminalState.capacity) end
 	-- BUG REAL reportado por el usuario (2026-08-26): sin energia, el
 	-- terminal se abria igualmente en Almacen (activeTabKey nil al abrir
 	-- nunca pasa por TerminalTabs.activate, que ya bloquea el CAMBIO a esa
@@ -821,7 +832,7 @@ function GS_TerminalUI:refreshFromState(state)
 	end
 	local tab = self.activeTabKey or "items"
 	local builtNow = self.ensureTabBuilt and self:ensureTabBuilt(tab) == true
-	if tab == "items" and inventoryChanged and not builtNow then
+	if tab == "items" and (inventoryChanged or capacityChanged) and not builtNow then
 		self:refreshItemsTab()
 	elseif tab == "network" and networkChanged and not builtNow then
 		GlobalStorageSiK.TerminalNetwork.refreshScroll(self, self.terminalState)

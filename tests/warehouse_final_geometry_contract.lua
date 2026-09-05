@@ -7,6 +7,9 @@ package.path = "../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramewo
 dofile("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK_UI.lua")
 
 local CLIENT = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
+local uiHandle = assert(io.open(CLIENT .. "GS_TerminalUI.lua", "rb"))
+local uiSource = uiHandle:read("*a")
+uiHandle:close()
 local artifact = assert(dofile(CLIENT .. "GlobalStorageSiK/UI/Generated/TabWarehouse.lua"))
 local parent = ISPanel:new(0, 0, 1600, 900)
 parent:initialise()
@@ -44,6 +47,7 @@ local tree, reason = SiK.UI.buildSurface(parent, artifact, {
 assert(tree, reason)
 
 local searchForm = assert(tree.nodes["warehouse-search-form"])
+local capacity = assert(tree.nodes["warehouse-capacity"])
 local search = assert(tree.nodes["warehouse-search-field"])
 local searchButton = assert(tree.nodes["warehouse-search-button"])
 local filterForm = assert(tree.nodes["warehouse-filter-form"])
@@ -51,6 +55,20 @@ local family = assert(tree.nodes["warehouse-family-filter"])
 local group = assert(tree.nodes["warehouse-group-filter"])
 local detail = assert(tree.nodes["warehouse-detail-filter"])
 local tableView = assert(tree.nodes["warehouse-table"])
+
+assert(capacity._sikUiControl == "progress", "Warehouse capacity must be a SiK progress control")
+assert(uiSource:find("self.itemsWeightLbl:setProgress", 1, true),
+	"Warehouse capacity alias is not updated through the progress contract")
+assert(uiSource:find("inventoryChanged or capacityChanged", 1, true),
+	"capacity-only snapshots do not refresh the Warehouse surface")
+assert(capacity.y + capacity.height <= searchForm.panel.y,
+	"capacity must precede the Warehouse search form without overlap")
+assert(searchForm.panel.y + searchForm.panel.height <= filterForm.panel.y,
+	"search form must precede Warehouse filters without overlap")
+assert(filterForm.panel.y + filterForm.panel.height <= tableView.panel.y,
+	"filters must precede the Warehouse table without overlap: filter="
+		.. tostring(filterForm.panel.y) .. "+" .. tostring(filterForm.panel.height)
+		.. " table=" .. tostring(tableView.panel.y))
 
 assert(search._sikUiControl == "field", "Warehouse search must be SiK field chrome")
 assert(searchButton._sikUiControl == "iconButton", "Warehouse search action must be SiK chrome")

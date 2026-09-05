@@ -99,6 +99,10 @@ function Programming.context(terminal)
 		local recording = Programming.recordingProgramId == id
 		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
 		local title = T(def.menuTextKey or id)
+		local actionLabel = T("IGUI_GS_ProgrammingButton", title)
+		-- Keep product labels complete even if the host Translator returns a
+		-- numbered placeholder literally on a particular locale/runtime.
+		actionLabel = GlobalStorageSiK.I18n.plainReplace(actionLabel, "%1", title)
 		cards[#cards + 1] = {
 			variant = "output", title = title,
 			description = def.descKey and T(def.descKey) or "", icon = def.iconPath,
@@ -108,7 +112,7 @@ function Programming.context(terminal)
 				state = known and "success" or "missing",
 				iconSize = 32,
 			},
-			actionLabel = T("IGUI_GS_ProgrammingButton", title),
+			actionLabel = actionLabel,
 			locked = not ready or recording,
 			tooltip = (not canProgram and reader.text)
 				or (not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName))

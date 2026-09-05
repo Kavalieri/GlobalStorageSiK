@@ -146,7 +146,7 @@ return {
       ["translations"] = {
         {
           ["locale"] = "es",
-          ["text"] = "Familia · Todas"
+          ["text"] = "Familia | Todas"
         }
       }
     },
@@ -209,7 +209,7 @@ return {
       ["translations"] = {
         {
           ["locale"] = "es",
-          ["text"] = "Grupo · Todos"
+          ["text"] = "Grupo | Todos"
         }
       }
     },
@@ -254,7 +254,7 @@ return {
       ["translations"] = {
         {
           ["locale"] = "es",
-          ["text"] = "Detalle · Todos"
+          ["text"] = "Detalle | Todos"
         }
       }
     },
@@ -350,7 +350,7 @@ return {
     ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "cc74854e8606036ce9930b9ffa2b3c2d92eff5ae6ff988dc72b10ee0d5f617cd",
+    ["surfaceSpecSha256"] = "b287f32cd061ff26894410facb8467869c1052369258922c6cb85f442c91a729",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
     ["visualMasterSha256"] = "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
     ["visualSubtreeSha256"] = "752b081fb1d4bba990b37045e47ef2b21c46d90ecd66f6b4565f6586986d8890"

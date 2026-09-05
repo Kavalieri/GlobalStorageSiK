@@ -2038,7 +2038,7 @@ local function bindWarehouseAliases(panel, terminal)
 	terminal.subCategoryFilterCombo = nodes["warehouse-group-filter"]
 	terminal.leafCategoryFilterCombo = nodes["warehouse-detail-filter"]
 	terminal.autoSortStatusRow = nodes["warehouse-status"]
-	terminal.itemsWeightLbl = nodes["warehouse-weight"]
+	terminal.itemsWeightLbl = nodes["warehouse-capacity"]
 	terminal.depositDropHint = nodes["warehouse-drop-hint"]
 	local root = nodes["warehouse-root"]
 	terminal.itemsTitleLbl = root and root.headerControl or nil
