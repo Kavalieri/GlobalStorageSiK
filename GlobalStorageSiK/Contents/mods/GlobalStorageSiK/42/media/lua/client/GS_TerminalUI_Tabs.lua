@@ -68,14 +68,14 @@ local function navigationOptions(terminal, items)
 end
 
 local function textureSize(texture, method)
-	if not texture or type(texture[method]) ~= "function" then return 0 end
+	if not texture or not texture[method] then return 0 end
 	local ok, value = pcall(texture[method], texture)
 	return ok and tonumber(value) or 0
 end
 
 local function widgetSize(widget, method, field)
 	if not widget then return 0 end
-	if type(widget[method]) == "function" then
+	if widget[method] then
 		local ok, value = pcall(widget[method], widget)
 		if ok and tonumber(value) then return tonumber(value) end
 	end
@@ -88,7 +88,7 @@ local function logIconDiagnostics(terminal)
 	local parts = {}
 	for index = 1, #(navigation.items or {}) do
 		local item = navigation.items[index]
-		local button = navigation.buttons and navigation.buttons[index]
+		local button = navigation.getButton and navigation:getButton(item.key) or nil
 		local descriptor = item and item.icon
 		local path = type(descriptor) == "table" and descriptor.path or descriptor
 		local texture = nil
@@ -102,6 +102,8 @@ local function logIconDiagnostics(terminal)
 			.. tostring(textureSize(texture, "getHeight"))
 			.. ",slot=" .. tostring(widgetSize(button, "getWidth", "width")) .. "x"
 			.. tostring(widgetSize(button, "getHeight", "height"))
+			.. ",drawn=" .. tostring(button and button._sikIconDrawn)
+			.. ",drawReason=" .. tostring(button and button._sikIconDrawReason)
 	end
 	local signature = table.concat(parts, " | ")
 	if terminal._gsTabIconDiagnosticSignature ~= signature then

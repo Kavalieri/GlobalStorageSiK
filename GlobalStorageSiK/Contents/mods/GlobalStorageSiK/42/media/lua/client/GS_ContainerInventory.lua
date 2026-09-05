@@ -53,15 +53,43 @@ function Inventory.mount(parent, editor, node, options)
 	view.controller.contextMenuOwner = editor
 	function view.controller:refreshItemsTab() view:render() end
 	function view.controller:onWithdrawCompleted(ok, result) view:afterWithdraw(ok, result) end
-	function view:afterWithdraw(ok, result)
-		-- Exact child rows are revision-bound. Remove them as soon as the ACK
-		-- arrives so a second gesture cannot reuse an itemId that was just moved.
+	function view:invalidateAndScheduleRefresh(revision, reason)
+		if self.disposed then return end
+		-- Exact rows are bound to one authoritative revision. Invalidate them
+		-- immediately so repeated gestures cannot act on an item that another
+		-- transfer has already moved.
 		panel._detailPages, panel._detailPending = {}, {}
 		self.detailQueue = {}
-		local revision = result and tonumber(result.inventoryRevision)
-		if revision then self.controller.terminalState.inventoryRevision = revision end
+		local wanted = tonumber(revision)
+		local known = tonumber(self.controller.terminalState.inventoryRevision)
+		if wanted and (not known or wanted > known) then
+			self.controller.terminalState.inventoryRevision = wanted
+		end
+		if wanted and (not self.refreshRevision or wanted > self.refreshRevision) then
+			self.refreshRevision = wanted
+		end
+		self.refreshReason = reason or self.refreshReason or "inventory-change"
 		self:render()
-		self:request()
+		if self.refreshTick then return end
+		self.refreshTick = function()
+			-- Detach before dispatch: SP may return getNodeContents synchronously.
+			if Events and Events.OnTick then Events.OnTick.Remove(self.refreshTick) end
+			self.refreshTick = nil
+			local requested, refreshReason = self.refreshRevision, self.refreshReason
+			self.refreshRevision, self.refreshReason = nil, nil
+			if self.disposed then return end
+			self.requestedRevision = requested
+			self:request()
+			GlobalStorageSiK.Log.debug("ExactWithdraw", "container.refresh requested"
+				.. " reason=" .. tostring(refreshReason)
+				.. " revision=" .. tostring(requested))
+		end
+		if Events and Events.OnTick then Events.OnTick.Add(self.refreshTick)
+		else self.refreshTick() end
+	end
+	function view:afterWithdraw(ok, result)
+		local revision = result and tonumber(result.inventoryRevision)
+		self:invalidateAndScheduleRefresh(revision, "withdraw-ack")
 		GlobalStorageSiK.Log.debug("ExactWithdraw", "detail-cache invalidated surface=container-editor"
 			.. " ok=" .. tostring(ok == true) .. " revision=" .. tostring(revision))
 	end
@@ -177,7 +205,8 @@ function Inventory.mount(parent, editor, node, options)
 		if self.disposed then return end
 		self.disposed = true
 		if self.detailTick and Events and Events.OnTick then Events.OnTick.Remove(self.detailTick) end
-		self.detailTick, self.detailQueue = nil, {}
+		if self.refreshTick and Events and Events.OnTick then Events.OnTick.Remove(self.refreshTick) end
+		self.detailTick, self.refreshTick, self.detailQueue = nil, nil, {}
 		views[self] = nil
 		GlobalStorageSiK.TerminalDrop.disposePanel(panel, self.controller)
 		self.table:dispose(); self.block:dispose()
@@ -194,6 +223,7 @@ function Inventory.mount(parent, editor, node, options)
 			self.detailQueue = {}
 		end
 		self.controller.terminalState.inventoryRevision = revision
+		self.requestedRevision = nil
 		self.capacity = payload.capacity or self.capacity
 		if payload.catalogRows then
 			self.rows = payload.catalogRows
@@ -253,8 +283,7 @@ function Inventory.onTerminalState(state)
 			local revision = tonumber(state.inventoryRevision)
 			local known = tonumber(view.controller.terminalState.inventoryRevision) or -1
 			if revision and revision > known and view.requestedRevision ~= revision then
-				view.requestedRevision = revision
-				view:request()
+				view:invalidateAndScheduleRefresh(revision, "terminal-state")
 			end
 		end
 	end
@@ -262,13 +291,21 @@ end
 
 function Inventory.onActionResult(args)
 	local transfer = args and args.transfer
-	if not transfer or transfer.op ~= "redistribute" or args.jobState ~= "finished" then return end
+	if not transfer then return end
+	local moved = tonumber(transfer.moved) or 0
+	local refresh = (transfer.op == "deposit" or transfer.op == "bulkDeposit") and moved > 0
+		or (transfer.op == "redistribute" and args.jobState == "finished")
+	if not refresh then return end
 	local snapshot = {}
 	for view in pairs(views) do snapshot[#snapshot + 1] = view end
 	for i = 1, #snapshot do
 		local view = snapshot[i]
-		if view.networkId == transfer.networkId and view.node.id == transfer.sourceNodeId
-			and view.playerNum == (tonumber(args.playerNum) or 0) then view:request() end
+		if not view.disposed and view.networkId == transfer.networkId
+			and (args.playerNum == nil or view.playerNum == tonumber(args.playerNum))
+			and (transfer.op ~= "redistribute" or view.node.id == transfer.sourceNodeId) then
+			view:invalidateAndScheduleRefresh(transfer.inventoryRevision,
+				transfer.op .. "-ack")
+		end
 	end
 end
 

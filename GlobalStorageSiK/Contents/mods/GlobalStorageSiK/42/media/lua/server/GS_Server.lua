@@ -1961,8 +1961,8 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	-- ACCION de deposito (no por microlote interno), y el cliente la aplica
 	-- fusionando sobre su estado ya cacheado (GS_Client.lua
 	-- mergeInventorySyncState) sin resetear scroll/busqueda/filtros. Solo al
-	-- actor: los demas watchers de la red siguen recibiendo la actualizacion
-	-- via el mecanismo diferido existente, sin ampliar el alcance del fix.
+	-- actor de forma inmediata; los demas watchers se agrupan despues mediante
+	-- la cola diferida existente, sin emitir una actualizacion por objeto.
 	if actor then
 		-- BUG REAL encontrado 2026-08-21: pushTerminalInventorySync ->
 		-- buildRows() lee node.itemSnapshot (la CACHE en memoria), no el
@@ -1987,9 +1987,15 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 		-- falta refrescar nada, solo empujar el estado ya actualizado.
 		pushTerminalInventorySync(actor, networkId, searchQuery)
 	end
+	-- Other players who are already looking at the same network receive one
+	-- coalesced inventory sync on the existing refresh queue. This keeps
+	-- concurrent deposits/withdrawals coherent without broadcasting per item or
+	-- disturbing the authoritative transfer queues.
+	local watcherCount = pushTerminalStateToNetworkWatchers(actor, networkId, searchQuery)
 	GlobalStorageSiK.Log.detail("Server", "afterTransferSync",
 		"network=" .. tostring(networkId)
-			.. " refresh=directed_node_snapshot+inventory_sync")
+			.. " refresh=directed_node_snapshot+inventory_sync"
+			.. " watcherSyncs=" .. tostring(watcherCount))
 end
 
 --- Envía estado del terminal al cliente.
