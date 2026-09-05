@@ -87,6 +87,13 @@ local function widget(kind, options)
 end
 
 local scrollStats = { clearPreserve = nil, contentHeight = nil, restoredOffset = nil }
+local confirmationCalls = {}
+local Confirmation = {
+	show = function(options)
+		confirmationCalls[#confirmationCalls + 1] = options
+		return options
+	end,
+}
 local UI = {
 	Controls = {
 		metrics = function() return { inputHeight = 28, buttonHeight = 28 } end,
@@ -142,6 +149,7 @@ package.preload["GS_I18n"] = function() return GlobalStorageSiK.I18n end
 package.preload["GS_NativeProduct"] = function() return GlobalStorageSiK.NativeProduct end
 package.preload["GS_CategoryResolution"] = function() return GlobalStorageSiK.CategoryResolution end
 package.preload["GS_UI_Framework"] = function() return UI end
+package.preload["GS_Confirmation"] = function() return Confirmation end
 
 assert(dofile(SOURCE_PATH) == nil, "TerminalConfig did not load with neutral SiK.UI doubles")
 local Config = GlobalStorageSiK.TerminalConfig

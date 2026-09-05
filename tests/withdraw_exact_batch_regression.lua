@@ -50,6 +50,7 @@ for i = 1, 28 do
 		fullType = "Base.VHS",
 		mediaTitle = "Titulo " .. tostring(i),
 		mediaIndex = i,
+		dynamicSignature = "snapshot-" .. tostring(i),
 		count = 1,
 		itemIds = { i },
 		-- Expanded rows may originate in different containers. Exact item IDs are
@@ -58,7 +59,9 @@ for i = 1, 28 do
 	}
 end
 
-assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, 0, "player:main", "vhs", {
+-- El arrastre nace sobre una fila y aporta amount=1 aunque la seleccion visual
+-- contenga muchas filas hijas. El lote debe conservar todos los IDs elegidos.
+assert(GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, 1, "player:main", "vhs", {
 	onComplete = function(ok, result) batchCompletion = { ok = ok, result = result } end,
 }),
 	"exact VHS batch was not queued")
@@ -79,8 +82,9 @@ tick()
 assert(#sent == 1 and #sent[1].itemIds == 10, "first micro-batch must contain ten exact VHS")
 assert(sent[1].sourceNodeId == nil,
 	"exact item IDs must be resolved across the accessible network, not pinned to one node")
-assert(sent[1].mediaTitle == nil and sent[1].mediaIndex == nil,
-	"merged exact VHS must not retain the first title selector")
+assert(sent[1].mediaTitle == nil and sent[1].mediaIndex == nil
+	and sent[1].dynamicSignature == nil,
+	"merged exact VHS must not retain stale derived selectors")
 respond(10)
 
 now = 400
@@ -148,4 +152,18 @@ local source = assert(io.open("GlobalStorageSiK/Contents/mods/GlobalStorageSiK/4
 local halo = assert(source:match("local function showProgress%(force%)(.-)\nend"), "progress function missing")
 assert(not halo:find("rowsDone", 1, true) and not halo:find("rowsTotal", 1, true),
 	"world halo must expose physical units only, never queue rows")
+
+-- Defensa en profundidad: incluso un cliente anterior que conserve metadatos
+-- de snapshot debe entrar en la rama exacta sin filtrar por ellos.
+local serverSource = assert(io.open(
+	"GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/server/GS_Server.lua", "r")):read("*a")
+local exactStart = assert(serverSource:find('elseif selectionMode == "exact_ids" then', 1, true),
+	"server exact_ids branch missing")
+local exactEnd = assert(serverSource:find("\n\t\telse", exactStart + 1, true),
+	"server exact_ids branch end missing")
+local exactBranch = serverSource:sub(exactStart, exactEnd - 1)
+assert(exactBranch:find("mediaTitle = nil", 1, true)
+	and exactBranch:find("mediaIndex = nil", 1, true)
+	and exactBranch:find("dynamicSignature = nil", 1, true),
+	"server exact_ids must discard stale derived selectors")
 print("withdraw_exact_batch_regression: OK")

@@ -950,13 +950,18 @@ function GS_NodeEditorUI:refreshContents()
         if not self.contentsView then
                 self.contentsView = ContainerInventory.mount(self.contentsHost, self, self.node, {
                         x = 0, y = 0, w = contentW,
-                        onHeightChanged = function(view)
-                                local height = view and view:getHeight() or 40
-                                self.contentsHost:setHeight(math.max(40, height))
+			onHeightChanged = function(view)
+				local currentOffset = self.editorScroll
+					and UI.Scroll.getScrollOffset(self.editorScroll) or nil
+				local height = view and view:getHeight() or 40
+				self.contentsHost:setHeight(math.max(40, height))
                                 self._lastContentBottom = (self._contentsStartY or 0)
                                         + self.contentsHost:getHeight()
-                                self:updateScrollHeight(self._lastContentBottom)
-                        end,
+				self:updateScrollHeight(self._lastContentBottom)
+				if self.editorScroll and currentOffset ~= nil then
+					UI.Scroll.setScrollOffset(self.editorScroll, currentOffset)
+				end
+			end,
                 })
         elseif self.contentsView.refresh then
                 self.contentsView:refresh(self.node)

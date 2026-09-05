@@ -3318,6 +3318,14 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 			selectionCount = ticketBatch.selectionCount
 			ticketRemaining = ticketBatch.remainingBefore
 		elseif selectionMode == "exact_ids" then
+			-- Los IDs exactos son la identidad de esta seleccion. Los metadatos de
+			-- presentacion proceden de un snapshot anterior y no deben convertir una
+			-- unidad valida en "not_found" si cambiaron mientras estaba en pantalla.
+			-- Se conserva la revalidacion autoritativa de ID, tipo, red, acceso y
+			-- destino dentro de Transfer.withdrawType.
+			mediaTitle = nil
+			mediaIndex = nil
+			dynamicSignature = nil
 			local seenIds = {}
 			requestedItemIds = {}
 			for i = 1, math.min(type(args.itemIds) == "table" and #args.itemIds or 0,

@@ -142,9 +142,8 @@ function GS_TerminalEditorUI:onDelete()
 	self:closeAfterAction()
 end
 
---- Eliminar definitivamente un terminal SANO (presente, no suspendido/ausente)
---- puede sorprender - se pide confirmacion. Las entradas ya rotas/ausentes se
---- borran directo, no hay nada real que perder ahi.
+--- Toda eliminación de terminal, también una entrada ausente o rota, requiere
+--- confirmación explícita antes de enviar la mutación autoritativa.
 function GS_TerminalEditorUI:onDeleteClicked()
 	Confirmation.show({
 		title = T("IGUI_GS_TerminalEditorTitle"),
@@ -185,8 +184,8 @@ function GS_TerminalEditorUI:buildLayout()
 	self.suspendBtn = UI.Controls.button(actions, {
 		text = T("IGUI_GS_TerminalEditorSuspendBtn"), enabled = isActive,
 		playerNum = self.playerNum, onClick = function() self:onSuspend() end })
-	self.deleteBtn = UI.Controls.iconButton(actions, {
-		icon = "sik.close.18", tooltip = T("IGUI_GS_TerminalEditorDeleteBtn"), danger = true,
+	self.deleteBtn = UI.Controls.button(actions, {
+		text = T("IGUI_GS_TerminalEditorDeleteBtn"), danger = true,
 		playerNum = self.playerNum, onClick = function() self:onDeleteClicked() end })
 	self:reflowEditor()
 	UI.Modal.fitContent(self, self.identityBlock.h + self.actionsBlock.h + 8,
@@ -210,7 +209,7 @@ function GS_TerminalEditorUI:reflowEditor()
 	local actions = self.actionsBlock:beginColumn()
 	actions:row(CONTROL_METRICS.buttonHeight, {
 		{ widget = self.controllerBtn }, { widget = self.suspendBtn },
-		{ widget = self.deleteBtn, w = CONTROL_METRICS.buttonHeight } })
+		{ widget = self.deleteBtn } })
 	self.editorDock:setFixedBottomHeight(actions:finish())
 	self._layoutBusy = false
 end

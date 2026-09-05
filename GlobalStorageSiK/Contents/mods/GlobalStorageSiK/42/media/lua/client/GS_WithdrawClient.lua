@@ -224,10 +224,15 @@ local function dispatchCurrent()
 		-- decirselo al servidor para que no tome cualquier cinta del mismo
 		-- fullType generico, sino una que enseñe justo esto. nil para
 		-- cualquier otro item (comportamiento identico a siempre).
-		mediaTitle = current.rowData.mediaTitle,
-		mediaIndex = current.rowData.mediaIndex,
+		-- En una seleccion exacta el itemId es la identidad autoritativa. No
+		-- conservar selectores derivados de la captura (titulo, indice o firma):
+		-- pueden cambiar entre el snapshot y el movimiento y bloquear una unidad
+		-- que el servidor volvera a validar por ID, tipo, red y permisos.
+		mediaTitle = current.selectionMode == "exact_ids" and nil or current.rowData.mediaTitle,
+		mediaIndex = current.selectionMode == "exact_ids" and nil or current.rowData.mediaIndex,
 		fullTypes = current.rowData.aggregateAllowed and current.rowData.fullTypes or nil,
-		dynamicSignature = current.rowData.dynamicSignature,
+		dynamicSignature = current.selectionMode == "exact_ids"
+			and nil or current.rowData.dynamicSignature,
 		itemIds = exactItemIds,
 		selectionMode = current.selectionMode,
 		rowKey = not current.selectionTicket and current.rowData.rowKey or nil,
@@ -529,7 +534,13 @@ function GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetK
 		end }
 	end
 	for i = 1, #coalescedRows do
-		if enqueueWithdraw(coalescedRows[i], amount, targetKey, searchQuery, requestOptions) then
+		local row = coalescedRows[i]
+		-- El gesto aporta cantidad 1 porque comienza sobre una fila. Tras agrupar
+		-- varias filas hijas exactas, la operacion debe cubrir todos sus IDs; usar
+		-- aqui el 1 original reducia silenciosamente una multiseleccion a una sola
+		-- unidad. La cola mantiene el microlote y el pacing habituales.
+		local rowAmount = row._gsMergedExact and #(row.itemIds or {}) or amount
+		if enqueueWithdraw(row, rowAmount, targetKey, searchQuery, requestOptions) then
 			okAny = true
 		elseif requestOptions then
 			requestOptions.onComplete(false, { reason = "queue_rejected", moved = 0 })

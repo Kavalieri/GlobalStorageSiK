@@ -52,16 +52,6 @@ end
 
 function Terminals.activate(terminal, row)
 	if not terminal or not row then return false, "terminal_row_unavailable" end
-	if row.missing or row.present == false then
-		local client = GlobalStorageSiK.NetClient
-		if not client or type(client.sendCommand) ~= "function" then
-			return false, "network_client_unavailable"
-		end
-		client.sendCommand("removeTerminal", { x = row.x, y = row.y, z = row.z,
-			gsnNetworkId = terminal.terminalState and terminal.terminalState.networkId })
-		if type(terminal.refreshNetworkPanel) == "function" then terminal:refreshNetworkPanel() end
-		return true
-	end
 	local editor = GlobalStorageSiK.TerminalTerminalEditor
 	if not editor or type(editor.open) ~= "function" then return false, "editor_unavailable" end
 	editor.open(terminal, row)

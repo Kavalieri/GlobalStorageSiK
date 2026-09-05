@@ -9,6 +9,7 @@ require "GS_NativeProduct"
 require "GS_CategoryResolution"
 
 local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.TerminalConfig = {}
 
@@ -320,9 +321,14 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 		end)
 		UI.Scroll.addChild(scroll, row.renameBtn)
 
-                row.deleteBtn = createRowButton(pad + entryW + btnGap + renameW + btnGap, y, deleteW, ENTRY_H, T("IGUI_GS_DeleteZone"), scroll, function()
-                        terminal:onDeleteZone(zone.id)
-                end, true)
+		row.deleteBtn = createRowButton(pad + entryW + btnGap + renameW + btnGap, y, deleteW, ENTRY_H, T("IGUI_GS_DeleteZone"), scroll, function()
+			Confirmation.show({
+				title = T("IGUI_GS_DeleteZone"),
+				question = T("IGUI_GS_ZoneDeleteQuestion", zone.name or "?"),
+				consequences = T("IGUI_GS_ZoneDeleteConsequences", tonumber(zone.nodeCount) or 0),
+				onAccept = function() terminal:onDeleteZone(zone.id) end,
+			})
+		end, true)
 		UI.Scroll.addChild(scroll, row.deleteBtn)
 
 		y = y + ENTRY_H + BLOCK_GAP

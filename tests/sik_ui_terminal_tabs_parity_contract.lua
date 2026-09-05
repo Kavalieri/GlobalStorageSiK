@@ -144,6 +144,7 @@ local tabs = read(CLIENT .. "GS_TerminalUI_Tabs.lua")
 local api = read(CLIENT .. "GS_TerminalUI_Api.lua")
 local blockedApi = read(CLIENT .. "GS_TerminalUI_Blocked.lua")
 local blockedPanel = read(CLIENT .. "GS_TerminalUI_BlockedPanel.lua")
+local nodeEditor = read(CLIENT .. "GS_TerminalUI_NodeEditor.lua")
 contains(blockedPanel, "UI.Scroll.setOnContentRectChanged",
 	"blocked layout misses immediate framework content-rect reflow")
 contains(blockedPanel, "UI.Scroll.contentWidth(scroll)",
@@ -255,15 +256,29 @@ end)
 local Metrics = Support.loadFrameworkModule(suite, "Metrics")
 local Block = Support.loadFrameworkModule(suite, "Block")
 
-Support.check(suite, "runtime rail fills each 76 px cell with the product icon", function()
+Support.check(suite, "runtime rail keeps square 56 px tabs inside the 76 px track", function()
 	local profile = Metrics.profile(0, "terminal")
-	assert(profile.window.railWidth == 76, "runtime rail track exceeds the full icon cell")
+	assert(profile.window.railWidth == 76, "runtime rail track differs from icon plus side insets")
 	assert(profile.window.railPadding == 0, "runtime rail retains forbidden inner padding")
-	assert(profile.window.railItemHeight == 76, "runtime rail cell clips the production icon")
+	assert(profile.window.railItemHeight == 56, "runtime rail tab is not square with the production icon")
+	assert(profile.window.railIconSize == 56, "runtime rail icon size differs from its native asset")
 	assert(profile.window.railGap == 4, "runtime rail gap differs from HTML")
 	contains(tabs, "iconSize = 56", "product rail does not request the current HTML icon extent")
 	contains(tabs, "iconExact = true", "product rail does not preserve exact icon sizing")
 	contains(tabs, "iconOnly = true", "product rail adds forbidden icon padding")
+	local frameworkTabs = read("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Tabs.lua")
+	contains(frameworkTabs, 'or "source"',
+		"exact full-colour tab artwork is still darkened by a semantic tint")
+	return true
+end)
+
+Support.check(suite, "footer chrome and editor refresh preserve their global state", function()
+	contains(terminal, "self._sikFooterInsetLeft = 0",
+		"footer divider still stops at the navigation rail")
+	contains(nodeEditor, "local currentOffset = self.editorScroll",
+		"container refresh does not snapshot the active editor scroll")
+	contains(nodeEditor, "UI.Scroll.setScrollOffset(self.editorScroll, currentOffset)",
+		"container refresh does not restore the active editor scroll")
 	return true
 end)
 

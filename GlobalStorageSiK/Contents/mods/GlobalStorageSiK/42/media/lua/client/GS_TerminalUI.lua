@@ -540,7 +540,9 @@ function GS_TerminalUI:calculateLayout()
 	local tabY = shell.content.y
 	local railW = blockedMode and 0
 		or GlobalStorageSiK.TerminalTabs.measureRailWidth(self)
-	self._sikFooterInsetLeft = railW
+	-- The footer divider belongs to the global window chrome and spans below
+	-- both the navigation rail and the content area.
+	self._sikFooterInsetLeft = 0
 	shell = UI.Window.chromeRects(self)
 	local bodyH = shell.content.h
 	self.headerHeight = shell.header.h

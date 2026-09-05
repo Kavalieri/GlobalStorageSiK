@@ -25,7 +25,7 @@ end
 local state = {
 	networkName = { text = "Network" }, selectedNetwork = { items = {}, selected = nil },
 	networkSummary = { text = "Summary" }, networkActions = {},
-	power = { text = "Power", indicator = true },
+	power = { text = "Power", tone = "success", indicator = true },
 	terminalStatus = { text = "Terminal", indicator = true },
 	zonesStatus = { text = "Zones", indicator = true },
 	accessStatus = { text = "Access", indicator = true },
@@ -117,6 +117,24 @@ local containers = assert(tree.nodes["options-info-containers"], "container coun
 local membersCount = assert(tree.nodes["options-info-members"], "member count missing")
 assert(power._sikUiControl == "statusIndicator",
 	"power state must retain its semantic status indicator")
+local powerPaint = {}
+power.drawRect = function(_, x, y, w, h, a, r, g, b)
+	powerPaint.dot = { r = r, g = g, b = b, a = a }
+end
+power.drawText = function(_, text, x, y, r, g, b, a)
+	powerPaint.text = { text = text, r = r, g = g, b = b, a = a }
+end
+power:prerender()
+assert(powerPaint.dot and powerPaint.text, "power indicator did not paint dot and text")
+assert(powerPaint.dot.g ~= powerPaint.text.g or powerPaint.dot.r ~= powerPaint.text.r,
+	"power status still paints the complete message with the semaphore colour")
+local summaryCards = assert(tree.nodes["options-summary-cards"], "summary cards grid missing")
+assert(summaryCards.options and summaryCards.options.padding == 0,
+	"summary card grid retains an extra container padding above and below its cards")
+local informationHost = assert(tree.nodes["options-information-host"],
+	"information geometry host missing")
+assert(informationHost.options and informationHost.options.padding == 0,
+	"information host adds a second inset outside the canonical Block padding")
 local function isSemanticStatus(control)
 	return control._sikUiControl == "status"
 		or control._sikUiControl == "statusIndicator"

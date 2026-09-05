@@ -102,6 +102,8 @@ local function logIconDiagnostics(terminal)
 			.. tostring(textureSize(texture, "getHeight"))
 			.. ",slot=" .. tostring(widgetSize(button, "getWidth", "width")) .. "x"
 			.. tostring(widgetSize(button, "getHeight", "height"))
+			.. ",draw=" .. tostring(button and button._sikIconDrawWidth) .. "x"
+			.. tostring(button and button._sikIconDrawHeight)
 			.. ",drawn=" .. tostring(button and button._sikIconDrawn)
 			.. ",drawReason=" .. tostring(button and button._sikIconDrawReason)
 	end

@@ -78,4 +78,22 @@ local ok, reason = Icon.drawExact(target,
 	{ texture = texture, width = 56, height = 56 }, 10, 10, 56, 56, {})
 assert(ok == true and target.drawn and target.drawn.texture == texture,
 	"exact inherited renderer failed: " .. tostring(reason))
+
+local nativeCalls, scaledCalls = 0, 0
+local nativeCallable = setmetatable({}, { __call = function(_, nativeTarget, received, x, y)
+	nativeCalls = nativeCalls + 1
+	nativeTarget.nativeDrawn = { texture = received, x = x, y = y }
+end })
+local scaledCallable = setmetatable({}, { __call = function()
+	scaledCalls = scaledCalls + 1
+end })
+local nativeTarget = setmetatable({}, { __index = {
+	drawTexture = nativeCallable,
+	drawTextureScaled = scaledCallable,
+} })
+local nativeOk, nativeReason = Icon.drawExact(nativeTarget,
+	{ texture = texture, width = 56, height = 56 }, 10, 10, 56, 56, {})
+assert(nativeOk == true and nativeCalls == 1 and scaledCalls == 0
+	and nativeTarget.nativeDrawn and nativeTarget.nativeDrawn.texture == texture,
+	"exact renderer did not preserve the native no-scale path: " .. tostring(nativeReason))
 print("framework_critical_runtime_guards_contract: OK")

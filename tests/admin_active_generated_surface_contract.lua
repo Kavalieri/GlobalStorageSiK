@@ -66,7 +66,7 @@ assert(spec.surface and spec.surface.id == "tab-options", "generated artifact mu
 assert(spec.frameworkRef and spec.frameworkRef.namespace == "SiK.UI",
 	"generated artifact must target the public SiK.UI namespace")
 assert(spec.provenance and spec.provenance.visualMasterSha256 ==
-	"a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a",
+	"797642dd24770b3737dc3466c73889f22d6ea929dec4b9ce0d384a49dd1ee1e1",
 	"generated artifact must remain pinned to Kava's validated terminal-tabs visual master")
 
 local factories = {}

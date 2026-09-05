@@ -48,7 +48,7 @@ absent(items, "_gsPager = true", "Warehouse must not inject a second pager row")
 assert(generated.surface and generated.surface.id == "tab-warehouse")
 assert(generated.frameworkRef and generated.frameworkRef.namespace == "SiK.UI")
 assert(generated.provenance and generated.provenance.visualMasterSha256 ==
-	"a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a")
+	"797642dd24770b3737dc3466c73889f22d6ea929dec4b9ce0d384a49dd1ee1e1")
 
 local function find(node, id)
 	if type(node) ~= "table" then return nil end
