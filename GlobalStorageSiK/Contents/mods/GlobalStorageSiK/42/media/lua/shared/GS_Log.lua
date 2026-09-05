@@ -97,6 +97,10 @@ local AREA_CATEGORY = {
 	-- GS_TerminalUI_Extensions.lua) - registro/reutilizacion de panel,
 	-- visibilidad y activacion/cancelacion de clic.
 	SiKUITabs = "SiKUITabs",
+	-- Diagnósticos P0 separados para no obligar a activar el árbol UI entero.
+	TabIcons = "TabIcons",
+	ExactWithdraw = "ExactWithdraw",
+	OptionsTables = "OptionsTables",
 	-- Caja de busqueda de SiK UI (antes "SearchDiag", pedido explicito
 	-- 2026-08-18: sin esta entrada dependia solo del interruptor maestro).
 	-- Renombrada en dev36 para agrupar bajo el mismo arbol SiK UI en vez de

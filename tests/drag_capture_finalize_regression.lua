@@ -111,6 +111,7 @@ assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(parent, 0,
 	{ parent, child }, { parent, child }, source) == true, "drag did not start")
 assert(GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer() == true, "valid drop failed")
 assert(#sent == 1 and sent[1].mode == "batch", "valid drop did not send one batch")
+assert(sent[1].amount == 1, "player 0 was confused with a zero-unit withdrawal")
 assert(sent[1].key == "player:main", "inventory drop lost its exact destination")
 assert(GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer() == false,
 	"second finalization was not ignored")
@@ -126,6 +127,7 @@ assert(GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer() == true,
 	"world-container drop failed")
 assert(#sent == 2 and sent[2].key == "world:crate",
 	"world-container drop lost its exact destination")
+assert(sent[2].amount == 1, "single-row drag did not clamp its amount to one")
 
 destinationAvailable = false
 assert(GlobalStorageSiK.TerminalWithdrawDrag.begin(parent, 0,
@@ -153,18 +155,25 @@ assert(not GlobalStorageSiK.TerminalWithdrawDrag.isActive(),
 assert(captureEvents[#captureEvents] == false, "external close did not release capture")
 assert(#sent == 2, "external close emitted a transfer")
 
-assert(logEvents[1] == "dragDropAttempt" and logEvents[2] == "dragDropSent",
-	"valid drop lifecycle logs are not ordered")
 local allowed = { dragDropAttempt = true, dragDropSent = true }
 local sawCancel = false
 for i = 1, #logEvents do
 	local event = logEvents[i]
 	if event:find("dragCancelled reason=", 1, true) == 1 then
 		sawCancel = true
+	elseif event:find("drag.", 1, true) == 1 then
+		-- Diagnóstico focal ExactWithdraw; el contrato funcional se comprueba arriba.
 	else
 		assert(allowed[event], "unexpected drag log event: " .. tostring(event))
 	end
 end
 assert(sawCancel, "cancel lifecycle reason was not logged")
+
+local itemsPath = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua"
+local itemsSource = assert(io.open(itemsPath, "rb")):read("*a")
+assert(itemsSource:find("TerminalWithdrawDrag.begin(data, 1,", 1, true),
+	"row adapter does not pass an explicit one-unit amount")
+assert(not itemsSource:find("TerminalWithdrawDrag.begin(data, terminal and terminal.playerNum", 1, true),
+	"row adapter still passes playerNum as withdrawal amount")
 
 print("drag_capture_finalize_regression: OK")

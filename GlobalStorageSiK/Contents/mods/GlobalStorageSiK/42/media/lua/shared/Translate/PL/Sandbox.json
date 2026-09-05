@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSTYKA: ikony kart",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Wymaga włączonego trybu debugowania. Rejestruje ścieżkę, rozpoznanie, rozmiar natywny i końcowy obszar każdej ikony tylko po zmianie geometrii.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSTYKA: interaktywne pobieranie",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Wymaga włączonego trybu debugowania. Śledzi początek przeciągania, dokładną ilość i wiersze, cel ekwipunku, akceptację oraz warstwy menu kontekstowego.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNOSTYKA: tabele Opcji",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Wymaga włączonego trybu debugowania. Rejestruje liczbę wierszy oraz końcowe prostokąty bloków i tabel po utworzeniu, odświeżeniu i zmianie rozmiaru.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Dostęp i sieć",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Przedmioty i depozyt",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Wymagania wytwarzania",

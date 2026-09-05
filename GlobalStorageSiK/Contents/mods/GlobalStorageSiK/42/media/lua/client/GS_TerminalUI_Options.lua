@@ -21,6 +21,48 @@ local function panelBounds(panel)
 	return { x = 0, y = 0, w = math.max(1, tonumber(width) or 1), h = math.max(1, tonumber(height) or 1) }
 end
 
+local function handleRect(handle)
+	if not handle then return nil end
+	local widget = handle.panel or handle.root or handle
+	local x = widget.getAbsoluteX and widget:getAbsoluteX() or widget.x
+	local y = widget.getAbsoluteY and widget:getAbsoluteY() or widget.y
+	return { x = tonumber(x) or 0, y = tonumber(y) or 0,
+		w = tonumber(widget.width or widget.w) or 0,
+		h = tonumber(widget.height or widget.h) or 0 }
+end
+
+local function containsRect(outer, inner)
+	return outer and inner and inner.x >= outer.x and inner.y >= outer.y
+		and inner.x + inner.w <= outer.x + outer.w
+		and inner.y + inner.h <= outer.y + outer.h
+end
+
+local function logTableGeometry(surface)
+	local tree = surface and surface.getTree and surface:getTree() or nil
+	local nodes = tree and tree.nodes or {}
+	local ids = { "options-terminals-block", "options-terminals-table",
+		"options-members-block", "options-members-table" }
+	local parts = {}
+	for index = 1, #ids do
+		local rect = handleRect(nodes[ids[index]])
+		parts[#parts + 1] = ids[index] .. "=" .. (rect and
+			(rect.x .. "," .. rect.y .. "," .. rect.w .. "x" .. rect.h) or "missing")
+	end
+	local terminalsBlock = handleRect(nodes[ids[1]])
+	local terminalsTable = handleRect(nodes[ids[2]])
+	local membersBlock = handleRect(nodes[ids[3]])
+	local membersTable = handleRect(nodes[ids[4]])
+	parts[#parts + 1] = "terminalContained=" .. tostring(containsRect(terminalsBlock, terminalsTable))
+	parts[#parts + 1] = "memberContained=" .. tostring(containsRect(membersBlock, membersTable))
+	parts[#parts + 1] = "blocksOverlap=" .. tostring(terminalsBlock and membersBlock
+		and terminalsBlock.y + terminalsBlock.h > membersBlock.y or false)
+	local signature = table.concat(parts, " | ")
+	if surface and surface._gsOptionsTableSignature ~= signature then
+		surface._gsOptionsTableSignature = signature
+		GlobalStorageSiK.Log.debug("OptionsTables", "geometry " .. signature)
+	end
+end
+
 local function release(panel)
 	if not panel then return false end
 	local released = false
@@ -71,6 +113,7 @@ function Options.buildSection(terminal, optionsPanel)
 	end
 	optionsPanel._sikOptionsSurface = surface
 	optionsPanel.optBuilt = true
+	logTableGeometry(surface)
 	return surface
 end
 
@@ -87,7 +130,9 @@ function Options.refreshScroll(terminal, state)
 	end
 	local snapshot, reason = snapshotFor(terminal, panel, state)
 	if not snapshot then return nil, reason end
-	return surface:refresh(snapshot)
+	local result, detail = surface:refresh(snapshot)
+	logTableGeometry(surface)
+	return result, detail
 end
 
 function Options.layoutUi(_, ui)
@@ -98,15 +143,19 @@ function Options.syncScrollLayout(terminal)
 	local panel = terminal and terminal.configPanel
 	local surface = panel and panel._sikOptionsSurface
 	if not surface then return false end
-	return surface:reflow(panelBounds(panel))
+	local result, detail = surface:reflow(panelBounds(panel))
+	logTableGeometry(surface)
+	return result, detail
 end
 
 function Options.layout(terminal, innerW, innerH)
 	local panel = terminal and terminal.configPanel
 	local surface = panel and panel._sikOptionsSurface
 	if not surface then return false end
-	return surface:reflow({ x = 0, y = 0, w = math.max(1, tonumber(innerW) or 1),
+	local result, detail = surface:reflow({ x = 0, y = 0, w = math.max(1, tonumber(innerW) or 1),
 		h = math.max(1, tonumber(innerH) or 1) })
+	logTableGeometry(surface)
+	return result, detail
 end
 
 function Options.ensureUi(terminal)

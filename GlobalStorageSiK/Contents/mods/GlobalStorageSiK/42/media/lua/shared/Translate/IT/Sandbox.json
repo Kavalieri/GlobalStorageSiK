@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSTICA: icone delle schede",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Richiede la modalità debug. Registra percorso, risoluzione, dimensione nativa e spazio finale di ogni icona solo quando cambia la geometria.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSTICA: prelievo interattivo",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Richiede la modalità debug. Traccia inizio trascinamento, quantità e righe esatte, destinazione inventario, accettazione e livelli del menu contestuale.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNOSTICA: tabelle Opzioni",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Richiede la modalità debug. Registra conteggi delle righe e rettangoli finali di blocchi e tabelle dopo creazione, aggiornamento e ridimensionamento.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Accesso e Rete",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Oggetti e Deposito",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Requisiti di crafting",

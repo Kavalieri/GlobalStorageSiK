@@ -3,6 +3,7 @@
 -- and cleanup registration must be deferred and idempotent.
 
 local root = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/"
+local sourcePath = root .. "GS_ContainerInventory.lua"
 
 GlobalStorageSiK = {
 	I18n = { text = function(key) return key end },
@@ -10,10 +11,11 @@ GlobalStorageSiK = {
 
 package.preload["GS_TerminalUI_Items"] = function() return true end
 package.preload["GS_WithdrawClient"] = function() return true end
+package.preload["GS_TerminalDrop"] = function() return true end
 package.preload["GS_UI_Framework"] = function() return {} end
 package.preload["GlobalStorageSiK/UI/CapacityPresentation"] = function() return {} end
 
-local chunk = assert(loadfile(root .. "GS_ContainerInventory.lua"))
+local chunk = assert(loadfile(sourcePath))
 local Inventory = chunk()
 assert(type(Inventory) == "table", "inventory adapter did not load before GS_Client")
 assert(Inventory.installCleanup() == false, "cleanup cannot register before GS_Client exists")
@@ -31,5 +33,15 @@ GlobalStorageSiK.Client = {
 assert(Inventory.installCleanup() == true, "cleanup did not register after GS_Client became available")
 assert(Inventory.installCleanup() == true, "registered cleanup did not remain installed")
 assert(registrations == 1, "cleanup registration is not idempotent")
+
+local sourceFile = assert(io.open(sourcePath, "rb"))
+local source = sourceFile:read("*a")
+sourceFile:close()
+assert(source:find("contextMenuOwner = editor", 1, true),
+	"editor context menu is not layered above its real owner")
+assert(source:find("TerminalDrop.setupPanel(panel, view.controller)", 1, true),
+	"container editor did not become an independent deposit target")
+assert(source:find("TerminalDrop.disposePanel(panel, self.controller)", 1, true),
+	"container editor deposit target is not disposed with the view")
 
 print("PASS: container inventory tolerates load order and registers cleanup once")

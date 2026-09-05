@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSTIC: tab icons",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Requires Debug mode ON. Records each tab asset path, texture resolution, native size and final slot size only when the rail geometry changes.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSTIC: interactive withdrawal",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Requires Debug mode ON. Traces drag start, exact amount and rows, inventory drop target, request acceptance and editor context-menu layering.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNOSTIC: Options tables",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Requires Debug mode ON. Records Terminal and Member row counts and their final block/table rectangles after build, refresh and resize.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Access & Network",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Items & Deposit",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Crafting Requirements",

@@ -46,6 +46,15 @@ local admin = {
 	successionHint = { text = "" }, backupWarning = { text = "" }, canClaim = { text = "" },
 	access = { subject = { items = {}, selected = nil } }, accessActions = {},
 }
+for index = 2, 4 do
+	admin.terminals[index] = { id = "terminal:" .. index, name = "Terminal " .. index,
+		coords = index .. ", " .. index .. ", 0", role = "Secundario",
+		status = { text = "Presente", color = color(0.45, 0.85, 0.45) } }
+	admin.members[index] = { id = "member:" .. index,
+		role = { text = "Miembro", color = color(0.91, 0.63, 0.31) },
+		name = "Jugador " .. index,
+		connection = { text = "Ahora", color = color(0.45, 0.85, 0.45) } }
+end
 local actions = {}
 for _, id in ipairs({ "options.select-network",
 	"options.use-network", "options.refresh-networks", "options.open-terminal",
@@ -155,6 +164,23 @@ for _, id in ipairs({ "options-terminals-table", "options-members-table" }) do
 	assert(paints[2].y == row.height - 1 and paints[2].h == 1,
 		"options row lost its SiK divider: " .. id)
 end
+
+local terminalsBlock = assert(tree.nodes["options-terminals-block"])
+local terminalsTable = assert(tree.nodes["options-terminals-table"])
+local membersBlock = assert(tree.nodes["options-members-block"])
+local membersTableView = assert(tree.nodes["options-members-table"])
+local function assertContained(block, tableView, label)
+	local content = block:getContentRect()
+	local bounds = tableView:getBounds()
+	assert(bounds.x >= content.x and bounds.y >= content.y
+		and bounds.x + bounds.w <= content.x + content.w
+		and bounds.y + bounds.h <= content.y + content.h,
+		label .. " table escaped its dynamic Block")
+end
+assertContained(terminalsBlock, terminalsTable, "Terminales")
+assertContained(membersBlock, membersTableView, "Miembros")
+assert(terminalsBlock.y + terminalsBlock.h <= membersBlock.y,
+	"Terminales Block overlaps Miembros Block")
 
 local members = assert(tree.nodes["options-members-table"], "members table missing")
 assert(members.columns[#members.columns].title == "Última conexión",

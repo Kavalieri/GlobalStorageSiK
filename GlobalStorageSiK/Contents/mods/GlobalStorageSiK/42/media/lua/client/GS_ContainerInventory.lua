@@ -1,5 +1,6 @@
 require "GS_TerminalUI_Items"
 require "GS_WithdrawClient"
+require "GS_TerminalDrop"
 local UI = require "GS_UI_Framework"
 local Capacity = require "GlobalStorageSiK/UI/CapacityPresentation"
 local T = GlobalStorageSiK.I18n.text
@@ -47,6 +48,9 @@ function Inventory.mount(parent, editor, node, options)
 		networkId = state.networkId, inventoryRevision = state.inventoryRevision,
 		zones = state.zones, nodes = state.nodes, items = view.rows,
 	} }
+	-- TerminalItems reutiliza el mismo menú contextual en Almacén y editores.
+	-- Aquí la capa superior real es el editor, no la terminal principal.
+	view.controller.contextMenuOwner = editor
 	function view.controller:refreshItemsTab() view:render() end
 	function view.controller:onWithdrawRow(row, amount, targetKey)
 		return GlobalStorageSiK.WithdrawClient.sendWithdraw(row, amount, targetKey, "", {
@@ -88,6 +92,7 @@ function Inventory.mount(parent, editor, node, options)
 	tableOptions.heightMode, tableOptions.allRowsVisible = "content", true
 	view.table = UI.Table.create(tableOptions)
 	panel.itemTable = view.table
+	GlobalStorageSiK.TerminalDrop.setupPanel(panel, view.controller)
 	function view:getHeight() return self.block.h end
 	function view:render()
 		if self.disposed then return end
@@ -159,6 +164,7 @@ function Inventory.mount(parent, editor, node, options)
 		if self.detailTick and Events and Events.OnTick then Events.OnTick.Remove(self.detailTick) end
 		self.detailTick, self.detailQueue = nil, {}
 		views[self] = nil
+		GlobalStorageSiK.TerminalDrop.disposePanel(panel, self.controller)
 		self.table:dispose(); self.block:dispose()
 		panel._detailPages = nil
 	end

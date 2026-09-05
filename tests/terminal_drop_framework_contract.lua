@@ -1,7 +1,7 @@
 -- Focal contract for terminal deposit drop migration to public SiK UI.
 -- It preserves the product transfer path while reducing PZ widgets to stubs.
 
-for _, name in ipairs({ "GS_I18n", "GS_NetClient", "GS_DepositClient" }) do
+for _, name in ipairs({ "GS_I18n", "GS_Log", "GS_NetClient", "GS_DepositClient" }) do
 	package.loaded[name] = true
 end
 
@@ -51,6 +51,7 @@ local clearCount, sent = 0, {}
 
 GlobalStorageSiK = {
 	I18n = { text = function(key) return key end },
+	Log = { debug = function() end },
 	DepositClient = {
 		collectDraggedItems = function() return draggedItems end,
 		isDraggingItems = function() return #draggedItems > 0 end,
@@ -92,14 +93,20 @@ getTimestampMs = function() return now end
 local sourcePath = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalDrop.lua"
 dofile(sourcePath)
 
-local panel = { width = 320, playerNum = 2 }
+local panel = { x = 0, y = 0, width = 320, height = 240, playerNum = 2,
+	getIsVisible = function() return true end,
+	isMouseOver = function() return true end,
+	getX = function(self) return self.x end,
+	getY = function(self) return self.y end,
+	getWidth = function(self) return self.width end,
+	getHeight = function(self) return self.height end }
 GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 assert(#attached == 1 and attached[1].control == panel,
 	"setupPanel did not attach the public DropTarget")
 assert(panel.gsDropTarget ~= nil and panel.gsDropTerminal == terminal,
 	"setupPanel did not retain its framework handle or terminal context")
-assert(terminal.gsDropMonitor ~= nil and type(tickHandler) == "function",
-	"external drag monitor was not owned by the framework")
+assert(panel.gsDropMonitor ~= nil and terminal.gsDropMonitor == nil and type(tickHandler) == "function",
+	"external drag monitor was not owned by its exact drop surface")
 assert(attached[1].options.playerNum == 2 and attached[1].options.tone == "info",
 	"DropTarget lost player or feedback tone")
 GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)

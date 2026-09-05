@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNÓSTICO: iconos de pestañas",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Requiere Modo depuración activado. Registra la ruta, resolución, tamaño nativo y tamaño final del espacio de cada icono solo cuando cambia la geometría de la barra.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNÓSTICO: retirada interactiva",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Requiere Modo depuración activado. Traza el inicio del arrastre, cantidad y filas exactas, destino de inventario, aceptación de la solicitud y capas del menú contextual del editor.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNÓSTICO: tablas de Opciones",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Requiere Modo depuración activado. Registra las filas de Terminales y Miembros y los rectángulos finales de sus bloques y tablas tras construir, actualizar o redimensionar.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Acceso y red",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Ítems y depósito",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Requisitos de crafteo",

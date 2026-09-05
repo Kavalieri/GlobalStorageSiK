@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNÓSTICO: ícones das abas",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Requer o modo de depuração. Registra caminho, resolução, tamanho nativo e espaço final de cada ícone apenas quando a geometria muda.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNÓSTICO: retirada interativa",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Requer o modo de depuração. Rastreia início do arrasto, quantidade e linhas exatas, destino do inventário, aceitação e camadas do menu de contexto.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNÓSTICO: tabelas de Opções",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Requer o modo de depuração. Registra contagens de linhas e retângulos finais dos blocos e tabelas após criação, atualização e redimensionamento.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Acesso e Rede",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Itens e Depósito",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Requisitos de Fabricação",

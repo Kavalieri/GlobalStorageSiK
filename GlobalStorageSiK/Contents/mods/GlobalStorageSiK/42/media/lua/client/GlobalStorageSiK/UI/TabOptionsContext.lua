@@ -3,6 +3,7 @@
 -- into plain, stable values consumed by the independent framework.
 
 require "GS_I18n"
+require "GS_Log"
 require "GS_NetClient"
 require "GS_Sandbox"
 require "GS_TerminalCatalog"
@@ -384,6 +385,8 @@ function TabOptionsContext.create(terminal)
 		end
 		local role = perms.playerRole or perms.role or "member"
 		local isOwner, isAdmin = role == "owner", role == "admin" or role == "owner"
+		GlobalStorageSiK.Log.debug("OptionsTables", "snapshot rows terminals="
+			.. tostring(#terminals) .. " members=" .. tostring(#members))
 		return {
 			data = { options = {
 				state = {

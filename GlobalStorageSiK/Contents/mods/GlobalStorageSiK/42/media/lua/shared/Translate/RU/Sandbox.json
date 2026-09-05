@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> ДИАГНОСТИКА: значки вкладок",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Требует включённого режима отладки. Записывает путь, загрузку, исходный размер и итоговую область каждого значка только при изменении геометрии.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> ДИАГНОСТИКА: интерактивное изъятие",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Требует включённого режима отладки. Отслеживает начало перетаскивания, точное количество и строки, цель инвентаря, принятие запроса и слои контекстного меню.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> ДИАГНОСТИКА: таблицы настроек",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Требует включённого режима отладки. Записывает число строк и итоговые прямоугольники блоков и таблиц после создания, обновления и изменения размера.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Доступ и сеть",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Предметы и депонирование",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Требования крафта",

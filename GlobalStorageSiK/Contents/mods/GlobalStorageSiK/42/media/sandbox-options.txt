@@ -379,6 +379,30 @@ option GlobalStorageSiK.DebugCatSiKUITabs
 	translation = GlobalStorageSiK_DebugCatSiKUITabs,
 }
 
+option GlobalStorageSiK.DebugCatTabIcons
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatTabIcons,
+}
+
+option GlobalStorageSiK.DebugCatExactWithdraw
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatExactWithdraw,
+}
+
+option GlobalStorageSiK.DebugCatOptionsTables
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatOptionsTables,
+}
+
 option GlobalStorageSiK.DebugCatSiKUISearch
 {
 	type = boolean,

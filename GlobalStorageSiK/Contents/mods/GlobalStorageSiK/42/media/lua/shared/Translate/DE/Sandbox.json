@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSE: Registerkartensymbole",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Benötigt aktivierten Debug-Modus. Protokolliert Pfad, Auflösung, native Größe und endgültige Slotgröße jedes Symbols nur bei Geometrieänderungen.",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSE: interaktive Entnahme",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "Benötigt aktivierten Debug-Modus. Protokolliert Drag-Start, genaue Menge und Zeilen, Inventarziel, Anfrageannahme und Kontextmenü-Ebenen.",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> DIAGNOSE: Optionstabellen",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "Benötigt aktivierten Debug-Modus. Protokolliert Zeilenzahlen sowie endgültige Block- und Tabellenrechtecke nach Aufbau, Aktualisierung und Größenänderung.",
 	"Sandbox_GlobalStorageSiK": "GSSiK: Zugriff und Netzwerk",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK: Gegenstände und Einlagerung",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK: Herstellungsanforderungen",

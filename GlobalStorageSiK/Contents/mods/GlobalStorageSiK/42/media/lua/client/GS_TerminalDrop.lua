@@ -6,6 +6,7 @@
 ]]
 
 require "GS_I18n"
+require "GS_Log"
 require "GS_NetClient"
 require "GS_DepositClient"
 
@@ -21,6 +22,14 @@ local DEPOSIT_COOLDOWN_MS = 500
 ---@return boolean
 function GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
 	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
+	return GlobalStorageSiK.TerminalDrop.isMouseOverPanel(ui)
+end
+
+--- Indica si el puntero está realmente sobre una superficie receptora visible.
+---@param panel ISUIElement|nil
+---@return boolean
+function GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
+	local ui = panel
 	if not ui or not ui.getIsVisible or not ui:getIsVisible() then
 		return false
 	end
@@ -28,7 +37,9 @@ function GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
 		return true
 	end
 	local mx, my = getMouseX(), getMouseY()
-	return mx >= ui:getX() and my >= ui:getY() and mx < ui:getX() + ui:getWidth() and my < ui:getY() + ui:getHeight()
+	local x = ui.getAbsoluteX and ui:getAbsoluteX() or ui:getX()
+	local y = ui.getAbsoluteY and ui:getAbsoluteY() or ui:getY()
+	return mx >= x and my >= y and mx < x + ui:getWidth() and my < y + ui:getHeight()
 end
 
 --- Intenta depositar ítems pendientes o en arrastre (una sola petición por cooldown).
@@ -37,26 +48,33 @@ end
 function GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
 	local now = getTimestampMs and getTimestampMs() or 0
 	if now - lastDepositMs < DEPOSIT_COOLDOWN_MS then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.rejected reason=cooldown")
 		return false
 	end
 
 	items = items or GlobalStorageSiK.DepositClient.collectDraggedItems()
 	if #items == 0 then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.rejected reason=no_items")
 		return false
 	end
 	if not GlobalStorageSiK.DepositClient.canDepositDraggedItems(items) then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.rejected reason=not_depositable count=" .. tostring(#items))
 		return false
 	end
 
 	local ids = GlobalStorageSiK.DepositClient.collectItemIds(items)
 	if #ids == 0 then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.rejected reason=no_ids")
 		return false
 	end
 
 	lastDepositMs = now
 	GlobalStorageSiK.DepositClient.clearDrag()
 
-	return GlobalStorageSiK.DepositClient.sendDepositItems(ids)
+	local sent = GlobalStorageSiK.DepositClient.sendDepositItems(ids)
+	GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.sent count=" .. tostring(#ids)
+		.. " accepted=" .. tostring(sent ~= false))
+	return sent
 end
 
 --- Configura el panel como destino visual mediante el contrato publico SiK UI.
@@ -80,16 +98,18 @@ function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 		end,
 		accept = function(items)
 			return items ~= nil and #items > 0
-				and GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
+				and GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
 				and GlobalStorageSiK.DepositClient.canDepositDraggedItems(items)
 		end,
 		onDrop = function(items)
 			return GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
 		end,
 	})
-	if terminal and not terminal.gsDropMonitor then
-		terminal.gsDropMonitor = UI.DropTarget.monitor(terminal, {
-			playerNum = terminal.playerNum or 0,
+	-- Cada superficie tiene su monitor. Compartir uno en `terminal` dejaba los
+	-- editores sin captura porque la pestaña Almacén ya lo había ocupado.
+	if not panel.gsDropMonitor then
+		panel.gsDropMonitor = UI.DropTarget.monitor(panel, {
+			playerNum = terminal and terminal.playerNum or panel.playerNum or 0,
 			isDragging = function()
 				return ISMouseDrag and ISMouseDrag.dragging ~= nil
 			end,
@@ -99,7 +119,7 @@ function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 				return items
 			end,
 			isOver = function()
-				return GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
+				return GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
 			end,
 			onDrop = function(items)
 				return GlobalStorageSiK.TerminalDrop.tryDepositItems(items)
@@ -115,16 +135,15 @@ end
 ---@return boolean
 function GlobalStorageSiK.TerminalDrop.disposePanel(panel, terminal)
 	if not panel then return false end
-	local owner = terminal or panel.gsDropTerminal
 	if panel.gsDropTarget and panel.gsDropTarget.dispose then
 		panel.gsDropTarget:dispose()
 	end
 	panel.gsDropTarget = nil
 	panel.gsDropSetup = nil
 	panel.gsDropTerminal = nil
-	if owner and owner.gsDropMonitor then
-		if owner.gsDropMonitor.dispose then owner.gsDropMonitor:dispose() end
-		owner.gsDropMonitor = nil
+	if panel.gsDropMonitor then
+		if panel.gsDropMonitor.dispose then panel.gsDropMonitor:dispose() end
+		panel.gsDropMonitor = nil
 	end
 	return true
 end

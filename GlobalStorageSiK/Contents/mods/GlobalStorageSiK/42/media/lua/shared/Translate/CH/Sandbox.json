@@ -1,4 +1,10 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> 診斷：分頁圖示",
+	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "需要啟用除錯模式。僅在版面變更時記錄每個圖示的路徑、載入結果、原始尺寸與最終欄位尺寸。",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> 診斷：互動式取出",
+	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw_tooltip": "需要啟用除錯模式。記錄拖曳開始、準確數量與資料列、目標容器、請求結果及編輯器右鍵選單層級。",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> 診斷：選項表格",
+	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "需要啟用除錯模式。記錄終端和成員列數，以及建立、重新整理和調整大小後的區塊與表格矩形。",
 	"Sandbox_GlobalStorageSiK": "GSSiK：访问与网络",
 	"Sandbox_GlobalStorageSiK_Items": "GSSiK：物品与存储",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK：制作需求",

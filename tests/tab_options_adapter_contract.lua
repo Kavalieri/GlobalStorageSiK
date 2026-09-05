@@ -95,7 +95,7 @@ GlobalStorageSiK = {
 	TerminalPermissions = {
 		shouldShowTab = function() return true end,
 	},
-	Log = { error = function() end },
+	Log = { error = function() end, debug = function() end },
 }
 
 require = function(name)
@@ -232,7 +232,7 @@ local generatedDouble = { id = "tab-options" }
 previousRequire = require
 previousGlobalStorageSiK = GlobalStorageSiK
 previousSiK = SiK
-GlobalStorageSiK = { TerminalOptions = {} }
+GlobalStorageSiK = { TerminalOptions = {}, Log = { debug = function() end } }
 SiK = { UI = uiDouble }
 require = function(name)
 	if name == "GS_UI_Framework" then return uiDouble end

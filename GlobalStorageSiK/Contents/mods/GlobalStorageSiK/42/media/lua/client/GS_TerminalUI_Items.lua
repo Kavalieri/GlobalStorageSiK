@@ -1500,7 +1500,14 @@ local function openItemContextMenu(listPanel, terminal, data)
 		playerNum = player:getPlayerNum()
 	end
 
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	-- El menú debe superar la ventana que contiene realmente la tabla. En los
+	-- editores el controlador es un adaptador y la terminal principal puede estar
+	-- detrás; bajar esa terminal dejaba el menú bajo el editor always-on-top.
+	local ui = terminal.contextMenuOwner or terminal._gsContextMenuOwner
+		or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+		or terminal
+	GlobalStorageSiK.Log.debug("ExactWithdraw", "contextMenu.prepare owner="
+		.. tostring(ui) .. " row=" .. tostring(data.rowKey or data.fullType))
 	local menuState = GlobalStorageSiK.ContextMenuUi.prepareTerminal(ui)
 
 	local ok, err = pcall(function()
@@ -1559,6 +1566,8 @@ local function openItemContextMenu(listPanel, terminal, data)
 		end
 
 		GlobalStorageSiK.ContextMenuUi.raiseMenu(cm)
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "contextMenu.raised row="
+			.. tostring(data.rowKey or data.fullType))
 	end)
 
 	if not ok then
@@ -1857,7 +1866,9 @@ local function itemRowAdapter(listPanel, terminal)
 			local multi = #selection > 1 and isRowSelected(listPanel, rowIdentity(data))
 			local dragState = GlobalStorageSiK.TerminalItems.buildDragState(
 				listPanel, data, multi and selection or nil)
-			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, terminal and terminal.playerNum or 0,
+			-- `begin` recibe cantidad, no playerNum. Pasar el jugador 0 producía un
+			-- payload de retirada de cero unidades aunque el ghost fuese correcto.
+			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, 1,
 				dragState.payloadRows, dragState.visualRows, row)
 			return true
 		end,

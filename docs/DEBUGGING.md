@@ -86,10 +86,39 @@ categoría específica únicamente para esa superficie; no actives todo el árbo
 | `DebugCatSiKUI` | `>> Integración con SiK UI` / `>> SiK UI integration` | Hechos de integración del producto con el framework. Incluye tiempos acotados `shell_visible`, `state_refresh`, `tab_activate` y `refreshItemsTab_done`; no registra una línea por frame. Para montaje, geometría, árbol y solapes internos se usa el interruptor propio de SiK UI Framework. |
 | `DebugCatRecordedMediaRuntime` | `>> DIAGNÓSTICO: identidad de medios grabados` / `>> DIAGNOSTIC: recorded-media identity` | Resumen acotado de filas VHS, títulos exactos/no resueltos, L3 Con enseñanza/Ocio y hasta cinco `mediaIndex` de muestra. |
 | `DebugCatSiKUITabs` | `>> SiK UI: pestañas y extensiones` / `>> SiK UI: tabs & extensions` | Registro/reutilización de panel, visibilidad y clic de pestaña. |
+| `DebugCatTabIcons` | `>> DIAGNÓSTICO: iconos de pestañas` / `>> DIAGNOSTIC: tab icons` | Ruta del asset, resolución de textura, tamaño nativo y tamaño final del slot; solo cambia con la geometría del rail. |
+| `DebugCatExactWithdraw` | `>> DIAGNÓSTICO: retirada interactiva` / `>> DIAGNOSTIC: interactive withdrawal` | Arrastre, cantidad y filas semánticas exactas, destino, envío y capa del menú contextual. |
+| `DebugCatOptionsTables` | `>> DIAGNÓSTICO: tablas de Opciones` / `>> DIAGNOSTIC: Options tables` | Conteos de Terminales/Miembros y rectángulos finales de bloque y tabla tras montar, refrescar o redimensionar. |
 | `DebugCatSiKUISearch` | `>> SiK UI: caja de búsqueda` / `>> SiK UI: search box` | Bytes vs. caracteres UTF-8 reales en el cuadro de búsqueda de Almacén. |
 | `DebugCatNodeNaming` | `>> Nombrado de terminal` / `>> Terminal naming` | Aplicación del nombre visible de un contenedor a su objeto en el mundo. |
 
 Las líneas del Core usan componente y evento estables. Operaciones largas deben emitir estados significativos, no una línea por tick. Si un estado no cambió, no se repite.
+
+### Prueba DEV: incidencias críticas de interfaz
+
+Cada caso se activa por separado junto con `Modo depuración (debug)` / `Debug
+mode`; todas las demás categorías y todos los sublogs `>>> DETALLE / >>>
+DETAIL` permanecen apagados:
+
+- Iconos: activa `>> DIAGNÓSTICO: iconos de pestañas` / `>> DIAGNOSTIC: tab
+  icons`, abre la terminal y cambia una vez el tamaño. El prefijo esperado es
+  `[CLI] [GlobalStorageSiK:DEBUG:TabIcons]`; cada entrada debe indicar
+  `resolved=true`, `native=56x56` y un `slot` de al menos `56x56`.
+- Retirada interactiva: activa `>> DIAGNÓSTICO: retirada interactiva` / `>>
+  DIAGNOSTIC: interactive withdrawal`. Arrastra una cabecera, una línea de
+  detalle individual y una selección múltiple desde Almacén y desde el editor
+  de contenedor; abre además su menú contextual. El prefijo esperado es `[CLI]
+  [GlobalStorageSiK:DEBUG:ExactWithdraw]`; `amount` nunca será cero, el destino
+  tendrá clave y el envío terminará en `accepted`. El menú debe quedar por
+  encima del editor.
+- Tablas de Opciones: activa `>> DIAGNÓSTICO: tablas de Opciones` / `>>
+  DIAGNOSTIC: Options tables`, abre Opciones y redimensiona en ambos sentidos.
+  El prefijo esperado es `[CLI] [GlobalStorageSiK:DEBUG:OptionsTables]`; los
+  cuatro rectángulos deben existir y cada tabla debe quedar dentro de su bloque.
+
+Conserva `console.txt` del cliente. En host/dedicado conserva también el
+`console.txt` autoritativo si se prueba una transferencia; el eco al cliente
+solo se activa si hace falta y estas categorías no generan trazas por tick.
 
 ### Prueba DEV: descubrimiento y montaje de addons
 

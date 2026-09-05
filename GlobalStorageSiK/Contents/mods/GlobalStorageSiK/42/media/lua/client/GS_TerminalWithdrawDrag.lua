@@ -200,11 +200,15 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 		payloadRows = payloadRows,
 		visualRows = visualRows,
 		rowData = rowData,
-		amount = amount or 1,
+		amount = math.max(1, math.floor(tonumber(amount) or 1)),
                 sourceWidget = sourceWidget,
                 captureOwner = captureOwner,
-                playerNum = (captureOwner and captureOwner.playerNum) or 0,
+		playerNum = (captureOwner and captureOwner.playerNum) or 0,
 	}
+	GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.begin row="
+		.. tostring(rowIdentity(rowData)) .. " kind=" .. tostring(rowData._gsRowKind)
+		.. " amount=" .. tostring(activeDrag.amount) .. " payloadRows="
+		.. tostring(#payloadRows) .. " player=" .. tostring(activeDrag.playerNum))
 	-- La captura empieza solo al superar el umbral. Así el origen recibe el
 	-- mouseUp aunque el cursor ya este sobre ISInventoryPane/loot vanilla.
 	if captureOwner and captureOwner.setCapture then
@@ -280,22 +284,26 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	local player = GlobalStorageSiK.NetClient.getPlayer(drag.playerNum)
 	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, drag.playerNum)
 	if not pane then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=pane_nil")
 		clearDrag("pane=nil")
 		return false
 	end
 	local container = GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
 	if not container then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=container_nil")
 		GlobalStorageSiK.ContainerTargets.debugDropTarget("container=nil")
 		clearDrag("container=nil")
 		return false
 	end
-        if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
+	if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=access_denied")
 		GlobalStorageSiK.ContainerTargets.debugDropTarget("accessDenied")
 		clearDrag("accessDenied")
 		return false
 	end
 	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
 	if not key then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=target_key_nil")
 		GlobalStorageSiK.ContainerTargets.debugDropTarget("key=nil")
 		clearDrag("key=nil")
 		return false
@@ -308,15 +316,20 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	-- expandida o paginada. Las paginas son solo presentacion; el servidor
 	-- reconstruye el grupo fisico a partir de rowKey + revision.
 	local sent
+	GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop target=" .. tostring(key)
+		.. " amount=" .. tostring(drag.amount) .. " rows=" .. tostring(#rows))
 	if #rows > 1 then
 		sent = GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, drag.amount, key, searchQuery)
 	else
 		sent = GlobalStorageSiK.WithdrawClient.sendWithdraw(rows[1], drag.amount, key, searchQuery)
 	end
 	if sent then
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.send accepted mode="
+			.. (#rows > 1 and "batch" or "single"))
 		GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropSent")
 		GlobalStorageSiK.ContainerTargets.debugDropTarget("send=true")
 	else
+		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.send rejected")
 		logCancelled("sendRejected")
 	end
 	return sent

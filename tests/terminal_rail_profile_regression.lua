@@ -14,8 +14,12 @@ assert(not source:find("railProfile()", 1, true),
 	"removed railProfile helper is still called")
 
 local requestedWidth, requestedProfile
-GlobalStorageSiK = { I18n = { text = function(key) return key end } }
+GlobalStorageSiK = {
+	I18n = { text = function(key) return key end },
+	Log = { debug = function() end },
+}
 package.preload["GS_I18n"] = function() return true end
+package.preload["GS_Log"] = function() return true end
 package.preload["GS_Sandbox"] = function() return true end
 package.preload["GS_UI_Framework"] = function()
 	return { Metrics = { profile = function(width, profile)

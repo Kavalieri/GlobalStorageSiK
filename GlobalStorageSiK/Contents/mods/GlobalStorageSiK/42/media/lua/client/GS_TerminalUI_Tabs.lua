@@ -14,6 +14,8 @@ local UI = require "GS_UI_Framework"
 
 require "GS_I18n"
 
+require "GS_Log"
+
 require "GS_Sandbox"
 
 local T = GlobalStorageSiK.I18n.text
@@ -65,6 +67,40 @@ local function navigationOptions(terminal, items)
 	}
 end
 
+local function textureSize(texture, method)
+	if not texture or type(texture[method]) ~= "function" then return 0 end
+	local ok, value = pcall(texture[method], texture)
+	return ok and tonumber(value) or 0
+end
+
+local function logIconDiagnostics(terminal)
+	local navigation = terminal.navigationContainer and terminal.navigationContainer.navigation
+	if not navigation then return end
+	local parts = {}
+	for index = 1, #(navigation.items or {}) do
+		local item = navigation.items[index]
+		local button = navigation.buttons and navigation.buttons[index]
+		local descriptor = item and item.icon
+		local path = type(descriptor) == "table" and descriptor.path or descriptor
+		local texture = nil
+		if path and getTexture then
+			local ok, resolved = pcall(getTexture, path)
+			if ok then texture = resolved end
+		end
+		parts[#parts + 1] = tostring(item and item.key) .. ":path=" .. tostring(path)
+			.. ",resolved=" .. tostring(texture ~= nil)
+			.. ",native=" .. tostring(textureSize(texture, "getWidth")) .. "x"
+			.. tostring(textureSize(texture, "getHeight"))
+			.. ",slot=" .. tostring(button and button.width or 0) .. "x"
+			.. tostring(button and button.height or 0)
+	end
+	local signature = table.concat(parts, " | ")
+	if terminal._gsTabIconDiagnosticSignature ~= signature then
+		terminal._gsTabIconDiagnosticSignature = signature
+		GlobalStorageSiK.Log.debug("TabIcons", "rail.icons " .. signature)
+	end
+end
+
 local function syncNavigationSelection(terminal)
 	local navigation = terminal.navigationContainer and terminal.navigationContainer.navigation
 	if not navigation then return end
@@ -101,6 +137,7 @@ local function layoutNavigation(terminal, bounds)
 	if not terminal.navigationContainer then return end
 	terminal.navigationContainer:reflow(bounds)
 	syncNavigationSelection(terminal)
+	logIconDiagnostics(terminal)
 end
 
 GlobalStorageSiK.TerminalTabs = {}
@@ -170,6 +207,7 @@ function GlobalStorageSiK.TerminalTabs.build(terminal, tabDefs)
 
 
 	terminal.navigationContainer:setActive("items", false)
+	logIconDiagnostics(terminal)
 
 end
 
@@ -255,6 +293,7 @@ function GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, defi
 		terminal.navigationContainer:mountContent(tabKey, panel)
 	end
 	syncNavigationSelection(terminal)
+	logIconDiagnostics(terminal)
 	return true
 end
 

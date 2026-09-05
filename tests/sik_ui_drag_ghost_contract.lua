@@ -117,11 +117,12 @@ Support.check(suite, "terminal owns capture exactly once and every finalization 
 end)
 
 Support.check(suite, "drag logging is event-only and has no move or frame noise", function()
-        assert(countPlain(dragSource, "GlobalStorageSiK.Log.") == 3,
-                "drag has logs outside the three allowed lifecycle events")
-        contains(dragSource, '"dragDropAttempt"', "drop attempt log missing")
-        contains(dragSource, '"dragDropSent"', "drop sent log missing")
-        contains(dragSource, '"dragCancelled reason="', "cancel reason log missing")
+        assert(countPlain(dragSource, "GlobalStorageSiK.Log.") == 11,
+				"drag diagnostics changed without updating the bounded event contract")
+		contains(dragSource, '"dragDropAttempt"', "drop attempt log missing")
+		contains(dragSource, '"dragDropSent"', "drop sent log missing")
+		contains(dragSource, '"dragCancelled reason="', "cancel reason log missing")
+		contains(dragSource, '"ExactWithdraw"', "focused exact-withdraw diagnostics missing")
         excludes(dragSource, "print(", "drag emits an unstructured print")
         local moveStart = assert(dragSource:find(
                 "function GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer", 1, true),
