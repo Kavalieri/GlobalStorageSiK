@@ -215,9 +215,9 @@ local function hasCorruptionSentinel(codepoints)
 	return false
 end
 
---- true si el TEXTO ESCAPADO contiene la secuencia ASCII literal "�"
+--- true si el TEXTO ESCAPADO contiene el caracter de reemplazo Unicode
 --- (4 caracteres ASCII backslash-u-F-F-F-D) - pedido explicito de
---- sistemas: "tambien deben rechazarse las secuencias ASCII �", no
+--- sistemas: "tambien debe rechazarse el caracter de reemplazo Unicode", no
 --- solo el caracter real U+FFFD (ya cubierto por hasCorruptionSentinel
 --- sobre los codepoints de ENTRADA, esto cubre el caso de que la
 --- corrupcion ya escapada se cuele en la SALIDA).
@@ -1105,7 +1105,7 @@ function GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 		-- observados tras construir la cadena, texto escapado, y
 		-- match=true/false contra el valor esperado exacto - nunca solo
 		-- "no contiene U+FFFD" (insuficiente, pedido explicito de
-		-- sistemas: tambien deben rechazarse � como texto ASCII y
+		-- sistemas: tambien debe rechazarse el caracter de reemplazo Unicode y
 		-- sustitutos aislados).
 		writer:write("--- Probe Unicode (codepoints explicitos, ver GS_NativeCorpus.lua:runUnicodeProbe) ---\r\n")
 		local probeResults, probePassed = report.unicodeProbeResults, report.unicodeProbePassed

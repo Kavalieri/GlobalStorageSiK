@@ -103,7 +103,7 @@ return {
     ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "2e5c3c5949b90450abe307803b74369b235121aed1bfdc485b9f3e888bdce1ed",
+    ["surfaceSpecSha256"] = "3e832b11c0c34d7f0820e0e6c749b026e59e1a2fbd0ee85cfc2eb99bf7cf34d9",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
     ["visualMasterSha256"] = "a62bb7db749fab6a67fde42cc5615b6be66b17d6cd6b6bb72eb3e622d1f3148a",
     ["visualSubtreeSha256"] = "df54539090c9c1cfac89dd5a53a3ee9fda0ffbc2ac33d1ad0fb6c31996a7ba26"
@@ -428,7 +428,22 @@ return {
         ["mode"] = "column",
         ["overrides"] = {}
       },
-      ["props"] = {},
+      ["props"] = {
+        {
+          ["name"] = "direction",
+          ["value"] = {
+            ["kind"] = "literal",
+            ["value"] = "column"
+          }
+        },
+        {
+          ["name"] = "overflow",
+          ["value"] = {
+            ["kind"] = "literal",
+            ["value"] = "scroll"
+          }
+        }
+      },
       ["type"] = "container",
       ["variant"] = "surface-root"
     }

@@ -218,6 +218,73 @@ local function paletteRows()
 	return result
 end
 
+local function itemCount(state)
+	local total = 0
+	for index = 1, #(state.items or {}) do
+		total = total + math.max(0, math.floor(tonumber(state.items[index].count) or 0))
+	end
+	return total
+end
+
+-- Surface specs retain Spanish only as visual design metadata. Runtime text
+-- always crosses the product i18n boundary so Kahlua never decodes a raw UTF-8
+-- fallback embedded in generated Lua and every locale can use its own catalog.
+local function runtimeI18n()
+	return {
+		["options.state.network.title"] = text("IGUI_GS_NetSelected"),
+		["options.state.network.help"] = text("IGUI_GS_OptionsNetworkHelp"),
+		["options.state.network.current"] = text("IGUI_GS_OptionsNetworkCurrent"),
+		["options.state.network.selected"] = text("IGUI_GS_NetSelected"),
+		["options.state.network.use"] = text("IGUI_GS_NetUseSelected"),
+		["options.state.network.refresh"] = text("IGUI_GS_NetRefreshList"),
+		["options.state.operational.title"] = text("IGUI_GS_OptionsEnergyTitle"),
+		["options.state.operational.help"] = text("IGUI_GS_OptionsEnergyHelp"),
+		["options.state.operational.power"] = text("IGUI_GS_ValPowerOk"),
+		["options.state.operational.terminal"] = text("IGUI_GS_OptionsTerminalsTitle"),
+		["options.state.operational.zones"] = text("IGUI_GS_StatsZones", 0),
+		["options.state.operational.access"] = text("IGUI_GS_OptionsAccessHelp"),
+		["options.state.resources.title"] = text("IGUI_GS_OptionsInformationTitle"),
+		["options.state.resources.help"] = text("IGUI_GS_OptionsInformationHelp"),
+		["options.state.resources.summary"] = text("IGUI_GS_OptionsSummaryTitle"),
+		["options.state.resources.access"] = text("IGUI_GS_OptionsAccessHelp"),
+		["options.state.resources.consumption"] = text("IGUI_GS_StatsConsumption", 0),
+		["options.state.resources.capacity-available"] = text("IGUI_GS_OptionsInformationTitle"),
+		["options.state.resources.capacity"] = text("IGUI_GS_OptionsInformationTitle"),
+		["options.state.resources.warning"] = text("IGUI_GS_OptionsSummaryHelp"),
+		["options.summary.title"] = text("IGUI_GS_OptionsSummaryTitle"),
+		["options.summary.help"] = text("IGUI_GS_OptionsSummaryHelp"),
+		["options.summary.information.title"] = text("IGUI_GS_OptionsInformationTitle"),
+		["options.summary.information.help"] = text("IGUI_GS_OptionsInformationHelp"),
+		["options.summary.energy.title"] = text("IGUI_GS_OptionsEnergyTitle"),
+		["options.summary.energy.help"] = text("IGUI_GS_OptionsEnergyHelp"),
+		["options.state.range.title"] = text("IGUI_GS_OptionsRangeTitle"),
+		["options.state.range.help"] = text("IGUI_GS_OptionsRangeHelp"),
+		["options.state.range.terminal"] = text("IGUI_GS_DistTerminalUse", 0),
+		["options.state.range.network"] = text("IGUI_GS_DistNetworkReach", 0),
+		["options.state.palette.title"] = text("IGUI_GS_UIPaletteLabel"),
+		["options.state.palette.help"] = text("IGUI_GS_OptionsPaletteHelp"),
+		["options.admin.terminals.title"] = text("IGUI_GS_OptionsTerminalsTitle"),
+		["options.admin.terminals.help"] = text("IGUI_GS_OptionsTerminalsHelp"),
+		["options.admin.column.terminal-name"] = text("IGUI_GS_ColTerminalName"),
+		["options.admin.column.coordinates"] = text("IGUI_GS_ColTerminalCoords"),
+		["options.admin.column.terminal-role"] = text("IGUI_GS_ColTerminalRole"),
+		["options.admin.column.status"] = text("IGUI_GS_ColTerminalStatus"),
+		["options.admin.members.title"] = text("IGUI_GS_OptionsMembersTitle"),
+		["options.admin.members.help"] = text("IGUI_GS_OptionsMembersHelp"),
+		["options.admin.column.member-role"] = text("IGUI_GS_PermColRole"),
+		["options.admin.column.member-name"] = text("IGUI_GS_PermColMemberName"),
+		["options.admin.column.connection"] = text("IGUI_GS_PermColConnection"),
+		["options.admin.succession.help"] = text("IGUI_GS_PermSuccessionHint"),
+		["options.admin.succession.warning"] = text("IGUI_GS_PermNoBackupWarn"),
+		["options.admin.claim"] = text("IGUI_GS_ClaimOwnershipButton"),
+		["options.admin.access.title"] = text("IGUI_GS_PermAddBlockTitle"),
+		["options.admin.access.help"] = text("IGUI_GS_OptionsAccessHelp"),
+		["options.admin.access.select"] = text("IGUI_GS_OptionsAccessSelect"),
+		["options.admin.access.add"] = text("IGUI_GS_AddMember"),
+		["options.admin.access.empty"] = text("IGUI_GS_PermPickNone"),
+	}
+end
+
 function TabOptionsContext.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal" end
 	local context = { terminal = terminal, terminalRows = {}, memberRows = {}, accessPicks = {}, disposed = false }
@@ -327,7 +394,7 @@ function TabOptionsContext.create(terminal)
 					zonesStatus = status(text("IGUI_GS_StatsZones", zoneCount)),
 					resourceSummary = status(text("IGUI_GS_StatsNodes", nodeCount)),
 					accessStatus = status(text("IGUI_GS_StatsMembers", #members)),
-					capacity = CapacityPresentation.fromState(capacity),
+					capacity = CapacityPresentation.fromState(capacity, { count = itemCount(state) }),
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
 					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
 					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(),
@@ -350,11 +417,7 @@ function TabOptionsContext.create(terminal)
 				["add-without-selection"] = isAdmin and self.selectedAccessKey == nil,
 				["tablet-addon-installed"] = antennaInstalled,
 			},
-			i18n = {
-				["options.admin.column.connection"] = text("IGUI_GS_PermColConnection"),
-				["options.admin.access.title"] = text("IGUI_GS_PermAddBlockTitle"),
-				["options.admin.access.add"] = text("IGUI_GS_AddMember"),
-			},
+			i18n = runtimeI18n(),
 			tableOptions = {
 				["options-terminals-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
 				["options-members-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },

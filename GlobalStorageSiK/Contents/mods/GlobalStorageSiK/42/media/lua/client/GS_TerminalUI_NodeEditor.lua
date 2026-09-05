@@ -195,7 +195,8 @@ function GS_NodeEditorUI:syncTitleFromName()
 	self._titleText = T("IGUI_GS_NodeEditorTitle") .. separator .. name
 		.. (zoneName ~= "" and (separator .. zoneName) or "")
 	if self.setHeader then self:setHeader({ titleParts = {
-		prefix = T("IGUI_GS_NodeEditorTitle"), name = name, zone = zoneName } }) end
+		prefix = T("IGUI_GS_NodeEditorTitle"), name = name, zone = zoneName,
+		separator = separator } }) end
 end
 
 --- Envía cambios de nodo al servidor.

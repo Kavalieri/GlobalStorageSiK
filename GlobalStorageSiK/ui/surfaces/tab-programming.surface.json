@@ -62,7 +62,22 @@
         ],
         "overrides": []
       },
-      "props": [],
+      "props": [
+        {
+          "name": "direction",
+          "value": {
+            "kind": "literal",
+            "value": "column"
+          }
+        },
+        {
+          "name": "overflow",
+          "value": {
+            "kind": "literal",
+            "value": "scroll"
+          }
+        }
+      ],
       "actions": [],
       "capabilities": [],
       "children": [

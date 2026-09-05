@@ -210,7 +210,13 @@ local function dispatchCurrent()
 		.. " count=" .. tostring(current.rowData.count)
 		.. " destination=" .. tostring(current.targetKey))
 	local sent = GlobalStorageSiK.NetClient.sendCommand("withdrawItem", {
-		sourceNodeId = current.rowData.sourceNodeId,
+		-- Un itemId exacto ya identifica una unidad fisica unica. No acoplarlo
+		-- al nodo que produjo la captura: el servidor vuelve a buscarlo solo en
+		-- los contenedores accesibles de esta red y valida tipo/selector antes de
+		-- moverlo. Esto tolera una captura de nodo renovada y permite que varias
+		-- unidades iguales repartidas por la red compartan un microlote.
+		sourceNodeId = current.selectionMode == "exact_ids"
+			and nil or current.rowData.sourceNodeId,
 		fullType = current.rowData.fullType,
 		-- mediaTitle (2026-08-26, fix de agrupacion de VHS): cuando la fila
 		-- retirada es una cinta VHS/radio, esta fila representa SOLO las
@@ -448,7 +454,7 @@ local function coalesceExactRows(rows)
 		local row = rows[i]
 		local ids = row and row.itemIds or nil
 		if row and row.fullType and ids and #ids > 0 then
-			local key = tostring(row.sourceNodeId or "") .. ":" .. tostring(row.fullType)
+			local key = tostring(row.fullType)
 			local merged = grouped[key]
 			if not merged then
 				merged = {}
@@ -463,6 +469,7 @@ local function coalesceExactRows(rows)
 				merged.dynamicSignature = nil
 				merged.aggregateAllowed = false
 				merged.fullTypes = nil
+				merged.sourceNodeId = nil
 				merged._gsMergedExact = true
 				grouped[key] = merged
 				order[#order + 1] = merged

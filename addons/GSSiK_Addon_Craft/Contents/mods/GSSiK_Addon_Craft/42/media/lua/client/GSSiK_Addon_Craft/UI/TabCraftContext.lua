@@ -9,7 +9,15 @@ local Context = {}
 GSSiK_Addon_Craft.UI.TabCraftContext = Context
 local Session = API.WorkSession
 
-local function T(key, ...) return getText(key, ...) end
+local function T(key, ...)
+	local args = { ... }
+	local value = getText(key, unpack(args))
+	for index = 1, #args do
+		local marker = "{" .. tostring(index) .. "}"
+		value = tostring(value):gsub(marker, function() return tostring(args[index]) end)
+	end
+	return value
+end
 local function isModActive(modId)
 	local active = getActivatedMods and getActivatedMods() or nil
 	return active ~= nil and active:contains(modId) == true

@@ -125,6 +125,7 @@ function Programming.context(terminal)
 	return {
 		playerNum = terminal and terminal.playerNum or 0,
 		i18n = {
+			["programming.title"] = T("IGUI_GS_SectionProgramming"),
 			["programming.resources.title"] = T("IGUI_GS_ProgrammingResourcesTitle"),
 			["programming.programs.title"] = T("IGUI_GS_SectionProgramming"),
 			["programming.help"] = T("IGUI_GS_TabProgramming"),

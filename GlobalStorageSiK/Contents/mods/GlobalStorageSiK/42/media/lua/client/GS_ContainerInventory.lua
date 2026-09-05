@@ -78,6 +78,10 @@ function Inventory.mount(parent, editor, node, options)
 		end })
 	local tableOptions = GlobalStorageSiK.TerminalItems.tableOptions(panel, view.controller)
 	tableOptions.parent, tableOptions.embedded = panel, true
+	-- Este Block contiene barra, acciones y tabla. La tabla es un hermano
+	-- compuesto, no el unico contenido directo del Block: si toma propiedad
+	-- directa ocupa todo el rectangulo y tapa los widgets anteriores.
+	tableOptions.directBlock = false
 	tableOptions.x, tableOptions.y, tableOptions.w, tableOptions.h = 8, 100, width - 16, 50
 	tableOptions.columns = GlobalStorageSiK.TerminalItems.columns({ hideZone = true })
 	tableOptions.rows, tableOptions.pagination = {}, nil

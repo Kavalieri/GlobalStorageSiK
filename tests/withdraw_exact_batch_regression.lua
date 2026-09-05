@@ -52,6 +52,9 @@ for i = 1, 28 do
 		mediaIndex = i,
 		count = 1,
 		itemIds = { i },
+		-- Expanded rows may originate in different containers. Exact item IDs are
+		-- authoritative; batching must not fragment or pin them to a stale node.
+		sourceNodeId = "node-" .. tostring((i % 3) + 1),
 	}
 end
 
@@ -71,6 +74,8 @@ end
 
 tick()
 assert(#sent == 1 and #sent[1].itemIds == 10, "first micro-batch must contain ten exact VHS")
+assert(sent[1].sourceNodeId == nil,
+	"exact item IDs must be resolved across the accessible network, not pinned to one node")
 assert(sent[1].mediaTitle == nil and sent[1].mediaIndex == nil,
 	"merged exact VHS must not retain the first title selector")
 respond(10)
@@ -78,11 +83,13 @@ respond(10)
 now = 400
 tick()
 assert(#sent == 2 and #sent[2].itemIds == 10, "second micro-batch must contain ten exact VHS")
+assert(sent[2].sourceNodeId == nil, "second exact micro-batch leaked a source node")
 respond(10)
 
 now = 800
 tick()
 assert(#sent == 3 and #sent[3].itemIds == 8, "last micro-batch must include all remaining VHS")
+assert(sent[3].sourceNodeId == nil, "last exact micro-batch leaked a source node")
 respond(8)
 
 assert(tick == nil, "completed exact batch left an OnTick handler installed")

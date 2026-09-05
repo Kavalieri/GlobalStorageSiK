@@ -232,7 +232,8 @@ function GS_ZoneEditorUI:applyAll()
 		self.terminal:onRenameZone(self.zone.id, name)
 		self.zone.name = name
 		if self.setHeader then
-			self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = name } })
+			self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = name,
+				separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
 		end
 	end
 	local n = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
@@ -436,7 +437,8 @@ function GS_ZoneEditorUI:setZone(terminal, zone)
 	self.terminal = terminal
 	self.zone = zone
 	if self.setHeader then
-		self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = zone.name or "?" } })
+		self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = zone.name or "?",
+			separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
 	end
 	if not sameZone then
 		self:resetForm()
@@ -756,7 +758,8 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 				and state.capacity.perZone[ui.zone.id]
 			if capacity then ui:onCapacityReceived(capacity) end
 			if ui.setHeader then
-				ui:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = ui.zone.name or "?" } })
+				ui:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = ui.zone.name or "?",
+					separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
 			end
 			-- Mismo bug/mismo fix que GS_TerminalUI_NodeEditor.lua:syncFormButtons
 			-- - anadir/quitar una regla dispara rebuildForm() de inmediato
