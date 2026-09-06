@@ -25,7 +25,7 @@ local Installation = GSSiK.API.Installation
 local Diagnostics = GSSiK.API.Diagnostics
 local Registry = GlobalStorageSiK.AddonRegistry
 
-local API_VERSION = "1.0.0-dev1"
+local API_VERSION = "1.0.0"
 local CAPABILITY_VERSIONS = {
 	Addon = "1.0.0",
 	Access = "1.0.0",

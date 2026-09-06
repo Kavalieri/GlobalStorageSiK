@@ -45,3 +45,22 @@ AGENTS.md
 **/AGENTS.md
 CLAUDE.md
 **/CLAUDE.md
+
+# Authoring and QA material is retained privately, never published.
+tests/
+**/tests/
+test/
+**/test/
+qa/
+QA/
+fixtures/
+corpus/
+harness/
+coverage/
+.agents/
+.claude/
+.codex/
+.env
+.env.*
+*.log
+*.bak
