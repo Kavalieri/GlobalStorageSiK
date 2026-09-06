@@ -259,6 +259,7 @@ function GlobalStorageSiK.ReaderAcquireUI.show(player, owner)
 	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	ui.modalOwner = owner
 	ui:initialise()
+	UI.Modal.setOwner(ui, owner)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.ReaderAcquireUI.instance = ui
 end

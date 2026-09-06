@@ -323,6 +323,7 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 
 		row.deleteBtn = createRowButton(pad + entryW + btnGap + renameW + btnGap, y, deleteW, ENTRY_H, T("IGUI_GS_DeleteZone"), scroll, function()
 			Confirmation.show({
+				owner = terminal,
 				title = T("IGUI_GS_DeleteZone"),
 				question = T("IGUI_GS_ZoneDeleteQuestion", zone.name or "?"),
 				consequences = T("IGUI_GS_ZoneDeleteConsequences", tonumber(zone.nodeCount) or 0),

@@ -582,6 +582,7 @@ function GS_FilterEditorUI:confirmContradiction(conflict, newRule, conflictConta
 		consequences = T("IGUI_GS_RuleContradictionConsequences", conflict.op, existingLabel, newRule.op, newLabel)
 	end
 	Confirmation.show({
+		owner = self,
 		title = T("IGUI_GS_FilterEditorTitle"),
 		question = question,
 		consequences = consequences,

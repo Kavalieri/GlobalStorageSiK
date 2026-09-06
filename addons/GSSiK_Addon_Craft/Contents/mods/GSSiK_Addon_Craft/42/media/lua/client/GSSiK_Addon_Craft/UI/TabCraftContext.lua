@@ -48,8 +48,7 @@ function Context.create(terminal)
 			if not owner or type(owner.openCraft) ~= "function" then
 				return false, "craft_action_unavailable"
 			end
-			owner.openCraft(terminal, isModActive("Neat_Crafting") and "neat" or "vanilla")
-			return true
+			return owner.openCraft(terminal, isModActive("Neat_Crafting") and "neat" or "vanilla")
 		end,
 		["open-cook"] = function()
 			local owner = GSSiK_Addon_Craft and GSSiK_Addon_Craft.TerminalUI

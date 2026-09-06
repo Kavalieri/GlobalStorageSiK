@@ -345,6 +345,7 @@ function GlobalStorageSiK.AdminDashboard.showHistory(events, networkLabel, netwo
 	ui.networkLabel = networkLabel or ""
 	ui.networkId = networkId
 	ui:initialise()
+	UI.Modal.setOwner(ui, dashboard)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.AdminDashboard.historyInstance = ui
 end
@@ -484,6 +485,7 @@ function GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
         ui.dashboard = dashboard
 	ui.member = member
 	ui:initialise()
+	UI.Modal.setOwner(ui, dashboard)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.AdminDashboard.memberEditorInstance = ui
 end
@@ -1245,6 +1247,7 @@ function GS_AdminDashboardUI:onDeleteNetworkConfirm()
 	local networkId = self._selectedNetworkId
 	local dashboard = self
 	Confirmation.show({
+		owner = self,
 		title = T("IGUI_GS_AdminDeleteNetwork"),
 		question = T("IGUI_GS_AdminDeleteNetworkQuestion", networkId),
 		consequences = T("IGUI_GS_AdminDeleteNetworkConsequences"),

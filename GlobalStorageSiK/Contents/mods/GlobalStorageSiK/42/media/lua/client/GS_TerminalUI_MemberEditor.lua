@@ -156,6 +156,7 @@ function GS_MemberEditorUI:onRemoveAccess()
 		self:closeAfterAction()
 	end
 	Confirmation.show({
+		owner = self,
 		title = T("IGUI_GS_MemberEditorTitle"),
 		question = T("IGUI_GS_PermRemoveQuestion", data.displayName or data.name or "?"),
 		consequences = T("IGUI_GS_PermRemoveConsequences", data.displayName or data.name or "?"),
@@ -170,6 +171,7 @@ function GS_MemberEditorUI:onLeaveNetwork()
 	if not self.terminal or not self.terminal.onLeaveNetwork then return end
 	local terminal = self.terminal
 	Confirmation.show({
+		owner = self,
 		title = T("IGUI_GS_MemberEditorTitle"),
 		question = T("IGUI_GS_MemberEditorLeaveQuestion"),
 		consequences = T("IGUI_GS_MemberEditorLeaveConsequences"),
@@ -437,6 +439,7 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 	ui.viewerRole = viewerRole or "member"
 	ui.isSelf = isSelf
 	ui:initialise()
+	UI.Modal.setOwner(ui, terminal)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.TerminalMemberEditor.instance = ui
 end

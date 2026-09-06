@@ -77,6 +77,7 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 	local ok, err = pcall(function()
 		UI.Modal.input({
 			title = title,
+			owner = options.owner,
 			text = defaultText,
 			fieldTitle = maxVal and (T("IGUI_GS_QuantityAvailableNow") .. ": " .. tostring(maxVal))
 				or T("IGUI_GS_QuantityPrompt"),

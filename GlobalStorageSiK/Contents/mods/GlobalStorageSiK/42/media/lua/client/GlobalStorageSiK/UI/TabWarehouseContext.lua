@@ -231,7 +231,10 @@ function TabWarehouseContext.create(terminal, panel)
 			data = { warehouse = {
 				headerActions = { redistribution.action },
 				capacity = CapacityPresentation.fromState(
-					terminal.terminalState and terminal.terminalState.capacity, { count = itemCount }),
+					terminal.terminalState and terminal.terminalState.capacity, {
+						count = itemCount,
+						typeCount = terminal.terminalState and terminal.terminalState.itemTypeCount,
+					}),
 				search = { query = terminal._warehouseQuery or "" },
 				filters = {
 					family = { items = filterItems(text("IGUI_GS_FilterCategoryAll"), main), selected = mainKey },

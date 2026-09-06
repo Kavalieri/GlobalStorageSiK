@@ -26,6 +26,7 @@ function Confirmation.show(options)
 	end
 	return UI.Modal.confirm({
 		playerNum = options.playerNum,
+		owner = options.owner,
 		title = options.title,
 		question = options.question,
 		consequences = options.consequences,

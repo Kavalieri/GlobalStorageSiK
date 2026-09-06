@@ -109,6 +109,8 @@ local function promptCustomAmount(player, rowData, onWithdraw)
 
 	GlobalStorageSiK.QuantityPrompt.show({
 
+		owner = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance,
+
 		title = T("IGUI_GS_WithdrawAmountPrompt"),
 		acceptText = T("IGUI_GS_QuantityWithdraw"),
 

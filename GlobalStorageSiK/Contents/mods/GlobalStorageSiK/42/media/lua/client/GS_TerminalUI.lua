@@ -739,7 +739,7 @@ function GS_TerminalUI:refreshFromState(state)
 		if state.redistributeActive ~= nil then
 			merged.redistributeActive = state.redistributeActive == true
 		end
-		if state.itemTypeCount then
+		if state.itemTypeCount ~= nil then
 			merged.itemTypeCount = state.itemTypeCount
 		end
 		if state.capacity then

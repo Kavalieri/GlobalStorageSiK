@@ -373,6 +373,7 @@ local function createAddonActionButton(self, parent, width, def, isInstalled, ca
 				return
 			end
 				GlobalStorageSiK.Confirmation.show({
+					owner = self,
 					playerNum = self.playerNum,
 					title = T("IGUI_GS_AddonUninstallBtn"),
 					question = T("IGUI_GS_AddonUninstallQuestion", def.titleKey and T(def.titleKey) or def.id),
@@ -732,7 +733,7 @@ end
 --- ver nota en buildLayout: sin esto la ventana releia el mirror local de
 --- ModData y podia mostrar "Instalar" para un addon que la propia bahia
 --- ya pintaba como instalado.
-function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, terminal, installed)
+function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, terminal, installed, owner)
 	if not addonId or not addonDefinition(addonId) then
 		return
 	end
@@ -755,6 +756,7 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.terminal = terminal
 	ui.installed = installed or {}
 	ui:initialise()
+	UI.Modal.setOwner(ui, owner or terminal)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
 end

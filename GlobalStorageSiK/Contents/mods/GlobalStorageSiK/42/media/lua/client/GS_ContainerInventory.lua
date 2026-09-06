@@ -157,7 +157,10 @@ function Inventory.mount(parent, editor, node, options)
 		self.block:setBounds(self.block.x, self.block.y, self.block.w, height)
 		local count = 0
 		for i = 1, #self.rows do count = count + (tonumber(self.rows[i].count) or 0) end
-		self.bar:setProgress(Capacity.fromState(self.capacity, { count = count }))
+		self.bar:setProgress(Capacity.fromState(self.capacity, {
+			count = count,
+			typeCount = #self.rows,
+		}))
 		self.rendering = false
 		for key, details in pairs(panel._detailPages) do
 			if details.nextPage and panel._expandedKeys and panel._expandedKeys[key] then

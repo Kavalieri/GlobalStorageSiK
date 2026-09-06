@@ -107,8 +107,9 @@ local function createProductButton(x, y, w, h, title, target, onClick,
 	return button
 end
 
-local function confirmAction(message, onAccept, consequences)
-	return Confirmation.show({ question = message, consequences = consequences, onAccept = onAccept })
+local function confirmAction(owner, message, onAccept, consequences)
+	return Confirmation.show({ owner = owner, question = message,
+		consequences = consequences, onAccept = onAccept })
 end
 
 -- Estos helpers conservan la geometria historica del editor, pero delegan
@@ -300,7 +301,7 @@ function GS_NodeEditorUI:confirmExtendToZone()
 	local count = countOtherZoneNodes(nodes, self.node.zoneId, self.node.id)
 	if count == 0 then return end
 	local message = T("IGUI_GS_NodeExtendToZoneQuestion", count, self.node.zoneName or "?")
-	confirmAction(message, function()
+	confirmAction(self, message, function()
 		GlobalStorageSiK.NetClient.sendCommand("applyNodeTemplateToZone", {
 			zoneId = self.node.zoneId,
 			rules = self.node.rules or {},
@@ -314,7 +315,7 @@ end
 function GS_NodeEditorUI:confirmExclude()
 	if not self.node then return end
 	local message = T("IGUI_GS_NodeExcludeQuestion", self.node.displayName or self.node.name or "?")
-	confirmAction(message, function()
+	confirmAction(self, message, function()
 		self:requestNodeUpdate({ enabled = false, membership = "excluded" })
 	end, T("IGUI_GS_NodeExcludeConsequences"))
 end
@@ -396,7 +397,7 @@ end
 function GS_NodeEditorUI:confirmRemoveFromNetwork()
 	if not self.node or not self.terminal then return end
 	local nodeName = self.node.displayName or self.node.name or "?"
-	confirmAction(T("IGUI_GS_NodeRemoveQuestion", nodeName), function()
+	confirmAction(self, T("IGUI_GS_NodeRemoveQuestion", nodeName), function()
 		if self.node and self.terminal then
 			self.terminal:onRemoveNode(self.node.id)
 			GlobalStorageSiK.TerminalNodeEditor.close()
@@ -419,7 +420,7 @@ function GS_NodeEditorUI:confirmConfigTransferProposal(proposal)
 		or proposal.sourceId ~= self.node.id then return end
 	local sourceName = self.node.displayName or self.node.name or "?"
 	local targetName = proposal.targetName or "?"
-	confirmAction(T("IGUI_GS_NodeTransferConfigQuestion", sourceName, targetName), function()
+	confirmAction(self, T("IGUI_GS_NodeTransferConfigQuestion", sourceName, targetName), function()
 		self.terminal:onTransferNodeConfiguration(self.node.id, proposal.token)
 	end, T("IGUI_GS_NodeTransferConfigConsequences", sourceName, targetName))
 end
@@ -447,7 +448,7 @@ function GS_NodeEditorUI:confirmRebindProposal(proposal)
 	local sourceName = self.node.displayName or self.node.name or "?"
 	local targetName = proposal.targetName or "?"
 	self._rebindCandidates = nil
-	confirmAction(T("IGUI_GS_NodeRebindQuestion", sourceName, targetName), function()
+	confirmAction(self, T("IGUI_GS_NodeRebindQuestion", sourceName, targetName), function()
 		self.terminal:onRebindNode(self.node.id, proposal.rebindToken)
 	end, T("IGUI_GS_NodeRebindConsequences", sourceName, targetName))
 end
@@ -592,7 +593,7 @@ function GS_NodeEditorUI:ensureForm()
 		inheritedColumn:block(self.inheritedZoneHost, self.inheritedZoneHost.height)
 		self.editZoneFromNodeBtn = button(inheritedColumn, T("IGUI_GS_NodeInheritedEditZoneBtn"), function()
 			GlobalStorageSiK.TerminalZoneEditor.open(self.terminal, zone,
-				self.terminal.terminalState and self.terminal.terminalState.nodes or {})
+				self.terminal.terminalState and self.terminal.terminalState.nodes or {}, self)
 		end)
 		inheritedColumn:block(self.editZoneFromNodeBtn, CONTROL_METRICS.buttonHeight)
 		rulesColumn:block(inherited, inheritedColumn:finish())
@@ -628,7 +629,7 @@ function GS_NodeEditorUI:ensureForm()
 			end
 			local conflict = GlobalStorageSiK.RulesUI.detectContradiction(node.rules, newRule)
 			if conflict then
-				confirmAction(T("IGUI_GS_RuleContradictionQuestion", conflict.op,
+				confirmAction(self, T("IGUI_GS_RuleContradictionQuestion", conflict.op,
 					describeCondition(conflict.condition), op, describeCondition(condition)), apply,
 					T("IGUI_GS_RuleContradictionConsequences", conflict.op,
 						describeCondition(conflict.condition), op, describeCondition(condition)))
@@ -1149,7 +1150,7 @@ end
 ---@param terminal GS_TerminalUI|nil
 ---@param node table
 ---@param categories string[]
-function GlobalStorageSiK.TerminalNodeEditor.open(terminal, node, categories)
+function GlobalStorageSiK.TerminalNodeEditor.open(terminal, node, categories, owner)
 	if not node then
 		return
 	end
@@ -1172,6 +1173,7 @@ function GlobalStorageSiK.TerminalNodeEditor.open(terminal, node, categories)
 
 	local ui = GS_NodeEditorUI:new(x, y, w, h)
 	ui:initialise()
+	UI.Modal.setOwner(ui, owner or terminal)
 	UI.Modal.show(ui)
 	ui:setNode(terminal, node, categories)
 	GlobalStorageSiK.TerminalNodeEditor.instance = ui

@@ -46,8 +46,7 @@ function Context.create(terminal)
 		if not owner or type(owner.openBuild) ~= "function" then
 			return false, "build_action_unavailable"
 		end
-		owner.openBuild(terminal, isModActive("Neat_Building") and "neat" or "vanilla")
-		return true
+		return owner.openBuild(terminal, isModActive("Neat_Building") and "neat" or "vanilla")
 	end } }
 	local state, statusText, statusTone = sessionPresentation()
 	local neat, warning = isModActive("Neat_Building"), nil

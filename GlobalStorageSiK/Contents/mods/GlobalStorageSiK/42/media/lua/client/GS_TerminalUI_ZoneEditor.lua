@@ -86,8 +86,8 @@ local function createProductButton(x, y, w, h, title, target, onClick,
 	return button
 end
 
-local function confirmAction(title, question, consequences, onAccept)
-	return Confirmation.show({ title = title, question = question,
+local function confirmAction(owner, title, question, consequences, onAccept)
+	return Confirmation.show({ owner = owner, title = title, question = question,
 		consequences = consequences, onAccept = onAccept })
 end
 
@@ -357,7 +357,9 @@ function GS_ZoneEditorUI:ensureForm()
 		keyOf = function(row) return row.id end,
 		onRowClick = function(payload)
 			local row = payload and payload.item
-			if row and row.sourceNode then GlobalStorageSiK.TerminalNodeEditor.open(terminal, row.sourceNode, {}) end
+			if row and row.sourceNode then
+				GlobalStorageSiK.TerminalNodeEditor.open(terminal, row.sourceNode, {}, self)
+			end
 		end,
 	})
 	if not zoneNodesTable then
@@ -666,7 +668,7 @@ end
 --- nunca al volver a incluir).
 function GS_ZoneEditorUI:confirmExcludeZone()
 	if not self.zone then return end
-	confirmAction(T("IGUI_GS_ZoneEditorTitle"),
+	confirmAction(self, T("IGUI_GS_ZoneEditorTitle"),
 		T("IGUI_GS_ZoneExcludeQuestion", self.zone.name or "?"),
 		T("IGUI_GS_ZoneExcludeConsequences"), function()
 		if self.zone then
@@ -681,7 +683,7 @@ function GS_ZoneEditorUI:confirmDelete()
 	for i = 1, #nodes do
 		if self.zone and nodes[i].zoneId == self.zone.id then count = count + 1 end
 	end
-	confirmAction(T("IGUI_GS_ZoneEditorTitle"),
+	confirmAction(self, T("IGUI_GS_ZoneEditorTitle"),
 		T("IGUI_GS_ZoneDeleteQuestion", self.zone and self.zone.name or "?"),
 		T("IGUI_GS_ZoneDeleteConsequences", count), function()
 		if self.zone and self.terminal then
@@ -695,7 +697,7 @@ end
 ---@param terminal GS_TerminalUI|nil
 ---@param zone table
 ---@param allNodes table[]|nil
-function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
+function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes, owner)
 	if not zone then
 		return
 	end
@@ -713,6 +715,7 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes)
 
 	local ui = GS_ZoneEditorUI:new(x, y, w, h)
 	ui:initialise()
+	UI.Modal.setOwner(ui, owner or terminal)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.TerminalZoneEditor.instance = ui
 	ui:setZone(terminal, zone)

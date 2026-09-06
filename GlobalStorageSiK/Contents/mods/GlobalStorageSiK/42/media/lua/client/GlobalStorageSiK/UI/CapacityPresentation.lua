@@ -49,9 +49,14 @@ function CapacityPresentation.fromState(capacity, options)
 		label = text("IGUI_GS_WeightUsedOnly", numberText(used))
 	end
 	local count = tonumber(options.count)
+	local typeCount = tonumber(options.typeCount)
 	local containers = options.kind == "containers"
 	if count == nil then count = tonumber(containers and cap.containerCount or cap.itemCount) end
-	if count ~= nil then
+	if count ~= nil and typeCount ~= nil and not containers then
+		label = text("IGUI_GS_NodeStatsLine", tostring(math.max(0, math.floor(count))),
+			tostring(math.max(0, math.floor(typeCount))))
+			.. " " .. MIDDLE_DOT .. " " .. label
+	elseif count ~= nil then
 		local key = containers and "IGUI_GS_CapacityContainerCount" or "IGUI_GS_CapacityItemCount"
 		label = text(key, tostring(math.max(0, math.floor(count))))
 			.. " " .. MIDDLE_DOT .. " " .. label
@@ -75,6 +80,8 @@ function CapacityPresentation.fromState(capacity, options)
 		usedWeight = used,
 		effectiveCapacity = total,
 		percent = percent,
+		itemCount = count,
+		itemTypeCount = typeCount,
 		personalBonus = personalBonus,
 		partialEstimate = cap.partialEstimate == true,
 	}

@@ -154,8 +154,7 @@ retainRegistration("item-actions", API.ItemActions.registerProvider({
 			if not recipe then return false end
 		end
 		local itemString = not recipe and request.inputFullType and ("!" .. request.inputFullType) or nil
-		terminal:openNetworkCraft("vanilla", recipe, itemString)
-		return true
+		return TerminalModule.openCraft(terminal, "vanilla", recipe, itemString)
 	end,
 }))
 
@@ -164,7 +163,7 @@ retainRegistration("item-actions", API.ItemActions.registerProvider({
 function TerminalModule.openCraft(terminal, mode, recipe, itemString)
 	local player = Terminal.player(terminal)
 	if not player or not terminal then
-		return
+		return false, terminal and "no_player" or "no_terminal"
 	end
 	local state = Terminal.state(terminal) or {}
 	-- Antes, si begin() u openHandcraft() fallaban, el clic no hacia nada
@@ -188,28 +187,27 @@ function TerminalModule.openCraft(terminal, mode, recipe, itemString)
 	GSSiK_Addon_Craft.Log.debug("openNetworkCraft mode=" .. tostring(mode)
 		.. " networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
 		.. " reason=" .. tostring(beginReason))
+	local opened, openReason = false, beginReason
 	if began then
-		local opened, openReason = Session.openHandcraft("Craft", mode, recipe, itemString)
+		opened, openReason = Session.openHandcraft("Craft", mode, recipe, itemString)
 		GSSiK_Addon_Craft.Log.debug("openHandcraft opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
 	if terminal.craftPanel then
 		TerminalModule.refresh(terminal.craftPanel, terminal)
 	end
+	return opened == true, openReason
 end
 
 retainRegistration("staff-action", Terminal.registerStaffAction("craft.vanilla", {
 	labelKey = "IGUI_GS_CraftOpenVanilla",
 	order = 10,
 	invoke = function(dashboard)
-		if dashboard and dashboard.setVisible then
+		local terminal = Terminal.current()
+		local opened, reason = TerminalModule.openCraft(terminal, "vanilla")
+		if opened and dashboard and dashboard.setVisible then
 			dashboard:setVisible(false)
 		end
-		local terminal = Terminal.current()
-		if terminal then
-			TerminalModule.openCraft(terminal, "vanilla")
-		else
-			Session.openHandcraft("Craft", "vanilla")
-		end
+		return opened, reason
 	end,
 }))
 

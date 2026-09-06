@@ -77,8 +77,7 @@ retainRegistration("item-actions", API.ItemActions.registerProvider({
 		local terminal = providerTerminal(context)
 		if not terminal then return false end
 		local itemString = request.inputFullType and ("!" .. request.inputFullType) or nil
-		TerminalModule.openBuild(terminal, "vanilla", nil, itemString)
-		return true
+		return TerminalModule.openBuild(terminal, "vanilla", nil, itemString)
 	end,
 }))
 
@@ -87,7 +86,7 @@ retainRegistration("item-actions", API.ItemActions.registerProvider({
 function TerminalModule.openBuild(terminal, mode, recipe, itemString)
 	local player = Terminal.player(terminal)
 	if not player or not terminal then
-		return
+		return false, terminal and "no_player" or "no_terminal"
 	end
 	local state = Terminal.state(terminal) or {}
 	-- Antes, si begin() u openBuild() fallaban, el clic no hacia nada
@@ -111,28 +110,27 @@ function TerminalModule.openBuild(terminal, mode, recipe, itemString)
 	GSSiK_Addon_Builder.Log.debug("openNetworkBuild mode=" .. tostring(mode)
 		.. " networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
 		.. " reason=" .. tostring(beginReason))
+	local opened, openReason = false, beginReason
 	if began then
-		local opened, openReason = Session.openBuild("Builder", mode, recipe, itemString)
+		opened, openReason = Session.openBuild("Builder", mode, recipe, itemString)
 		GSSiK_Addon_Builder.Log.debug("openBuild opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
 	if terminal.buildPanel then
 		TerminalModule.refresh(terminal.buildPanel, terminal)
 	end
+	return opened == true, openReason
 end
 
 retainRegistration("staff-action", Terminal.registerStaffAction("builder.vanilla", {
 	labelKey = "IGUI_GS_CraftOpenBuildVanilla",
 	order = 20,
 	invoke = function(dashboard)
-		if dashboard and dashboard.setVisible then
+		local terminal = Terminal.current()
+		local opened, reason = TerminalModule.openBuild(terminal, "vanilla")
+		if opened and dashboard and dashboard.setVisible then
 			dashboard:setVisible(false)
 		end
-		local terminal = Terminal.current()
-		if terminal then
-			TerminalModule.openBuild(terminal, "vanilla")
-		else
-			Session.openBuild("Builder", "vanilla")
-		end
+		return opened, reason
 	end,
 }))
 

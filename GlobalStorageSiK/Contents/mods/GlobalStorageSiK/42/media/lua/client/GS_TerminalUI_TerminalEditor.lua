@@ -146,6 +146,7 @@ end
 --- confirmación explícita antes de enviar la mutación autoritativa.
 function GS_TerminalEditorUI:onDeleteClicked()
 	Confirmation.show({
+		owner = self,
 		title = T("IGUI_GS_TerminalEditorTitle"),
 		question = T("IGUI_GS_UninstallQuestion"),
 		consequences = T("IGUI_GS_UninstallConsequences"),
@@ -231,6 +232,7 @@ function GlobalStorageSiK.TerminalTerminalEditor.open(terminal, row)
 	ui.terminal = terminal
 	ui.row = row
 	ui:initialise()
+	UI.Modal.setOwner(ui, terminal)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.TerminalTerminalEditor.instance = ui
 end
