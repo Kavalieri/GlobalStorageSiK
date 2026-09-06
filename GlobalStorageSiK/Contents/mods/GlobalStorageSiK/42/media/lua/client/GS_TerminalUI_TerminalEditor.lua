@@ -47,7 +47,6 @@ function GS_TerminalEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
-	self:setAlwaysOnTop(true)
 	UI.Modal.apply(self, {
 		kind = "compact", resizable = true, contentMode = "dock",
 		title = T("IGUI_GS_TerminalEditorTitle"),
@@ -232,7 +231,6 @@ function GlobalStorageSiK.TerminalTerminalEditor.open(terminal, row)
 	ui.terminal = terminal
 	ui.row = row
 	ui:initialise()
-	UI.Modal.setOwner(ui, terminal)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(terminal, ui)
 	GlobalStorageSiK.TerminalTerminalEditor.instance = ui
 end

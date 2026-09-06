@@ -228,7 +228,6 @@ function GS_AddonManageUI:initialise()
 	-- GS_ReaderAcquireUI.lua).
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
-	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
 	local def = addonDefinition(self.addonId)
 	UI.Modal.apply(self, {
@@ -756,8 +755,7 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui.terminal = terminal
 	ui.installed = installed or {}
 	ui:initialise()
-	UI.Modal.setOwner(ui, owner or terminal)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(owner or terminal, ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
 end
 

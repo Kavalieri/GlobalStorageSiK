@@ -1984,7 +1984,12 @@ local function itemTableOptions(panel, terminal)
 					or tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
 				local pending = panel._detailPending and panel._detailPending[key] == true
 				return {
-					total = detailPage and detailPage.total or tonumber(parent and parent.count) or 0,
+				-- El paginador cuenta exclusivamente filas hijas renderizadas. La
+				-- fila padre/cabecera aporta unidades, pero nunca una fila de detalle.
+				total = detailPage and (detailPage.totalRows or detailPage.total) or 0,
+					totalRows = detailPage and (detailPage.totalRows or detailPage.total) or nil,
+					totalUnits = detailPage and detailPage.totalUnits
+						or tonumber(parent and parent.count) or 0,
 					page = detailPage and detailPage.page or wantedPage,
 					pageSize = detailPage and detailPage.pageSize or 15,
 					disabled = pending or pageStale,

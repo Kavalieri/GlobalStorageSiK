@@ -150,7 +150,6 @@ function GS_FilterEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	self.backgroundColor = { r = 0.08, g = 0.09, b = 0.11, a = 0.96 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
-	self:setAlwaysOnTop(true)
 	self.operator = self.operator or "OR"
 	self.filterType = self.filterType or "category"
 	self.selectedItem = nil
@@ -613,7 +612,7 @@ function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded, parentMod
 	ui.operator = operator or "OR"
 	ui.onAdded = onAdded
 	ui:initialise()
-	UI.Modal.setOwner(ui, parentModal)
-	UI.Modal.show(ui)
+	if parentModal then UI.Modal.presentChild(parentModal, ui)
+	else UI.Modal.show(ui) end
 	GlobalStorageSiK.FilterEditor.instance = ui
 end

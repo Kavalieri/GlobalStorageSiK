@@ -172,7 +172,6 @@ function GS_NodeEditorUI:initialise()
 	})
 	self.clipChildren = true
 	self:setVisible(true)
-	self:setAlwaysOnTop(true)
 	self:createChildren()
 	self:calculateLayout()
 end
@@ -1194,8 +1193,7 @@ function GlobalStorageSiK.TerminalNodeEditor.open(terminal, node, categories, ow
 
 	local ui = GS_NodeEditorUI:new(x, y, w, h)
 	ui:initialise()
-	UI.Modal.setOwner(ui, owner or terminal)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(owner or terminal, ui)
 	ui:setNode(terminal, node, categories)
 	GlobalStorageSiK.TerminalNodeEditor.instance = ui
 	-- Verificación de solapes del modal al abrir (gated por DebugMode).

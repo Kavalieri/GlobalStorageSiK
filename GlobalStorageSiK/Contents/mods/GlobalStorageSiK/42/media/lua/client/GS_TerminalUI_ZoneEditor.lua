@@ -192,7 +192,6 @@ function GS_ZoneEditorUI:initialise()
 	})
 	self.clipChildren = true
 	self:setVisible(true)
-	self:setAlwaysOnTop(true)
 	self:createChildren()
 	self:calculateLayout()
 end
@@ -715,8 +714,7 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes, owne
 
 	local ui = GS_ZoneEditorUI:new(x, y, w, h)
 	ui:initialise()
-	UI.Modal.setOwner(ui, owner or terminal)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(owner or terminal, ui)
 	GlobalStorageSiK.TerminalZoneEditor.instance = ui
 	ui:setZone(terminal, zone)
 

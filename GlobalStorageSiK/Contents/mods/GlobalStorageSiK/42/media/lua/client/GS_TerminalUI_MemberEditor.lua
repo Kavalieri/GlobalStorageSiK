@@ -67,7 +67,6 @@ function GS_MemberEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
-	self:setAlwaysOnTop(true)
 	UI.Modal.apply(self, {
 		kind = "compact", resizable = false,
 		title = T("IGUI_GS_MemberEditorTitle"),
@@ -439,7 +438,6 @@ function GlobalStorageSiK.TerminalMemberEditor.open(terminal, data, viewerRole)
 	ui.viewerRole = viewerRole or "member"
 	ui.isSelf = isSelf
 	ui:initialise()
-	UI.Modal.setOwner(ui, terminal)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(terminal, ui)
 	GlobalStorageSiK.TerminalMemberEditor.instance = ui
 end

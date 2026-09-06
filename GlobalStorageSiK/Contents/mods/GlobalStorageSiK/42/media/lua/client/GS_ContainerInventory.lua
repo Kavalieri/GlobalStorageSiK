@@ -248,7 +248,9 @@ function Inventory.mount(parent, editor, node, options)
 			if existing.receivedPages[page] then return end
 			existing.receivedPages[page] = true
 			for i = 1, #(detail.items or {}) do existing.items[#existing.items + 1] = detail.items[i] end
-			existing.total = tonumber(detail.total) or #existing.items
+			existing.totalRows = tonumber(detail.totalRows) or tonumber(detail.total) or #existing.items
+			existing.totalUnits = tonumber(detail.totalUnits) or existing.totalRows
+			existing.total = existing.totalRows
 			existing.hasPrevious, existing.hasNext = false, false
 			panel._detailPending[detail.rowKey] = nil
 			existing.nextPage = detail.hasNext and (page + 1) or nil

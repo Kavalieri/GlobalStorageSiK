@@ -78,6 +78,7 @@ function Tickets.start(player, networkId, targetKey, pacingId, rowKey, revision,
 		rowKey = rowKey,
 		revision = selection.revision,
 		refs = selection.refs,
+		retryRefs = {},
 		count = selection.count,
 		offset = 1,
 		sequence = 1,
@@ -126,54 +127,102 @@ function Tickets.take(player, ticketId, networkId, targetKey, pacingId, sequence
 	if math.floor(tonumber(sequence) or -1) ~= ticket.sequence then
 		return nil, "ticket_sequence"
 	end
-	local first = ticket.refs[ticket.offset]
+	local fromRetry = #ticket.retryRefs > 0
+	local source = fromRetry and ticket.retryRefs or ticket.refs
+	local startIndex = fromRetry and 1 or ticket.offset
+	local first = source[startIndex]
 	if not first then return nil, "ticket_complete" end
 	limit = math.max(1, math.min(10, math.floor(tonumber(limit) or 10)))
-	local ids = {}
-	local index = ticket.offset
-	while index <= #ticket.refs and #ids < limit do
-		local ref = ticket.refs[index]
+	local ids, refs = {}, {}
+	local index = startIndex
+	while index <= #source and #ids < limit do
+		local ref = source[index]
 		if ref.fullType ~= first.fullType then break end
 		ids[#ids + 1] = ref.itemId
+		refs[#refs + 1] = ref
 		index = index + 1
 	end
+	local remainingBefore = #ticket.retryRefs + math.max(0, #ticket.refs - ticket.offset + 1)
 	return {
 		ticket = ticket,
 		fullType = first.fullType,
 		itemIds = ids,
+		refs = refs,
+		fromRetry = fromRetry,
+		sequence = ticket.sequence,
 		requested = #ids,
 		selectionCount = ticket.count,
-		remainingBefore = #ticket.refs - ticket.offset + 1,
+		remainingBefore = remainingBefore,
 	}, nil
 end
 
-function Tickets.commit(ticketId, attempted)
-	local ticket = records[ticketId]
-	if not ticket then return 0, true end
-	ticket.offset = math.min(#ticket.refs + 1,
-		ticket.offset + math.max(0, math.floor(tonumber(attempted) or 0)))
+--- Consume únicamente identidades físicas confirmadas por la transferencia.
+-- Las no movidas vuelven a una cola corta prioritaria; el resto del ticket no
+-- se reconstruye en cada microlote, evitando coste cuadrático con selecciones
+-- grandes. El batch es además la capacidad intransferible: debe ser exactamente
+-- el obtenido por take(), con el mismo ticket y secuencia.
+function Tickets.commit(batch, movedItemIds)
+	local ticket = type(batch) == "table" and batch.ticket or nil
+	if not ticket or records[ticket.id] ~= ticket or batch.sequence ~= ticket.sequence then
+		return nil, nil, nil, "ticket_sequence"
+	end
+	local attempted, confirmed = {}, {}
+	for i = 1, #(batch.refs or {}) do
+		local ref = batch.refs[i]
+		local itemId = ref and tonumber(ref.itemId) or nil
+		if itemId then attempted[tostring(math.floor(itemId))] = true end
+	end
+	for i = 1, #(movedItemIds or {}) do
+		local itemId = tonumber(movedItemIds[i])
+		local key = itemId and tostring(math.floor(itemId)) or nil
+		if key and attempted[key] then confirmed[key] = true end
+	end
+	local retry, consumed = {}, 0
+	for i = 1, #(batch.refs or {}) do
+		local ref = batch.refs[i]
+		local itemId = ref and tonumber(ref.itemId) or nil
+		local key = itemId and tostring(math.floor(itemId)) or nil
+		if key and confirmed[key] then consumed = consumed + 1
+		else retry[#retry + 1] = ref end
+	end
+	if batch.fromRetry then
+		local kept = {}
+		for i = #batch.refs + 1, #ticket.retryRefs do
+			kept[#kept + 1] = ticket.retryRefs[i]
+		end
+		for i = 1, #kept do retry[#retry + 1] = kept[i] end
+		ticket.retryRefs = retry
+	else
+		ticket.offset = ticket.offset + #batch.refs
+		for i = 1, #retry do ticket.retryRefs[#ticket.retryRefs + 1] = retry[i] end
+	end
 	ticket.sequence = ticket.sequence + 1
 	ticket.touchedMs = nowMs()
-	local remaining = math.max(0, #ticket.refs - ticket.offset + 1)
-	if remaining == 0 then records[ticketId] = nil end
-	return remaining, remaining == 0
+	local remaining = #ticket.retryRefs + math.max(0, #ticket.refs - ticket.offset + 1)
+	if remaining == 0 then records[ticket.id] = nil end
+	return remaining, remaining == 0, consumed, nil
 end
 
 function Tickets.cancel(player, ticketId)
 	local ticket = type(ticketId) == "string" and records[ticketId] or nil
-	if not ticket or ticket.playerKey ~= playerKey(player) then return false end
+	if not ticket or ticket.playerKey ~= playerKey(player) then return nil end
 	records[ticketId] = nil
-	return true
+	return ticket
 end
 
 function Tickets.cancelForPlayer(player)
 	local key = playerKey(player)
 	local ids = {}
+	local cancelled = {}
 	for ticketId, ticket in pairs(records) do
 		if ticket.playerKey == key then ids[#ids + 1] = ticketId end
 	end
-	for i = 1, #ids do records[ids[i]] = nil end
-	return #ids
+	for i = 1, #ids do
+		local ticket = records[ids[i]]
+		if ticket then cancelled[#cancelled + 1] = ticket end
+		records[ids[i]] = nil
+	end
+	return cancelled
 end
 
 return Tickets

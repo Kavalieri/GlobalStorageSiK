@@ -503,6 +503,10 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 	for i = 1, #details do
 		if details[i].detailKind ~= "recorded_media" then recordedMediaOnly = false break end
 	end
+	-- Cada entrada actual representa un único itemId físico. Se captura antes
+	-- de compactar filas cosméticas/medios. La cabecera padre nunca entra en
+	-- `details`, por lo que no puede sumar una unidad fantasma.
+	local totalUnits = #details
 	if cosmeticOnly or recordedMediaOnly then
 		local grouped, compact = {}, {}
 		for i = 1, #details do
@@ -545,13 +549,16 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 			return av < bv
 		end)
 	end
-	local total = #details
+	local totalRows = #details
 	local first = (page - 1) * pageSize + 1
-	local last = math.min(total, first + pageSize - 1)
+	local last = math.min(totalRows, first + pageSize - 1)
 	local items = {}
 	for i = first, last do items[#items + 1] = details[i] end
-	return { rowKey = rowKey, page = page, pageSize = pageSize, total = total,
-		hasPrevious = page > 1, hasNext = last < total, items = items }
+	return { rowKey = rowKey, page = page, pageSize = pageSize,
+		totalRows = totalRows, totalUnits = totalUnits,
+		-- Compatibilidad transitoria: `total` siempre fue paginación por filas.
+		total = totalRows,
+		hasPrevious = page > 1, hasNext = last < totalRows, items = items }
 end
 
 function GlobalStorageSiK.Index.requiresExactSelection(networkId, player, fullType)

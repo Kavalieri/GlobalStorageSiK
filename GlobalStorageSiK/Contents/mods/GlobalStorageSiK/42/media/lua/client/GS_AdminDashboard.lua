@@ -175,7 +175,6 @@ local HISTORY_COPY_COUNT = 100
 
 function GS_AdminHistoryUI:initialise()
 	UI.Window.callBase(self, "initialise")
-	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
 	UI.Modal.apply(self, {
 		kind = "task", title = T("IGUI_GS_AdminHistoryTitle"),
@@ -345,8 +344,7 @@ function GlobalStorageSiK.AdminDashboard.showHistory(events, networkLabel, netwo
 	ui.networkLabel = networkLabel or ""
 	ui.networkId = networkId
 	ui:initialise()
-	UI.Modal.setOwner(ui, dashboard)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(dashboard, ui)
 	GlobalStorageSiK.AdminDashboard.historyInstance = ui
 end
 
@@ -359,7 +357,6 @@ GS_AdminMemberEditorUI = UI.Window.derive("GS_AdminMemberEditorUI")
 
 function GS_AdminMemberEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
-	self:setAlwaysOnTop(true)
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
 	UI.Modal.apply(self, {
 		kind = "compact", title = T("IGUI_GS_AdminMemberEditorTitle"),
@@ -485,8 +482,7 @@ function GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
         ui.dashboard = dashboard
 	ui.member = member
 	ui:initialise()
-	UI.Modal.setOwner(ui, dashboard)
-	UI.Modal.show(ui)
+	UI.Modal.presentChild(dashboard, ui)
 	GlobalStorageSiK.AdminDashboard.memberEditorInstance = ui
 end
 

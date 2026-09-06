@@ -95,10 +95,32 @@ require "GS_NetTrace"
 
 GlobalStorageSiK.Server = GlobalStorageSiK.Server or {}
 
-function GlobalStorageSiK.Server.operationPacingKey(player, operationType, operationId)
+function GlobalStorageSiK.Server.operationPacingKey(player, operationType, operationId, networkId)
 	if type(operationId) ~= "string" or operationId == "" then return nil end
 	local username = player and player.getUsername and player:getUsername() or "?"
-	return tostring(operationType) .. ":" .. tostring(username) .. ":" .. string.sub(operationId, 1, 96)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or -1
+	return tostring(operationType) .. ":" .. tostring(username) .. ":" .. tostring(playerNum)
+		.. ":" .. tostring(networkId or "") .. ":" .. string.sub(operationId, 1, 96)
+end
+
+function GlobalStorageSiK.Server.releaseWithdrawTicketPacing(player, ticket)
+	if type(ticket) ~= "table" then return false end
+	local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw",
+		ticket.pacingId, ticket.networkId)
+	if not pacingKey then return false end
+	GlobalStorageSiK.OperationPacing.release(pacingKey)
+	return true
+end
+
+function GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player, tickets)
+	if type(tickets) ~= "table" then return 0 end
+	local released = 0
+	for i = 1, #tickets do
+		if GlobalStorageSiK.Server.releaseWithdrawTicketPacing(player, tickets[i]) then
+			released = released + 1
+		end
+	end
+	return released
 end
 
 --- En SP real (no anfitrion), isClient()/isServer() son ambos false - cliente
@@ -3257,7 +3279,7 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 			and string.sub(args.selectionMode, 1, 24) or nil
 		local pacingId = type(args.pacingId) == "string"
 			and string.sub(args.pacingId, 1, 96) or tostring(withdrawId or "")
-		local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw", pacingId)
+		local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "withdraw", pacingId, networkId)
 		local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
 			{ operationType = "withdraw" })
 		pacing.batchUnits = math.min(10, math.max(1, math.floor(tonumber(pacing.batchUnits) or 10)))
@@ -3372,17 +3394,31 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 				dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes,
 				pacing.batchUnits, sourceNodeId)
 		end)
-		local ticketComplete = false
+		local ticketComplete, ticketConsumed, ticketCommitReason = false, nil, nil
 		if ticketBatch then
-			ticketRemaining, ticketComplete = GlobalStorageSiK.WithdrawSelectionTickets.commit(
-				ticketId, ticketBatch.requested)
+			ticketRemaining, ticketComplete, ticketConsumed, ticketCommitReason =
+				GlobalStorageSiK.WithdrawSelectionTickets.commit(ticketBatch, movedItemIds)
+			if not ticketCommitReason and ticketConsumed ~= (tonumber(moved) or 0) then
+				ticketCommitReason = "ticket_identity_mismatch"
+			end
+			if ticketCommitReason then
+				GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, ticketId)
+				ticketComplete = true
+				ok, reason = false, ticketCommitReason
+			end
 		end
 		if ticketComplete or (not ticketBatch and (args.pacingFinal == true or not ok or (moved or 0) < requested)) then
 			GlobalStorageSiK.OperationPacing.release(pacingKey)
 		end
 		GlobalStorageSiK.Log.debug("Withdraw", "withdraw-validate mode=" .. tostring(selectionMode)
 			.. " match=" .. tostring((moved or 0) > 0)
-			.. " reason=" .. tostring(reason) .. " moved=" .. tostring(moved or 0))
+			.. " reason=" .. tostring(reason) .. " moved=" .. tostring(moved or 0)
+			.. " ticketConsumed=" .. tostring(ticketConsumed)
+			.. " ticketRemaining=" .. tostring(ticketRemaining)
+			.. " player=" .. tostring(player and player:getUsername())
+			.. " network=" .. tostring(networkId)
+			.. " pacingId=" .. tostring(pacingId)
+			.. " withdrawId=" .. tostring(withdrawId))
 		if (moved or 0) > 0 then
 			afterTransferSync(player, networkId, searchQuery, { snapshotsUpdated = snapshotsUpdated })
 		end
@@ -3399,7 +3435,11 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 				selectionTicket = ticketComplete and nil or ticketId,
 				selectionSequence = ticketBatch and ticketBatch.ticket.sequence or nil,
 				ticketRemaining = ticketRemaining, selectionCount = selectionCount,
-				itemIds = args.returnItemIds == true and requested == 1 and movedItemIds or nil,
+				-- El cliente exacto necesita las identidades confirmadas incluso si
+				-- el microlote fue parcial para conservar las no movidas.
+				itemIds = (selectionMode == "exact_ids" or selectionMode == "exact_group")
+					and movedItemIds
+					or (args.returnItemIds == true and requested == 1 and movedItemIds or nil),
 				sourceNodeId = args.returnItemIds == true and requested == 1
 					and sourceNodeIds and sourceNodeIds[1] or nil,
 			},
@@ -3438,10 +3478,12 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "closeTerminal" then
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
-		GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player)
+		GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player,
+			GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player))
 
 	elseif command == "cancelWithdrawSelection" then
-		GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, args.selectionTicket)
+		GlobalStorageSiK.Server.releaseWithdrawTicketPacing(player,
+			GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, args.selectionTicket))
 
 	elseif command == "identityHello" then
 		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo tras
@@ -4258,7 +4300,7 @@ local function onClientCommand(module, command, player, args)
 
 		runLockedTransfer(player, networkId, "depositItems", function()
 			local pacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "deposit",
-				type(args.queueId) == "string" and args.queueId or args.operationId)
+				type(args.queueId) == "string" and args.queueId or args.operationId, networkId)
 			local pacing = GlobalStorageSiK.OperationPacing.forOperation(pacingKey,
 				{ operationType = "deposit" })
 			local allowedOrigins = {
@@ -5775,7 +5817,8 @@ if Events and Events.OnPlayerDeath then
 		if not player or not GlobalStorageSiK.isAuthoritative() then
 			return
 		end
-		GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player)
+		GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player,
+			GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player))
 		local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.warn("Permissions", "OnPlayerDeath charName=" .. tostring(charName)

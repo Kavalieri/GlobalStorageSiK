@@ -26,6 +26,51 @@ local nextDispatchMs = 0
 local responseDeadlineMs = 0
 local operation = nil
 
+local function copyItemIds(itemIds, limit)
+	local copied = {}
+	local maximum = math.max(0, math.floor(tonumber(limit) or #(itemIds or {})))
+	for i = 1, math.min(#(itemIds or {}), maximum) do
+		copied[#copied + 1] = itemIds[i]
+	end
+	return copied
+end
+
+local function appendItemIds(target, itemIds)
+	for i = 1, #(itemIds or {}) do target[#target + 1] = itemIds[i] end
+end
+
+-- Quita exclusivamente las identidades que el servidor confirma como movidas.
+-- Las intentadas pero no movidas permanecen al frente para el siguiente lote.
+local function consumeConfirmedItemIds(pendingItemIds, attemptedItemIds, movedItemIds)
+	local attempted, confirmed = {}, {}
+	for i = 1, #(attemptedItemIds or {}) do
+		local itemId = tonumber(attemptedItemIds[i])
+		if itemId then attempted[tostring(math.floor(itemId))] = true end
+	end
+	for i = 1, #(movedItemIds or {}) do
+		local itemId = tonumber(movedItemIds[i])
+		local key = itemId and tostring(math.floor(itemId)) or nil
+		if not key or not attempted[key] or confirmed[key] then
+			return pendingItemIds or {}, 0, false
+		end
+		confirmed[key] = true
+	end
+	local remaining = {}
+	local consumed = 0
+	for i = 1, #(pendingItemIds or {}) do
+		local itemId = pendingItemIds[i]
+		local numericId = tonumber(itemId)
+		local key = numericId and tostring(math.floor(numericId)) or tostring(itemId)
+		if confirmed[key] then
+			confirmed[key] = nil
+			consumed = consumed + 1
+		else
+			remaining[#remaining + 1] = itemId
+		end
+	end
+	return remaining, consumed, true
+end
+
 local function runCompletion(request, ok, result)
 	local callback = request and request.onComplete
 	if not callback then return end
@@ -41,7 +86,10 @@ local function failQueuedCompletions(cancelledCurrent, cancelledQueue, reason)
 		runCompletion(cancelledCurrent, false, {
 			reason = reason or "cancelled",
 			moved = cancelledCurrent.totalMoved or 0,
-			itemIds = {},
+			itemIds = cancelledCurrent.movedItemIds or {},
+			unmovedItemIds = cancelledCurrent.pendingItemIds or {},
+			unmovedCount = math.max(0,
+				math.floor(tonumber(cancelledCurrent.remaining) or 0)),
 		})
 	end
 	for i = 1, #cancelledQueue do
@@ -162,16 +210,25 @@ local function startNext()
 	end
 	current = table.remove(queue, 1)
 	current.totalMoved = 0
+	current.movedItemIds = {}
 	current.remaining = current.amount > 0 and math.floor(current.amount) or nil
 	current.all = current.openEnded == true
 	current.sequence = 0
-	current.itemIdOffset = 1
 	current.selectionTicket = nil
 	current.selectionSequence = 1
 	current.staleRetryCount = 0
 	current.awaitingFreshSelection = false
 	current.selectionMode = current.rowData.selectionMode
 		or ((current.rowData.itemIds and #current.rowData.itemIds > 0) and "exact_ids" or "aggregate")
+	if current.selectionMode == "exact_ids" then
+		current.pendingItemIds = copyItemIds(current.rowData.itemIds, current.remaining)
+		current.remaining = #current.pendingItemIds
+		if operation and current.expectedCount ~= current.remaining then
+			operation.totalExpected = math.max(0,
+				(operation.totalExpected or 0) - (current.expectedCount or 0) + current.remaining)
+		end
+		current.expectedCount = current.remaining
+	end
 	if current.selectionMode == "exact_group" then
 		current.all = true
 		current.remaining = nil
@@ -192,12 +249,12 @@ local function dispatchCurrent()
 	current.batchRequested = requested
 	current.requestId = current.logicalId .. ":" .. tostring(current.sequence)
 	local exactItemIds = {}
-	local visibleIds = current.rowData.itemIds or {}
 	if current.selectionMode == "exact_ids" then
-		for i = current.itemIdOffset, math.min(#visibleIds, current.itemIdOffset + requested - 1) do
-			exactItemIds[#exactItemIds + 1] = visibleIds[i]
+		for i = 1, math.min(#(current.pendingItemIds or {}), requested) do
+			exactItemIds[#exactItemIds + 1] = current.pendingItemIds[i]
 		end
 	end
+	current.batchItemIds = exactItemIds
 	local expectedRequestId = current.requestId
 	-- Armar ANTES del envío: en SP/host el bypass local puede entregar y
 	-- resolver actionResult de forma síncrona dentro de sendCommand.
@@ -562,6 +619,12 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		GlobalStorageSiK.WithdrawClient.cancelAll("invalid_response")
 		return false
 	end
+	if transfer.networkId ~= current.networkId then
+		GlobalStorageSiK.Log.error("WithdrawClient", "response network mismatch",
+			"expected=" .. tostring(current.networkId) .. " received=" .. tostring(transfer.networkId))
+		GlobalStorageSiK.WithdrawClient.cancelAll("network_mismatch")
+		return false
+	end
 	-- La lista visible se actualiza por delta confirmado en TerminalSync. No
 	-- pedir además un catálogo completo por cada micro-lote; el servidor ya
 	-- consolida una captura incremental después del periodo de calma.
@@ -612,26 +675,46 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		GlobalStorageSiK.Log.debug("WithdrawClient", "selection stale; explicit refresh requested")
 		return true
 	end
-	current.totalMoved = (current.totalMoved or 0) + moved
 	if selectionMode == "exact_ids" then
-		current.itemIdOffset = (current.itemIdOffset or 1) + (current.batchRequested or 0)
-	else
-		current.itemIdOffset = (current.itemIdOffset or 1) + moved
+		local confirmedIds = transfer.itemIds or {}
+		local pending, consumed, identitiesValid = consumeConfirmedItemIds(
+			current.pendingItemIds, current.batchItemIds, confirmedIds)
+		if not identitiesValid or consumed ~= moved then
+			GlobalStorageSiK.Log.error("WithdrawClient", "exact response identity mismatch",
+				"moved=" .. tostring(moved) .. " confirmedIds=" .. tostring(consumed)
+					.. " withdrawId=" .. tostring(current.requestId)
+					.. " network=" .. tostring(current.networkId))
+			GlobalStorageSiK.WithdrawClient.cancelAll("identity_mismatch")
+			return false
+		end
+		current.pendingItemIds = pending
+		current.remaining = #pending
+		appendItemIds(current.movedItemIds, confirmedIds)
+	elseif selectionMode == "exact_group" then
+		local confirmedIds = transfer.itemIds or {}
+		if #confirmedIds ~= moved then
+			GlobalStorageSiK.Log.error("WithdrawClient", "group response identity mismatch",
+				"moved=" .. tostring(moved) .. " confirmedIds=" .. tostring(#confirmedIds)
+					.. " withdrawId=" .. tostring(current.requestId)
+					.. " network=" .. tostring(current.networkId))
+			GlobalStorageSiK.WithdrawClient.cancelAll("identity_mismatch")
+			return false
+		end
+		appendItemIds(current.movedItemIds, confirmedIds)
 	end
+	-- Solo contabilizar después de validar que cada unidad movida pertenece al
+	-- microlote y a la operación/red que siguen en vuelo.
+	current.totalMoved = (current.totalMoved or 0) + moved
 	if operation then
 		operation.totalMoved = (operation.totalMoved or 0) + moved
-		operation.inspected = (operation.inspected or 0) + (current.batchRequested or 0)
-		operation.skipped = (operation.skipped or 0)
-			+ math.max(0, (current.batchRequested or 0) - moved)
+		operation.inspected = (operation.inspected or 0) + moved
 		operation.batches = (operation.batches or 0) + 1
 		local revision = tonumber(transfer.inventoryRevision)
 		if revision then
 			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
 		end
 	end
-	if selectionMode == "exact_ids" then
-		current.remaining = math.max(0, (current.remaining or 0) - (current.batchRequested or 0))
-	elseif selectionMode ~= "exact_group" and not current.all then
+	if selectionMode ~= "exact_group" and selectionMode ~= "exact_ids" and not current.all then
 		current.remaining = math.max(0, (current.remaining or 0) - moved)
 	end
 	-- not_found (tambien parcial) significa que la captura visible se agoto o
@@ -653,7 +736,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		GlobalStorageSiK.WithdrawClient.cancelAll(cleanReason)
 		return false
 	end
-	local shouldContinue = exactHasMore and (args.ok == true or exhausted)
+	local shouldContinue = exactHasMore and moved > 0 and (args.ok == true or exhausted)
 		or (selectionMode ~= "exact_group" and args.ok == true and moved > 0 and not exhausted
 				and ((current.all) or (not current.all and (current.remaining or 0) > 0)))
 	if shouldContinue then
@@ -664,10 +747,19 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 	end
 	if operation then operation.rowsDone = (operation.rowsDone or 0) + 1 end
 	local completedRequest = current
+	local unresolvedCount = math.max(0, math.floor(tonumber(completedRequest.remaining) or 0))
+	if completedRequest.selectionTicket and unresolvedCount > 0 then
+		GlobalStorageSiK.NetClient.sendCommand("cancelWithdrawSelection", {
+			networkId = completedRequest.networkId,
+			selectionTicket = completedRequest.selectionTicket,
+		})
+	end
 	local completionResult = {
 		reason = reason,
 		moved = completedRequest and completedRequest.totalMoved or moved,
-		itemIds = transfer.itemIds or {},
+		itemIds = completedRequest.movedItemIds or {},
+		unmovedItemIds = completedRequest.pendingItemIds or {},
+		unmovedCount = unresolvedCount,
 		sourceNodeId = transfer.sourceNodeId,
 		networkId = transfer.networkId,
 		fullType = transfer.fullType,
