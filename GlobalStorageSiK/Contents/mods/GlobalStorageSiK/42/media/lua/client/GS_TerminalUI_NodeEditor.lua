@@ -671,6 +671,25 @@ function GS_NodeEditorUI:ensureForm()
 		end
 		finish(recovery, recoveryColumn)
 	end
+
+	-- Estos dos bloques formaban parte del editor antes de su migracion al
+	-- compositor SiK.UI. syncFormButtons siguio actualizando sus referencias,
+	-- pero ensureForm dejo de crearlas y por eso los contadores desaparecieron
+	-- silenciosamente. Se reconstruyen como Blocks reales y consumen solamente
+	-- el snapshot/capacidad autoritativos ya cacheados para este contenedor.
+	local itemCount, typeCount = nodeItemStats(node)
+	local statsBlock = section(nil)
+	self.statsBlock = statsBlock
+	local statsColumn = statsBlock:beginColumn()
+	self.statsLbl = label(statsColumn, T("IGUI_GS_NodeStatsLine", itemCount, typeCount))
+	finish(statsBlock, statsColumn)
+
+	local occupancyBlock = section(nil)
+	self.occupancyBlock = occupancyBlock
+	local occupancyColumn = occupancyBlock:beginColumn()
+	self.occupancyLbl = label(occupancyColumn, occupancyLabelText(nodeCapacityInfo(node)))
+	finish(occupancyBlock, occupancyColumn)
+
 	self._contentsStartY = bottom
 	self._contentsFingerprint = nil
 	self._formBuilt = true
@@ -1013,6 +1032,8 @@ function GS_NodeEditorUI:resetForm()
 	self._formBuilt = false
 	self.statsLbl        = nil
 	self.occupancyLbl    = nil
+	self.statsBlock      = nil
+	self.occupancyBlock  = nil
 	self.nameLbl         = nil
 	self.nameEntry       = nil
 	self.rulesTitleLbl   = nil

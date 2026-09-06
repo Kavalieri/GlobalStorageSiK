@@ -32,6 +32,7 @@ require "GS_UIDebug"
 require "GSSiK_API"
 
 local UI = require "GS_UI_Framework"
+local CapacityPresentation = require "GlobalStorageSiK/UI/CapacityPresentation"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
 GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or {}
@@ -662,18 +663,31 @@ function GS_TerminalUI:applyCapacityState(cap)
 		netScroll._weightLbl.b = b
 	end
 	if self.itemsWeightLbl then
+		-- El Almacen comparte la barra de capacidad con el resumen fisico del
+		-- inventario. Ambos contadores proceden del estado autoritativo: las
+		-- unidades son la suma de sus filas agregadas y los tipos distintos son
+		-- el itemTypeCount calculado por servidor (incluido el cero explicito).
+		-- No reutilizar weightText aqui: hacerlo borraba el binding compuesto
+		-- creado por TabWarehouseContext en cada refreshNetworkPanel().
+		local state = self.terminalState or {}
+		local rows = state.items
+		local itemCount = nil
+		if rows ~= nil then
+			itemCount = 0
+			for i = 1, #rows do
+				itemCount = itemCount + (tonumber(rows[i].count) or 0)
+			end
+		end
+		local warehouseCapacity = CapacityPresentation.fromState(cap, {
+			count = itemCount,
+			typeCount = tonumber(state.itemTypeCount),
+		})
 		if self.itemsWeightLbl.setProgress then
-			self.itemsWeightLbl:setProgress({
-				value = math.max(0, math.min(1, pct / 100)),
-				label = weightText,
-				status = status,
-				tone = tone,
-				mode = "determinate",
-			})
+			self.itemsWeightLbl:setProgress(warehouseCapacity)
 		elseif self.itemsWeightLbl.setStatus then
-			self.itemsWeightLbl:setStatus(weightText, tone)
+			self.itemsWeightLbl:setStatus(warehouseCapacity.label, warehouseCapacity.tone)
 		elseif self.itemsWeightLbl.setName then
-			self.itemsWeightLbl:setName(weightText)
+			self.itemsWeightLbl:setName(warehouseCapacity.label)
 			self.itemsWeightLbl.r = r
 			self.itemsWeightLbl.g = g
 			self.itemsWeightLbl.b = b
