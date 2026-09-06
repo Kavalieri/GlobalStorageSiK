@@ -7,9 +7,9 @@
   &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;2efdfaaf1c684377295a6217d15986024d1a01da3c18fb281f48a465253bb844&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;fd4b9398aec56b11913478f0c35fdfb95ee6899cda64d624b164aa4ad3168abf&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;797642dd24770b3737dc3466c73889f22d6ea929dec4b9ce0d384a49dd1ee1e1&quot;,
+  &quot;visualMasterSha256&quot;: &quot;c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;8c250c9db8afec2ee5edd8a5544f6ebcb8d86654aa9e7298b505eb4cbc5c5455&quot;
 }">
   <title>tab-options</title>
@@ -67,6 +67,7 @@
   --sik-block-header-symbol-gap: 8px;
   --sik-combo-arrow-size: 14px;
   --sik-combo-arrow-inset: var(--sik-space-3);
+  --sik-field-inline-padding: var(--sik-space-3);
   --sik-icon-close: url("icons/sik-close-18.png");
   --sik-icon-check: url("icons/sik-check-18.png");
   --sik-icon-info: url("icons/sik-info-24.png");
@@ -709,7 +710,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 }
 
 .sik-field,
-.sik-search { padding: 0 var(--sik-space-3); }
+.sik-search { padding-inline: var(--sik-field-inline-padding); }
+.sik-field::placeholder,
+.sik-search::placeholder { opacity: 1; }
 .sik-field { width: 100%; }
 .sik-quantity-modal { min-width: min(360px, 100%); }
 .sik-quantity-control { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; gap: var(--sik-space-2); }
@@ -1390,6 +1393,68 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     row.setAttribute("aria-expanded", expanded ? "false" : "true");
     const marker = row.querySelector(".sik-expander");
     if (marker) marker.textContent = expanded ? "▶" : "▼";
+    const table = row.closest(".sik-table");
+    if (table?.classList.contains("sik-warehouse-table")) {
+      refreshInlinePagers(table);
+      filterWarehouse();
+    }
+    else refreshInlinePagers(table || document);
+    requestAnimationFrame(refreshOverflow);
+  }
+
+  function getInlinePagerRows(pager) {
+    const table = pager.closest(".sik-table");
+    const key = pager.dataset.groupChild;
+    if (!table || !key) return [];
+    return Array.from(table.querySelectorAll(`[data-group-child="${key}"]`)).filter((row) => !row.classList.contains("sik-pager-row"));
+  }
+
+  function refreshInlinePager(pager) {
+    const rows = getInlinePagerRows(pager);
+    if (!rows.length) return;
+    const pages = Array.from(new Set(rows.map((row) => Number(row.dataset.pagerPage || 1)))).sort((left, right) => left - right);
+    const requestedPage = Number(pager.dataset.currentPage || pages[0]);
+    const page = pages.includes(requestedPage) ? requestedPage : pages[0];
+    pager.dataset.currentPage = String(page);
+    const visibleRows = rows.filter((row) => Number(row.dataset.pagerPage || 1) === page);
+    const first = Math.min(...visibleRows.map((row) => Number(row.dataset.pagerRowIndex || 1)));
+    const last = Math.max(...visibleRows.map((row) => Number(row.dataset.pagerRowIndex || first)));
+    const totalUnits = visibleRows.reduce((sum, row) => sum + (Number(row.dataset.pagerUnits) || 0), 0);
+    const label = pager.querySelector("[data-pager-label]");
+    if (label) label.textContent = `Mostrando ${first}–${last} de ${rows.length} líneas · ${totalUnits} objetos`;
+    pager.querySelectorAll("[data-pager-direction]").forEach((button) => {
+      button.disabled = button.dataset.pagerDirection === "previous" ? page === pages[0] : page === pages[pages.length - 1];
+    });
+    const parent = pager.closest(".sik-table")?.querySelector(`[data-expand-group="${pager.dataset.groupChild}"]`);
+    if (!pager.closest(".sik-warehouse-table")) {
+      const expanded = parent?.getAttribute("aria-expanded") !== "false";
+      rows.forEach((row) => { row.hidden = !expanded || Number(row.dataset.pagerPage || 1) !== page; });
+      pager.hidden = !expanded;
+    }
+  }
+
+  function refreshInlinePagers(scope = document) {
+    if (!scope) return;
+    const pagers = scope.matches?.(".sik-pager-row") ? [scope] : scope.querySelectorAll?.(".sik-pager-row");
+    Array.from(pagers || []).forEach(refreshInlinePager);
+  }
+
+  function changeInlinePager(button) {
+    const pager = button.closest(".sik-pager-row");
+    if (!pager || button.disabled) return;
+    const rows = getInlinePagerRows(pager);
+    const pages = Array.from(new Set(rows.map((row) => Number(row.dataset.pagerPage || 1)))).sort((left, right) => left - right);
+    const current = Number(pager.dataset.currentPage || pages[0]);
+    const index = pages.indexOf(current);
+    const next = button.dataset.pagerDirection === "previous" ? pages[index - 1] : pages[index + 1];
+    if (!next) return;
+    pager.dataset.currentPage = String(next);
+    const table = pager.closest(".sik-table");
+    if (table?.classList.contains("sik-warehouse-table")) {
+      refreshInlinePager(pager);
+      filterWarehouse();
+    }
+    else refreshInlinePagers(table || document);
     requestAnimationFrame(refreshOverflow);
   }
 
@@ -1566,7 +1631,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       const detailMatch = detail === "all" || rowDetail === detail;
       const collapsed = childGroup && parent && parent.getAttribute("aria-expanded") === "false";
       const filtering = Boolean(query) || family !== "all" || group !== "all" || detail !== "all";
-      row.hidden = !(textMatch && familyMatch && groupMatch && detailMatch) || (collapsed && !filtering);
+      const pager = childGroup ? table.querySelector(`.sik-pager-row[data-group-child="${childGroup}"]`) : null;
+      const offPage = pager && Number(row.dataset.pagerPage || 1) !== Number(pager.dataset.currentPage || 1);
+      row.hidden = !(textMatch && familyMatch && groupMatch && detailMatch) || (collapsed && !filtering) || offPage;
     });
     refreshOverflow();
   }
@@ -1622,6 +1689,11 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
         dialog.showModal();
         dialog.querySelector(".sik-modal-actions .sik-button")?.focus();
       }
+    }
+    const pagerButton = event.target.closest("[data-pager-direction]");
+    if (pagerButton) {
+      changeInlinePager(pagerButton);
+      return;
     }
     const tab = event.target.closest("[data-tab]");
     if (tab) activateTab(tab);
@@ -1712,6 +1784,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   installFloatingTooltips();
   installItemTooltips();
   document.querySelectorAll("[data-sik-table]").forEach(configureTable);
+  refreshInlinePagers();
   const requestedTab = params.get("tab");
   if (requestedTab) {
     const tab = findByDataset("[data-tab]", "tab", requestedTab);

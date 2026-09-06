@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RemoteDetailLoading": "正在載入物品詳細資訊…",
+	"IGUI_GS_RemoteDetailUnavailable": "詳細資訊不可用；請重新整理庫存。",
+	"IGUI_GS_RemoteGroupTotal": "群組總計：{1} 件物品",
+	"IGUI_GS_ScanUpdatingAge": "正在更新庫存 · 上次有效資料為 {1} 秒前",
+	"IGUI_GS_ItemDetailPage": "第 {1}-{2} 行，共 {3} 行 · {4} 個物品",
 	"IGUI_GS_BlockedVacantTitle": "Network without an owner",
 	"IGUI_GS_BlockedVacantMessage": "This network has no active owner and you can claim it.",
 	"IGUI_GS_BlockedRecoverTitle": "Previous access available",

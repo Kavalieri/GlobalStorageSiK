@@ -60,19 +60,18 @@ local function resetMetrics()
 	pathTraceSamples = {}
 end
 
---- Muestra extremo-a-extremo acotada y solo bajo el sublog DETALLE de
+--- Muestra extremo-a-extremo acotada bajo la categoria normal de
 --- Inventario. Máximo tres filas por etapa y época; no reclasifica.
 ---@param stage string
 ---@param fullType string|nil
 ---@param nativePath string|nil
 function GlobalStorageSiK.NativeProduct.tracePathSample(stage, fullType, nativePath)
 	local count = pathTraceSamples[stage] or 0
-	if count >= 3 or not GlobalStorageSiK.Log or not GlobalStorageSiK.Log.detail
-		or not GlobalStorageSiK.Sandbox or not GlobalStorageSiK.Sandbox.debugDetailEnabled
-		or not GlobalStorageSiK.Sandbox.debugDetailEnabled("Inventory") then return end
+	if count >= 3 or not GlobalStorageSiK.Log or not GlobalStorageSiK.Log.debug
+		or not GlobalStorageSiK.Sandbox or not GlobalStorageSiK.Sandbox.debugMode()
+		or not GlobalStorageSiK.Sandbox.debugCategoryEnabled("Inventory") then return end
 	pathTraceSamples[stage] = count + 1
-	local area = stage == "clientReceive" and "Client" or "Server"
-	GlobalStorageSiK.Log.detail(area, "nativePath stage=" .. tostring(stage)
+	GlobalStorageSiK.Log.debug("NativeProduct", "nativePath stage=" .. tostring(stage)
 		.. " fullType=" .. tostring(fullType) .. " value=" .. tostring(nativePath)
 		.. " decodable=" .. tostring(GlobalStorageSiK.NativeProduct.decodePath(nativePath) ~= nil))
 end

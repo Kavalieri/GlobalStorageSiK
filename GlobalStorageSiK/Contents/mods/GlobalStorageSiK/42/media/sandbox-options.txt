@@ -254,7 +254,7 @@ option GlobalStorageSiK.DebugMode
 option GlobalStorageSiK.DebugRelayToClients
 {
 	type = boolean,
-	default = true,
+	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugRelayToClients,
 }
@@ -267,13 +267,6 @@ option GlobalStorageSiK.DebugCatNetwork
 	translation = GlobalStorageSiK_DebugCatNetwork,
 }
 
-option GlobalStorageSiK.DebugDetailNetwork
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailNetwork,
-}
 
 option GlobalStorageSiK.DebugCatTerminalAccess
 {
@@ -299,13 +292,6 @@ option GlobalStorageSiK.DebugCatCraft
 	translation = GlobalStorageSiK_DebugCatCraft,
 }
 
-option GlobalStorageSiK.DebugDetailCraft
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailCraft,
-}
 
 option GlobalStorageSiK.DebugCatInventory
 {
@@ -315,13 +301,6 @@ option GlobalStorageSiK.DebugCatInventory
 	translation = GlobalStorageSiK_DebugCatInventory,
 }
 
-option GlobalStorageSiK.DebugDetailInventory
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailInventory,
-}
 
 option GlobalStorageSiK.DebugCatTooltip
 {
@@ -443,13 +422,6 @@ option GlobalStorageSiK.DebugCatAddons
 	translation = GlobalStorageSiK_DebugCatAddons,
 }
 
-option GlobalStorageSiK.DebugDetailCapacityBonus
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailCapacityBonus,
-}
 
 option GlobalStorageSiK.DebugCatLiteratureRead
 {
@@ -459,13 +431,6 @@ option GlobalStorageSiK.DebugCatLiteratureRead
 	translation = GlobalStorageSiK_DebugCatLiteratureRead,
 }
 
-option GlobalStorageSiK.DebugDetailRouter
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailRouter,
-}
 
 option GlobalStorageSiK.DebugSkipTerminalAccess
 {
@@ -559,13 +524,6 @@ option GlobalStorageSiK.BulkDepositEnabled
 	translation = GlobalStorageSiK_BulkDepositEnabled,
 }
 
-option GlobalStorageSiK.OperationHaloFeedback
-{
-	type = boolean,
-	default = true,
-	page = GlobalStorageSiK_Items,
-	translation = GlobalStorageSiK_OperationHaloFeedback,
-}
 
 option GlobalStorageSiK.RejectDepositIfNoMatch
 {

@@ -249,14 +249,10 @@ function GlobalStorageSiK.Sandbox.bulkDepositEnabled()
 	return SandboxVars.GlobalStorageSiK.BulkDepositEnabled ~= false
 end
 
---- Muestra progreso y resumen de depósito, extracción y Auto Sort mediante
---- notas sobre el personaje. Es feedback de juego, independiente de debug.
+--- Legacy compatibility: informational operation halos have been retired.
 ---@return boolean
 function GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
-	if not SandboxVars.GlobalStorageSiK then
-		return true
-	end
-	return SandboxVars.GlobalStorageSiK.OperationHaloFeedback ~= false
+	return false
 end
 
 --- Presupuesto interno e invariable de una petición masiva. Ya no se expone
@@ -412,9 +408,9 @@ end
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugRelayToClients()
 	if not SandboxVars.GlobalStorageSiK then
-		return true
+		return false
 	end
-	return SandboxVars.GlobalStorageSiK.DebugRelayToClients ~= false
+	return SandboxVars.GlobalStorageSiK.DebugRelayToClients == true
 end
 
 -- dev36: debugModeUI() (interruptor DebugModeUI independiente para el
@@ -434,37 +430,23 @@ end
 --- DebugMode activo, cada categoria se puede apagar por separado para ver
 --- solo el tipo de diagnostico que se necesita en cada momento. Todas
 --- En instalaciones nuevas todas quedan apagadas y el administrador activa
---- solo el bloque que corresponda a su prueba. Una clave ausente de una
---- partida anterior conserva el fallback historico para no ocultar trazas.
+--- solo el bloque que corresponda a su prueba. Claves ausentes/desconocidas OFF.
 ---@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"AdminTableRuntime"|"RecordedMediaRuntime"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
 	if not SandboxVars.GlobalStorageSiK then
-		return true
+		return false
 	end
 	local varName = "DebugCat" .. tostring(key)
 	local value = SandboxVars.GlobalStorageSiK[varName]
-	if value == nil then
-		-- Categoria desconocida (area de log sin mapear todavia): no
-		-- silenciarla por defecto, mejor pecar de mostrar de mas que de
-		-- ocultar una traza nueva sin que nadie se de cuenta del porque.
-		return true
-	end
 	return value == true
 end
 
---- Sublog detallado dentro de una categoria principal. Siempre requiere que
---- la categoria padre este activa; las claves nuevas/ausentes quedan apagadas
---- para que una actualizacion no empiece a volcar inventarios completos.
+--- Legacy DETAIL keys are deliberately ignored, including persisted true values.
 ---@param key string "Network"|"Craft"|"Inventory"|"Router"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugDetailEnabled(key)
-	if not GlobalStorageSiK.Sandbox.debugMode()
-		or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(key) then
-		return false
-	end
-	if not SandboxVars.GlobalStorageSiK then return false end
-	return SandboxVars.GlobalStorageSiK["DebugDetail" .. tostring(key)] == true
+	return false
 end
 
 -- Requisitos fijos del producto. No son opciones sandbox: las cuatro claves

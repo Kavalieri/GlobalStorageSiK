@@ -192,14 +192,18 @@ local function buildHeaderSpec(state)
 				progress.checked, progress.total, true), value = value, mode = mode,
 			status = "warning", tone = "warning",
 		}
-	elseif state.scanActive == true or (state.scanStatus and state.scanStatus.state == "RUNNING") then
+	elseif state.scanActive == true or state.reconcilePending == true
+		or (state.scanStatus and (state.scanStatus.state == "RUNNING"
+			or state.scanStatus.state == "STALE_RETRY")) then
 		local scan = state.scanStatus or {}
 		local done = scan.progressDone or scan.zonesDone
 		local total = scan.progressTotal or scan.zonesTotal
 		local value, mode = operationProgress(done, total)
 		operation = {
-			label = operationLabel("IGUI_GS_ScanRunningShort",
-				done, total, true), value = value, mode = mode,
+			label = state.snapshotAgeMs and T("IGUI_GS_ScanUpdatingAge",
+				tostring(math.floor(math.max(0, tonumber(state.snapshotAgeMs) or 0) / 1000)))
+				or operationLabel("IGUI_GS_ScanRunningShort", done, total, true),
+			value = value, mode = mode,
 			status = "warning", tone = "warning",
 		}
 	end

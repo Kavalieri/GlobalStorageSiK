@@ -13,6 +13,7 @@ require "GS_ItemSnapshot"
 require "GS_RecordedMedia"
 require "GS_Sandbox"
 require "GS_Log"
+local RemotePresentation = require "GS_RemoteTooltipPresentation"
 local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.ItemNetworkTooltip = {}
@@ -360,6 +361,12 @@ local MAX_EXT_WIDTH = 520
 -- Coincide con el anclaje vanilla/fallback de ISToolTipInv. No se desplaza
 -- lateralmente el tooltip al añadir contenido SiK ya medido.
 local TOOLTIP_GUTTER = 24
+local renderCapturedTooltip
+
+local function remoteContextFor(item)
+	return GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.contextForProbe
+		and GlobalStorageSiK.RemoteItemDetail.contextForProbe(item) or nil
+end
 
 local function withdrawDragActive()
 	return GlobalStorageSiK.TerminalWithdrawDrag
@@ -510,6 +517,12 @@ end
 --- ciclo igual, pero el jugador ve contenido real en vez de un hueco vacio.
 ---@param self table ISToolTipInv
 local function safeFallbackRender(self)
+	local remoteContext = remoteContextFor(self.item)
+	if remoteContext then
+		-- Even reentrance/cooldown must not fall back to fabricated script state.
+		if renderCapturedTooltip then renderCapturedTooltip(self, remoteContext) end
+		return
+	end
 	if withdrawDragActive() then
 		if self.setVisible then self:setVisible(false) end
 		return
@@ -624,11 +637,8 @@ local function buildTooltipBlocks(item, rowContext)
 		dynamicStateKey = GlobalStorageSiK.FluidTaxonomy and GlobalStorageSiK.FluidTaxonomy.stateKey
 			and GlobalStorageSiK.FluidTaxonomy.stateKey(item)
 	end
-	-- Las filas padre usan la misma sonda vanilla con contexto agregado. Las
-	-- filas hija adjuntan, bajo demanda, el snapshot exacto recibido del
-	-- servidor. El peso/estado/fluido ya los dibuja DoTooltip vanilla: no crear
-	-- un segundo anexo azul oportunista debajo del bloque SiK aceptado. El detalle
-	-- remoto se conserva solo como fuente de identidad y para VHS concretos.
+	-- Remote probes supply identity only. The snapshot-only renderer owns their
+	-- condition/food/fluid section; DoTooltip remains exclusive to real items.
 	-- Solo VHS: los libros ya describen en DoTooltip vanilla su habilidad y
 	-- rango, por lo que repetirlo en el anexo SiK añade ruido sin informacion.
 	-- La formacion de una cinta si es dato propio de su media concreta.
@@ -673,21 +683,56 @@ local function buildTooltipBlocks(item, rowContext)
 	return blocks
 end
 
+renderCapturedTooltip = function(panel, context)
+	if withdrawDragActive() then return end
+	local blocks = RemotePresentation.blocks(context)
+	local identity = context.detail and context.detail.ok == true and context.detail or context.row
+	local native = identity and identity.nativePath and GlobalStorageSiK.NativeProduct
+		and GlobalStorageSiK.NativeProduct.getView(identity.nativePath)
+	if native and native.fullLabel and native.fullLabel ~= "" then
+		blocks[#blocks + 1] = { lines = { T("IGUI_GS_DetailCategory", native.fullLabel) }, color = { 0.9, 0.85, 0.4, 1 } }
+	end
+	local extra = buildTooltipBlocks(panel.item, context.row)
+	for i = 1, #extra do blocks[#blocks + 1] = extra[i] end
+	local viewport = UI.Viewport.resolve(playerNumForItem(panel.item))
+	local width = math.min(MAX_EXT_WIDTH, math.max(1, viewport.w - TOOLTIP_GUTTER * 2))
+	local naturalWidth = extensionMetrics(blocks, 240)
+	width = math.min(width, naturalWidth)
+	local height = 0
+	for i = 1, #blocks do
+		local block = blocks[i]
+		block.lineColor, block.font = block.color, NET_FONT
+		block.paddingX, block.paddingY = 8, LINE_PAD
+		height = height + UI.Tooltip.measureSection(block, width).height
+	end
+	if not placeMeasuredTooltip(panel, panel.item, width, height) then return end
+	panel:setHeight(height)
+	UI.Tooltip.renderFrame(panel, 0, 0, width, height, {
+		backgroundColor = panel.backgroundColor, borderColor = panel.borderColor,
+	})
+	local y = 0
+	for i = 1, #blocks do
+		local measured = UI.Tooltip.renderSection(panel, blocks[i], 0, y, width)
+		y = y + measured.height
+	end
+end
+
 -- BUG REAL DE ARQUITECTURA cerrado (2026-08-27, ver comentario extenso junto
 -- a "hooksInstalled" arriba): dos vias de instalacion, evaluadas en este
 -- orden.
 --
 -- VIA 1 - integracion con TooltipLib (Workshop 3694097672) cuando esta
 -- presente: nos registramos como proveedor via TooltipLib.registerProvider,
--- SIN tocar ISToolTipInv.render en absoluto - cero riesgo de ciclo porque no
--- formamos parte de ninguna cadena de wrappers, es TooltipLib quien despacha
--- nuestro callback de forma aislada (su propio framework ya gestiona el
--- render real). Decision explicita: no depender de TooltipLib como unica
+-- TooltipLib despacha el anexo para inventarios reales. El wrapper único
+-- sigue siendo necesario para las sondas remotas: su rama previa evita que
+-- cualquier renderer base invente frescura o capacidad desde el script.
+-- Decision explicita: no depender de TooltipLib como unica
 -- solucion (es un mod opcional de terceros, la mayoria de jugadores no lo
 -- tendran) - esta via es una MEJORA cuando aplica, nunca la unica defensa.
 --
--- VIA 2 - wrapper propio, autonomo, instalado UNA SOLA VEZ (usado cuando
--- TooltipLib no esta presente): a diferencia del diseño anterior (dev7-dev28),
+-- VIA 2 - wrapper propio, autonomo, instalado UNA SOLA VEZ. Para objetos
+-- reales sin TooltipLib añade el anexo; con TooltipLib no lo duplica.
+-- A diferencia del diseño anterior (dev7-dev28),
 -- este wrapper NUNCA intenta recuperar la posicion exterior si otro mod
 -- envuelve por encima despues - se instala, y a partir de ahi es
 -- responsabilidad exclusiva de la guarda de reentrada (renderingInstances,
@@ -748,10 +793,9 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	if not FEATURE_ENABLED or hooksInstalled then
 		return hooksInstalled
 	end
-	if installViaTooltipLib() then
-		hooksInstalled = true
+	local usesTooltipLib = installViaTooltipLib()
+	if usesTooltipLib then
 		GlobalStorageSiK.Log.debug("ItemNetworkTooltip", "registrado como proveedor de TooltipLib")
-		return true
 	end
 	if not ISToolTipInv or not ISToolTipInv.render then
 		return false
@@ -780,6 +824,8 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		return result
 	end
 	wrapperBody = function(self, ...)
+		local remoteContext = remoteContextFor(self.item)
+		if remoteContext then return renderCapturedTooltip(self, remoteContext) end
 		if sharedRenderDepth > MAX_SHARED_RENDER_DEPTH then
 			pcall(safeFallbackRender, self)
 			return
@@ -815,6 +861,9 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 				end
 			end
 		end
+		-- TooltipLib already runs our provider for real items. Remote probes
+		-- bypass that base render above, so synthetic quantities never leak.
+		if usesTooltipLib then return result end
 		pcall(function()
 			if self.item and self.isVisible and self:isVisible() then
 				local blocks = buildTooltipBlocks(self.item, self._gsRemoteRow)

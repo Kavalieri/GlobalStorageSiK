@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RemoteDetailLoading": "Загрузка точных данных предмета…",
+	"IGUI_GS_RemoteDetailUnavailable": "Данные недоступны; обновите инвентарь.",
+	"IGUI_GS_RemoteGroupTotal": "Всего в группе: {1} предметов",
+	"IGUI_GS_ScanUpdatingAge": "Обновление инвентаря · последние верные данные {1} с назад",
+	"IGUI_GS_ItemDetailPage": "Строки {1}-{2} из {3} · {4} предметов",
 	"IGUI_GS_BlockedVacantTitle": "Network without an owner",
 	"IGUI_GS_BlockedVacantMessage": "This network has no active owner and you can claim it.",
 	"IGUI_GS_BlockedRecoverTitle": "Previous access available",

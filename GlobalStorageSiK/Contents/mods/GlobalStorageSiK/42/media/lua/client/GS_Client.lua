@@ -43,17 +43,19 @@ local function terminalUiForPlayer(playerNum)
 	return GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
 end
 
---- Nota flotante sobre el jugador. Los fallos (ok=false, p.ej. "Red sin
---- energía") se pintan en rojo y duran mas tiempo - antes todo salia en gris
---- clarito 300ms, facil de no ver mientras se mira la ventana del terminal
---- en vez del personaje.
+--- Fallos relevantes: halo breve. Información: estado de la UI del destinatario.
 ---@param text string|nil
 ---@param failed boolean|nil
-local function showMessage(text, failed)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+local function showMessage(text, failed, playerNum)
+	playerNum = tonumber(playerNum) or 0
+	local player = getSpecificPlayer and getSpecificPlayer(playerNum)
+	if not player and playerNum == 0 then
+		player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	end
 	if player and text then
 		if failed then
-			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 235, 90, 90, 600, { tone = "danger" })
+			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 235, 90, 90, 1200,
+				{ tone = "danger", playerNum = playerNum })
 		else
 			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 220, 220, 220, 300)
 		end
@@ -62,11 +64,6 @@ end
 
 ---@param args table|nil
 ---@return boolean
-local function isOperationFeedback(args)
-	return args ~= nil and (args.transfer ~= nil or args.deposit ~= nil or args.bulk ~= nil
-		or args.jobType == "redistribute")
-end
-
 --- Fusiona terminalState parcial de inventario con el estado cacheado previo.
 ---@param incoming table|nil
 ---@param prev table|nil
@@ -186,9 +183,18 @@ local function onServerCommand(module, command, args)
 		local ui = terminalUiForPlayer(playerNum)
 		if ui and ui.terminalState and args
 			and ui.terminalState.networkId == args.networkId then
-			ui.terminalState.scanActive = true
+			ui.terminalState.scanActive = args.state == "RUNNING" or args.state == "STALE_RETRY"
 			ui.terminalState.scanStatus = args
+			if args.snapshotAgeMs ~= nil then ui.terminalState.snapshotAgeMs = args.snapshotAgeMs end
 			if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+			local now = getTimestampMs and getTimestampMs() or 0
+			local panel = ui.networkPanel
+			if panel and panel._sikNetworkSurface and panel.isVisible and panel:isVisible()
+				and now >= (ui._gsScanStatusRefreshMs or 0)
+				and GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
+				ui._gsScanStatusRefreshMs = now + 1000
+				GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
+			end
 		end
 		return
 	elseif command == "actionResult" then
@@ -204,7 +210,7 @@ local function onServerCommand(module, command, args)
 			continuing = GlobalStorageSiK.WithdrawClient.onActionResult(args) == true or continuing
 		end
 		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
-		local capacityPopup = (require "GS_TransferFeedback").showResult(args)
+		local transferFeedback = (require "GS_TransferFeedback").showResult(args)
 		if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onActionResult(args) end
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
@@ -214,15 +220,13 @@ local function onServerCommand(module, command, args)
 		end
 		-- Cada cola consume exclusivamente su operation ID. Una respuesta de
 		-- otra acción nunca libera ni hace avanzar depósitos o retiradas.
-		if not continuing and not capacityPopup then
+		if not continuing and not transferFeedback then
 			local failed = args and args.ok == false
-			local showOperation = not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
-				or GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
-			-- Los errores nunca se silencian. La opción solo controla feedback
-			-- funcional de procesos largos; el resto de mensajes conserva su flujo.
-			if failed or not isOperationFeedback(args) or showOperation then
-				showMessage(resolvedMessage or "Listo", failed)
+			local reason = args and (args.reason or args.transfer and args.transfer.reason)
+			if reason == "cancelled" or reason == "snapshot_stale" or reason == "selection_stale" then
+				failed = false
 			end
+			showMessage(resolvedMessage, failed, args and args.playerNum)
 		end
 		if args and args.jobType == "redistribute" then
 			if args.jobState == "finished" and (args.redistributeTiers or args.redistributeTopTypes) then
@@ -243,12 +247,14 @@ local function onServerCommand(module, command, args)
 			end
 		end
 		if args and args.jobType == "zoneScan" then
-			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-			if ui and ui.terminalState then
+			local ui = terminalUiForPlayer(tonumber(args.playerNum) or 0)
+			if ui and ui.terminalState and ui.terminalState.networkId == args.networkId then
 				local scanState = args.jobState or "IDLE"
-				ui.terminalState.scanActive = scanState == "RUNNING"
+				local running = scanState == "RUNNING" or scanState == "STALE_RETRY"
+					or scanState == "INVALIDATED_BY_MUTATION"
+				ui.terminalState.scanActive = running
 				ui.terminalState.scan = ui.terminalState.scan or {}
-				ui.terminalState.scan.running = scanState == "RUNNING"
+				ui.terminalState.scan.running = running
 				ui.terminalState.scanStatus = args.scanStatus or ui.terminalState.scanStatus or {}
 				ui.terminalState.scanStatus.state = scanState
 				ui.terminalState.scanStatus.reason = args.reason or ui.terminalState.scanStatus.reason
@@ -547,7 +553,7 @@ local function onServerCommand(module, command, args)
 				end)
 				if not ok then
 					GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"))
+					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"), true)
 				end
 			end
 		elseif explicitOpen then
@@ -557,7 +563,7 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Log.info("Client", "terminalState", "open items=" .. tostring(itemCount))
 			if not GlobalStorageSiK.TerminalUI or type(GlobalStorageSiK.TerminalUI.show) ~= "function" then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show no disponible")
-				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
 				return
 			end
 			local ok, err = pcall(function()
@@ -565,7 +571,7 @@ local function onServerCommand(module, command, args)
 			end)
 			if not ok then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
 			elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.pendingInitialTab then
 				-- Ver terminalRegistered mas arriba: tras instalar un terminal
 				-- con exito, la ventana debe abrir directamente en Red (dev41:
@@ -618,7 +624,9 @@ local function onServerCommand(module, command, args)
 		end
 		if args and args.catalogRows and GlobalStorageSiK.WithdrawClient then
 			GlobalStorageSiK.WithdrawClient.onTerminalState({ networkId = args.networkId,
-				sourceNodeId = args.nodeId, inventoryRevision = args.inventoryRevision, items = args.catalogRows })
+				sourceNodeId = args.nodeId, inventoryRevision = args.inventoryRevision,
+				snapshotRevision = args.snapshotRevision, snapshotCertified = args.snapshotCertified,
+				items = args.catalogRows })
 		end
 		GlobalStorageSiK.Client.nodeContentsCache = GlobalStorageSiK.Client.nodeContentsCache or {}
 		local activeState = GlobalStorageSiK.Client.cachedTerminalState
@@ -689,7 +697,7 @@ local function onServerCommand(module, command, args)
 		elseif reason == "out_of_network_range" then
 			msgKey = "IGUI_GS_TerminalOutOfNetworkRange"
 		end
-		showMessage(GlobalStorageSiK.I18n.text(msgKey))
+		showMessage(GlobalStorageSiK.I18n.text(msgKey), true)
 	elseif command == "terminalRegistered" then
 		if args and args.ok and args.networkId then
 			local player = GlobalStorageSiK.NetClient.getPlayer()

@@ -284,7 +284,7 @@ local function shouldScanOnOpen(networkId)
 	return false, "recent"
 end
 
-local function scheduleSnapshotSync(networkId, player, revision)
+local function scheduleSnapshotSync(networkId, player, revision, reason)
 	if not networkId then
 		return
 	end
@@ -294,12 +294,15 @@ local function scheduleSnapshotSync(networkId, player, revision)
 	local now = serverNowMs()
 	local pending = pendingSnapshotSync[networkId]
 	if pending then
-		pending.dueMs = now + SNAPSHOT_QUIET_MS
-		-- Una transferencia incremental activa no debe disparar una captura
-		-- completa a mitad del trabajo. El limite vuelve a contar desde el ultimo
-		-- bloque confirmado; cuando cesa la actividad, dueMs la ejecuta en 2 s.
-		pending.forceMs = now + SNAPSHOT_FORCE_MS
+		if (revision or 0) > (pending.revision or 0) then
+			pending.dueMs = now + SNAPSHOT_QUIET_MS
+			-- Una transferencia incremental activa no debe disparar una captura
+			-- completa a mitad del trabajo. El limite vuelve a contar desde el ultimo
+			-- bloque confirmado; cuando cesa la actividad, dueMs la ejecuta en 2 s.
+			pending.forceMs = now + SNAPSHOT_FORCE_MS
+		end
 		pending.revision = math.max(pending.revision or 0, revision or 0)
+		pending.reason = reason or pending.reason
 		if player and player.getUsername then pending.username = player:getUsername() end
 	else
 		pendingSnapshotSync[networkId] = {
@@ -307,6 +310,7 @@ local function scheduleSnapshotSync(networkId, player, revision)
 			forceMs = now + SNAPSHOT_FORCE_MS,
 			revision = revision or 0,
 			username = player and player.getUsername and player:getUsername() or nil,
+			reason = reason or "inventory_mutation",
 		}
 	end
 end
@@ -343,6 +347,7 @@ local function flushPendingSnapshotSync()
 	end
 	local started, reason = GlobalStorageSiK.ZoneScanJob.start(player, selectedId, {
 		background = true,
+		reason = pending.reason,
 	})
 	if started then
 		-- Quitar fuera del recorrido. Si otra transferencia ocurre durante el
@@ -803,7 +808,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	-- terminalState real que recibe el cliente (items/nodos/zonas), solo las
 	-- cifras del propio ZoneScanJob (que son del escaneo, no del payload
 	-- final enviado). Siempre visible mientras dure esta investigacion.
-	GlobalStorageSiK.Log.warn("Server", "terminalStateSize",
+	GlobalStorageSiK.Log.debug("Server", "terminalStateSize",
 		"network=" .. tostring(networkId) .. " items=" .. tostring(rows and #rows or "not_modified")
 			.. " nodes=" .. tostring(#nodesList) .. " zones=" .. tostring(#zonesList))
 	local snapshotMeta, snapshotAgeMs = snapshotStatus(networkId)
@@ -1725,7 +1730,7 @@ local function reconcileOpenInventories()
 		if not access then clearTerminalWatcher(player); return end
 		if not pendingSnapshotSync[networkId] and not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 			and not GlobalStorageSiK.RedistributeJob.isActive(networkId) and shouldScanOnOpen(networkId) then
-			scheduleSnapshotSync(networkId, player, GlobalStorageSiK.Index.getInventoryRevision(networkId))
+			scheduleSnapshotSync(networkId, player, GlobalStorageSiK.Index.getInventoryRevision(networkId), "watcher_reconcile")
 			scheduled = true
 		end
 	end)
@@ -2135,7 +2140,8 @@ local function scanResult(networkId, state, key, reason, summary)
 		}
 	end
 	return {
-		ok = state == "COMPLETED", message = GlobalStorageSiK.I18n.remote(key),
+		ok = state == "COMPLETED" or state == "STALE_RETRY" or state == "INVALIDATED_BY_MUTATION",
+		networkId = networkId, message = GlobalStorageSiK.I18n.remote(key),
 		jobType = "zoneScan", jobState = state, reason = reason,
 		reasonCode = scanStatus.reasonCode or GlobalStorageSiK.I18n.scanReasonCode(reason),
 		failedZones = scanStatus.failedZones or 0,
@@ -2372,18 +2378,17 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 				if not retryPlayer and isTerminalWatcher(player, networkId) then retryPlayer = player end
 			end)
 		end
-		scheduleSnapshotSync(networkId, retryPlayer, currentRevision)
-		GlobalStorageSiK.Log.warn("ZoneScanJob", "discard unstable network="
+		scheduleSnapshotSync(networkId, retryPlayer, currentRevision, "invalidated_by_mutation")
+		GlobalStorageSiK.Log.debug("ZoneScanJob", "snapshot retry network="
 			.. tostring(networkId) .. " startRevision=" .. tostring(startRevision)
-			.. " currentRevision=" .. tostring(currentRevision))
-		GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, "FAILED", "snapshot_stale")
-		summary.networkId = networkId
-		forEachOnlinePlayer(function(player)
-			if isTerminalWatcher(player, networkId) then
-				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED",
-					"IGUI_GS_ScanFailed", "snapshot_stale", summary))
-			end
-		end)
+			.. " currentRevision=" .. tostring(currentRevision)
+			.. " nextAttemptMs=" .. tostring(pendingSnapshotSync[networkId].dueMs))
+		GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, "STALE_RETRY", "snapshot_stale")
+		local status = GlobalStorageSiK.ZoneScanJob.getStatus(networkId)
+		status.nextAttemptMs = pendingSnapshotSync[networkId].dueMs
+		status.inventoryRevision = currentRevision
+		status.snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+		GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
 		return
 	end
 	if summary._terminalState == "FAILED" then
@@ -2449,6 +2454,7 @@ end
 
 --- Actualizacion pequena de cabecera: nunca reconstruye ni reenvia el catalogo.
 function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
+	status.snapshotAgeMs = select(2, snapshotStatus(networkId))
 	forEachOnlinePlayer(function(player)
 		local username = player.getUsername and player:getUsername() or ""
 		local requested = requestedWatchers and requestedWatchers[username] ~= nil
@@ -3882,6 +3888,12 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		local rows, source, liveContainer = resolveNodeContents(node, networkId)
+		local _, snapshotComplete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
+		if not snapshotComplete or GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+			~= GlobalStorageSiK.Index.getInventoryRevision(networkId) then
+			scheduleSnapshotSync(networkId, player,
+				GlobalStorageSiK.Index.getInventoryRevision(networkId), "node_capture_pending")
+		end
 		local detailPage = nil
 		if type(args.rowKey) == "string" and #args.rowKey <= 500 then
 			if tonumber(args.inventoryRevision) ~= GlobalStorageSiK.Index.getInventoryRevision(networkId) then
@@ -3898,6 +3910,11 @@ local function onClientCommand(module, command, player, args)
 			networkId = networkId,
 			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 			nodeId = args.nodeId,
+			snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId),
+			snapshotCertified = snapshotComplete and GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+				== GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			snapshotAgeMs = select(2, snapshotStatus(networkId)),
+			reconcilePending = pendingSnapshotSync[networkId] ~= nil,
 			rows = rows,
 			catalogRows = not detailPage and GlobalStorageSiK.Index.buildRows(networkId, player, nil, node.id) or nil,
 			detailPage = detailPage,
@@ -5705,6 +5722,14 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 
+		local _, snapshotComplete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
+		if not snapshotComplete or GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+			~= GlobalStorageSiK.Index.getInventoryRevision(networkId) then
+			-- Reuse the network's pending capture; repeated drag requests cannot
+			-- start scans or postpone a same-revision retry indefinitely.
+			scheduleSnapshotSync(networkId, player,
+				GlobalStorageSiK.Index.getInventoryRevision(networkId), "selection_capture_pending")
+		end
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "getItemNetworkCounts" then

@@ -16,6 +16,9 @@ require "GS_OperationPacing"
 GlobalStorageSiK.WithdrawClient = {}
 
 local RESPONSE_TIMEOUT_MS = 10000
+-- A read-only recapture can take longer than a transfer ACK (12 s in TEST).
+-- Never extend the non-idempotent transfer deadline or retry a lost ACK.
+local SELECTION_REFRESH_TIMEOUT_MS = 30000
 local MAX_QUEUED_REQUESTS = 4096
 
 local queue = {}
@@ -133,8 +136,6 @@ end
 
 local function showProgress(force)
 	if not operation then return end
-	if GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
-		and not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled() then return end
 	local now = nowMs()
 	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
 	operation.lastProgressMs = now
@@ -148,7 +149,7 @@ local function showProgress(force)
 	-- Una operación puede contener grupos de títulos con varias unidades. Las
 	-- filas internas son un detalle de cola, no progreso del jugador: mostrar
 	-- ambas cifras convertía 8/34 en el engañoso "(6/28)" para VHS paginados.
-	-- El halo siempre comunica únicamente unidades físicas confirmadas.
+	-- El estado siempre comunica únicamente unidades físicas confirmadas.
 	pcall(function()
 		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 220, 200, 220,
 			{ channel = "withdraw-progress", dedupeKey = text, throttleMs = 1000 })
@@ -321,6 +322,19 @@ function GlobalStorageSiK.WithdrawClient.onTick()
 	end
 	if responseDeadlineMs > 0 then
 		if now < responseDeadlineMs then return end
+		if current.awaitingFreshSelection then
+			GlobalStorageSiK.Log.debug("WithdrawClient", "selection refresh expired",
+				"network=" .. tostring(current.networkId)
+					.. " withdrawId=" .. tostring(current.requestId))
+			local player = GlobalStorageSiK.NetClient.getPlayer()
+			if player then
+				GlobalStorageSiK.UIFeedback.halo(player,
+					GlobalStorageSiK.I18n.text("IGUI_GS_ScanReason_snapshot_stale"),
+					220, 220, 220, 1800)
+			end
+			GlobalStorageSiK.WithdrawClient.cancelAll("selection_stale")
+			return
+		end
 		-- Retirar no es idempotente: jamás se reenvía a ciegas una petición cuya
 		-- respuesta se perdió, porque podría retirar dos veces. Tampoco se continúa
 		-- con las filas siguientes: se aborta la operación lógica completa y se
@@ -389,10 +403,21 @@ end
 function GlobalStorageSiK.WithdrawClient.onTerminalState(state)
 	if not current or current.awaitingFreshSelection ~= true or not state then return false end
 	if state.networkId ~= current.networkId then return false end
-	if state.sourceNodeId ~= current.rowData.sourceNodeId then return false end
+	if state.snapshotCertified == false then return false end
 	local freshRevision = tonumber(state.inventoryRevision)
 	local staleRevision = tonumber(current.staleSelectionRevision)
-	if not freshRevision or (staleRevision and freshRevision <= staleRevision) then return false end
+	if not freshRevision or (staleRevision and freshRevision < staleRevision) then return false end
+	if staleRevision == freshRevision and state.snapshotCertified ~= true then return false end
+	if state.sourceNodeId ~= current.rowData.sourceNodeId then
+		if current.rowData.sourceNodeId and state.sourceNodeId == nil
+			and state.snapshotCertified == true and not current.freshNodeRequested then
+			current.freshNodeRequested = true
+			GlobalStorageSiK.NetClient.sendCommand("getNodeContents", {
+				networkId = current.networkId, nodeId = current.rowData.sourceNodeId,
+			})
+		end
+		return false
+	end
 	local freshRow = nil
 	for i = 1, #(state.items or {}) do
 		local candidate = state.items[i]
@@ -658,7 +683,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		current.staleSelectionRevision = current.rowData.selectionRevision
 		current.selectionTicket = nil
 		current.selectionSequence = 1
-		responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
+		responseDeadlineMs = nowMs() + SELECTION_REFRESH_TIMEOUT_MS
 		nextDispatchMs = math.huge
 		local sourceNodeId = current.rowData.sourceNodeId
 		local refreshSent = GlobalStorageSiK.NetClient.sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex", {
@@ -728,7 +753,7 @@ function GlobalStorageSiK.WithdrawClient.onActionResult(args)
 		or (reason and string.sub(reason, 1, 8) == "partial:" and not exhausted)
 	if hardFailure then
 		local cleanReason = reason and string.gsub(reason, "^partial:", "") or "unknown"
-		GlobalStorageSiK.Log.error("WithdrawClient", "operation stopped",
+		GlobalStorageSiK.Log.debug("WithdrawClient", "operation stopped",
 			"reason=" .. tostring(cleanReason)
 				.. " movedConfirmed=" .. tostring(operation and operation.totalMoved or moved))
 		args.ok = false

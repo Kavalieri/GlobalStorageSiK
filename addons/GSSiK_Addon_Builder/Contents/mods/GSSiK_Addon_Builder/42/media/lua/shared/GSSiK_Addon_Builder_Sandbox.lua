@@ -60,6 +60,6 @@ function GSSiK_Addon_Builder.Sandbox.isDebugCategoryEnabled(category)
 	if not GSSiK_Addon_Builder.Sandbox.isDebugMode() then return false end
 	local v = SandboxVars.GSSiK_Addon_Builder
 	if category == "Operations" then return v and v.DebugOperations == true end
-	if category == "Lifecycle" then return not v or v.DebugLifecycle ~= false end
-	return true
+	if category == "Lifecycle" then return v and v.DebugLifecycle == true end
+	return false
 end

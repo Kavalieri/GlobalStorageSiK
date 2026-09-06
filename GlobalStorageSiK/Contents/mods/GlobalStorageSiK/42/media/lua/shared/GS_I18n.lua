@@ -1460,11 +1460,44 @@ local function storeItemSearchHaystack(key, value)
 	end
 	itemSearchHaystackCache[key] = value
 end
+-- One localized presentation for rows, search and remote tooltips. A parent
+-- summarizes physical variants, never the number of visible detail lines.
+function GlobalStorageSiK.I18n.foodStateLabel(row)
+	if type(row) ~= "table" then return "" end
+	local seen, labels = {}, {}
+	if type(row.foodSummary) == "table" then
+		for _, key in ipairs({ "Fresh", "Stale", "Rotten", "Cooked", "Burnt", "Frozen" }) do
+			if row.foodSummary[key] == true then labels[#labels + 1] = getText("Tooltip_food_" .. key) end
+		end
+		return table.concat(labels, " / ")
+	end
+	local function addState(state)
+		if type(state) ~= "table" then return end
+		local keys = {}
+		if state.rotten == true then keys[#keys + 1] = "Rotten"
+		elseif state.fresh == true then keys[#keys + 1] = "Fresh"
+		elseif state.fresh == false then keys[#keys + 1] = "Stale" end
+		if state.burnt == true then keys[#keys + 1] = "Burnt"
+		elseif state.cooked == true then keys[#keys + 1] = "Cooked" end
+		if state.frozen == true then keys[#keys + 1] = "Frozen" end
+		for i = 1, #keys do
+			if not seen[keys[i]] then
+				seen[keys[i]] = true
+				labels[#labels + 1] = getText("Tooltip_food_" .. keys[i])
+			end
+		end
+	end
+	addState(row.foodState)
+	for i = 1, #(row.variantSummary or {}) do addState(row.variantSummary[i].foodState) end
+	return table.concat(labels, " / ")
+end
+
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	if not row then
 		return ""
 	end
-	local cacheKey = tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
+	local foodLabel = GlobalStorageSiK.I18n.foodStateLabel(row)
+	local cacheKey = foodLabel .. "\1" .. tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
 		.. "\1" .. tostring(row.nativePath or "") .. "\1" .. tostring(row.variantSearchText or "")
@@ -1491,6 +1524,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 
 	local locName = GlobalStorageSiK.I18n.itemDisplayName(fullType, row.displayName, row.worldSprite)
 	addPart(locName)
+	addPart(foodLabel)
 	local resolved = GlobalStorageSiK.CategoryResolution
 		and GlobalStorageSiK.CategoryResolution.resolve(fullType, row, nil) or nil
 	if resolved and resolved.effective == "native" and GlobalStorageSiK.NativeProduct then

@@ -46,7 +46,8 @@ local function contextKey(row, terminal)
 	if not row or not row.itemId or not row.nodeId or not state.networkId then return nil end
 	local revision = tonumber(state.inventoryRevision) or 0
 	return tostring(state.networkId) .. "\31" .. tostring(revision) .. "\31"
-		.. tostring(row.nodeId) .. "\31" .. tostring(row.itemId), revision, state.networkId
+		.. tostring(row.nodeId) .. "\31" .. tostring(row.itemId) .. "\31"
+		.. tostring(terminal.playerNum or 0), revision, state.networkId
 end
 
 function RemoteDetail.invalidateAll()
@@ -171,23 +172,29 @@ function RemoteDetail.activate(owner, row, terminal)
 	if not requestId then
 		sequence = sequence + 1
 		requestId = "tooltip:" .. tostring(sequence) .. ":" .. tostring(row.itemId)
-		inFlightByKey[key] = { requestId = requestId, sentAt = now }
+		inFlightByKey[key] = { requestId = requestId, sentAt = now,
+			networkId = networkId, revision = revision, nodeId = row.nodeId, itemId = row.itemId }
 		inFlightOrder[#inFlightOrder + 1] = key
 		capInFlight()
 		keyByRequestId[requestId] = key
+		-- SP can respond synchronously inside sendCommand. Register the owner
+		-- first, otherwise the valid response is discarded as an abandoned hover.
+		activeByOwner[owner] = { key = key, requestId = requestId, networkId = networkId }
 		local sent = GlobalStorageSiK.NetClient.sendCommand("getItemTooltipDetail", {
 			requestId = requestId,
 			networkId = networkId,
 			inventoryRevision = revision,
 			nodeId = row.nodeId,
 			itemId = row.itemId,
-		})
+		}, getSpecificPlayer and getSpecificPlayer(terminal.playerNum or 0) or nil)
 		if not sent then
 			keyByRequestId[requestId] = nil
 			inFlightByKey[key] = nil
 			removeOrdered(inFlightOrder, key)
 			requestId = nil
 		end
+		if cache[key] then return cache[key], false end
+		if not inFlightByKey[key] then requestId = nil end
 	end
 	activeByOwner[owner] = { key = key, requestId = requestId, networkId = networkId }
 	return nil, requestId ~= nil
@@ -201,6 +208,10 @@ function RemoteDetail.onReceived(args)
 	if not args or not args.requestId then return false end
 	local key = keyByRequestId[args.requestId]
 	if not key then return false end
+	local flight = inFlightByKey[key]
+	if not flight or args.networkId ~= flight.networkId or args.nodeId ~= flight.nodeId
+		or tonumber(args.itemId) ~= tonumber(flight.itemId)
+		or (args.ok == true and tonumber(args.inventoryRevision) ~= flight.revision) then return false end
 	keyByRequestId[args.requestId] = nil
 	inFlightByKey[key] = nil
 	removeOrdered(inFlightOrder, key)

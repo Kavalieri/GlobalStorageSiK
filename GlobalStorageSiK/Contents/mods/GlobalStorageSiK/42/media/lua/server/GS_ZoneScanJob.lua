@@ -118,6 +118,7 @@ local function progressStatus(job)
 	end
 	return {
 		state = "RUNNING", phase = job and job.phase or "preparing",
+		reason = job and job.reason or nil,
 		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
 		zonesDone = completed, zonesTotal = total,
 		progressDone = math.min(total, completed + fraction), progressTotal = total,
@@ -249,14 +250,15 @@ end
 local function finishJob(networkId, job)
 	jobs[networkId] = nil
 	job.totals.durationMs = math.max(0, nowMs() - job.startedMs)
-	local state = ((job.totals.failedZones or 0) > 0 or job.totals._stagedDiscarded)
-		and "FAILED" or "COMPLETED"
+	local state = (job.totals.failedZones or 0) > 0 and "FAILED"
+		or job.totals._stagedDiscarded and "INVALIDATED_BY_MUTATION" or "COMPLETED"
 	job.totals._terminalState = state
 	if state == "COMPLETED" then job.totals._freshSnapshotScope = job.zoneId or "network" end
 	job.totals._background = job.background == true
 	job.totals._startRevision = job.startRevision or 0
 	job.totals._startContentSignature = job.startContentSignature
-	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error" or "complete")
+	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error"
+		or state == "INVALIDATED_BY_MUTATION" and "snapshot_stale" or "complete")
 	if not job.totals._stagedDiscarded and GlobalStorageSiK.RegistryStore
 		and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
@@ -283,19 +285,28 @@ local function onTick()
 	local now = nowMs()
 	if now < nextGlobalRunMs then return end
 	local networkId, job, oldestDue = nil, nil, nil
+	local hasPending = false
 	for candidateId, candidate in pairs(jobs) do
+		hasPending = true
 		if now >= candidate.nextRunMs and (oldestDue == nil or candidate.nextRunMs < oldestDue) then
 			networkId, job, oldestDue = candidateId, candidate, candidate.nextRunMs
 		end
 	end
 	if not job then
-		if tickInstalled and Events and Events.OnTick then
+		if not hasPending and tickInstalled and Events and Events.OnTick then
 			Events.OnTick.Remove(onTick)
 			tickInstalled = false
 		end
 		return
 	end
 	nextGlobalRunMs = now + STEP_DELAY_MS
+	-- A mutation invalidates staging immediately. Do not spend the remaining
+	-- scan budget collecting a snapshot that can no longer be committed.
+	if GlobalStorageSiK.Index.getInventoryRevision(networkId) ~= job.startRevision then
+		job.totals._stagedDiscarded = true
+		finishJob(networkId, job)
+		return
+	end
 	if now > 0 and job.lastProgressMs and now - job.lastProgressMs > STALL_TIMEOUT_MS then
 		finishCancelled(networkId, job, "timed_out")
 		return
@@ -388,6 +399,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		zoneIndex = 1,
 		zoneState = nil,
 		background = opts.background == true,
+		reason = opts.reason,
 		startedMs = nowMs(),
 		lastProgressMs = nowMs(),
 		phase = "preparing",

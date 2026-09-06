@@ -46,23 +46,21 @@ local function rescanState(state)
 	local scan = state.scanStatus or state.scan or {}
 	local scanState = tostring(scan.state or scan.phase or ""):upper()
 	local running = state.scanActive == true or state.scanRunning == true
-		or scan.running == true or scanState == "RUNNING"
+		or scan.running == true or scanState == "RUNNING" or scanState == "STALE_RETRY"
+		or scanState == "INVALIDATED_BY_MUTATION" or state.reconcilePending == true
 	local incidents = GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo(state.nodes or {})
 	local feedback
 	if incidents.count > 0 then
 		feedback = { text = text("IGUI_GS_NetworkIncidentTip", incidents.count),
 			tone = "text", severity = "warning", glow = true }
 	end
-	local done = tonumber(scan.zonesDone or scan.processed or 0) or 0
-	local total = tonumber(scan.zonesTotal or scan.total or 0) or 0
 	local progress
 	if running then
 		progress = {
-			value = total > 0 and math.min(1, math.max(0, done / total)) or nil,
-			label = total > 0 and (tostring(done) .. " / " .. tostring(total))
+			text = state.snapshotAgeMs ~= nil
+				and text("IGUI_GS_ScanUpdatingAge", math.floor(math.max(0, tonumber(state.snapshotAgeMs) or 0) / 1000))
 				or text("IGUI_GS_ScanRunning"),
-			mode = total > 0 and "determinate" or "indeterminate",
-			status = "warning", tone = "warning",
+			severity = "warning", tone = "text", glow = false,
 		}
 	end
 	return running, feedback, progress

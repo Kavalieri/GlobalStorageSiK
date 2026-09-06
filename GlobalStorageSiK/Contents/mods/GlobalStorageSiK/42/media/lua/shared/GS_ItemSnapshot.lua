@@ -243,6 +243,7 @@ local function foodState(item)
 		customName = customName and tostring(customName) or nil
 	end
 	local state = {
+		fresh = boolState(item, "isFresh"),
 		cooked = boolState(item, "isCooked"),
 		burnt = boolState(item, "isBurnt"),
 		frozen = boolState(item, "isFrozen"),
@@ -253,8 +254,8 @@ local function foodState(item)
 		customName = customName,
 	}
 	local signature = string.format(
-		"food:cooked=%d;burnt=%d;frozen=%d;rotten=%d;uses=%s;extra=%s;spices=%s;name=%s",
-		state.cooked and 1 or 0, state.burnt and 1 or 0,
+		"food:fresh=%d;cooked=%d;burnt=%d;frozen=%d;rotten=%d;uses=%s;extra=%s;spices=%s;name=%s",
+		state.fresh and 1 or 0, state.cooked and 1 or 0, state.burnt and 1 or 0,
 		state.frozen and 1 or 0, state.rotten and 1 or 0,
 		tostring(uses or ""), encodeStateList(extraItems), encodeStateList(spices),
 		tostring(customName or ""))

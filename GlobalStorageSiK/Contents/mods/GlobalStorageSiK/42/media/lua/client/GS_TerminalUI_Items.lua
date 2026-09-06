@@ -235,6 +235,7 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
 	-- deshabilitado, sus filas seguian teniendo drag/click y reutilizaban IDs ya
 	-- retirados. Invalida la presentacion y el fallback global de forma atomica.
 	panel._detailPages, panel._detailPending = nil, {}
+	panel._detailPageByKey = {}
 	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
@@ -253,6 +254,7 @@ end
 function GlobalStorageSiK.TerminalItems.onWithdrawCompleted(panel, terminal, ok, result)
 	if not panel then return end
 	panel._detailPages, panel._detailPending = nil, {}
+	panel._detailPageByKey = {}
 	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	local revision = result and tonumber(result.inventoryRevision)
 	if revision and terminal and terminal.terminalState then
@@ -1147,7 +1149,7 @@ local function buildDisplayRows(panel, terminal, parents)
 		parent._gsDepth = 0
 		out[#out + 1] = parent
 		if parent.expandable and panel._expandedKeys[key] then
-			local wantedPage = panel._allDetails and 1 or panel._detailPageByKey[key] or 1
+			local wantedPage = panel._detailPageByKey[key] or 1
 			local pages = panel._detailPages or detailPagesByRowKey()
 			local detailPage = pages and pages[key] or nil
 			local stale = not detailPage or detailPage.page ~= wantedPage
@@ -1649,11 +1651,14 @@ function GlobalStorageSiK.TerminalItems.describeRow(data, listPanel, terminal, z
 		hasChildren = data and data.expandable == true, expanded = expanded,
 	}
 	local name = displayNameForRow(data)
+	local foodLabel = GlobalStorageSiK.I18n.foodStateLabel(data)
+	if foodLabel ~= "" then name = name .. "  [" .. foodLabel .. "]" end
 	if data._gsRowKind == "child" and data.detailKind == "condition"
 		and data.condition and data.conditionMax then
 		name = name .. "  [" .. tostring(data.condition) .. "/" .. tostring(data.conditionMax) .. "]"
-	elseif data._gsRowKind == "child" and data.detailKind == "fluid" and data.dynamicPercent then
-		name = name .. "  [" .. tostring(data.dynamicPercent) .. "%]"
+	elseif data._gsRowKind == "child" and data.detailKind == "fluid" then
+		local quantity = (require "GS_RemoteTooltipPresentation").fluidQuantity(data, false)
+		if quantity then name = name .. "  [" .. quantity .. "]" end
 	end
 	local projection = presentationProjection(data)
 	local muted = UI.Theme.tokens().textMuted
@@ -1972,6 +1977,10 @@ local function itemTableOptions(panel, terminal)
 		pagination = {
 			pageSize = 15,
 			external = true,
+			labelOf = function(state)
+				return T("IGUI_GS_ItemDetailPage", tostring(state.first), tostring(state.last),
+					tostring(state.totalRows or state.total), tostring(state.totalUnits or 0))
+			end,
 			stateOf = function(parent, key)
 				local detailPage = GlobalStorageSiK.TerminalItems.getDetails(key, panel)
 				local wantedPage = panel._detailPageByKey and panel._detailPageByKey[key] or 1
@@ -1992,6 +2001,7 @@ local function itemTableOptions(panel, terminal)
 						or tonumber(parent and parent.count) or 0,
 					page = detailPage and detailPage.page or wantedPage,
 					pageSize = detailPage and detailPage.pageSize or 15,
+					pending = pending, stale = pageStale,
 					disabled = pending or pageStale,
 					disabledReason = pending and "page_request_pending" or "page_stale",
 				}
@@ -2258,8 +2268,6 @@ function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items
 	-- table must remain honestly in a loading state until the authoritative
 	-- snapshot is present.  Empty/filter messages are only valid afterwards.
 	local hasSnapshot = type(state) == "table" and type(state.items) == "table"
-		and state.scanActive ~= true
-		and not (state.scanStatus and state.scanStatus.state == "RUNNING")
 	local expanded = {}
 	for key in pairs(panel._expandedKeys or {}) do expanded[key] = true end
 	return {

@@ -350,10 +350,10 @@ return {
     ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "d36fb4f4aa5a6a74bfccc865d0b0f5a29b840c567220ca82bc0c2d0a71dd70ab",
+    ["surfaceSpecSha256"] = "1f30e7f89fa1e6ddbc504c23af11ea09b440f7a6270935ebae05d1aa4605e376",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "797642dd24770b3737dc3466c73889f22d6ea929dec4b9ce0d384a49dd1ee1e1",
-    ["visualSubtreeSha256"] = "752b081fb1d4bba990b37045e47ef2b21c46d90ecd66f6b4565f6586986d8890"
+    ["visualMasterSha256"] = "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
+    ["visualSubtreeSha256"] = "aedf9e0c9768ab039794e3a25eda32d178b37e4a4d59b86098ac5c95ca36481e"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,

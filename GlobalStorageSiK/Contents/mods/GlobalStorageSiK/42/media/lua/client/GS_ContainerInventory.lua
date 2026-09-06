@@ -37,7 +37,7 @@ function Inventory.mount(parent, editor, node, options)
 	local panel = view.block.childParent
 	panel._detailPages = {}
 	panel._detailPending = {}
-	panel._allDetails = true
+	panel._detailPageByKey = {}
 	view.panel = panel
 	local playerNum = editor.playerNum or 0
 	view.playerNum = playerNum
@@ -59,6 +59,7 @@ function Inventory.mount(parent, editor, node, options)
 		-- immediately so repeated gestures cannot act on an item that another
 		-- transfer has already moved.
 		panel._detailPages, panel._detailPending = {}, {}
+		panel._detailPageByKey = {}
 		self.detailQueue = {}
 		local wanted = tonumber(revision)
 		local known = tonumber(self.controller.terminalState.inventoryRevision)
@@ -103,7 +104,7 @@ function Inventory.mount(parent, editor, node, options)
 		local sent = GlobalStorageSiK.NetClient.sendCommand("getNodeContents", {
 			networkId = view.networkId, nodeId = view.node.id, rowKey = row.rowKey,
 			inventoryRevision = self.terminalState.inventoryRevision, page = page or 1,
-		})
+		}, getSpecificPlayer and getSpecificPlayer(view.playerNum) or nil)
 		if sent == false then panel._detailPending[row.rowKey] = nil end
 		return sent
 	end
@@ -131,7 +132,7 @@ function Inventory.mount(parent, editor, node, options)
 	tableOptions.directBlock = false
 	tableOptions.x, tableOptions.y, tableOptions.w, tableOptions.h = 8, 100, width - 16, 50
 	tableOptions.columns = GlobalStorageSiK.TerminalItems.columns({ hideZone = true })
-	tableOptions.rows, tableOptions.pagination = {}, nil
+	tableOptions.rows = {}
 	tableOptions.heightMode, tableOptions.allRowsVisible = "content", true
 	view.table = UI.Table.create(tableOptions)
 	panel.itemTable = view.table
@@ -162,43 +163,16 @@ function Inventory.mount(parent, editor, node, options)
 			typeCount = #self.rows,
 		}))
 		self.rendering = false
-		for key, details in pairs(panel._detailPages) do
-			if details.nextPage and panel._expandedKeys and panel._expandedKeys[key] then
-				self:scheduleDetail(key, details.nextPage)
-			end
-		end
 		if self.lastHeight ~= height then
 			self.lastHeight = height
 			if options.onHeightChanged then options.onHeightChanged(self) end
 		end
 		if self.renderAgain then self.renderAgain = false; self:render() end
 	end
-	function view:scheduleDetail(key, page)
-		if self.disposed or panel._detailPending[key] then return end
-		self.detailQueue[key] = page
-		if self.detailTick then return end
-		self.detailTick = function()
-			local wantedKey, wantedPage
-			for rowKey, number in pairs(self.detailQueue) do wantedKey, wantedPage = rowKey, number; break end
-			if wantedKey then self.detailQueue[wantedKey] = nil end
-			-- Detach before dispatch: SP can synchronously deliver a response.
-			if Events and Events.OnTick then Events.OnTick.Remove(self.detailTick) end
-			self.detailTick = nil
-			if not self.disposed and wantedKey and panel._expandedKeys and panel._expandedKeys[wantedKey] then
-				panel._detailPending[wantedKey] = true
-				self.controller:requestInventoryDetails({ rowKey = wantedKey }, wantedPage)
-			end
-			if not self.disposed then
-				local keyNext, pageNext
-				for rowKey, number in pairs(self.detailQueue) do keyNext, pageNext = rowKey, number; break end
-				if keyNext then self:scheduleDetail(keyNext, pageNext) end
-			end
-		end
-		if Events and Events.OnTick then Events.OnTick.Add(self.detailTick) end
-	end
 	function view:request()
 		if self.disposed then return end
-		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { networkId = self.networkId, nodeId = self.node.id })
+		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { networkId = self.networkId, nodeId = self.node.id },
+			getSpecificPlayer and getSpecificPlayer(self.playerNum) or nil)
 	end
 	function view:refresh(nextNode)
 		if nextNode then self.node = nextNode end
@@ -223,9 +197,14 @@ function Inventory.mount(parent, editor, node, options)
 		if tonumber(revision) and tonumber(knownRevision) and revision < knownRevision then return end
 		if self.controller.terminalState.inventoryRevision ~= revision then
 			panel._detailPages, panel._detailPending = {}, {}
+			panel._detailPageByKey = {}
 			self.detailQueue = {}
 		end
 		self.controller.terminalState.inventoryRevision = revision
+		self.controller.terminalState.snapshotCertified = payload.snapshotCertified
+		self.controller.terminalState.snapshotRevision = payload.snapshotRevision
+		self.controller.terminalState.snapshotAgeMs = payload.snapshotAgeMs
+		self.controller.terminalState.reconcilePending = payload.reconcilePending
 		self.requestedRevision = nil
 		self.capacity = payload.capacity or self.capacity
 		if payload.catalogRows then
@@ -239,21 +218,17 @@ function Inventory.mount(parent, editor, node, options)
 			return
 		end
 		if detail and detail.rowKey and not detail.reason then
-			local existing = panel._detailPages[detail.rowKey]
-			if not existing then
-				existing = { page = 1, items = {}, receivedPages = {}, networkId = self.networkId, inventoryRevision = revision }
-				panel._detailPages[detail.rowKey] = existing
-			end
 			local page = tonumber(detail.page) or 1
-			if existing.receivedPages[page] then return end
-			existing.receivedPages[page] = true
-			for i = 1, #(detail.items or {}) do existing.items[#existing.items + 1] = detail.items[i] end
+			local wantedPage = panel._detailPageByKey[detail.rowKey] or 1
+			if page ~= wantedPage then return end
+			local existing = { page = page, pageSize = tonumber(detail.pageSize) or 25,
+				items = detail.items or {}, networkId = self.networkId, inventoryRevision = revision }
+			panel._detailPages[detail.rowKey] = existing
 			existing.totalRows = tonumber(detail.totalRows) or tonumber(detail.total) or #existing.items
 			existing.totalUnits = tonumber(detail.totalUnits) or existing.totalRows
 			existing.total = existing.totalRows
-			existing.hasPrevious, existing.hasNext = false, false
+			existing.hasPrevious, existing.hasNext = detail.hasPrevious == true, detail.hasNext == true
 			panel._detailPending[detail.rowKey] = nil
-			existing.nextPage = detail.hasNext and (page + 1) or nil
 		end
 		self:render()
 	end

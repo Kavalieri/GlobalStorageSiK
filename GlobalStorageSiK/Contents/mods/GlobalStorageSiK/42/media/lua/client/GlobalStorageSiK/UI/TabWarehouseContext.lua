@@ -206,8 +206,8 @@ function TabWarehouseContext.create(terminal, panel)
 			and api.presentationModel(panel, terminal, items) or { rows = {} }
 		local state = terminal.terminalState
 		local hasSnapshot = type(state) == "table" and type(state.items) == "table"
-			and state.scanActive ~= true
-			and not (state.scanStatus and state.scanStatus.state == "RUNNING")
+		-- A running recapture never hides the last received inventory. Exact
+		-- transfers separately require a certified revision, not visual rows.
 		local availableCount = #catalogItems
 		local visibleCount = #(tableModel.rows or {})
 		local fingerprint = tostring(hasSnapshot) .. ":" .. tostring(availableCount)

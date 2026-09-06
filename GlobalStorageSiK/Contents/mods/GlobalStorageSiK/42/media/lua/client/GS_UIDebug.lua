@@ -66,16 +66,5 @@ function GlobalStorageSiK.UIDebug.action(what, detail)
 	out("interaction", message)
 end
 
--- Product-owned sink: the Global Storage option records only integration
--- events through its logger/category. SiK UI keeps a separate self-owned sink
--- and Sandbox page for framework-internal diagnostics.
-if UI.Diagnostics and UI.Diagnostics.registerSink then
-	UI.Diagnostics.registerSink("GSSiK.UIIntegration", {
-		enabled = GlobalStorageSiK.UIDebug.enabled,
-		sink = function(event)
-			GlobalStorageSiK.Log.debug("TerminalUI",
-				tostring(event and event.kind or "event"),
-				tostring(event and event.message or ""))
-		end,
-	})
-end
+-- GS_UI_Framework owns the one product sink. These helpers emit events only;
+-- registering a second sink here duplicated every framework interaction.

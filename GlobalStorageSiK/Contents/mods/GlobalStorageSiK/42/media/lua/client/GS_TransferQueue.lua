@@ -50,17 +50,12 @@ local function batchDelayMs()
 	return operation and operation.pacing and operation.pacing.batchDelayMs or 400
 end
 
-local function feedbackEnabled()
-	return not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
-		or GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
-end
-
 --- Feedback funcional local: no depende de DebugMode ni genera red adicional.
 --- Se limita a una actualización por segundo para no reemplazar continuamente
 --- otros avisos importantes sobre el personaje.
 ---@param force boolean|nil
 local function showProgress(force)
-	if not operation or not feedbackEnabled() then return end
+	if not operation then return end
 	local now = nowMs()
 	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
 	operation.lastProgressMs = now
@@ -73,8 +68,6 @@ local function showProgress(force)
 	else
 		text = text .. " " .. tostring(moved)
 	end
-	local currentJob = math.min(operation.jobsTotal or 1, (operation.jobsDone or 0) + 1)
-	text = text .. " (" .. tostring(currentJob) .. "/" .. tostring(operation.jobsTotal or 1) .. ")"
 	pcall(function()
 		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 220, 200, 220,
 			{ channel = "deposit-progress", dedupeKey = text, throttleMs = 1000 })

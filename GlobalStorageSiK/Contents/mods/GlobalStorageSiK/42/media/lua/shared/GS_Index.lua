@@ -253,13 +253,24 @@ local function compactParentRows(detailRows)
                                 numberOfPages = detail.numberOfPages,
 						mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
 						mediaCodes = detail.mediaCodes,
-				count = 0, locations = {}, variantSummary = {}, totalWeight = 0,
+				count = 0, locations = {}, variantSummary = {}, totalWeight = 0, foodSummary = {},
 				totalFluidAmount = 0, totalFluidCapacity = 0,
 				_variantSeen = {}, _pathSeen = {}, _detailKinds = {}, _fullTypeSeen = {},
 			}
 			byParent[parentKey] = parent
 		end
 		parent.count = parent.count + (detail.count or 0)
+		-- Summarize six visible food states once while building the capture.
+		-- Render/search must not walk every physical variant on every frame.
+		if detail.foodState then
+			local food = detail.foodState
+			if food.rotten == true then parent.foodSummary.Rotten = true
+			elseif food.fresh == true then parent.foodSummary.Fresh = true
+			elseif food.fresh == false then parent.foodSummary.Stale = true end
+			if food.burnt == true then parent.foodSummary.Burnt = true
+			elseif food.cooked == true then parent.foodSummary.Cooked = true end
+			if food.frozen == true then parent.foodSummary.Frozen = true end
+		end
 		parent.totalWeight = parent.totalWeight + (detail.totalWeight or 0)
 		parent.totalFluidAmount = parent.totalFluidAmount + (detail.totalFluidAmount or 0)
 		parent.totalFluidCapacity = parent.totalFluidCapacity + (detail.totalFluidCapacity or 0)
@@ -820,6 +831,15 @@ function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, sel
 	if math.floor(tonumber(selectionRevision) or -1) ~= currentRevision then
 		return nil, "selection_stale"
 	end
+	-- Parent rows and exact selectors must refer to the same complete capture.
+	-- The legacy live fallback can paint counts before IDs are captured; it
+	-- must never turn an unfinished capture into a false 'not_found'. Exact-ID
+	-- transfers remain independently valid and are revalidated on the item.
+	local snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+	local _, complete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
+	if snapshotRevision ~= currentRevision or not complete then
+		return nil, "selection_stale"
+	end
 	local refs, seen = {}, {}
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	for _, node in pairs(registry.nodes or {}) do
@@ -830,6 +850,9 @@ function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, sel
 			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
 			for _, row in pairs(node.itemSnapshot or {}) do
 				if parentKeyForRow(row) == rowKey then
+					if #(row.itemIds or {}) < (tonumber(row.count) or 0) then
+						return nil, "selection_stale"
+					end
 					for i = 1, #(row.itemIds or {}) do
 						local itemId = tonumber(row.itemIds[i])
 						if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seen[itemId] then
@@ -846,7 +869,8 @@ function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, sel
 		return tostring(a.fullType) < tostring(b.fullType)
 	end)
 	if #refs == 0 then return nil, "not_found" end
-	return { refs = refs, count = #refs, revision = currentRevision, rowKey = rowKey }, nil
+	return { refs = refs, count = #refs, revision = currentRevision,
+		snapshotRevision = snapshotRevision, rowKey = rowKey }, nil
 end
 
 --- Revisión hasta la que los snapshots persistidos representan una captura

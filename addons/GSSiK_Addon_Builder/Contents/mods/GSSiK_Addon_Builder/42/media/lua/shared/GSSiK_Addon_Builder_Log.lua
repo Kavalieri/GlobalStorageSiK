@@ -14,7 +14,7 @@ local Diagnostics = API.Diagnostics
 GSSiK_Addon_Builder = GSSiK_Addon_Builder or {}
 GSSiK_Addon_Builder.Log = GSSiK_Addon_Builder.Log or {}
 
-local detailNoticeShown = false
+local budget = {}
 
 local function requestRelay()
 	if isClient and isClient() and not (isServer and isServer())
@@ -44,16 +44,20 @@ function GSSiK_Addon_Builder.Log.debug(category, message)
 	if not GSSiK_Addon_Builder.Sandbox.isDebugCategoryEnabled(category) then
 		return
 	end
+	local now = getTimestampMs and tonumber(getTimestampMs()) or 0
+	local bucket = budget[category]
+	if not bucket or now < bucket.startedAt or now - bucket.startedAt >= 1000 then
+		bucket = { startedAt = now, lines = 0 }
+		budget[category] = bucket
+	end
+	if bucket.lines >= 20 then return end
+	bucket.lines = bucket.lines + 1
+	message = tostring(message)
+	if #message > 1024 then message = "oversized diagnostic omitted bytes=" .. tostring(#message) end
 	requestRelay()
 	local _, _, origin = Diagnostics.processTag()
 	origin = origin or "?"
-	local level = category == "Operations" and "DETAIL" or "DEBUG"
-	if level == "DETAIL" and not detailNoticeShown then
-		detailNoticeShown = true
-		local notice = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Builder:SYSTEM][Operations] DETAIL sublog enabled; high-volume output may fill console.txt; use only for targeted diagnostics"
-		print(notice)
-		Diagnostics.emit(notice)
-	end
+	local level = "DEBUG"
 	local line = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Builder:" .. level .. "][" .. tostring(category) .. "] " .. tostring(message)
 	print(line)
 	Diagnostics.emit(line)

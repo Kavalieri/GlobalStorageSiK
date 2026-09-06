@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RemoteDetailLoading": "Chargement des détails exacts…",
+	"IGUI_GS_RemoteDetailUnavailable": "Détails indisponibles ; actualisez l’inventaire.",
+	"IGUI_GS_RemoteGroupTotal": "Total du groupe : {1} objets",
+	"IGUI_GS_ScanUpdatingAge": "Actualisation de l’inventaire · dernier état valide il y a {1} s",
+	"IGUI_GS_ItemDetailPage": "Lignes {1}-{2} sur {3} · {4} objets",
 	"IGUI_GS_BlockedVacantTitle": "Network without an owner",
 	"IGUI_GS_BlockedVacantMessage": "This network has no active owner and you can claim it.",
 	"IGUI_GS_BlockedRecoverTitle": "Previous access available",

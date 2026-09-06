@@ -51,7 +51,7 @@ option GSSiK_Addon_Craft.DebugMode
 option GSSiK_Addon_Craft.DebugLifecycle
 {
 	type = boolean,
-	default = true,
+	default = false,
 	page = GSSiK_Addon_Craft_Debug,
 	translation = GSSiK_Addon_Craft_DebugLifecycle,
 }

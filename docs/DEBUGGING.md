@@ -1,13 +1,12 @@
 # Diagnóstico y logs
 
-Los logs de diagnóstico están desactivados por defecto y no cambian la partida. La única excepción es el relé de servidor dedicado, que está preparado por defecto pero no transmite nada mientras el logger correspondiente siga apagado. No debe existir ningún `print()` suelto fuera de la implementación de un logger o del receptor que imprime una línea remota ya formada.
+Los logs de diagnóstico y el relé están desactivados por defecto. El servidor permite suscribirse y recibir únicamente a administradores; revalida en cada envío y elimina la suscripción al perder acceso o desconectarse. No debe existir ningún `print()` suelto fuera del logger o del receptor de una línea remota ya formada.
 
 ## Cómo leer una línea
 
 ```text
 [12.3s][CLI] [GlobalStorageSiK:DEBUG:Network] requestManifest START networkId=...
 [12.4s][SRV] [GlobalStorageSiK:DEBUG:Network] requestManifest END networkId=...
-[12.5s][SRV] [GlobalStorageSiK:SYSTEM:Router] DETAIL sublog enabled category=Router; high-volume output may fill console.txt; use only for targeted diagnostics
 ```
 
 - `[CLI]`: proceso de cliente remoto.
@@ -15,11 +14,11 @@ Los logs de diagnóstico están desactivados por defecto y no cambian la partida
 - `[HOST]`: proceso que actúa como cliente y servidor en una partida alojada.
 - `[SP]`: partida de un jugador; no usa transporte de red para duplicar sus propias líneas.
 - `DEBUG`: evento resumido apto para una sesión de diagnóstico normal.
-- `DETAIL`: sublog de alto volumen. Siempre está apagado por defecto y emite antes una advertencia `SYSTEM`.
+- `DETAIL`: retirado; los valores heredados no reactivan sus emisores. Las categorías normales permanecen acotadas.
 
-El relé del dedicado agrupa y limita las líneas antes de enviarlas. No vuelve a envolverlas ni las registra una segunda vez. Aun así, no se deben activar sublogs `DETAIL` sin una prueba dirigida.
+El relé del dedicado agrupa y limita las líneas, sin envolverlas ni duplicarlas. Requiere activación explícita y cuenta de administrador.
 
-Los mensajes de diagnóstico son exclusivamente de consola. Nunca deben usar el halo sobre el personaje: ese espacio se reserva para progreso y resultados funcionales, cancelaciones y fallos que el jugador debe ver sin abrir el log. Los errores funcionales se muestran en rojo y durante más tiempo; comandos internos como `pingTerminalAccess`, payloads y comprobaciones periódicas permanecen en `console.txt` aunque el modo debug esté activo.
+El diagnóstico pertenece exclusivamente a consola. El halo se reserva para errores funcionales relevantes, breves y no bloqueantes; progreso, éxito, información y cancelación se muestran en la UI propia. Capacidad es peso/encumbrance vanilla: se distingue el inventario del jugador del contenedor destino, no una cuadrícula espacial.
 
 Al iniciar una partida, cada proceso escribe siempre una única identidad de runtime: `[CLI] [GlobalStorageSiK:SYSTEM:RuntimeIdentity] client | version=X.Y.Z-devN` en cliente y `[SRV] ... server | version=X.Y.Z-devN` en dedicado (`[SP]`/`[HOST]` según corresponda). No requiere opciones sandbox y permite confirmar el árbol efectivo antes de interpretar una prueba. La instalación DEV genera además `%USERPROFILE%\Zomboid\.sik-dev-client-identity.json` con versión, conteos y `sik-tree-sha256-v1` de cada override físico.
 
@@ -40,7 +39,7 @@ permissions/permissions-<runId>.log
 session.json
 ```
 
-`session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` únicamente si necesitas el eco acotado en el cliente.
+`session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators` únicamente si necesitas el eco acotado en el cliente.
 
 ### Adaptador de diagnóstico de SiK UI
 
@@ -69,18 +68,14 @@ categoría específica únicamente para esa superficie; no actives todo el árbo
 | Clave | Español / English | Volumen y función |
 |---|---|---|
 | `DebugMode` | `Modo depuración (debug)` / `Debug mode` | Interruptor maestro. Por sí solo no activa ninguna categoría. |
-| `DebugRelayToClients` | `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients` | Preparado por defecto. Envía por lotes acotados solo las líneas que otro logger haya activado. |
+| `DebugRelayToClients` | `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators` | No, por defecto. Lotes acotados solo para administradores suscritos; comprobación en suscripción y envío. |
 | `DebugCatNetwork` | `>> Trazas de red` / `>> Network traces` | Resumen de comandos y sincronización. |
-| `DebugDetailNetwork` | `>>> DETALLE: payloads completos de red` / `>>> DETAIL: full network payloads` | Payloads completos; alto volumen. |
 | `DebugCatTerminalAccess` | `>> Acceso a terminal` / `>> Terminal access` | Manifest, registro, permisos, alcance y apertura. |
 | `DebugCatPermissions` | `>> Identidad y permisos` / `>> Identity & permissions` | UUID de personaje, unión acotada de rosters, altas idempotentes y posibles rotaciones de identidad. |
 | `DebugCatCraft` | `>> Recetas y crafteo` / `>> Recipes & crafting` | Resumen de recetas y préstamos compartidos. |
-| `DebugDetailCraft` | `>>> DETALLE: recetas y préstamos de red` / `>>> DETAIL: recipes and network loans` | Probes y decisiones individuales; alto volumen. |
 | `DebugCatInventory` | `>> Inventario y transferencias` / `>> Inventory & transfers` | Depósitos, retiradas, snapshots y trabajos masivos resumidos. |
-| `DebugDetailInventory` | `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL: taxonomy and items` | Clasificación por objeto/tipo, consolidación por microlote, render por-frame del tooltip, muestras acotadas de la resolución nativa o vanilla y cambios de estado de `FluidContainer` visibles; volumen masivo. |
 | `DebugCatTooltip` | `>> Tooltip de red` / `>> Network tooltip` | Instalación/recuperación del hook, fallos y fallback del tooltip de cantidades. No registra cada frame. |
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
-| `DebugDetailRouter` | `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` | Tier y capacidad de cada candidato; alto volumen. |
 | `DebugCatAddons` | `>> Instalación/desinstalación de addons` / `>> Addon install/uninstall` | Catálogo por addon con ID/ModID, registro, disponibilidad, causa y montaje; además, consumo/devolución de la unidad durante instalación o retirada. |
 | `DebugCatRuleMigration` | `>> Migración de reglas legacy` / `>> Legacy rule migration` | Clasifica reglas persistidas como nativas, categorías fuente explícitas, vanilla, alias GS, externas retiradas o residuo técnico; conserva hasta tres muestras acotadas de `rules` o `categories`. |
 | `DebugCatSiKUI` | `>> Integración con SiK UI` / `>> SiK UI integration` | Hechos de integración del producto con el framework. Incluye tiempos acotados `shell_visible`, `state_refresh`, `tab_activate` y `refreshItemsTab_done`; no registra una línea por frame. Para montaje, geometría, árbol y solapes internos se usa el interruptor propio de SiK UI Framework. |
@@ -97,8 +92,7 @@ Las líneas del Core usan componente y evento estables. Operaciones largas deben
 ### Prueba DEV: incidencias críticas de interfaz
 
 Cada caso se activa por separado junto con `Modo depuración (debug)` / `Debug
-mode`; todas las demás categorías y todos los sublogs `>>> DETALLE / >>>
-DETAIL` permanecen apagados:
+mode`; todas las demás categorías permanecen apagadas:
 
 - Iconos: activa `>> DIAGNÓSTICO: iconos de pestañas` / `>> DIAGNOSTIC: tab
   icons`, abre la terminal y cambia una vez el tamaño. El prefijo esperado es
@@ -124,8 +118,7 @@ solo se activa si hace falta y estas categorías no generan trazas por tick.
 
 Activa únicamente `Modo depuración (debug)` / `Debug mode` y
 `>> Instalación/desinstalación de addons` / `>> Addon install/uninstall`.
-Mantén apagadas las categorías no relacionadas y todos los sublogs
-`>>> DETALLE / >>> DETAIL`. Abre la pestaña Addons con Craft, Builder y Tablet
+Mantén apagadas las categorías no relacionadas. Abre la pestaña Addons con Craft, Builder y Tablet
 activos: cada ID debe aparecer exactamente una vez con `registered=true`,
 `available=true`, `mounted=true` y `cause=available`. Repite retirando uno de
 los tres ModID: los otros dos deben seguir montados y el ausente debe quedar
@@ -140,10 +133,9 @@ servidor. El eco de dedicado se activa solo si se necesita expresamente.
 Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y
 `>> DIAGNÓSTICO: identidad de medios grabados` /
 `>> DIAGNOSTIC: recorded-media identity`. En dedicado, añade
-`>> Reenviar logs del dedicado a clientes` /
-`>> Relay dedicated-server logs to clients` solo si necesitas el eco en el
-cliente. Mantén apagadas las categorías no relacionadas y todos los sublogs
-`>>> DETALLE / >>> DETAIL`.
+`Reenviar logs del dedicado a administradores` /
+`Relay dedicated-server logs to administrators` solo si necesitas el eco en el
+cliente. Mantén apagadas las categorías no relacionadas.
 
 Deposita dos copias de una misma cinta con enseñanza, otra edición con
 enseñanza distinta y una cinta de ocio. Tras reescanear y reabrir Almacén, cada
@@ -181,9 +173,8 @@ jugador humano. Dedicado, cliente remoto y pantalla dividida fuerzan `Seguro`.
 
 Para comparar perfiles activa solo `Modo depuración (debug)` / `Debug mode` y
 `>> Inventario y transferencias` / `>> Inventory & transfers`; en dedicado,
-añade `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server
-logs to clients`. Mantén `>>> DETALLE: taxonomía y objetos` / `>>> DETAIL:
-taxonomy and items` apagado. Las líneas agregadas incluyen `requested`,
+añade `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`.
+Las líneas agregadas incluyen `requested`,
 `effective`, lote, esperas, movimientos, inspecciones y presupuesto CPU.
 
 Prueba depósitos, retiradas y Auto-Sort de 10, 100 y un inventario enorme. En
@@ -211,7 +202,7 @@ La identidad y sus migraciones pertenecen a `Identidad y permisos / Identity & p
 
 ### Prueba DEV: identidades y permisos
 
-Opciones mínimas: `Modo depuración (debug)` / `Debug mode`, `>> Identidad y permisos` / `>> Identity & permissions` y, en dedicado, `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`. No actives ningún sublog `DETALLE / DETAIL`.
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode`, `>> Identidad y permisos` / `>> Identity & permissions` y, en dedicado, `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`. Las opciones DETAIL han sido retiradas.
 
 Comprueba en dedicado el propietario, un administrador y varios miembros con nombres latinos, chinos, cirílicos y homónimos. La fila visible conserva el nombre exacto del personaje, mientras `characterId` permanece opaco y único. Un miembro de facción conectado aparece una sola vez bajo Facción y conserva su UUID online; uno desconectado mantiene `factionUsername`. Los homónimos con UUID diferentes permanecen y muestran sufijo `[xxxxxx]`. Tras añadir, el UUID desaparece del selector y aparece una sola vez en miembros. Dos clics o dos administradores añadiendo el mismo UUID deben producir una sola mutación; la segunda respuesta será `ok=true changed=false reason=already_member`. Una selección que se desconecta antes del clic debe fallar con `invalid_or_stale_identity`. Conserva `console.txt` del cliente y dedicado.
 
@@ -230,7 +221,7 @@ Para confirmar que un ítem concreto atraviesa el render solo durante un diagnó
 Cada addon tiene sandbox y logger independientes del Core:
 
 - `DebugMode`: interruptor maestro del addon.
-- `DebugOperations`: claims, espera de ACK, inicio, resolución y devolución.
+- `DebugOperations`: solicitudes, esperas y resultados acotados por operación; requiere activación explícita.
 - `DebugLifecycle`: apertura/cierre de UI, sesión e instalación de hooks.
 
 Opciones visibles de Craft y Builder:
@@ -239,14 +230,14 @@ Opciones visibles de Craft y Builder:
 |---|---|---|
 | `DebugMode` | `Modo debug (Craft/Builder)` / `Debug mode (Craft/Builder)` | Interruptor maestro del addon. |
 | `DebugLifecycle` | `>> Interfaz y sesiones` / `>> UI and session lifecycle` | Hooks, apertura/cierre y estado de sesión; volumen normal. |
-| `DebugOperations` | `>>> DETALLE: operaciones de crafteo/construcción` / `>>> DETAIL: crafting/building operations` | Claims, ACK, unidades, resultados y devoluciones por `operationId`; alto volumen. |
+| `DebugOperations` | `Operaciones` / `Operations` | Claims, ACK, unidades, resultados y devoluciones por `operationId`; DEBUG acotado y apagado por defecto. |
 
 Tablet solo expone `Modo debug (Tablet) / Debug mode (Tablet)`, de volumen normal. Los tres addons usan el relé neutral del Core cuando está habilitado.
 
 Formato:
 
 ```text
-[12.3s][CLI] [GSSiK_Addon_Craft:DETAIL][Operations] craftAttempt START operationId=Craft-...
+[12.3s][CLI] [GSSiK_Addon_Craft:DEBUG][Operations] craftAttempt START operationId=Craft-...
 ```
 
 El tiempo transcurrido permite medir esperas. `operationId` correlaciona cliente, servidor, claims y resultado; no abras un segundo identificador para el mismo intento.
@@ -278,11 +269,11 @@ Las colas cliente usan `queueId` (depósito) o `withdrawId` (retirada). Una resp
 - `[SRV] [GlobalStorageSiK:ERROR:RedistributeJob] network remained busy` o `job made no progress`: Auto Sort termina tras espera acotada o cursor estancado.
 - `[CLI] [GlobalStorageSiK:DEBUG:RedistributeJob] completed breakdown | tiers=1:12,4:3,5:2 topTypes=Base.Nails:8,...`: resumen acotado al terminar Auto Sort. `tiers` indica el nivel de destino (1=filtro/hoja exacta, 2=subcategoría, 3=categoría, 4=afinidad por `fullType`, 5=afinidad por ruta taxonómica canónica, 6=contenedor libre) y `topTypes` muestra como máximo ocho tipos; no emite una línea por objeto.
 
-Al terminar cualquiera de estos casos, el correspondiente `Events.OnTick` se retira. Para diagnosticarlos activa `Modo depuración (debug)` / `Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`; añade `>> Router` / `>> Router` y `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` solo si se investiga la selección de destino.
+Al terminar cualquiera de estos casos, el correspondiente `Events.OnTick` se retira. Para diagnosticarlos activa `Modo depuración (debug)` / `Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`; añade `>> Router` / `>> Router` solo para investigar destino.
 
 ### Prueba DEV: migración recuperable de reglas legacy
 
-Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `>> Migración de reglas legacy` / `>> Legacy rule migration`. Mantén apagadas las categorías no relacionadas y todos los sublogs `>>> DETALLE / >>> DETAIL`. En dedicado, añade opcionalmente `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`; conserva siempre el `console.txt` del servidor.
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `>> Migración de reglas legacy` / `>> Legacy rule migration`. Mantén apagadas las categorías no relacionadas. En dedicado, añade opcionalmente `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`; conserva siempre el `console.txt` del servidor.
 
 Al abrir por primera vez una red heredada, el servidor emite `legacyRuleSanitizerInspection phase=capture` y hasta tres `legacyRuleSanitizerRecord` antes de mutar. Cada registro acotado identifica `network`, `ownerKind`, `ownerId`, `source`, `ruleIndex`, `op`, `type`, `value`, `nativePath` y `legacyValue`; nunca incluye payloads completos. Después aparecen `legacyRuleSanitizer ... pass=1` con conteos separados `rules=A->B` y `categories=C->D`, seguido de `pass=2` con `changedOwners=0` y `quarantined=0`. La postcondición exige `legacyRuleSanitizerInspection phase=postvalidate ... matches=0` antes de `legacyRuleSanitizerMarker ... version=3 status=written`; si quedan coincidencias, el marcador se retiene con `status=withheld` para permitir reintento. Las entradas retiradas permanecen recuperables y sin duplicados en `legacyJunkRules`, con `legacySource=rules|categories` y `legacyRuleIndex`.
 
@@ -290,19 +281,19 @@ Las claves de proveedores de categorías retirados se conservan literalmente y s
 
 ### Prueba DEV: leer literatura y devolverla a la red
 
-Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`. En dedicado, añade `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`. No hace falta activar ningún sublog `DETALLE / DETAIL`.
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`. En dedicado, añade `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`. No existen sublogs DETAIL activables.
 
 Prueba por separado un libro de habilidad, una revista de receta y una revista o periódico normal: abre el menú contextual de la fila de red, elige `Leer y devolver a la red` / `Read and return to network`, deja terminar una lectura y cancela otra. Debe retirarse exactamente una instancia, encolarse la acción vanilla y regresar el mismo `itemId` al mismo nodo físico siempre que siga válido; si no, debe caer al router compartido. Espera `NetworkReadAction read queued`, después `return scheduled` y `return queued ... preferredNodeId=...`; el servidor debe registrar `depositItems origin=network_read_return operationId=Read-... preferredNodeId=...`. Si la devolución no puede encolarse durante 30 segundos, debe quedar una sola línea `return queue timeout`, cesar el `OnTick` y conservarse el objeto en el inventario del jugador. Guarda `console.txt` del cliente y, en dedicado, el del servidor.
 
 ### Prueba DEV: afinidad exacta y taxonómica
 
-Opciones mínimas: `Modo depuración (debug)` / `Debug mode`, `>> Inventario y transferencias` / `>> Inventory & transfers` y `>> Router` / `>> Router`. En dedicado, añade `>> Reenviar logs del dedicado a clientes` / `>> Relay dedicated-server logs to clients`. Activa `>>> DETALLE: enrutado por nodo` / `>>> DETAIL: routing per node` solo para una repetición breve: es un sublog de alto volumen.
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode`, `>> Inventario y transferencias` / `>> Inventory & transfers` y `>> Router` / `>> Router`. En dedicado, añade `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`.
 
 En una zona con dos contenedores sin categorías, coloca una revista de receta A en el primero y deposita una revista de receta B. Debe aparecer `RESULT tier=5 ... (afinidad de categoría)` si comparten identidad de routing; una copia exacta de B debe ganar tier 4. Repite con `Rechazar depósito sin contenedor adecuado` / `Reject deposit without a matching container` activado: tiers 4 y 5 siguen permitidos; un objeto sin afinidad ni filtro debe quedar en el inventario con `RESULT no_match`. Ejecuta Auto Sort con la misma disposición y comprueba que usa los mismos tiers y que no mueve un objeto que ya está en el mejor destino. Conserva `console.txt` del cliente y del dedicado.
 
 ### Prueba DEV: requisitos y montaje del lector/PC
 
-Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `Recetas y crafteo` / `Recipes & crafting`. En dedicado, añade `Reenviar logs del dedicado a clientes` / `Relay dedicated-server logs to clients`. Mantén apagados todos los sublogs `DETALLE / DETAIL`.
+Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `Recetas y crafteo` / `Recipes & crafting`. En dedicado, añade `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators`. Mantén apagadas las categorías no relacionadas.
 
 Prueba el lector con tres distribuciones: todos los requisitos en el inventario principal, todos en contenedores físicos cercanos y una mezcla entre inventario, mochila equipada y contenedor. El modal y el servidor deben coincidir; debe aparecer una única salida, consumirse cada pieza de su origen real y conservarse soldador y destornillador. Repite retirando una pieza durante la barra: debe fallar con `reason=materials`, no crear salida y no consumir las demás. El evento esperado es `[SRV] [GlobalStorageSiK:INFO:Acquire] reader result | ok=true reason=success` o el motivo resumido del fallo. Repite al menos el caso mixto con el PC (`pc result`) y un disquete en blanco cercano (`program disk result`). Guarda `console.txt` del cliente y del servidor; en SP la marca será `[SP]` y no habrá relé.
 
@@ -319,4 +310,14 @@ Prueba el lector con tres distribuciones: todos los requisitos en el inventario 
 
 Indica versión de Core/addon, SP/host/dedicado/cliente, UI vanilla o mod externo, receta/objeto y el bloque completo desde `START` hasta `END` o `ABORT`. Para problemas de red, el `console.txt` del cliente puede contener conjuntamente `[CLI]` y `[SRV]` si el relé estaba habilitado; conserva también el log dedicado si está disponible.
 
-Cada plan de pruebas DEV debe indicar, para cada caso, los nombres visibles exactos en español e inglés de las opciones mínimas que hay que activar. Debe dejar todos los demás sublogs apagados, señalar el prefijo o evento esperado y enumerar los ficheros que se deben conservar. `DETAIL` solo se usa cuando el caso necesita ese nivel.
+Cada plan de pruebas DEV indica los nombres visibles exactos ES/EN de las opciones mínimas, deja las demás categorías apagadas, señala el evento esperado y los ficheros que se deben conservar. DETAIL está retirado, incluidos valores heredados.
+
+## Política de volumen y migración del cierre 1.5.0
+
+Core limita INFO/DEBUG por categoría a 20 líneas y 8192 bytes de mensaje por segundo; un mensaje de más de 1024 bytes se sustituye por un resumen de omisión. La siguiente ventana activa informa cuántas líneas se omitieron. No hay listener de mantenimiento. WARN, ERROR e identidad de arranque no se ocultan por esta cuota.
+
+Craft/Builder limitan cada categoría a 20 líneas por segundo y sustituyen mensajes de más de 1024 bytes. Framework conserva un solo sink de integración del producto; `GS_UIDebug` no duplica el evento recibido por `GS_UI_Framework`.
+
+Retiradas: `DebugDetailNetwork`, `DebugDetailCraft`, `DebugDetailInventory`, `DebugDetailRouter`, `DebugDetailCapacityBonus` y `OperationHaloFeedback`. Sus valores antiguos no habilitan trazas o halos. Se conservan las categorías normales, todas OFF por defecto; `ZoneScanJob` y `NativeProduct` pertenecen a Inventario y `WithdrawClient` a Retirada interactiva.
+
+Para la corrección runtime activa: activa `Modo depuración (debug)` / `Debug mode`, `>> Inventario y transferencias` / `>> Inventory & transfers` y `>> DIAGNÓSTICO: retirada interactiva` / `>> DIAGNOSTIC: interactive withdrawal`. Espera IDs de operación, revisión, solicitados y confirmados coherentes; un escaneo invalidado termina como `INVALIDATED_BY_MUTATION`/`STALE_RETRY`, nunca `zone_error` por esa sola causa. Conserva `console.txt` de cliente y dedicado. El relé opcional requiere administrador; un jugador normal no recibe diagnóstico del servidor.

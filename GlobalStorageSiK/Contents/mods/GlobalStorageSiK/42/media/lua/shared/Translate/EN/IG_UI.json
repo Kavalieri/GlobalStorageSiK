@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RemoteDetailLoading": "Loading exact item details…",
+	"IGUI_GS_RemoteDetailUnavailable": "Details unavailable; refresh the inventory.",
+	"IGUI_GS_RemoteGroupTotal": "Group total: {1} items",
+	"IGUI_GS_ScanUpdatingAge": "Updating inventory · last valid snapshot {1} s ago",
+	"IGUI_GS_ItemDetailPage": "Showing {1}-{2} of {3} lines · {4} objects",
 	"IGUI_GS_BlockedVacantTitle": "Network without an owner",
 	"IGUI_GS_BlockedVacantMessage": "This network has no active owner and you can claim it.",
 	"IGUI_GS_BlockedRecoverTitle": "Previous access available",

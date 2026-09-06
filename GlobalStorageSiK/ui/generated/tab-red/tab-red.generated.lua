@@ -214,10 +214,10 @@ return {
     ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "832e2b66fed512b8137f9e25a4e17e75597a80593a8687eb293cb7f6f96f4813",
+    ["surfaceSpecSha256"] = "ddb1402e141d1a5d6748828dc9c411948063f518e0a30a7816219475fb7d8338",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "797642dd24770b3737dc3466c73889f22d6ea929dec4b9ce0d384a49dd1ee1e1",
-    ["visualSubtreeSha256"] = "0609df6ce7595679893163c26893f4a46c78e16d2c88fc0bcf395ba44b094c64"
+    ["visualMasterSha256"] = "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
+    ["visualSubtreeSha256"] = "13cda2937e033d43b44568de0f0a2e86fb3e83831593db2e3cecfba8c8f59ac6"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -725,7 +725,21 @@ return {
                       ["name"] = "kind",
                       ["value"] = {
                         ["kind"] = "literal",
-                        ["value"] = "progress"
+                        ["value"] = "alert-row"
+                      }
+                    },
+                    {
+                      ["name"] = "icon-key",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "sik.alert.warning.24"
+                      }
+                    },
+                    {
+                      ["name"] = "size",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = 24
                       }
                     },
                     {

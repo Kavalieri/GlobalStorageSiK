@@ -29,8 +29,7 @@ end
 
 --- Mapa area de log (primer argumento de cada llamada Log.debug/Debug.log en
 --- todo el mod) -> categoria de sandbox (ver GS_Sandbox.debugCategoryEnabled).
---- Un area sin entrada aqui NO se filtra por categoria (solo por DebugMode
---- maestro) - ver el comentario de debugCategoryEnabled() sobre por que.
+--- Un area sin entrada queda apagada: ninguna traza evita su gate granular.
 local AREA_CATEGORY = {
 	NetTrace = "Network",
 	Client = "Network",
@@ -58,6 +57,8 @@ local AREA_CATEGORY = {
 	Deposit = "Inventory",
 	DepositClient = "Inventory",
 	TransferQueue = "Inventory",
+	ZoneScanJob = "Inventory",
+	NativeProduct = "Inventory",
 	NetworkReadAction = "Inventory",
 	CraftSession = "Craft",
 	RedistributeJob = "Inventory",
@@ -84,6 +85,7 @@ local AREA_CATEGORY = {
 	-- geometria, solapes e interaccion; Global Storage solo aporta este gate y
 	-- su logger. Sustituye al antiguo interruptor independiente DebugModeUI.
 	TerminalUI = "SiKUI",
+	SiKUI = "SiKUI",
 	-- Geometria de columnas de SiK.UI.Table (SiK/UI/Table.lua) - ancho
 	-- resuelto por columna, solo se traza cuando el ancho disponible cambia
 	-- de verdad (resize), nunca por fotograma.
@@ -100,6 +102,7 @@ local AREA_CATEGORY = {
 	-- Diagnósticos P0 separados para no obligar a activar el árbol UI entero.
 	TabIcons = "TabIcons",
 	ExactWithdraw = "ExactWithdraw",
+	WithdrawClient = "ExactWithdraw",
 	OptionsTables = "OptionsTables",
 	-- Caja de busqueda de SiK UI (antes "SearchDiag", pedido explicito
 	-- 2026-08-18: sin esta entrada dependia solo del interruptor maestro).
@@ -223,6 +226,40 @@ local function write(level, area, message, detail)
 	end
 end
 
+-- Diagnostics are opt-in and bounded even when an existing caller logs in a
+-- loop. Fixed category keys bound memory; no timer/listener is installed.
+local normalBudget = {}
+local function writeNormal(level, category, area, message, detail)
+	local now = getTimestampMs and tonumber(getTimestampMs()) or 0
+	local bucket = normalBudget[category]
+	if not bucket or now < bucket.startedAt or now - bucket.startedAt >= 1000 then
+		local skipped = bucket and bucket.skipped or 0
+		bucket = { startedAt = now, lines = 0, bytes = 0, skipped = 0 }
+		normalBudget[category] = bucket
+		if skipped > 0 then
+			write("DEBUG", area, "diagnostics throttled", "category=" .. category .. " skipped=" .. skipped)
+			bucket.lines = 1
+			bucket.bytes = 256
+		end
+	end
+	if bucket.lines >= 20 or bucket.bytes >= 8192 then
+		bucket.skipped = bucket.skipped + 1
+		return
+	end
+	local text = tostring(message)
+	if detail ~= nil then text = text .. " | " .. tostring(detail) end
+	if #text > 1024 then
+		text = "oversized diagnostic omitted bytes=" .. tostring(#text)
+	end
+	if bucket.bytes + #text > 8192 then
+		bucket.skipped = bucket.skipped + 1
+		return
+	end
+	bucket.lines = bucket.lines + 1
+	bucket.bytes = bucket.bytes + #text
+	write(level, area, text)
+end
+
 --- Identidad mínima de la build efectiva, siempre visible una vez al arrancar.
 --- No es una traza de diagnóstico opcional: permite demostrar qué árbol cargó
 --- cada proceso antes de atribuir a código actual un resultado de QA antiguo.
@@ -263,10 +300,10 @@ function GlobalStorageSiK.Log.info(area, message, detail)
 		return
 	end
 	local category = AREA_CATEGORY[area]
-	if category and not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
+	if not category or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
 		return
 	end
-	write("INFO", area, message, detail)
+	writeNormal("INFO", category, area, message, detail)
 end
 
 --- Traza solo con DebugMode sandbox.
@@ -278,10 +315,10 @@ function GlobalStorageSiK.Log.debug(area, message, detail)
 		return
 	end
 	local category = AREA_CATEGORY[area]
-	if category and not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
+	if not category or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
 		return
 	end
-	write("DEBUG", area, message, detail)
+	writeNormal("DEBUG", category, area, message, detail)
 end
 
 --- Traza de alto volumen dentro de la categoria del area. Se usa para
