@@ -2268,6 +2268,13 @@ function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items
 	-- table must remain honestly in a loading state until the authoritative
 	-- snapshot is present.  Empty/filter messages are only valid afterwards.
 	local hasSnapshot = type(state) == "table" and type(state.items) == "table"
+	local scanState = state and type(state.scanStatus) == "table" and state.scanStatus.state or nil
+	local capturePending = state and (state.scanActive == true or state.reconcilePending == true
+		or scanState == "RUNNING" or scanState == "STALE_RETRY")
+	-- An initial response can contain items={} before its first scan finishes.
+	-- Keep prior nonempty rows/filter results visible, but do not claim that a
+	-- provisional empty capture proves the network contains no physical items.
+	local pendingEmpty = capturePending and #allItems == 0
 	local expanded = {}
 	for key in pairs(panel._expandedKeys or {}) do expanded[key] = true end
 	return {
@@ -2275,7 +2282,7 @@ function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items
 		-- Scan progress has one canonical, permanently visible owner: the shell
 		-- status indicator. Repeating it as an empty-table message created the
 		-- overlapping duplicate observed at runtime.
-		emptyText = not hasSnapshot and ""
+		emptyText = (not hasSnapshot or pendingEmpty) and ""
 			or T(#allItems > 0 and "IGUI_GS_NoFilterMatches" or "IGUI_GS_NoItems"),
 		sortKey = panel.itemsSortKey,
 		sortAsc = panel.itemsSortAsc,

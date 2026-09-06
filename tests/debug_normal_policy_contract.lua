@@ -10,7 +10,7 @@ local function loadFirst(paths)
 end
 
 local shared = "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/"
-local fallback = "GlobalStorageSiK-Repo/GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/shared/"
+local fallback = shared
 
 local console, relay, fileWrites = {}, {}, {}
 local now = 0
@@ -147,7 +147,7 @@ local function readSource(path)
     return text
 end
 local uidbg = readSource(fallback .. "../client/GS_UIDebug.lua")
-local framework = readSource("SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Diagnostics.lua")
+local framework = readSource("../SiKUIFramework-Repo/SiKUIFramework/Contents/mods/SiKUIFramework/42/media/lua/client/SiK/UI/Diagnostics.lua")
 assert(not string.find(uidbg, "registerSink", 1, true), "GS_UIDebug must not register a duplicate sink")
 local _, sinkCount = string.gsub(framework, "Diagnostics%.registerSink%(%\"SiK%.UI%.Framework%\"", "")
 assert(sinkCount == 1, "SiK.UI Diagnostics must retain exactly one framework sink")
