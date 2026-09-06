@@ -175,11 +175,10 @@ end
 
 function GS_FilterEditorUI:destroy()
 	GlobalStorageSiK.FilterEditor.instance = nil
-	if self.close then
-		self:close("product")
+	if UI.Modal and UI.Modal.close then
+		UI.Modal.close(self, "product")
 	else
-		self:setVisible(false)
-		if self.removeFromUIManager then self:removeFromUIManager() end
+		self:dispose()
 	end
 end
 
@@ -595,7 +594,8 @@ end
 ---@param target table { kind="node"|"zone", id=string, rules=table|nil } - rules = lista actual del propietario, para el detector de contradicciones
 ---@param operator string "OR"|"AND"|"NOT" - operador con el que se combinara la regla creada
 ---@param onAdded function|nil callback tras enviar la regla al servidor
-function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded)
+---@param parentModal table|nil editor de zona/contenedor que conserva el foco y la capa
+function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded, parentModal)
 	if not target or not target.id then return end
 	if GlobalStorageSiK.FilterEditor.instance then
 		GlobalStorageSiK.FilterEditor.instance:destroy()
@@ -612,6 +612,7 @@ function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded)
 	ui.operator = operator or "OR"
 	ui.onAdded = onAdded
 	ui:initialise()
+	UI.Modal.setOwner(ui, parentModal)
 	UI.Modal.show(ui)
 	GlobalStorageSiK.FilterEditor.instance = ui
 end

@@ -584,7 +584,7 @@ function GS_ZoneEditorUI:buildRuleSection(parentBlock, op)
 		end
 		GlobalStorageSiK.FilterEditor.show({ kind = "zone", id = self.zone.id, rules = self.zone.rules, containerGroups = containerGroups, scopeRules = scopeRules }, op, function()
 			self:rebuildForm()
-		end)
+		end, self)
 	end })
 	column:block(addBtn, CONTROL_METRICS.buttonHeight)
 	column:finish()

@@ -762,7 +762,7 @@ function GS_NodeEditorUI:buildRuleSection(parentBlock, op)
 			end
 			GlobalStorageSiK.FilterEditor.show({ kind = "node", id = self.node.id,
 				rules = self.node.rules, scopeRules = scopeRules }, op,
-				function() self:rebuildForm() end)
+				function() self:rebuildForm() end, self)
 		end })
 	self._ruleAddBtns[op] = add
 	column:block(add, CONTROL_METRICS.buttonHeight)
