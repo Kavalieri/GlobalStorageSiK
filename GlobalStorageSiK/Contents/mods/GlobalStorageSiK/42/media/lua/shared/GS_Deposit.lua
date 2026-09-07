@@ -127,12 +127,32 @@ end
 ---@param itemId number
 ---@return InventoryItem|nil
 ---@return ItemContainer|nil
-function GlobalStorageSiK.Deposit.findItemById(player, itemId)
+function GlobalStorageSiK.Deposit.createSearchSnapshot(player)
+	return {
+		-- La topología se puede reutilizar dentro de una operación corta, pero no
+		-- contiene contenido ni permisos congelados: ambos se vuelven a leer al
+		-- resolver cada ítem.
+		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player),
+	}
+end
+
+--- Busca un ítem dentro de una instantánea topológica ya creada. Permisos y
+--- contenido siguen siendo lecturas frescas: una puerta, distancia o vehículo
+--- pueden cambiar entre dos préstamos del mismo barrido.
+---@param player IsoPlayer
+---@param itemId number
+---@param snapshot table|nil
+---@return InventoryItem|nil
+---@return ItemContainer|nil
+function GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapshot)
 	if not player or not itemId then
 		return nil, nil
 	end
 
-	local containers = GlobalStorageSiK.Deposit.collectSearchContainers(player)
+	local containers = snapshot and snapshot.containers or nil
+	if type(containers) ~= "table" then
+		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player)
+	end
 	for c = 1, #containers do
 		local container = containers[c]
 		if GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container) then
@@ -147,13 +167,25 @@ function GlobalStorageSiK.Deposit.findItemById(player, itemId)
 	return nil, nil
 end
 
+--- Busca un ítem por ID en contenedores accesibles. `snapshot` es opcional y
+--- solo evita reconstruir la topología durante una operación; no cachea el
+--- contenido ni autoriza contenedores sin volver a comprobarlos.
+---@param player IsoPlayer
+---@param itemId number
+---@param snapshot table|nil
+---@return InventoryItem|nil
+---@return ItemContainer|nil
+function GlobalStorageSiK.Deposit.findItemById(player, itemId, snapshot)
+	return GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapshot)
+end
+
 --- Deposita una cantidad parcial de un ítem por ID.
 ---@param player IsoPlayer
 ---@param networkId string|nil
 ---@param referenceItemId number
 ---@param count number
 ---@return table summary
-function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referenceItemId, count)
+function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referenceItemId, count, options)
 	local summary = { moved = 0, skipped = 0, failed = 0, reason = nil }
 
 	local item, container = GlobalStorageSiK.Deposit.findItemById(player, referenceItemId)
@@ -195,7 +227,8 @@ function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referen
 		summary.reason = "invalid"
 		return summary
 	end
-	local maxItems = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxItems = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local target = math.min(count, maxItems)
 	local itemIds = {}
 	for i = 0, items:size() - 1 do
@@ -210,7 +243,7 @@ function GlobalStorageSiK.Deposit.depositPartialCount(player, networkId, referen
 		summary.reason = "not_found"
 		return summary
 	end
-	return GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds)
+	return GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, options)
 end
 
 --- Deposita ítems por lista de IDs.
@@ -221,7 +254,7 @@ end
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
-		reason = nil, failureReason = nil, remainingIds = {} }
+		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true }
 
 	if not player or not itemIds or #itemIds == 0 then
 		summary.reason = "invalid"
@@ -237,7 +270,8 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 		return summary
 	end
 
-	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxPerTick = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local seenIds = {}
 	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 
@@ -291,12 +325,13 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 				if not allowed then
 					summary.skipped = summary.skipped + 1
 				else
-					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
+					local ok, reason, snapshotsUpdated = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
 						preferredNodeId = options and options.preferredNodeId or nil,
 					})
 					if ok then
 						summary.moved = summary.moved + 1
+						if snapshotsUpdated ~= true then summary.snapshotsUpdated = false end
 					elseif reason == "filtered" then
 						summary.skipped = summary.skipped + 1
 					else
@@ -326,9 +361,9 @@ end
 ---@param networkId string|nil
 ---@param referenceItemId number
 ---@return table summary
-function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId)
+function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
-		reason = nil, failureReason = nil, remainingIds = {} }
+		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true }
 
 	local item, container = GlobalStorageSiK.Deposit.findItemById(player, referenceItemId)
 	if not item or not container then
@@ -353,7 +388,8 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		return summary
 	end
 
-	local maxPerTick = GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
+	local maxPerTick = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
+		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local candidates = GlobalStorageSiK.BulkFilters.collectCandidates(
 		container, player, GlobalStorageSiK.BulkFilters.SCOPE.SINGLE_BAG
 	)
@@ -371,11 +407,12 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		summary.processed = summary.processed + 1
 		local candidate = candidates[c]
 		if candidate and candidate:getContainer() == container then
-			local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
+			local ok, reason, snapshotsUpdated = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
 				session = routingSession,
 			})
 			if ok then
 				summary.moved = summary.moved + 1
+				if snapshotsUpdated ~= true then summary.snapshotsUpdated = false end
 			elseif reason == "filtered" then
 				summary.skipped = summary.skipped + 1
 			else

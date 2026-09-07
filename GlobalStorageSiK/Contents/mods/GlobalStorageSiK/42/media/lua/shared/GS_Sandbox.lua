@@ -249,14 +249,10 @@ function GlobalStorageSiK.Sandbox.bulkDepositEnabled()
 	return SandboxVars.GlobalStorageSiK.BulkDepositEnabled ~= false
 end
 
---- Muestra progreso y resumen de depósito, extracción y Auto Sort mediante
---- notas sobre el personaje. Es feedback de juego, independiente de debug.
+--- Legacy compatibility: informational operation halos have been retired.
 ---@return boolean
 function GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
-	if not SandboxVars.GlobalStorageSiK then
-		return true
-	end
-	return SandboxVars.GlobalStorageSiK.OperationHaloFeedback ~= false
+	return false
 end
 
 --- Presupuesto interno e invariable de una petición masiva. Ya no se expone
@@ -265,6 +261,41 @@ end
 ---@return number
 function GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()
 	return 10
+end
+
+local function localPerformanceValue(key, fallback)
+	local values = SandboxVars.GlobalStorageSiK
+	local value = values and values[key]
+	if value == nil then return fallback end
+	return value
+end
+
+function GlobalStorageSiK.Sandbox.getLocalPerformanceProfile()
+	return localPerformanceValue("LocalPerformanceProfile", 1)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalBatchUnits()
+	return localPerformanceValue("LocalBatchUnits", 10)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalBatchDelayMs()
+	return localPerformanceValue("LocalBatchDelayMs", 400)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalAutoSortMovesPerStep()
+	return localPerformanceValue("LocalAutoSortMovesPerStep", 2)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalAutoSortMoveDelayMs()
+	return localPerformanceValue("LocalAutoSortMoveDelayMs", 1000)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalInspectedPerStep()
+	return localPerformanceValue("LocalInspectedPerStep", 25)
+end
+
+function GlobalStorageSiK.Sandbox.getLocalCpuBudgetMs()
+	return localPerformanceValue("LocalCpuBudgetMs", 5)
 end
 
 --- Indica si se deben respetar los ítems favoritos.
@@ -377,9 +408,9 @@ end
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugRelayToClients()
 	if not SandboxVars.GlobalStorageSiK then
-		return true
+		return false
 	end
-	return SandboxVars.GlobalStorageSiK.DebugRelayToClients ~= false
+	return SandboxVars.GlobalStorageSiK.DebugRelayToClients == true
 end
 
 -- dev36: debugModeUI() (interruptor DebugModeUI independiente para el
@@ -399,80 +430,39 @@ end
 --- DebugMode activo, cada categoria se puede apagar por separado para ver
 --- solo el tipo de diagnostico que se necesita en cada momento. Todas
 --- En instalaciones nuevas todas quedan apagadas y el administrador activa
---- solo el bloque que corresponda a su prueba. Una clave ausente de una
---- partida anterior conserva el fallback historico para no ocultar trazas.
----@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
+--- solo el bloque que corresponda a su prueba. Claves ausentes/desconocidas OFF.
+---@param key string "Network"|"TerminalAccess"|"Permissions"|"Craft"|"Inventory"|"Tooltip"|"Router"|"NodeNaming"|"SiKUI"|"SiKUITable"|"AdminTableRuntime"|"RecordedMediaRuntime"|"SiKUIScroll"|"SiKUITabs"|"SiKUISearch"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugCategoryEnabled(key)
 	if not SandboxVars.GlobalStorageSiK then
-		return true
+		return false
 	end
 	local varName = "DebugCat" .. tostring(key)
 	local value = SandboxVars.GlobalStorageSiK[varName]
-	if value == nil then
-		-- Categoria desconocida (area de log sin mapear todavia): no
-		-- silenciarla por defecto, mejor pecar de mostrar de mas que de
-		-- ocultar una traza nueva sin que nadie se de cuenta del porque.
-		return true
-	end
 	return value == true
 end
 
---- Sublog detallado dentro de una categoria principal. Siempre requiere que
---- la categoria padre este activa; las claves nuevas/ausentes quedan apagadas
---- para que una actualizacion no empiece a volcar inventarios completos.
+--- Legacy DETAIL keys are deliberately ignored, including persisted true values.
 ---@param key string "Network"|"Craft"|"Inventory"|"Router"
 ---@return boolean
 function GlobalStorageSiK.Sandbox.debugDetailEnabled(key)
-	if not GlobalStorageSiK.Sandbox.debugMode()
-		or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(key) then
-		return false
-	end
-	if not SandboxVars.GlobalStorageSiK then return false end
-	return SandboxVars.GlobalStorageSiK["DebugDetail" .. tostring(key)] == true
+	return false
 end
 
---- Indica si la construcción GS es gratuita (ambas recetas).
----@return boolean
-function GlobalStorageSiK.Sandbox.freeBuilding()
-	if not SandboxVars.GlobalStorageSiK then
-		return false
-	end
-	return SandboxVars.GlobalStorageSiK.FreeBuilding == true
-end
-
---- Craft gratis del terminal mueble.
----@return boolean
-function GlobalStorageSiK.Sandbox.freeCraftTerminalUnit()
-	if GlobalStorageSiK.Sandbox.freeBuilding() then
-		return true
-	end
-	if not SandboxVars.GlobalStorageSiK then
-		return false
-	end
-	return SandboxVars.GlobalStorageSiK.FreeCraftTerminalUnit == true
-end
-
---- Indica si el craft de una receta GS es gratis.
----@param recipeId string
----@return boolean
-function GlobalStorageSiK.Sandbox.isFreeCraft(recipeId)
-	if recipeId == "terminal_unit" or recipeId == "terminal_install" then
-		return GlobalStorageSiK.Sandbox.freeCraftTerminalUnit()
-	end
-	return GlobalStorageSiK.Sandbox.freeBuilding()
-end
-
+-- Requisitos fijos del producto. No son opciones sandbox: las cuatro claves
+-- históricas que intentaban leer nunca se declararon y por tanto no podían
+-- configurarse. Mantener getters evita duplicar números en recetas/UI sin
+-- fingir una superficie de configuración inexistente.
 --- Nivel Electricidad para instalar terminal GS en ordenador vanilla.
 ---@return number
 function GlobalStorageSiK.Sandbox.getInstallTerminalSkill()
-	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.InstallTerminalSkillLevel or 2
+	return 2
 end
 
 --- Nivel Electricidad para terminal mueble.
 ---@return number
 function GlobalStorageSiK.Sandbox.getTerminalUnitSkill()
-	return SandboxVars.GlobalStorageSiK and SandboxVars.GlobalStorageSiK.TerminalUnitSkillLevel or 4
+	return 4
 end
 
 --- Máximo de terminales físicos por red.

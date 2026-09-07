@@ -12,6 +12,7 @@ require "GS_PlayerUtils"
 require "GS_TerminalAccess"
 require "GS_TransferLock"
 require "GS_InventorySync"
+require "GS_OperationPacing"
 
 GlobalStorageSiK.RedistributeJob = {}
 
@@ -119,6 +120,10 @@ local function notifyProgress(job, summary)
 				job.skipped or 0, job.failed or 0),
 			jobType = "redistribute",
 			jobState = "running",
+			progressPhase = summary.phase,
+			progressChecked = summary.checked or 0,
+			progressTotal = summary.total or 0,
+			progressMoved = job.moved or 0,
 		})
 	end)
 end
@@ -128,7 +133,15 @@ local function finishJob(networkId, job, reason)
 	local topTypes = topTypeSummary(job.movedByType, 8)
 	GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. tostring(networkId) .. " reason=" .. tostring(reason)
 		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
-		.. " tiers=" .. tiers .. " topTypes=" .. topTypes)
+		.. " skipped=" .. tostring(job.skipped) .. " inspected=" .. tostring(job.inspected or 0)
+		.. " budgetExhaustions=" .. tostring(job.budgetExhaustions or 0)
+		.. " batches=" .. tostring(job.steps or 0)
+		.. " durationMs=" .. tostring(nowMs() - (job.startedMs or nowMs()))
+		.. " cancelled=" .. tostring(reason == "no_player")
+		.. " timeout=" .. tostring(reason == "network_busy" or reason == "stalled")
+		.. " error=" .. tostring(reason == "error")
+		.. " tiers=" .. tiers .. " topTypes=" .. topTypes .. " "
+		.. GlobalStorageSiK.OperationPacing.describe(job.pacing))
 	jobs[networkId] = nil
 	-- Liberar el tick antes de cualquier notificación/UI potencialmente falible:
 	-- un error al informar no puede dejar polling sin un job que procesar.
@@ -137,6 +150,10 @@ local function finishJob(networkId, job, reason)
 	local msg
 	if reason == "network_busy" or reason == "stalled" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError")
+	elseif reason == "no_permission" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole")
+	elseif reason == "source_unavailable" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_TransferSourceUnavailable")
 	elseif reason == "remote_disabled" or reason == "no_power" or reason == "no_nodes" then
 		msg = GlobalStorageSiK.Redistribute.formatSummaryMessage(summary)
 	elseif job.moved == 0 and job.failed == 0 then
@@ -148,6 +165,7 @@ local function finishJob(networkId, job, reason)
 	local ok = reason ~= "remote_disabled" and reason ~= "no_power"
 		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
 		and reason ~= "network_busy" and reason ~= "stalled"
+		and reason ~= "no_permission" and reason ~= "source_unavailable"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
@@ -162,6 +180,11 @@ local function finishJob(networkId, job, reason)
 			message = msg,
 			jobType = "redistribute",
 			jobState = "finished",
+			transfer = job.options and job.options.sourceNodeId and {
+				op = "redistribute", sourceNodeId = job.options.sourceNodeId,
+				networkId = networkId, moved = job.moved, pending = job.blocked or 0,
+				reason = (not ok and reason) or job.blockedReason,
+			} or nil,
 			redistributeTiers = tiers,
 			redistributeTopTypes = topTypes,
 		})
@@ -198,10 +221,13 @@ onTick = function()
 		return
 	end
 	-- Presupuesto compartido: aunque haya muchas redes vencidas, todo Auto Sort
-	-- combinado ejecuta como máximo un paso cada 100 ms. El job elegido queda
-	-- aplazado y los demás se atienden en ticks posteriores (round-robin por
-	-- vencimiento, sin sumar N presupuestos pesados en el mismo frame).
-	nextGlobalRunMs = now + GLOBAL_STEP_DELAY_MS
+	-- combinado ejecuta como máximo un paso por OnTick. Seguro/Rápido añaden su
+	-- espera; Personalizado puede usar 0 ms para continuar en el tick siguiente,
+	-- nunca dentro de un bucle en este mismo tick. El job elegido queda aplazado
+	-- y los demás se atienden por vencimiento, sin sumar N presupuestos pesados
+	-- en el mismo frame.
+	nextGlobalRunMs = now + (job.pacing and job.pacing.schedulerDelayMs
+		or GLOBAL_STEP_DELAY_MS)
 
 	local player = resolvePlayer(job.username)
 	if not player then
@@ -228,7 +254,7 @@ onTick = function()
 	job.busyRetries = 0
 	local ok, summary, session = pcall(function()
 		return GlobalStorageSiK.InventorySync.withBatch(function()
-			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session)
+			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing, job.options)
 		end)
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
@@ -249,7 +275,12 @@ onTick = function()
 
 	job.moved   = job.moved   + (summary.moved   or 0)
 	job.failed  = job.failed  + (summary.failed  or 0)
+	job.blocked = (job.blocked or 0) + (summary.blocked or 0)
+	job.blockedReason = summary.blockedReason or job.blockedReason
 	job.skipped = job.skipped + (summary.skipped or 0)
+	job.inspected = (job.inspected or 0) + (summary.inspected or 0)
+	job.budgetExhaustions = (job.budgetExhaustions or 0) + (summary.budgetExhaustions or 0)
+	job.steps = (job.steps or 0) + 1
 	mergeCounts(job.movedByTier, summary.movedByTier)
 	mergeCounts(job.movedByType, summary.movedByType)
 	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
@@ -277,7 +308,8 @@ onTick = function()
 		if summary.phase ~= "index" then
 			-- Los remove/add replicados son lo caro y conservan la pausa larga.
 			-- Un barrido que no movió nada puede continuar antes sin generar red.
-			stepDelay = (summary.moved or 0) > 0 and MOVE_DELAY_MS or MOVE_IDLE_DELAY_MS
+			stepDelay = (summary.moved or 0) > 0
+				and (job.pacing and job.pacing.moveDelayMs or MOVE_DELAY_MS) or MOVE_IDLE_DELAY_MS
 		end
 		job.nextRunMs = now + stepDelay
 		local phaseChanged = summary.phase ~= job.lastPhase
@@ -307,7 +339,7 @@ end
 ---@param player IsoPlayer
 ---@param networkId string|nil
 ---@return boolean started
-function GlobalStorageSiK.RedistributeJob.start(player, networkId)
+function GlobalStorageSiK.RedistributeJob.start(player, networkId, options)
 	if not player or not networkId then
 		return false
 	end
@@ -316,7 +348,9 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		return false
 	end
 	ensureTickInstalled()
+	local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	jobs[networkId] = {
+		options = options and { sourceNodeId = options.sourceNodeId } or nil,
 		username  = player:getUsername(),
 		nextRunMs = 0,
 		moved     = 0,
@@ -331,8 +365,15 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId)
 		busyRetries = 0,
 		movedByTier = {},
 		movedByType = {},
+		pacing = pacing,
+		startedMs = nowMs(),
+		inspected = 0,
+		budgetExhaustions = 0,
+		steps = 0,
 	}
-	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId) .. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled))
+	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId)
+		.. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled),
+		GlobalStorageSiK.OperationPacing.describe(pacing))
 	return true
 end
 

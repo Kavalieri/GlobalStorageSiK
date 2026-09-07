@@ -5,33 +5,107 @@
 	Descripción: Evita excepciones Java en getText y claves crudas en UI.
 ]]
 
+require "GS_CatalogManager"
+
 GlobalStorageSiK.I18n = GlobalStorageSiK.I18n or {}
 
---- Vocales/consonantes acentuadas latinas mas comunes (ES/FR/DE/PT/IT) ->
---- su base ASCII. Pedido explicito (2026-08-17): la busqueda debe ser "por
---- mejor aproximacion", sin distinguir mayus/minus NI tildes/dieresis/cedilla
---- - un jugador que escribe "pocion" debe encontrar "Poción" igual. Cada
---- clave es un caracter UTF-8 literal (2 bytes, rango Latin-1 Supplement) -
---- los patrones de Lua tratan estos bytes como literales normales (ninguno es
---- caracter magico de patron), no hace falta escapar nada.
-local ACCENT_MAP = {
-	["á"] = "a", ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["ã"] = "a",
-	["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e",
-	["í"] = "i", ["ì"] = "i", ["î"] = "i", ["ï"] = "i",
-	["ó"] = "o", ["ò"] = "o", ["ô"] = "o", ["ö"] = "o", ["õ"] = "o",
-	["ú"] = "u", ["ù"] = "u", ["û"] = "u", ["ü"] = "u",
-	["ñ"] = "n", ["ç"] = "c", ["ý"] = "y",
-	["Á"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a", ["Ã"] = "a",
-	["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
-	["Í"] = "i", ["Ì"] = "i", ["Î"] = "i", ["Ï"] = "i",
-	["Ó"] = "o", ["Ò"] = "o", ["Ô"] = "o", ["Ö"] = "o", ["Õ"] = "o",
-	["Ú"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
-	["Ñ"] = "n", ["Ç"] = "c", ["Ý"] = "y",
+-- Vocales/consonantes latinas acentuadas (ES/FR/DE/PT/IT) -> base ASCII.
+-- No se conservan claves literales: Kahlua/PZ puede reinterpretarlas al cargar
+-- el fuente. Reconstruirlas desde codepoints numéricos cubre tanto UTF-8 como
+-- la unidad Latin-1 que puede entregar java.lang.String.
+local ACCENT_CODEPOINTS = {
+	{ 0x00E1, "a" }, { 0x00E0, "a" }, { 0x00E2, "a" }, { 0x00E4, "a" }, { 0x00E3, "a" },
+	{ 0x00E9, "e" }, { 0x00E8, "e" }, { 0x00EA, "e" }, { 0x00EB, "e" },
+	{ 0x00ED, "i" }, { 0x00EC, "i" }, { 0x00EE, "i" }, { 0x00EF, "i" },
+	{ 0x00F3, "o" }, { 0x00F2, "o" }, { 0x00F4, "o" }, { 0x00F6, "o" }, { 0x00F5, "o" },
+	{ 0x00FA, "u" }, { 0x00F9, "u" }, { 0x00FB, "u" }, { 0x00FC, "u" },
+	{ 0x00F1, "n" }, { 0x00E7, "c" }, { 0x00FD, "y" },
+	{ 0x00C1, "a" }, { 0x00C0, "a" }, { 0x00C2, "a" }, { 0x00C4, "a" }, { 0x00C3, "a" },
+	{ 0x00C9, "e" }, { 0x00C8, "e" }, { 0x00CA, "e" }, { 0x00CB, "e" },
+	{ 0x00CD, "i" }, { 0x00CC, "i" }, { 0x00CE, "i" }, { 0x00CF, "i" },
+	{ 0x00D3, "o" }, { 0x00D2, "o" }, { 0x00D4, "o" }, { 0x00D6, "o" }, { 0x00D5, "o" },
+	{ 0x00DA, "u" }, { 0x00D9, "u" }, { 0x00DB, "u" }, { 0x00DC, "u" },
+	{ 0x00D1, "n" }, { 0x00C7, "c" }, { 0x00DD, "y" },
 }
+local FOLD_CODEPOINTS = {}
+for i = 1, #ACCENT_CODEPOINTS do
+	local pair = ACCENT_CODEPOINTS[i]
+	FOLD_CODEPOINTS[pair[1]] = string.byte(pair[2])
+end
+-- Letras polacas con diacrítico -> base ASCII. Ó/ó ya está en la tabla común.
+FOLD_CODEPOINTS[0x0104], FOLD_CODEPOINTS[0x0105] = 0x61, 0x61
+FOLD_CODEPOINTS[0x0106], FOLD_CODEPOINTS[0x0107] = 0x63, 0x63
+FOLD_CODEPOINTS[0x0118], FOLD_CODEPOINTS[0x0119] = 0x65, 0x65
+FOLD_CODEPOINTS[0x0141], FOLD_CODEPOINTS[0x0142] = 0x6C, 0x6C
+FOLD_CODEPOINTS[0x0143], FOLD_CODEPOINTS[0x0144] = 0x6E, 0x6E
+FOLD_CODEPOINTS[0x015A], FOLD_CODEPOINTS[0x015B] = 0x73, 0x73
+FOLD_CODEPOINTS[0x0179], FOLD_CODEPOINTS[0x017A] = 0x7A, 0x7A
+FOLD_CODEPOINTS[0x017B], FOLD_CODEPOINTS[0x017C] = 0x7A, 0x7A
+
+local function isUtf8Continuation(value)
+	return value ~= nil and value >= 0x80 and value <= 0xBF
+end
+
+local function normalizedCodepoint(codepoint)
+	local folded = FOLD_CODEPOINTS[codepoint]
+	if folded then return folded end
+	if codepoint >= 0x0410 and codepoint <= 0x042F then return codepoint + 0x20 end
+	if codepoint == 0x0401 then return 0x0451 end
+	return codepoint
+end
+
+local function encodeTwoByteCodepoint(codepoint)
+	return string.char(0xC0 + math.floor(codepoint / 0x40), 0x80 + (codepoint % 0x40))
+end
+
+local function foldLatinAccents(value)
+	local folded = {}
+	local i = 1
+	while i <= #value do
+		local byte = string.byte(value, i)
+		local nextByte = i < #value and string.byte(value, i + 1) or nil
+		local thirdByte = i + 1 < #value and string.byte(value, i + 2) or nil
+		local fourthByte = i + 2 < #value and string.byte(value, i + 3) or nil
+		if byte >= 0xC2 and byte <= 0xDF and isUtf8Continuation(nextByte) then
+			local pair = value:sub(i, i + 1)
+			local codepoint = (byte - 0xC0) * 0x40 + (nextByte - 0x80)
+			local normalized = normalizedCodepoint(codepoint)
+			if normalized == codepoint then
+				folded[#folded + 1] = pair
+			elseif normalized <= 0x7F then
+				folded[#folded + 1] = string.char(normalized)
+			else
+				folded[#folded + 1] = encodeTwoByteCodepoint(normalized)
+			end
+			i = i + 2
+		elseif byte >= 0xE0 and byte <= 0xEF
+			and isUtf8Continuation(nextByte) and isUtf8Continuation(thirdByte) then
+			folded[#folded + 1] = value:sub(i, i + 2)
+			i = i + 3
+		elseif byte >= 0xF0 and byte <= 0xF4
+			and isUtf8Continuation(nextByte) and isUtf8Continuation(thirdByte)
+			and isUtf8Continuation(fourthByte) then
+			folded[#folded + 1] = value:sub(i, i + 3)
+			i = i + 4
+		else
+			local unit = value:sub(i, i)
+			local normalized = normalizedCodepoint(byte)
+			if normalized ~= byte then
+				local ok, normalizedUnit = pcall(string.char, normalized)
+				folded[#folded + 1] = ok and normalizedUnit or unit
+			else
+				folded[#folded + 1] = unit
+			end
+			i = i + 1
+		end
+	end
+	return table.concat(folded)
+end
 
 --- Normaliza texto de busqueda para comparacion "por mejor aproximacion":
---- minusculas ASCII + tildes/dieresis/cedilla latinas plegadas a su base,
---- CUALQUIER otro byte (chino, cirilico, etc.) intacto. Sustituye a
+--- minusculas ASCII/cirílicas + diacríticos latinos soportados plegados a su
+--- base (incluido polaco); cualquier otra escritura se conserva intacta.
+--- Sustituye a
 --- string.lower estandar, que delega en la tabla tolower() de la libc del
 --- proceso - locale-dependiente byte a byte, sin garantia de que un byte
 --- >=0x80 de una secuencia UTF-8 salga intacto en todos los entornos
@@ -53,9 +127,13 @@ local ACCENT_MAP = {
 -- por cadena de entrada evita repetir las 47 pasadas de gsub para el MISMO
 -- texto en cada fila que lo comparte, sin tocar la logica de normalizacion
 -- en si. Cache simple por valor de cadena (no debil - el universo de
--- textos de items/categorias es pequeño y estable durante toda la sesion,
--- nunca crece sin limite como pasaria con IDs unicos por fila).
+-- textos de items/categorias suele ser pequeño y estable, pero la consulta
+-- escrita por el jugador también pasa por aquí. El tope evita que una sesión
+-- larga acumule entradas arbitrarias; al alcanzarlo se descarta el lote
+-- completo, una operación rara y O(1) que mantiene el camino frecuente simple.
+local ASCII_LOWER_CACHE_MAX = 4096
 local asciiLowerCache = {}
+local asciiLowerCacheCount = 0
 function GlobalStorageSiK.I18n.asciiLower(s)
 	if not s or s == "" then
 		return s or ""
@@ -64,11 +142,21 @@ function GlobalStorageSiK.I18n.asciiLower(s)
 	if cached ~= nil then
 		return cached
 	end
-	local result = s:gsub("[A-Z]", function(c) return string.char(string.byte(c) + 32) end)
-	for accented, base in pairs(ACCENT_MAP) do
-		result = result:gsub(accented, base)
+	local lowered = {}
+	for i = 1, #s do
+		local unit = string.byte(s, i)
+		lowered[i] = unit >= 0x41 and unit <= 0x5A and string.char(unit + 0x20) or s:sub(i, i)
+	end
+	local result = table.concat(lowered)
+	-- Una sola lectura distingue una secuencia UTF-8 conocida de una unidad
+	-- Latin-1. Un carácter UTF-8 ajeno al mapa conserva todos sus bytes.
+	result = foldLatinAccents(result)
+	if asciiLowerCacheCount >= ASCII_LOWER_CACHE_MAX then
+		asciiLowerCache = {}
+		asciiLowerCacheCount = 0
 	end
 	asciiLowerCache[s] = result
+	asciiLowerCacheCount = asciiLowerCacheCount + 1
 	return result
 end
 
@@ -97,7 +185,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_AddonStatusInstalled = "Installed on this terminal.",
 	IGUI_GS_AddonStatusNeedMagazine = "Read the addon magazine first.",
 	IGUI_GS_AddonBayTitle = "Expansion bay",
-	IGUI_GS_AddonBayHint = "M = manual read · + = module installed · border shows readiness.",
+	IGUI_GS_AddonBayHint = "M = manual read - + = module installed - border shows readiness.",
 	IGUI_GS_AddonMagOk = "Manual: recipes unlocked.",
 	IGUI_GS_AddonMagMissing = "Manual: read the addon magazine to unlock the module recipe.",
 	IGUI_GS_AddonModuleOk = "Module: ready in your inventory.",
@@ -135,6 +223,23 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_CraftSessionInactive = "No network-inventory craft session active.",
 	IGUI_GS_CraftNoModRecipes = "No mod recipes available.",
 	IGUI_GS_SectionStatus = "Network status",
+	IGUI_GS_OptionsNetworkHelp = "Select the network available from this terminal. The closed selector is reserved for future compatible uses.",
+	IGUI_GS_OptionsNetworkCurrent = "Current network",
+	IGUI_GS_OptionsSummaryTitle = "Summary",
+	IGUI_GS_OptionsSummaryHelp = "Summary of capacity, composition, power and configured range for the current network.",
+	IGUI_GS_OptionsInformationTitle = "Information",
+	IGUI_GS_OptionsInformationHelp = "Total capacity and general network counts.",
+	IGUI_GS_OptionsEnergyTitle = "Power",
+	IGUI_GS_OptionsEnergyHelp = "Shows whether the network detects a usable power supply.",
+	IGUI_GS_OptionsRangeTitle = "Configured range",
+	IGUI_GS_OptionsRangeHelp = "Shows terminal use, physical network and WiFi ranges.",
+	IGUI_GS_OptionsPaletteHelp = "Local visual preference for this character.",
+	IGUI_GS_OptionsTerminalsTitle = "Terminals",
+	IGUI_GS_OptionsTerminalsHelp = "Registered terminals. Select a row to manage it.",
+	IGUI_GS_OptionsMembersTitle = "Members",
+	IGUI_GS_OptionsMembersHelp = "Roles and last connection. Select a row to manage access.",
+	IGUI_GS_OptionsAccessHelp = "Grant access to an available player or faction.",
+	IGUI_GS_OptionsAccessSelect = "Select player or faction",
 	IGUI_GS_SectionScan = "Scan",
 	IGUI_GS_SectionItems = "Network inventory",
 	IGUI_GS_SectionZones = "Zones",
@@ -228,6 +333,58 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ScanStarted = "Network inventory scan started.",
 	IGUI_GS_ScanRunning = "Scanning network inventory incrementally...",
 	IGUI_GS_ScanRunningShort = "Scanning...",
+	IGUI_GS_ScanProgress = "Scanning zone {1}/{2}: {3}",
+	IGUI_GS_ScanCancel = "Cancel scan",
+	IGUI_GS_ScanCancelHint = "Stops this scan safely. Existing network setup is kept.",
+	IGUI_GS_ScanCancelled = "Network scan cancelled safely.",
+	IGUI_GS_ScanTimedOut = "Network scan stopped after no progress. Check inaccessible containers and try again.",
+	IGUI_GS_ScanPartialFailed = "Network scan ended with errors. Its snapshot was not certified as complete.",
+	IGUI_GS_ScanState = "Scan state: {1}",
+	IGUI_GS_ScanFailedZones = "failed zones: {1}",
+	IGUI_GS_ScanState_IDLE = "idle",
+	IGUI_GS_ScanState_RUNNING = "running",
+	IGUI_GS_ScanState_COMPLETED = "completed; snapshot certified",
+	IGUI_GS_ScanState_FAILED = "failed; snapshot not certified",
+	IGUI_GS_ScanState_CANCELLED = "cancelled; snapshot not certified",
+	IGUI_GS_ScanState_TIMED_OUT = "timed out; snapshot not certified",
+	IGUI_GS_ScanReason_zone_error = "one or more zones could not be scanned",
+	IGUI_GS_ScanReason_snapshot_stale = "inventory changed while scanning",
+	IGUI_GS_ScanReason_timed_out = "no progress was detected",
+	IGUI_GS_ScanReason_manual = "cancelled by an administrator",
+	IGUI_GS_ScanReason_no_player = "all observers disconnected",
+	IGUI_GS_ScanReason_not_running = "no scan is active",
+	IGUI_GS_ScanReason_invalid = "the request is invalid",
+	IGUI_GS_ScanReason_zone_not_found = "the requested zone no longer exists",
+	IGUI_GS_ScanReason_redistribute_active = "auto sort is using this network",
+	IGUI_GS_ScanCode_ZERR = "Zone error",
+	IGUI_GS_ScanCode_GERR = "Global error",
+	IGUI_GS_ScanCode_STAL = "Stale snapshot",
+	IGUI_GS_ScanCode_TIME = "Timeout",
+	IGUI_GS_ScanCode_CANC = "Cancelled",
+	IGUI_GS_ScanCode_OBSV = "No observer",
+	IGUI_GS_ScanCode_ZONE = "Zone unavailable",
+	IGUI_GS_ScanCode_REQ = "Invalid request",
+	IGUI_GS_ScanCode_BUSY = "Busy",
+	IGUI_GS_ScanCode_IDLE = "Idle",
+	IGUI_GS_ScanCode_UNKN = "Unknown error",
+	IGUI_GS_ScanNotRunning = "There is no network scan running.",
+	IGUI_GS_NodeBtnRemove = "Remove from network",
+	IGUI_GS_NodeRemoveTooltip = "Removes only this logical network entry. The physical container and its items stay in the world.",
+	IGUI_GS_NodeRemoveConfirm = "Remove '{1}' from this network? Its rules and category reservations will be released; the physical container and its items stay unchanged.",
+	IGUI_GS_NodeRemovedMsg = "Removed '{1}' from the network. It can be rediscovered as a new container.",
+	IGUI_GS_NodeRemoveFailed = "The container could not be removed from this network.",
+	IGUI_GS_NodeRebindRejected = "That replacement container is not a unique clean discovery in this network.",
+	IGUI_GS_NodeRebindConflict = "A new container was found in the same place, but its type or sprite differs. Nothing was moved: keep or remove the old configuration, then configure the new container if desired.",
+	IGUI_GS_NodeRebindAmbiguous = "Several matching replacement containers were found. Select the intended one; nothing is moved until you confirm it.",
+	IGUI_GS_NodeRebindSourceOnline = "This container is still online. Nothing was moved.",
+	IGUI_GS_NodeReboundMsg = "Container configuration rebound to the new discovery.",
+	IGUI_GS_NodeBtnRebind = "Rebind configuration",
+	IGUI_GS_NodeRebindTooltip = "Ask the server to find recent matching replacements. If there is more than one, it highlights them and requires your choice.",
+	IGUI_GS_NodeRebindConfirm = "Rebind '{1}' to '{2}'? Its rules and coverage move once; physical containers stay unchanged.",
+	IGUI_GS_NodeRebindProposal = "Safe replacement found: {1}.",
+	IGUI_GS_NodeRebindChooseTarget = "Choose the compatible replacement",
+	IGUI_GS_NodeRebindCandidate = "{1} ({2}, {3}, {4})",
+	IGUI_GS_NodeRebindCandidateTooltip = "Server-authoritative compatible destination. It is highlighted in the world.",
 	IGUI_GS_ScanCompleteMetrics = "Scan complete in {1} ms: {2} containers, {3} item instances, {4} types, {5} snapshot rows.",
 	IGUI_GS_ScanMetricsTooltip = "Last scan: {1} ms | {2} containers | {3} item instances | {4} types | {5} rows",
 	IGUI_GS_ItemTypes = "Item types in network: {1}",
@@ -253,8 +410,8 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodeNotesHint         = "E.g.: Left hallway, next to the entrance...",
 	IGUI_GS_NodeAddCatComboHint   = "Select category...",
 	IGUI_GS_Apply                 = "Apply",
-	IGUI_GS_NodeCategoryMainLabel = "Category:",
-	IGUI_GS_NodeCategorySubLabel  = "Subcategory:",
+	IGUI_GS_NodeCategoryMainLabel = "Family:",
+	IGUI_GS_NodeCategorySubLabel  = "Group:",
 	-- Preconfigured subcategories (nested under their vanilla parent category in the combo)
 	IGUI_GS_SubCat_FoodCold       = "Refrigerated / Freezable",
 	IGUI_GS_SubCat_FoodDry        = "Dry / Non-perishable",
@@ -283,6 +440,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_FilterCategoryLabel = "Category:",
 	IGUI_GS_FilterCategoryAll = "All categories",
 	IGUI_GS_FilterSubCategoryAll = "All subcategories",
+	IGUI_GS_RuleCoverageUnavailable = "This category or item is already assigned to another destination.",
 	IGUI_GS_BulkDeposit = "Store all",
 	IGUI_GS_Withdraw = "Withdraw",
 	IGUI_GS_WithdrawAll = "Withdraw all of this type",
@@ -319,7 +477,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ColName = "Name",
 	IGUI_GS_ColCategory = "Category",
 	IGUI_GS_CategoryTooltipTitle = "Full category",
-	IGUI_GS_CategoryTooltipMain = "Category: {1}",
+	IGUI_GS_CategoryTooltipMain = "Family: {1}",
 	IGUI_GS_CategoryTooltipSub = "Subcategory: {1}",
 	IGUI_GS_CategoryTooltipLeaf = "Detail: {1}",
 	IGUI_GS_NodeMoreCategories = "+ {1} more accepted categories",
@@ -375,6 +533,9 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_WithdrawnCount = "Withdrawn: {1}",
 	IGUI_GS_WithdrawnPartial = "Withdrawn: {1} of {2} requested",
 	IGUI_GS_WithdrawErrorReason = "Error: {1}",
+	IGUI_GS_WithdrawExactSelectionRequired = "Expand this row and choose the exact item to withdraw.",
+	IGUI_GS_ItemPage = "Units {1}-{2} of {3}",
+	IGUI_GS_DragMoreObjects = "+{1} objects",
 	IGUI_GS_ZoneLimitReached = "Zone limit reached",
 	IGUI_GS_InvalidEntry = "Invalid entry",
 	IGUI_GS_AlreadyMarked = "Already marked",
@@ -480,6 +641,24 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodeStatusError = "ERROR",
 	IGUI_GS_NodeStatusOffShort = "OFF",
 	IGUI_GS_NodeStatusErrorShort = "ERR",
+	IGUI_GS_NodeStatusOffline = "OFFLINE",
+	IGUI_GS_NodeStatusExcluded = "EXCLUDED",
+	IGUI_GS_NodeStatusDisabled = "DISABLED",
+	IGUI_GS_NodeStatusNew = "NEW",
+	IGUI_GS_NodeStatusConflict = "CONFLICT",
+	IGUI_GS_NodeStatusTipTitle = "Container status",
+	IGUI_GS_NodeStatusOfflineTip = "OFFLINE: the previous container record no longer resolves. Review recovery or remove its record.",
+	IGUI_GS_NodeStatusConflictTip = "CONFLICT: this container needs review before its configuration can be recovered.",
+	IGUI_GS_NodeStatusDisabledTip = "DISABLED: this container is kept in the network but does not participate in routing.",
+	IGUI_GS_NodeStatusExcludedTip = "EXCLUDED: this container was deliberately excluded from the network.",
+	IGUI_GS_NodeStatusNewTip = "NEW: this container was detected without prior configuration.",
+	IGUI_GS_NetworkIncidentTip = "{1} container issue(s) in Network. Open Red to review them.",
+	IGUI_GS_ZoneIncidentTip = "{1} issue(s) in this zone. Open the zone to review them.",
+	IGUI_GS_NodeTransferConfigConfirm = "Transfer the saved configuration from {1} to the new {2}? Its contents, capacity and zone will not change.",
+	IGUI_GS_NodeBtnTransferConfig = "Transfer configuration…",
+	IGUI_GS_NodeTransferConfigTip = "Offer the configuration to a new container detected in the same position.",
+	IGUI_GS_NodeRecoveryTitle = "Recovery - OFFLINE",
+	IGUI_GS_NodeRecoveryBody = "The previous container is no longer available. A new container in the same position may inherit its saved configuration.",
 	IGUI_GS_NodeExclude = "Exclude",
 	IGUI_GS_NodeInclude = "Include",
 	IGUI_GS_NodeContentsLive = "Live inventory",
@@ -555,6 +734,10 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_TerminalUnverified = "Unverified (chunk unloaded)",
 	IGUI_GS_TerminalSuspended = "In inventory / suspended",
 	IGUI_GS_NetBlockNetworks = "GS Networks",
+	IGUI_GS_NetSelected = "Selected network",
+	IGUI_GS_NetResourceSummary = "{1} containers - {2} types",
+	IGUI_GS_NetCapacityAvailable = "Network capacity: available",
+	IGUI_GS_NetCapacityLine = "Capacity - {1} / {2} kg",
 	IGUI_GS_NetUseSelected = "Use network",
 	IGUI_GS_NetCreateNew = "New network",
 	IGUI_GS_NetLinkTerminal = "Link terminal here",
@@ -606,6 +789,21 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ZoneSourceStructure = "Structure",
 }
 
+-- Códigos estables de diagnóstico breve para estados de escaneo. Son un
+-- complemento del mensaje localizado, no sustituyen su explicación.
+local SCAN_REASON_CODES = {
+	zone_error = "ZERR", global_error = "GERR", snapshot_stale = "STAL",
+	timed_out = "TIME", manual = "CANC", no_player = "OBSV",
+	invalid = "REQ", zone_not_found = "ZONE", redistribute_active = "BUSY",
+	not_running = "IDLE",
+}
+
+---@param reason string|nil
+---@return string
+function GlobalStorageSiK.I18n.scanReasonCode(reason)
+	return SCAN_REASON_CODES[reason or ""] or "UNKN"
+end
+
 --- Sustitución literal (sin patrones Lua) para evitar corrupción de %1, %2...
 ---@param str string
 ---@param find string
@@ -654,10 +852,25 @@ end
 --- Devuelve plantilla traducida sin argumentos de formato (seguro en B42).
 ---@param key string
 ---@return string
-function GlobalStorageSiK.I18n.getTemplate(key)
+function GlobalStorageSiK.I18n.getTemplate(key, argumentCount)
 	if type(getText) == "function" then
-		local ok, value = pcall(getText, key)
+		local count = math.max(0, math.floor(tonumber(argumentCount) or 0))
+		local markers = {}
+		for index = 1, count do
+			markers[index] = "__GS_I18N_ARG_" .. tostring(index) .. "__"
+		end
+		-- B42 reports a MissingFormatArgumentException even when getText() is
+		-- used only to retrieve a localized template.  Supplying inert ASCII
+		-- markers lets Translator complete its own formatting first; below we
+		-- restore the neutral %1/%2 contract consumed by formatTemplate().
+		local ok, value = pcall(function()
+			return getText(key, unpack(markers))
+		end)
 		if ok and value and value ~= key then
+			for index = 1, count do
+				value = GlobalStorageSiK.I18n.plainReplace(value, markers[index],
+					"%" .. tostring(index))
+			end
 			return GlobalStorageSiK.I18n.normalizeTemplate(value)
 		end
 	end
@@ -670,7 +883,7 @@ end
 ---@return string
 function GlobalStorageSiK.I18n.text(key, ...)
 	local argCount = select("#", ...)
-	local template = GlobalStorageSiK.I18n.getTemplate(key)
+	local template = GlobalStorageSiK.I18n.getTemplate(key, argCount)
 	if argCount <= 0 then
 		return template
 	end
@@ -793,43 +1006,24 @@ end
 -- CatalogManager no este listo, un fallo de ScriptManager no se cachea en
 -- absoluto (se reintenta en la siguiente consulta); solo se cachea un
 -- negativo real una vez que el catalogo esta confirmado disponible.
--- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas): el fix
--- anterior evitaba cachear un negativo ANTES de que CatalogManager estuviera
--- listo, pero los negativos guardados DESPUES seguian siendo permanentes de
--- verdad - `forceNewEpoch()` (recarga Lua en debug) no limpiaba esta tabla
--- ni sus entradas llevaban el epoch en que se guardaron, así que la
--- afirmación del documento ("queda invalidada de facto al cambiar el
--- epoch") no se cumplia para esta cache en concreto.
---
--- Tabla PARALELA (no un wrapper dentro del mismo valor, para no arriesgar
--- confundir un ScriptItem real con una tabla de metadatos): solo los
--- negativos "confirmados con catalogo listo" quedan registrados aqui con el
--- epoch en que se guardaron. Si el epoch actual ya no coincide, el negativo
--- se descarta y se reintenta. Los positivos (`script` real) y el patron
--- Moveable (`false` permanente) NUNCA entran aqui - coherente con §8.2
--- dominio 1 (ScriptItemCache): un ScriptItem real no deja de existir por
--- cambiar de epoch, y el patron Moveable es estructural.
-local _scriptItemLookupCache = {}
-local _scriptItemNegativeEpoch = {}
+-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas: "los
+-- positivos de ScriptItem siguen siendo permanentes"). Ciclo de vida
+-- CERRADO DE VERDAD (2026-08-27, pedido explicito del usuario: "cerrar
+-- primero el ciclo de cache positiva por catalogEpoch antes de construir
+-- la taxonomia encima"): en vez de un seguimiento de epoch por entrada
+-- (fragil, ver historial de este comentario en versiones previas), esta
+-- tabla se crea con GlobalStorageSiK.CatalogManager.createEpochCache() -
+-- se vacia por COMPLETO cada vez que el catalogo cambia de epoch de
+-- verdad, sin excepcion y sin bookkeeping adicional. Positivos, negativos
+-- confirmados y el patron Moveable comparten la misma tabla; recomputar un
+-- patron Moveable tras un vaciado es barato (nunca llega a tocar
+-- ScriptManager), asi que no hace falta tratarlo aparte.
+local _scriptItemLookupCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 local function cachedScriptItem(fullType)
 	local cached = _scriptItemLookupCache[fullType]
 	if cached ~= nil then
-		if cached ~= false then
-			return cached
-		end
-		local negEpoch = _scriptItemNegativeEpoch[fullType]
-		if negEpoch == nil then
-			-- Negativo permanente (patron Moveable, sin epoch registrado).
-			return nil
-		end
-		local currentEpoch = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
-		if currentEpoch == nil or negEpoch == currentEpoch then
-			return nil
-		end
-		-- El catalogo cambio de epoch desde que se confirmo este negativo -
-		-- ya no es de fiar, se retira y se reintenta abajo.
-		_scriptItemLookupCache[fullType] = nil
-		_scriptItemNegativeEpoch[fullType] = nil
+		return cached or nil
 	end
 	if looksLikeMoveableSpriteFullType(fullType) then
 		_scriptItemLookupCache[fullType] = false
@@ -849,10 +1043,9 @@ local function cachedScriptItem(fullType)
 		_scriptItemLookupCache[fullType] = script
 	elseif queried and catalogReady then
 		-- Consulta real, ScriptManager disponible, catalogo confirmado
-		-- listo: un "no existe" aqui es un negativo de verdad - se ata al
-		-- epoch actual para poder invalidarse si el catalogo cambia.
+		-- listo: un "no existe" aqui es un negativo de verdad - la propia
+		-- cache lo descarta sola si el catalogo cambia de epoch.
 		_scriptItemLookupCache[fullType] = false
-		_scriptItemNegativeEpoch[fullType] = GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.getEpoch()
 	end
 	-- Si no se pudo consultar (sm no disponible) o el catalogo aun no esta
 	-- listo, no se cachea nada - la proxima llamada vuelve a intentarlo.
@@ -889,7 +1082,11 @@ end
 --- temprano si aplica) - segura de memorizar sin cache separada por sprite.
 ---@param fullType string|nil
 ---@return string
-local typeDisplayNameCache = {}
+-- Misma epoch-cache reutilizable que _scriptItemLookupCache (ver
+-- GS_CatalogManager.createEpochCache) - un nombre resuelto depende del
+-- ScriptItem subyacente, asi que debe invalidarse en el mismo momento.
+local typeDisplayNameCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
 function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	if not fullType or fullType == "" then
 		return "?"
@@ -901,34 +1098,6 @@ function GlobalStorageSiK.I18n.typeDisplayName(fullType)
 	local result = GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
 	typeDisplayNameCache[fullType] = result
 	return result
-end
-
--- BUG REAL cerrado (2026-08-27, hallazgo del equipo de sistemas: "los
--- positivos de ScriptItem siguen siendo permanentes" - un ScriptItem real
--- guardado en _scriptItemLookupCache nunca se invalidaba, aunque una recarga
--- Lua/debug o un cambio de catalogo pudiera sustituir su definicion
--- conservando el mismo fullType. El documento exige "valido durante una
--- epoca", no para siempre, y esto se vuelve critico en cuanto las fases
--- siguientes de la taxonomia empiecen a consultar propiedades del objeto
--- devuelto). En vez de atar cada positivo a un epoch individual (fragil,
--- facil de olvidar en un consumidor nuevo), se vacian POR COMPLETO las 3
--- caches de este fichero que dependen del catalogo cada vez que
--- CatalogManager confirma un cambio real de epoch.
-if GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.onEpochChanged then
-	GlobalStorageSiK.CatalogManager.onEpochChanged(function(newEpoch)
-		for k in pairs(_scriptItemLookupCache) do
-			_scriptItemLookupCache[k] = nil
-		end
-		for k in pairs(_scriptItemNegativeEpoch) do
-			_scriptItemNegativeEpoch[k] = nil
-		end
-		for k in pairs(typeDisplayNameCache) do
-			typeDisplayNameCache[k] = nil
-		end
-		if GlobalStorageSiK.Log then
-			GlobalStorageSiK.Log.debug("I18n", "cache de ScriptItem/nombre vaciada por cambio de catalogEpoch=" .. tostring(newEpoch))
-		end
-	end)
 end
 
 function GlobalStorageSiK.I18n._resolveTypeDisplayName(fullType)
@@ -1178,6 +1347,18 @@ function GlobalStorageSiK.I18n.nameFromItemInstance(item, fullType)
 	return nil
 end
 
+-- BUG REAL DE RENDIMIENTO cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: "I18n.itemDisplayName no cachea su resultado final -
+-- typeDisplayName() SI esta memorizada, pero el wrapper completo (deteccion
+-- de moveable + isLowQualityDisplayName sobre stable/fallback) se re-ejecuta
+-- en cada llamada de busqueda/ordenacion/render"). Clave por
+-- fullType+worldSprite+fallback (los 3 parametros reales de la funcion,
+-- estables mientras la fila no cambie de tipo) - epoch-cache igual que
+-- typeDisplayNameCache, un nombre resuelto depende del mismo ScriptItem
+-- subyacente y debe invalidarse en el mismo momento (cambio de catalogo).
+local itemDisplayNameCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+
 --- Nombre legible de un ítem según idioma del cliente (estable por fullType).
 ---@param fullType string|nil
 ---@param fallback string|nil
@@ -1187,21 +1368,31 @@ function GlobalStorageSiK.I18n.itemDisplayName(fullType, fallback, worldSprite)
 	if not fullType then
 		return fallback or "?"
 	end
+	local cacheKey = fullType .. "\1" .. tostring(worldSprite or "") .. "\1" .. tostring(fallback or "")
+	local cached = itemDisplayNameCache[cacheKey]
+	if cached ~= nil then
+		return cached
+	end
+	local result
 	local moveable = GlobalStorageSiK.I18n.moveableDisplayNameFromSprite(worldSprite)
-	if moveable then return moveable end
-	local stable = GlobalStorageSiK.I18n.typeDisplayName(fullType)
-	if stable and stable ~= "" and stable ~= fullType
-		and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
-		return stable
+	if moveable then
+		result = moveable
+	else
+		local stable = GlobalStorageSiK.I18n.typeDisplayName(fullType)
+		if stable and stable ~= "" and stable ~= fullType
+			and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
+			result = stable
+		elseif fallback and fallback ~= "" and fallback ~= fullType
+			and not GlobalStorageSiK.I18n.isLowQualityDisplayName(fallback) then
+			result = fallback
+		elseif stable and stable ~= "" and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
+			result = stable
+		else
+			result = fullType or "?"
+		end
 	end
-	if fallback and fallback ~= "" and fallback ~= fullType
-		and not GlobalStorageSiK.I18n.isLowQualityDisplayName(fallback) then
-		return fallback
-	end
-	if stable and stable ~= "" and not GlobalStorageSiK.I18n.isLowQualityDisplayName(stable) then
-		return stable
-	end
-	return fullType or "?"
+	itemDisplayNameCache[cacheKey] = result
+	return result
 end
 
 --- Categoría legible estilo inventario vanilla (p. ej. Arma - Hacha).
@@ -1210,12 +1401,9 @@ end
 ---@param subFallback string|nil
 ---@return string
 function GlobalStorageSiK.I18n.itemCategoryDisplay(fullType, fallback, subFallback, gsSubKeysStr)
-	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
-		return GlobalStorageSiK.ItemTaxonomy.resolve(fullType, {
-			category = fallback,
-			subCategory = subFallback,
-			gsSubKeysStr = gsSubKeysStr,
-		}).fullLabel
+	if GlobalStorageSiK.CategoryResolution then
+		return GlobalStorageSiK.CategoryResolution.label(
+			GlobalStorageSiK.CategoryResolution.resolve(fullType, { vanillaKey = fallback, category = fallback }, nil))
 	end
 	return fallback or "—"
 end
@@ -1228,17 +1416,93 @@ end
 -- esta memorizado"): filterItemRows() llama a esto para CADA fila en CADA
 -- pulsacion de tecla del buscador, recalculando itemDisplayName/
 -- ItemTaxonomy.resolve/categoria/asciiLower entero desde cero aunque la fila
--- no haya cambiado desde la ultima tecla. Cache por REFERENCIA de fila
--- (clave debil, __mode="k") - las filas del catalogo son objetos estables
--- mientras la pestaña no se reconstruye (refreshItemsTab crea filas NUEVAS,
--- asi que la cache vieja simplemente deja de usarse y el recolector de
--- basura libera las entradas sin que haga falta invalidarla a mano).
-local itemSearchHaystackCache = setmetatable({}, { __mode = "k" })
+-- no haya cambiado desde la ultima tecla.
+--
+-- BUG REAL DE RENDIMIENTO #2 cerrado (2026-08-27, informe de telemetria de
+-- Simucad tras dev19: "el snapshot del servidor entrega tablas de fila
+-- nuevas aproximadamente cada dos segundos - aunque el contenido logico sea
+-- identico, la identidad de tabla cambia y la cache pierde efectividad").
+-- La cache original usaba la propia tabla `row` como clave debil, asumiendo
+-- que era estable entre refrescos - Simucad confirmo que NO lo es. Cambiada
+-- a clave por COMPUESTO de los campos intrinsecos al tipo de los que
+-- realmente depende esta funcion (fullType/worldSprite/displayName/
+-- category/subCategory) - mismo patron ya usado por
+-- CategoryResolution.resolve()/su caché de sesión
+-- para el mismo problema. `count`/zona/nodo NUNCA entran en la clave -son
+-- estado dinamico de red, no identidad del tipo.
+local itemSearchHaystackCache = GlobalStorageSiK.CatalogManager
+	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+local ITEM_SEARCH_CACHE_MAX = 4096
+local ITEM_SEARCH_CACHE_TRIM = 2048
+local itemSearchHaystackOrder = {}
+local function clearItemSearchOrder()
+	itemSearchHaystackOrder = {}
+end
+if GlobalStorageSiK.CatalogManager then
+	GlobalStorageSiK.CatalogManager.onEpochChanged(clearItemSearchOrder)
+	GlobalStorageSiK.CatalogManager.onLanguageEpochChanged(clearItemSearchOrder)
+end
+local function storeItemSearchHaystack(key, value)
+	if itemSearchHaystackCache[key] == nil then
+		if #itemSearchHaystackOrder >= ITEM_SEARCH_CACHE_MAX then
+			local kept = {}
+			for i = 1, #itemSearchHaystackOrder do
+				local oldKey = itemSearchHaystackOrder[i]
+				if i <= ITEM_SEARCH_CACHE_TRIM then
+					itemSearchHaystackCache[oldKey] = nil
+				else
+					kept[#kept + 1] = oldKey
+				end
+			end
+			itemSearchHaystackOrder = kept
+		end
+		itemSearchHaystackOrder[#itemSearchHaystackOrder + 1] = key
+	end
+	itemSearchHaystackCache[key] = value
+end
+-- One localized presentation for rows, search and remote tooltips. A parent
+-- summarizes physical variants, never the number of visible detail lines.
+function GlobalStorageSiK.I18n.foodStateLabel(row)
+	if type(row) ~= "table" then return "" end
+	local seen, labels = {}, {}
+	if type(row.foodSummary) == "table" then
+		for _, key in ipairs({ "Fresh", "Stale", "Rotten", "Cooked", "Burnt", "Frozen" }) do
+			if row.foodSummary[key] == true then labels[#labels + 1] = getText("Tooltip_food_" .. key) end
+		end
+		return table.concat(labels, " / ")
+	end
+	local function addState(state)
+		if type(state) ~= "table" then return end
+		local keys = {}
+		if state.rotten == true then keys[#keys + 1] = "Rotten"
+		elseif state.fresh == true then keys[#keys + 1] = "Fresh"
+		elseif state.fresh == false then keys[#keys + 1] = "Stale" end
+		if state.burnt == true then keys[#keys + 1] = "Burnt"
+		elseif state.cooked == true then keys[#keys + 1] = "Cooked" end
+		if state.frozen == true then keys[#keys + 1] = "Frozen" end
+		for i = 1, #keys do
+			if not seen[keys[i]] then
+				seen[keys[i]] = true
+				labels[#labels + 1] = getText("Tooltip_food_" .. keys[i])
+			end
+		end
+	end
+	addState(row.foodState)
+	for i = 1, #(row.variantSummary or {}) do addState(row.variantSummary[i].foodState) end
+	return table.concat(labels, " / ")
+end
+
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	if not row then
 		return ""
 	end
-	local cached = itemSearchHaystackCache[row]
+	local foodLabel = GlobalStorageSiK.I18n.foodStateLabel(row)
+	local cacheKey = foodLabel .. "\1" .. tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
+		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
+		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
+		.. "\1" .. tostring(row.nativePath or "") .. "\1" .. tostring(row.variantSearchText or "")
+		.. "\1" .. tostring(row.mediaTitle or "")
+	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
 	end
@@ -1260,18 +1524,54 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 
 	local locName = GlobalStorageSiK.I18n.itemDisplayName(fullType, row.displayName, row.worldSprite)
 	addPart(locName)
-	if GlobalStorageSiK.ItemTaxonomy and GlobalStorageSiK.ItemTaxonomy.resolve then
-		local tax = GlobalStorageSiK.ItemTaxonomy.resolve(fullType, row)
-		addPart(tax.fullLabel)
-		addPart(tax.mainLabel)
-		addPart(tax.subLabel)
+	addPart(foodLabel)
+	local resolved = GlobalStorageSiK.CategoryResolution
+		and GlobalStorageSiK.CategoryResolution.resolve(fullType, row, nil) or nil
+	if resolved and resolved.effective == "native" and GlobalStorageSiK.NativeProduct then
+		local nativeView = GlobalStorageSiK.NativeProduct.getView(resolved.nativePath)
+		addPart(nativeView.fullLabel)
+		addPart(nativeView.l1Label)
+		addPart(nativeView.l2Label)
+		addPart(nativeView.l3Label)
+		addPart(resolved.nativePath)
+	end
+	-- Los padres mixtos no tienen una ruta representativa: cada variante conserva
+	-- la suya. Resolver aquí sus etiquetas en el idioma del cliente hace que la
+	-- búsqueda encuentre también el detalle sin solicitar/abrir filas remotas.
+	if GlobalStorageSiK.NativeProduct then
+		for i = 1, #(row.nativePaths or {}) do
+			local nativePath = row.nativePaths[i]
+			local nativeView = GlobalStorageSiK.NativeProduct.getView(nativePath)
+			addPart(nativeView.fullLabel)
+			addPart(nativeView.l1Label)
+			addPart(nativeView.l2Label)
+			addPart(nativeView.l3Label)
+			addPart(nativePath)
+		end
+	end
+	if resolved then
+		addPart(GlobalStorageSiK.CategoryResolution.label(resolved))
+		addPart(resolved.vanillaKey)
 	else
 		local locCat = GlobalStorageSiK.I18n.itemCategoryDisplay(fullType, row.category, row.subCategory)
 		addPart(locCat)
 	end
 	addPart(row.displayName)
+	-- `mediaTitle` es identidad visible por instancia, no el nombre generico
+	-- del ScriptItem. Se incluye de forma explicita sin cambiar la precedencia
+	-- global de itemDisplayName para fungibles y Moveables.
+	addPart(row.mediaTitle)
 	addPart(row.category)
 	addPart(row.subCategory)
+	for i = 1, #(row.variantSummary or {}) do
+		local summary = row.variantSummary[i]
+		addPart(GlobalStorageSiK.I18n.itemDisplayName(
+			summary.fullType or fullType, summary.displayName, row.worldSprite))
+		addPart(summary.displayName)
+		addPart(summary.mediaTitle)
+		addPart(summary.dynamicStateKey)
+	end
+	addPart(row.variantSearchText)
 	addPart(fullType)
 	local shortName = fullType:match("^[^.]+%.(.+)$")
 	if shortName and shortName ~= fullType then
@@ -1279,7 +1579,7 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 	end
 
 	local haystack = GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
-	itemSearchHaystackCache[row] = haystack
+	storeItemSearchHaystack(cacheKey, haystack)
 	return haystack
 end
 
@@ -1293,11 +1593,19 @@ function GlobalStorageSiK.I18n.filterItemRows(rows, query)
 	end
 	local q = GlobalStorageSiK.I18n.asciiLower(query)
 	local filtered = {}
+	local samples = {}
 	for i = 1, #rows do
 		local row = rows[i]
-		if string.find(GlobalStorageSiK.I18n.itemSearchHaystack(row), q, 1, true) then
+		local haystack = GlobalStorageSiK.I18n.itemSearchHaystack(row)
+		if #samples < 3 then samples[#samples + 1] = tostring(row.fullType) .. "=" .. haystack end
+		if string.find(haystack, q, 1, true) then
 			filtered[#filtered + 1] = row
 		end
+	end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("SiKUISearch", "filter raw=" .. tostring(query)
+			.. " normalized=" .. tostring(q) .. " rows=" .. tostring(#rows)
+			.. " matches=" .. tostring(#filtered) .. " samples=[" .. table.concat(samples, " | ") .. "]")
 	end
 	return filtered
 end

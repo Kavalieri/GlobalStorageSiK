@@ -7,6 +7,7 @@
 ]]
 
 require "TimedActions/ISBaseTimedAction"
+require "GS_UI_Feedback"
 require "GS_NetClient"
 require "GS_DiskProgramming"
 require "GS_Sandbox"
@@ -35,6 +36,9 @@ function GS_ProgramDiskAction:update()
 end
 
 function GS_ProgramDiskAction:start()
+	if self.callbacks and type(self.callbacks.onStart) == "function" then
+		self.callbacks.onStart(self)
+	end
 	self:setActionAnim("Craft")
 	self:setAnimVariable("CraftType", "electronics")
 	self.character:reportEvent("EventCrafting")
@@ -45,8 +49,13 @@ end
 --- localmente sin esperar respuesta de red.
 function GS_ProgramDiskAction:stop()
 	ISBaseTimedAction.stop(self)
-	if not self._performed and self.character and self.character.setHaloNote then
-		self.character:setHaloNote(GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"), 220, 180, 100, 300)
+	if self.callbacks and type(self.callbacks.onStop) == "function" then
+		self.callbacks.onStop(self)
+	end
+	if not self._performed and self.character then
+		GlobalStorageSiK.UIFeedback.halo(self.character,
+			GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"),
+			220, 180, 100, 300, { tone = "warning", channel = "timed-action" })
 	end
 end
 
@@ -54,15 +63,19 @@ function GS_ProgramDiskAction:perform()
 	self._performed = true
 	ISBaseTimedAction.perform(self)
 	GlobalStorageSiK.NetClient.sendCommand("programDisk", { programId = self.programId })
+	if self.callbacks and type(self.callbacks.onPerform) == "function" then
+		self.callbacks.onPerform(self)
+	end
 end
 
 ---@param character IsoPlayer
 ---@param programId string
 ---@return GS_ProgramDiskAction
-function GS_ProgramDiskAction:new(character, programId)
+function GS_ProgramDiskAction:new(character, programId, callbacks)
 	local o = ISBaseTimedAction.new(self, character)
 	o._performed = false
 	o.programId = programId
+	o.callbacks = callbacks
 	o.maxTime = PROGRAM_DISK_TIME
 	o.stopOnWalk = true
 	o.stopOnRun = true

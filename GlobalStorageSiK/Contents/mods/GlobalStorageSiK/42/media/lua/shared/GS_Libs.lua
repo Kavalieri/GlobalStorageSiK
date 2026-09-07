@@ -114,6 +114,36 @@ function GlobalStorageSiK.Libs.unicodeLength(text)
 	return count
 end
 
+-- dev24.1 (hallazgo bloqueante de sistemas: GlobalStorageSiK_NativeCorpus.log
+-- contenia U+FFFD literal - "señal"/"§2" llegaban ya sustituidos ANTES o
+-- durante getFileWriter:write(), bytes reales EF BF BD en el fichero). Sin
+-- poder reproducir el proceso Java real fuera del juego, se aplica la
+-- correccion segura pedida explicitamente por sistemas en vez de adivinar
+-- una conversion dependiente de locale: nunca pasar NADA fuera de ASCII a
+-- getFileWriter - cualquier caracter fuera de 0x20-0x7E se escapa de forma
+-- REVERSIBLE y EXPLICITA como \uXXXX (o \u{XXXXX} para fuera del BMP, ya
+-- resuelto correctamente por unicodeCodepoints - pares subrogados incluidos,
+-- cubre CJK igual que acentos, una unica politica para ambos casos).
+---@param text string
+---@return string escapado, seguro de escribir con getFileWriter sin riesgo de U+FFFD
+function GlobalStorageSiK.Libs.asciiSafeEscape(text)
+	text = tostring(text or "")
+	if text == "" then return "" end
+	local codepoints = GlobalStorageSiK.Libs.unicodeCodepoints(text, 100000)
+	local out = {}
+	for i = 1, #codepoints do
+		local cp = codepoints[i]
+		if cp == 0x0A or cp == 0x0D or cp == 0x09 or (cp >= 0x20 and cp <= 0x7E) then
+			out[#out + 1] = string.char(cp)
+		elseif cp <= 0xFFFF then
+			out[#out + 1] = string.format("\\u%04X", cp)
+		else
+			out[#out + 1] = string.format("\\u{%05X}", cp)
+		end
+	end
+	return table.concat(out)
+end
+
 --- Formatea los puntos de codigo de una cadena como "U+98CE U+3002" (formato
 --- pedido explicitamente para el diagnostico CJK) - vacio si el texto esta
 --- vacio, nunca falla sobre entrada corrupta (usa unicodeCodepoints, que ya

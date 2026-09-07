@@ -1,424 +1,61 @@
---[[
-	GlobalStorageSiK - Pestaña Red: bloque terminales registrados
-	Autor: SiK
-	Fecha: 2025-06-28
-	Descripción: Tabla de terminales con coordenadas, rol y estado físico.
-]]
+-- Global Storage SiK - terminal registry data/actions adapter.
+-- The visible Admin table is owned by tab-options and SiK.UI.Table.
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_TerminalRegistry"
-require "GS_TerminalUI_Scroll"
-require "GS_SiK_UI_Core"
 require "GS_TerminalCatalog"
 require "GS_TerminalUI_TerminalEditor"
-require "GS_SiK_UI_Table"
-require "GS_PCAcquireUI"
 
-GlobalStorageSiK.TerminalNetworkTerminals = {}
+GlobalStorageSiK.TerminalNetworkTerminals = GlobalStorageSiK.TerminalNetworkTerminals or {}
 
+local Terminals = GlobalStorageSiK.TerminalNetworkTerminals
 local T = GlobalStorageSiK.I18n.text
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local BTN_H = FONT_HGT_SMALL + 6
-local TABLE_METRICS = GlobalStorageSiK.SiK_UI.Table.metrics()
-local ROW_H = math.max(TABLE_METRICS.rowHeight, BTN_H + 4)
-local HEADER_H = TABLE_METRICS.headerHeight
-local ROW_GAP = 6
-local POOL = 6
--- Nombre es la PRIMERA columna (a peticion del usuario), luego coordenadas/rol/estado.
-local COL_NAME_FRAC   = 0.0   -- empieza en x=4 (absoluto)
-local COL_COORD_FRAC  = 0.30
-local COL_ROLE_FRAC   = 0.58
-local COL_STATUS_FRAC = 0.80
-local TERMINAL_TABLE_COLUMNS = {
-	{ key = "name", titleKey = "IGUI_GS_ColTerminalName", start = 4, finishFraction = COL_COORD_FRAC, pad = 0 },
-	{ key = "coords", titleKey = "IGUI_GS_ColTerminalCoords", startFraction = COL_COORD_FRAC, finishFraction = COL_ROLE_FRAC, pad = 0 },
-	{ key = "role", titleKey = "IGUI_GS_ColTerminalRole", startFraction = COL_ROLE_FRAC, finishFraction = COL_STATUS_FRAC, pad = 0 },
-	{ key = "status", titleKey = "IGUI_GS_ColTerminalStatus", startFraction = COL_STATUS_FRAC, right = 4, pad = 0 },
-}
 
----@param row table|nil
----@return string
-local function coordsLabel(row)
-	if not row then
-		return "—"
-	end
-	return string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0)
-end
-
----@param row table|nil
----@return string
-local function nameLabel(row)
-	if not row or not row.label or row.label == "" then
-		return "—"
-	end
-	return row.label
-end
-
----@param row table|nil
----@return string
-local function statusLabel(row)
-	if not row then
-		return "—"
-	end
-	if row.unknown then
-		return T("IGUI_GS_TerminalUnverified")
-	end
-	if row.missing or row.present == false then
-		return T("IGUI_GS_TerminalMissingPhys")
-	end
-	if row.suspended then
-		return T("IGUI_GS_TerminalSuspended")
-	end
-	return T("IGUI_GS_TerminalPresentPhys")
-end
-
----@param row table|nil
----@return number
----@return number
----@return number
-local function statusColor(row)
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
-	if row and row.unknown then
-		return pal.textSecondary[1], pal.textSecondary[2], pal.textSecondary[3]
-	end
-	if row and (row.missing or row.present == false) then
-		return pal.statusDanger[1], pal.statusDanger[2], pal.statusDanger[3]
-	end
-	if row and row.suspended then
-		return pal.statusWarn[1], pal.statusWarn[2], pal.statusWarn[3]
-	end
-	return pal.statusOk[1], pal.statusOk[2], pal.statusOk[3]
-end
-
----@param row table|nil
----@return string
-local function roleLabel(row)
-	if row and row.controller then
-		return T("IGUI_GS_TerminalController")
-	end
-	return T("IGUI_GS_TerminalSecondary")
-end
-
---- Elimina permanentemente un terminal (registro por coordenadas) de la red.
---- Sirve tanto para "purgar" una entrada ausente/suspendida (limpieza) como
---- para "desinstalar" un terminal presente y sano a petición del jugador -
---- el ordenador físico NO se toca, solo se deja de reconocer esa posición
---- como terminal (ver comentario de limpieza de ModData en GS_Server.lua,
---- comando removeTerminal).
----@param terminal GS_TerminalUI
----@param row table
-local function purgeTerminal(terminal, row)
-	if not row then return end
-	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-		GlobalStorageSiK.NetClient.sendCommand("removeTerminal", {
-			x = row.x,
-			y = row.y,
-			z = row.z,
-			gsnNetworkId = terminal and terminal.terminalState and terminal.terminalState.networkId,
-		})
-	end
-	if terminal and terminal.refreshNetworkPanel then
-		terminal:refreshNetworkPanel()
-	end
-end
-
----@param host ISPanel
----@param terminal GS_TerminalUI
----@param ui table
----@return ISPanel
-local function createTerminalRow(host, terminal, ui)
-	local row = ISPanel:new(0, 0, host.width, ROW_H)
-	row:initialise()
-	row.drawBackground = false
-	row.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	row.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	row.prerender = function(self)
-		ISPanel.prerender(self)
-		GlobalStorageSiK.SiK_UI.drawTableRowBackground(self, self.rowIndex, self:isMouseOver(), false)
-		local data = self.terminalData
-		if not data then
-			return
-		end
-		local cols = GlobalStorageSiK.SiK_UI.Table.resolveColumns(self.width, TERMINAL_TABLE_COLUMNS)
-		local pal = GlobalStorageSiK.SiK_UI.PALETTE
-		local sr, sg, sb = statusColor(data)
-		local nameMaxW = cols[1].width - 6
-		self:drawText(GlobalStorageSiK.SiK_UI.truncateText(nameLabel(data), nameMaxW, UIFont.Small),
-			cols[1].x, 2, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small)
-		self:drawText(coordsLabel(data), cols[2].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(roleLabel(data), cols[3].x, 2, pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small)
-		self:drawText(statusLabel(data), cols[4].x, 2, sr, sg, sb, 1, UIFont.Small)
-	end
--- Un clic en la fila abre SIEMPRE el editor completo (renombrar, marcar
-	-- como principal, suspender, eliminar) - a peticion del usuario, en vez de
-	-- ir directo a un dialogo de confirmacion de baja sin mas opciones. Las
-	-- entradas ya rotas/ausentes se purgan solas (nada que configurar en una
-	-- entrada que ya no existe de verdad).
-	row.onMouseUp = function(self, x, y)
-		local data = self.terminalData
-		if not data or not terminal then
-			return false
-		end
-		if data.missing or data.present == false then
-			purgeTerminal(terminal, data)
-		else
-			GlobalStorageSiK.TerminalTerminalEditor.open(terminal, data)
-		end
-		return true
-	end
-	return row
-end
-
---- Construye bloque de gestión de terminales.
----@param scroll ISPanel
----@param terminal GS_TerminalUI
----@param ui table
----@param y number
----@param innerW number
----@return number
-function GlobalStorageSiK.TerminalNetworkTerminals.build(scroll, terminal, ui, y, innerW)
-	local pad = 8
-	ui.termBlockY = y
-
-	local card = GlobalStorageSiK.SiK_UI.createSectionCard(pad - 4, y - 2, innerW - (pad - 4) * 2, 10)
-	card._gsNetStatic = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, card)
-	ui.termBlockCard = card
-
-	local title = GlobalStorageSiK.SiK_UI.createSectionLabel(pad + 6, y + 2, T("IGUI_GS_NetBlockTerminals"))
-	ui.termBlockTitle = title
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, title)
-	y = y + FONT_HGT_SMALL + 8
-
-	ui.termTableHost = ISPanel:new(pad, y, innerW - pad * 2, HEADER_H + ROW_H + 10)
-	ui.termTableHost:initialise()
-	ui.termTableHost.drawBackground = false
-	ui.termTableHost._gsNetStatic = true
-	ui.termTableHost.clipChildren = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termTableHost)
-
-	ui.termHeader = ISPanel:new(0, 0, ui.termTableHost.width, HEADER_H)
-	ui.termHeader:initialise()
-	ui.termHeader.prerender = function(self)
-		ISPanel.prerender(self)
-		GlobalStorageSiK.SiK_UI.Table.drawHeader(self, TERMINAL_TABLE_COLUMNS, nil, true, 2, UIFont.Small)
-	end
-	ui.termTableHost:addChild(ui.termHeader)
-
-	ui.termRowPool = {}
-	for i = 1, POOL do
-		local row = createTerminalRow(ui.termTableHost, terminal, ui)
-		row:setVisible(false)
-		ui.termTableHost:addChild(row)
-		ui.termRowPool[i] = row
-	end
-
-	local _tpal = GlobalStorageSiK.SiK_UI.PALETTE
-	ui.termEmptyLbl = ISLabel:new(pad, y + HEADER_H + 4, FONT_HGT_SMALL, T("IGUI_GS_NoTerminalsRegistered"), _tpal.textMuted[1], _tpal.textMuted[2], _tpal.textMuted[3], 1, UIFont.Small, true)
-	ui.termEmptyLbl:initialise()
-	ui.termEmptyLbl:setVisible(false)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termEmptyLbl)
-
-	ui.termTableY = y
-	y = y + ui.termTableHost:getHeight() + 4
-
-	ui.termPurgeBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, math.min(240, innerW - pad * 2), BTN_H + 2, T("IGUI_GS_TerminalPurgeMissing"), scroll, function()
-			local rows = ui.terminalRows or {}
-			for i = 1, #rows do
-				local r = rows[i]
-				if r.missing or r.suspended or r.present == false then
-					purgeTerminal(terminal, r)
-				end
-			end
-		end)
-	ui.termPurgeBtn._gsNetStatic = true
-	ui.termPurgeBtn:setVisible(false)
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.termPurgeBtn)
-	y = y + BTN_H + 10
-
-	-- "Conseguir PC" mudado aqui desde la sub-pestaña Estado (2026-08-26,
-	-- pedido explicito del usuario: "tiene mas sentido en la pestaña de
-	-- admin, bajo el bloque de terminales, que es donde lo podemos
-	-- necesitar") - misma accion, mismo GS_PCAcquireUI.lua, nueva ubicacion.
-	-- Siempre visible (a diferencia de termPurgeBtn, que solo aparece si hay
-	-- terminales ausentes/suspendidos) - su Y real se fija en layoutRows,
-	-- justo debajo de la tabla o de termPurgeBtn si este esta visible.
-	ui.getPCBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, innerW - pad * 2, BTN_H + 2, T("IGUI_GS_PCAcquireOpenBtn"), scroll, function()
-			GlobalStorageSiK.PCAcquireUI.show(GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer())
-		end, nil, true)
-	ui.getPCBtn._gsNetStatic = true
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, ui.getPCBtn)
-
-	y = y + BTN_H + 10
-	ui.termBlockEndY = y
-	GlobalStorageSiK.SiK_UI.resizeSectionCard(card,
-		pad - 4, ui.termBlockY - 2,
-		innerW - (pad - 4) * 2, y - ui.termBlockY + 4)
-	ui.lastTermFp = ""
-	ui.terminalRef = terminal
-	return y
-end
-
---- Posiciona filas de terminales.
----@param ui table
-function GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
-	local rows = ui and ui.terminalRows
-	local host = ui and ui.termTableHost
-	if not host or not rows or not ui.termRowPool then
-		return
-	end
-	local tableW = host.width or 200
-	local needed = #rows
-	local term = ui.terminalRef
-	while #ui.termRowPool < needed do
-		local row = createTerminalRow(host, term, ui)
-		row:setVisible(false)
-		host:addChild(row)
-		ui.termRowPool[#ui.termRowPool + 1] = row
-	end
-	local hasMissing = false
-	for i = 1, #ui.termRowPool do
-		local row = ui.termRowPool[i]
-		if i <= needed then
-			row.terminalData = rows[i]
-			row.rowIndex = i
-			row:setX(0)
-			row:setY(HEADER_H + 2 + (i - 1) * ROW_H)
-			row:setWidth(tableW)
-			row:setHeight(ROW_H)
-			row:setVisible(true)
-			local r = rows[i]
-			if r.missing or r.suspended or r.present == false then
-				hasMissing = true
-			end
-		else
-			row.terminalData = nil
-			row:setVisible(false)
-		end
-	end
-	local bodyH = math.max(ROW_H, needed * ROW_H)
-	host:setHeight(HEADER_H + 2 + bodyH + 8)
-	host:setVisible(needed > 0)
-	if ui.termEmptyLbl then
-		ui.termEmptyLbl:setVisible(needed == 0)
-		if ui.termTableY then
-			ui.termEmptyLbl:setY(ui.termTableY + HEADER_H + 4)
-		end
-	end
-	if ui.termPurgeBtn then
-		ui.termPurgeBtn:setVisible(hasMissing)
-		if ui.termTableY then
-			ui.termPurgeBtn:setY(ui.termTableY + host:getHeight() + 4)
-		end
-	end
-	-- "Conseguir PC" siempre visible, justo debajo de la tabla - o de
-	-- termPurgeBtn si esta visible, para no solapar (mismo hueco que antes
-	-- reservaba termBlockEndY, ahora con un boton mas debajo).
-	if ui.termTableY then
-		local afterTableY = ui.termTableY + host:getHeight() + (hasMissing and (BTN_H + 14) or 8)
-		if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
-			ui.getPCBtn:setY(afterTableY)
-		end
-		ui.termBlockEndY = afterTableY + BTN_H + 10
-		if ui.termBlockCard and ui.termBlockY then
-			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
-		end
-	end
-end
-
----@param ui table
----@param state table|nil
-function GlobalStorageSiK.TerminalNetworkTerminals.sync(ui, state)
+local function sourceRows(state)
 	state = state or {}
 	local rows = state.terminals or {}
 	if #rows == 0 and state.networkId and GlobalStorageSiK.TerminalCatalog then
-		rows = GlobalStorageSiK.TerminalCatalog.serializeRows(state.networkId)
-	elseif #rows > 0 and GlobalStorageSiK.TerminalCatalog then
-		local normalized = {}
-		for i = 1, #rows do
-			local row = rows[i]
-			if row.unknown == nil and row.present == false and row.missing ~= true then
-				row.unknown = true
-				row.missing = false
-			end
-			normalized[#normalized + 1] = row
-		end
-		rows = normalized
+		rows = GlobalStorageSiK.TerminalCatalog.serializeRows(state.networkId) or {}
 	end
-	local fp = ""
-	for i = 1, #rows do
-		local row = rows[i]
-		fp = fp .. tostring(row.x) .. "," .. tostring(row.y) .. "," .. tostring(row.z)
-			.. ":" .. tostring(row.controller) .. ":" .. tostring(row.missing) .. ":" .. tostring(row.label) .. "|"
-	end
-	if ui.lastTermFp == fp then
-		GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
-		return
-	end
-	ui.lastTermFp = fp
-	ui.terminalRows = rows
-	if not ui.termTableHost then
-		return
-	end
-	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
+	return rows
 end
 
----@param scroll ISPanel
----@param ui table
----@param innerW number
-function GlobalStorageSiK.TerminalNetworkTerminals.layout(scroll, ui, innerW)
-	if not ui or not ui.termTableHost then
-		return
-	end
-	local pad = 8
-	local SECTION_GAP = 10
-
-	-- Reposicionar el bloque entero si block2EndY cambió (zonas crecieron/encogieron)
-	local newBlockY = ui.block2EndY and (ui.block2EndY + SECTION_GAP) or ui.termBlockY
-	if newBlockY and ui.termBlockY and math.abs(newBlockY - ui.termBlockY) > 0.5 then
-		local delta = newBlockY - ui.termBlockY
-		ui.termBlockY = newBlockY
-		ui.termTableY = (ui.termTableY or newBlockY) + delta
-		ui.termBlockEndY = (ui.termBlockEndY or newBlockY) + delta
-		if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockCard, newBlockY - 2)
-		end
-		if ui.termBlockTitle and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockTitle) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termBlockTitle, newBlockY + 2)
-		end
-		if GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termTableHost) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termTableHost, ui.termTableY)
-		end
-		if ui.termEmptyLbl and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termEmptyLbl) then
-			GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.termEmptyLbl, ui.termTableY + HEADER_H + 4)
-		end
-	end
-
-	local tableW = innerW - pad * 2
-	ui.termTableHost:setWidth(tableW)
-	if ui.termHeader then
-		ui.termHeader:setWidth(tableW)
-	end
-	if ui.termBlockTitle then
-		ui.termBlockTitle:setX(pad + 6)
-	end
-	if ui.termPurgeBtn then
-		ui.termPurgeBtn:setWidth(math.min(240, tableW))
-	end
-	if ui.getPCBtn and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.getPCBtn) then
-		ui.getPCBtn:setWidth(tableW)
-	end
-	GlobalStorageSiK.TerminalNetworkTerminals.layoutRows(ui)
-	if ui.termBlockCard and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.termBlockCard) then
-		ui.termBlockCard:setX(pad - 4)
-		ui.termBlockCard:setWidth(innerW - (pad - 4) * 2)
-		if ui.termBlockEndY and ui.termBlockY then
-			ui.termBlockCard:setHeight(math.max(24, ui.termBlockEndY - ui.termBlockY + 4))
-		end
-	end
+local function status(row)
+	local unknown = row.unknown == true
+		or (row.unknown == nil and row.present == false and row.missing ~= true)
+	if unknown then return T("IGUI_GS_TerminalUnverified"), "textMuted" end
+	if row.missing or row.present == false then return T("IGUI_GS_TerminalMissingPhys"), "danger" end
+	if row.suspended then return T("IGUI_GS_TerminalSuspended"), "warning" end
+	return T("IGUI_GS_TerminalPresentPhys"), "success"
 end
+
+function Terminals.presentationRows(state, rowMap)
+	local result = {}
+	local rows = sourceRows(state)
+	for index = 1, #rows do
+		local row = rows[index]
+		local id = string.format("terminal:%s:%s:%s", tostring(row.x or 0),
+			tostring(row.y or 0), tostring(row.z or 0))
+		local label, tone = status(row)
+		result[#result + 1] = {
+			id = id,
+			name = row.label or T("IGUI_GS_PunctuationEmDash"),
+			coords = string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0),
+			role = row.controller and T("IGUI_GS_TerminalController")
+				or T("IGUI_GS_TerminalSecondary"),
+			status = { text = label, tone = tone },
+		}
+		if rowMap then rowMap[id] = row end
+	end
+	return result
+end
+
+function Terminals.activate(terminal, row)
+	if not terminal or not row then return false, "terminal_row_unavailable" end
+	local editor = GlobalStorageSiK.TerminalTerminalEditor
+	if not editor or type(editor.open) ~= "function" then return false, "editor_unavailable" end
+	editor.open(terminal, row)
+	return true
+end
+
+return Terminals

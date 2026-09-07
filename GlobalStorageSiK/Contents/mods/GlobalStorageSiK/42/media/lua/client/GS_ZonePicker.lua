@@ -3,13 +3,16 @@
 	Autor: SiK
 	Fecha: 2025-06-25
 	Descripción: Dos clics en el mundo definen un rectángulo de zona manual.
-	             Input capturado mediante ISPanel overlay (Events.OnMouseUp no
-	             dispara para clics en el mundo en B42).
+	             Input capturado mediante el WorldPicker neutral de SiK.UI
+	             (Events.OnMouseUp no dispara para clics en el mundo en B42).
 ]]
 
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_WorldHighlight"
+require "GS_UI_Feedback"
+local UI = require "GS_UI_Framework"
+require "GS_Network"
 
 GlobalStorageSiK.ZonePicker = GlobalStorageSiK.ZonePicker or {}
 
@@ -94,8 +97,9 @@ end
 ---@param duration number|nil
 local function showHint(text, duration)
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getSpecificPlayer(0)
-	if player and player.setHaloNote then
-		player:setHaloNote(text, 200, 210, 220, duration or 700)
+	if player then
+		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 210, 220, duration or 700,
+			{ channel = "zone-picker" })
 	end
 end
 
@@ -148,12 +152,36 @@ local function clearPreviewHighlights()
 	end
 end
 
+--- Vuelve a pintar los contenedores ya adscritos a la red que se está
+--- editando. El picker no consulta ni modifica red: consume el snapshot del
+--- terminal y se actualiza solo cuando se reconstruye el preview por una
+--- acción real del jugador.
+local function highlightExistingNetworkNodes()
+	local nodes = terminalRef and terminalRef.terminalState and terminalRef.terminalState.nodes or nil
+	if type(nodes) ~= "table" or not GlobalStorageSiK.WorldHighlight
+		or not GlobalStorageSiK.Network or not GlobalStorageSiK.Network.findWorldObject then
+		return
+	end
+	for i = 1, #nodes do
+		local node = nodes[i]
+		local object = node and node.offline ~= true
+			and GlobalStorageSiK.Network.findWorldObject(node) or nil
+		if object then
+			-- Mismo verde de pertenencia de red usado por el resaltado de nodos.
+			GlobalStorageSiK.WorldHighlight.highlightObject(object, 0.35, 0.88, 0.42)
+		end
+	end
+end
+
 --- Actualiza preview visual de la selección (esquina 1 + hover + rectángulo).
 local function updatePreviewHighlights()
 	clearPreviewHighlights()
 	if not active then
 		return
 	end
+	-- Primero la pertenencia persistente; esquina, hover y rectángulo del
+	-- picker se dibujan encima para que la selección actual siga siendo clara.
+	highlightExistingNetworkNodes()
 
 	local hover = squareUnderMouse()
 	lastPreviewHover = hover
@@ -196,10 +224,13 @@ end
 --- Elimina el overlay de pantalla completa.
 local function removeOverlay()
 	if overlay then
-		if overlay.removeFromUIManager then
-			overlay:removeFromUIManager()
-		end
+		local current = overlay
 		overlay = nil
+		if current.dispose then
+			current:dispose()
+		elseif current.removeFromUIManager then
+			current:removeFromUIManager()
+		end
 	end
 end
 
@@ -266,52 +297,79 @@ local function finishSelection(sq1, sq2)
 	showHint(T("IGUI_GS_ZonePickDone"))
 end
 
---- Crea el panel overlay de pantalla completa para capturar clics.
+--- Procesa un clic resuelto por el picker neutral.
+---@param sq IsoGridSquare|nil
+local function selectSquare(sq)
+	if not active then
+		return
+	end
+	if not sq then
+		showHint(T("IGUI_GS_ZonePickNoSquare"))
+		return
+	end
+	if not corner1 then
+		corner1 = sq
+		showHint(T("IGUI_GS_ZonePickFirstStored", sq:getX(), sq:getY(), sq:getZ()), 900)
+		showHint(T("IGUI_GS_ZonePickSecond"), 900)
+		updatePreviewHighlights()
+		return
+	end
+	finishSelection(corner1, sq)
+end
+
+--- Crea el picker del viewport del jugador para capturar clics.
 local function createOverlay()
 	if overlay then
 		removeOverlay()
 	end
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	overlay = ISPanel:new(0, 0, sw, sh)
-	overlay.drawBackground = false
-	overlay.drawBorder = false
-	overlay.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	overlay.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-
-	-- Captura clic izquierdo
-	overlay.onMouseDown = function(self, x, y)
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
+		and GlobalStorageSiK.NetClient.getPlayer() or nil
+	local playerNum = terminalRef and terminalRef.playerNum
+		or (player and player.getPlayerNum and player:getPlayerNum()) or 0
+	local bounds = UI.Viewport.resolve(playerNum)
+	overlay = UI.WorldPicker.create({
+		playerNum = playerNum,
+		bounds = bounds,
+		multiStep = true,
+		keepOpen = true,
+		resolvePoint = function(point)
+			local sx = tonumber(point and point.screenX)
+			local sy = tonumber(point and point.screenY)
+			if sx == nil or sy == nil then
+				sx = getMouseX()
+				sy = getMouseY()
+			else
+				sx = bounds.x + sx
+				sy = bounds.y + sy
+			end
+			return squareAtScreen(sx, sy)
+		end,
+		onStep = function(context)
+			local value = context and context.value or nil
+			selectSquare(value and value.point or nil)
+			if not active then
+				return "complete"
+			end
+		end,
+		onCancel = function()
+			GlobalStorageSiK.ZonePicker.cancel()
+		end,
+		onRender = function(context)
+			if not active then
+				return
+			end
+			local hover = context and context.value or nil
+			if hover ~= lastPreviewHover then
+				updatePreviewHighlights()
+			end
+		end,
+	})
+	-- WorldPicker ya gestiona UI.FocusStack.PRIORITY.TRANSIENT, captura y lifecycle.
+	-- Conservamos el
+	-- consumo del down derecho para que el clic de cancelación no alcance el mundo.
+	overlay.onRightMouseDown = function()
 		return true
 	end
-	overlay.onMouseUp = function(self, x, y)
-		if not active then return end
-		local sq = squareAtScreen(x, y)
-		if not sq then
-			showHint(T("IGUI_GS_ZonePickNoSquare"))
-			return
-		end
-		if not corner1 then
-			corner1 = sq
-			showHint(T("IGUI_GS_ZonePickFirstStored", sq:getX(), sq:getY(), sq:getZ()), 900)
-			showHint(T("IGUI_GS_ZonePickSecond"), 900)
-			updatePreviewHighlights()
-			return
-		end
-		finishSelection(corner1, sq)
-	end
-
-	-- Captura clic derecho → cancelar
-	overlay.onRightMouseDown = function(self, x, y)
-		return true
-	end
-	overlay.onRightMouseUp = function(self, x, y)
-		if not active then return end
-		GlobalStorageSiK.ZonePicker.cancel()
-	end
-
-	overlay:initialise()
-	overlay:addToUIManager()
-	overlay:bringToTop()
 end
 
 --- Inicia modo selección (oculta terminal temporalmente).
@@ -342,31 +400,4 @@ function GlobalStorageSiK.ZonePicker.install()
 		return
 	end
 	GlobalStorageSiK.ZonePicker._installed = true
-
-	local function onKeyPressed(key)
-		if not active then
-			return
-		end
-		if key == Keyboard.KEY_ESCAPE then
-			GlobalStorageSiK.ZonePicker.cancel()
-		end
-	end
-
-	local function onTick()
-		if not active then
-			return
-		end
-		local hover = squareUnderMouse()
-		if hover == lastPreviewHover then
-			return
-		end
-		updatePreviewHighlights()
-	end
-
-	if Events and Events.OnKeyPressed then
-		Events.OnKeyPressed.Add(onKeyPressed)
-	end
-	if Events and Events.OnTick then
-		Events.OnTick.Add(onTick)
-	end
 end

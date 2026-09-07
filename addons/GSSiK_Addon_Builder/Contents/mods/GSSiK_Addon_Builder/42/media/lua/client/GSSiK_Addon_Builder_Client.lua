@@ -4,46 +4,101 @@
 	Fecha: 2026-08-04
 ]]
 
-require "GS_TerminalUI"
-require "GS_TerminalUI_Extensions"
+local API = require "GSSiK_API_Client"
 require "GSSiK_Addon_Builder_Register"
-require "GS_NetworkCraftBridge"
-require "GS_NetworkCraftSession"
 require "GSSiK_Addon_Builder_NetworkBuild"
-require "GSSiK_Addon_Builder_TerminalUI"
+local TerminalModule = require "GSSiK_Addon_Builder_TerminalUI"
 require "GSSiK_Addon_Builder_Sandbox"
 require "GSSiK_Addon_Builder_Log"
 
 GSSiK_Addon_Builder = GSSiK_Addon_Builder or {}
+GSSiK_Addon_Builder._apiRegistrations = GSSiK_Addon_Builder._apiRegistrations or {}
+local registrations = GSSiK_Addon_Builder._apiRegistrations
+local Session = API.WorkSession
+local Terminal = API.Terminal
+
+local function retainRegistration(key, ok, code, handle)
+	if ok ~= true or not handle then
+		error("GSSiK.API " .. key .. ": " .. tostring(code))
+	end
+	local previous = registrations[key]
+	if previous and previous.dispose then previous:dispose() end
+	registrations[key] = handle
+end
 
 -- El sink de debug y los hooks de construccion en red ya se registran en
 -- GSSiK_Addon_Builder_NetworkBuild.lua (migrado desde aqui, ver ese fichero).
 
-GlobalStorageSiK.TerminalExtensions.registerDefinition("build", {
-	module = GlobalStorageSiK.TerminalBuilder,
+retainRegistration("terminal-tab", Terminal.registerTab({
+	key = "build",
+	surface = TerminalModule.surface,
+	builder = TerminalModule.builder,
+	contextFactory = TerminalModule.contextFactory,
 	titleKey = "IGUI_GS_TabBuilder",
-	iconPath = "media/ui/GS/GS_TabBuilder.png",
+	iconPath = "media/ui/GSSiK_Addon_Builder/sik-rail-builder.png",
 	panelField = "buildPanel",
-})
+	enabledStateKey = "buildTabEnabled",
+	order = 20,
+}))
+
+local function providerTerminal(context)
+	local extra = context and context.extra or {}
+	local terminal = extra.terminal or Terminal.current()
+	if not terminal or not terminal.terminalState then return nil end
+	if not terminal.getIsVisible or terminal:getIsVisible() ~= true then return nil end
+	if not Terminal.isAddonInstalled(terminal, "Builder") then return nil end
+	return terminal
+end
+
+local function buildItemActionRequest(actionId, context)
+	local items = context and context.items or {}
+	local item = context and context.extra and context.extra.row or items[1]
+	local inputFullType = item and item.fullType
+	if not inputFullType and item and item.getFullType then inputFullType = item:getFullType() end
+	return { actionId = actionId, inputFullType = inputFullType,
+		source = context and context.extra and context.extra.source or "inventory" }
+end
+
+-- Builder declara la fabricación contextual y reutiliza la sesión/autoridad
+-- compartida; Core no contiene ninguna rama específica del addon.
+retainRegistration("item-actions", API.ItemActions.registerProvider({
+	id = "builder.item-actions",
+	addonId = "Builder",
+	capabilities = { "craft" },
+	actions = {
+		{ id = "craft", labelKey = "IGUI_GS_CraftOpenBuildVanilla" },
+	},
+	appliesTo = function(context, actionId)
+		return actionId == "craft" and providerTerminal(context) ~= nil
+			and context.items ~= nil and #context.items > 0
+	end,
+	buildRequest = buildItemActionRequest,
+	executeRequest = function(request, context)
+		local terminal = providerTerminal(context)
+		if not terminal then return false end
+		local itemString = request.inputFullType and ("!" .. request.inputFullType) or nil
+		return TerminalModule.openBuild(terminal, "vanilla", nil, itemString)
+	end,
+}))
 
 --- Abre construcción con contenedores de red.
 ---@param mode string
-function GS_TerminalUI:openNetworkBuild(mode)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
-	if not player or not GlobalStorageSiK.CraftSession then
-		return
+function TerminalModule.openBuild(terminal, mode, recipe, itemString)
+	local player = Terminal.player(terminal)
+	if not player or not terminal then
+		return false, terminal and "no_player" or "no_terminal"
 	end
-	local state = self.terminalState or {}
+	local state = Terminal.state(terminal) or {}
 	-- Antes, si begin() u openBuild() fallaban, el clic no hacia nada
 	-- visible - ahora SIEMPRE se refresca el panel al final (exito o fallo)
-	-- para que GS_NetworkCraftSession.getLastOpenError() se muestre en la
+	-- para que WorkSession.getOpenFailure() se muestre en la
 	-- etiqueta de estado que ya existe en este panel.
 	-- Confiar en el terminalState ya confirmado por el servidor (el mismo
 	-- dato que hace que la pestaña Addons muestre el modulo instalado) en
 	-- vez de solo el mirror local de red (ModData), que puede ir con
-	-- retraso justo tras instalar - ver comentario en CraftSession.begin.
+	-- retraso justo tras instalar - ver el contrato WorkSession.begin.
 	local knownInstalled = state.installedAddons and state.installedAddons["Builder"] ~= nil
-	local began, beginReason = GlobalStorageSiK.CraftSession.begin({
+	local began, beginReason = Session.begin({
 		player = player,
 		networkId = state.networkId,
 		terminalAnchor = state.terminalAnchor,
@@ -55,54 +110,35 @@ function GS_TerminalUI:openNetworkBuild(mode)
 	GSSiK_Addon_Builder.Log.debug("openNetworkBuild mode=" .. tostring(mode)
 		.. " networkId=" .. tostring(state.networkId) .. " began=" .. tostring(began)
 		.. " reason=" .. tostring(beginReason))
+	local opened, openReason = false, beginReason
 	if began then
-		local opened, openReason = GlobalStorageSiK.CraftSession.openBuild(mode)
+		opened, openReason = Session.openBuild("Builder", mode, recipe, itemString)
 		GSSiK_Addon_Builder.Log.debug("openBuild opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
-	if self.buildPanel and GlobalStorageSiK.TerminalBuilder then
-		GlobalStorageSiK.TerminalBuilder.refresh(self.buildPanel, self)
+	if terminal.buildPanel then
+		TerminalModule.refresh(terminal.buildPanel, terminal)
 	end
+	return opened == true, openReason
 end
 
-function GS_TerminalUI:onOpenVanillaBuild()
-	self:openNetworkBuild("vanilla")
-end
-
-function GS_TerminalUI:onOpenNeatBuild()
-	self:openNetworkBuild("neat")
-end
-
-GlobalStorageSiK.TerminalExtensions.registerStaffAction("builder.vanilla", {
+retainRegistration("staff-action", Terminal.registerStaffAction("builder.vanilla", {
 	labelKey = "IGUI_GS_CraftOpenBuildVanilla",
 	order = 20,
 	invoke = function(dashboard)
-		if dashboard and dashboard.setVisible then
+		local terminal = Terminal.current()
+		local opened, reason = TerminalModule.openBuild(terminal, "vanilla")
+		if opened and dashboard and dashboard.setVisible then
 			dashboard:setVisible(false)
 		end
-		local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
-		if terminal and terminal.openNetworkBuild then
-			terminal:openNetworkBuild("vanilla")
-		else
-			GlobalStorageSiK.CraftSession.openBuild("vanilla")
-		end
+		return opened, reason
 	end,
-})
+}))
 
 --- Muestra/oculta la pestaña Build según addon instalado en este terminal
 --- y, si el acceso es inalámbrico, según la tableta que lleve el jugador.
-function GS_TerminalUI:syncBuildTabVisibility()
-	local state = self.terminalState or {}
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
-	local show = state.buildTabEnabled
-	if show == nil and GlobalStorageSiK.Addons then
-		show = GlobalStorageSiK.Addons.canShowTerminalBuildTab(
-			state.networkId,
-			state.terminalAnchor,
-			state.accessMode,
-			player
-		)
-	end
-	if GlobalStorageSiK.TerminalExtensions then
-		GlobalStorageSiK.TerminalExtensions.setTabVisible(self, "build", show == true)
-	end
+function TerminalModule.syncVisibility(terminal)
+	local show = Terminal.isTabEnabled(terminal, "Builder", "buildTabEnabled")
+	Terminal.setTabVisible(terminal, "build", show)
 end
+
+return GSSiK_Addon_Builder

@@ -9,6 +9,8 @@ require "GS_Utils"
 require "GS_Network"
 require "GS_Log"
 require "GS_NetClient"
+require "GS_UI_Feedback"
+require "GS_RemoteItemDetail"
 require "GS_Debug"
 require "GS_NetTrace"
 require "GS_Sandbox"
@@ -16,30 +18,52 @@ require "GS_Sandbox"
 require "GS_NodeNaming"
 require "GS_I18n"
 
---- Nota flotante sobre el jugador. Los fallos (ok=false, p.ej. "Red sin
---- energía") se pintan en rojo y duran mas tiempo - antes todo salia en gris
---- clarito 300ms, facil de no ver mientras se mira la ventana del terminal
---- en vez del personaje.
+local itemDetailsOrder = {}
+local nodeContentsOrder = {}
+local transientCleanupHandlers = {}
+local MAX_ITEM_DETAIL_PAGES = 128
+local MAX_NODE_CONTENT_ENTRIES = 128
+
+local function storeBounded(cache, order, key, value, limit)
+	if not key then return end
+	if cache[key] == nil then
+		order[#order + 1] = key
+		if #order > limit then
+			local oldest = table.remove(order, 1)
+			if oldest then cache[oldest] = nil end
+		end
+	end
+	cache[key] = value
+end
+
+local function terminalUiForPlayer(playerNum)
+	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.getInstanceForPlayer then
+		return GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	end
+	return GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance or nil
+end
+
+--- Fallos relevantes: halo breve. Información: estado de la UI del destinatario.
 ---@param text string|nil
 ---@param failed boolean|nil
-local function showMessage(text, failed)
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+local function showMessage(text, failed, playerNum)
+	playerNum = tonumber(playerNum) or 0
+	local player = getSpecificPlayer and getSpecificPlayer(playerNum)
+	if not player and playerNum == 0 then
+		player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	end
 	if player and text then
 		if failed then
-			player:setHaloNote(tostring(text), 235, 90, 90, 600)
+			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 235, 90, 90, 1200,
+				{ tone = "danger", playerNum = playerNum })
 		else
-			player:setHaloNote(tostring(text), 220, 220, 220, 300)
+			GlobalStorageSiK.UIFeedback.halo(player, tostring(text), 220, 220, 220, 300)
 		end
 	end
 end
 
 ---@param args table|nil
 ---@return boolean
-local function isOperationFeedback(args)
-	return args ~= nil and (args.transfer ~= nil or args.deposit ~= nil or args.bulk ~= nil
-		or args.jobType == "redistribute")
-end
-
 --- Fusiona terminalState parcial de inventario con el estado cacheado previo.
 ---@param incoming table|nil
 ---@param prev table|nil
@@ -58,6 +82,37 @@ local function mergeInventorySyncState(incoming, prev)
 		end
 	end
 	return merged
+end
+
+local function inventoryCatalogKey(playerNum, networkId)
+	return tostring(tonumber(playerNum) or 0) .. "\30" .. tostring(networkId or "")
+end
+
+local function applyInventoryCatalog(incoming, playerNum)
+	if not incoming or not incoming.networkId then return incoming end
+	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork =
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local key = inventoryCatalogKey(playerNum, incoming.networkId)
+	local cached = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key]
+	if incoming.notModified == true then
+		if cached and cached.inventoryRevision == incoming.inventoryRevision
+			and cached.catalogScope == incoming.catalogScope then
+			incoming.items = cached.items
+			incoming.itemTypeCount = cached.itemTypeCount
+			incoming.catalogRestored = true
+		end
+	elseif type(incoming.items) == "table" and incoming.inventoryRevision ~= nil
+		and type(incoming.catalogScope) == "string" then
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = {
+			playerNum = tonumber(playerNum) or 0,
+			networkId = incoming.networkId,
+			items = incoming.items,
+			itemTypeCount = incoming.itemTypeCount or #incoming.items,
+			inventoryRevision = incoming.inventoryRevision,
+			catalogScope = incoming.catalogScope,
+		}
+	end
+	return incoming
 end
 
 local function safeRequire(name)
@@ -101,6 +156,12 @@ safeRequire("GS_WithdrawMenu")
 safeRequire("GS_TransferMenu")
 safeRequire("GS_TerminalWithdrawDrag")
 safeRequire("GS_ItemActions")
+safeRequire("GS_DisplayCategoryPublisher")
+safeRequire("GS_VanillaInventoryTaxonomy")
+if GlobalStorageSiK.VanillaInventoryTaxonomy and GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks then
+	GlobalStorageSiK.VanillaInventoryTaxonomy.installHooks()
+end
+safeRequire("GS_CleanUIInventoryTaxonomy")
 
 if GlobalStorageSiK.TerminalDrop and GlobalStorageSiK.TerminalDrop.installHooks then
 	GlobalStorageSiK.TerminalDrop.installHooks()
@@ -117,7 +178,26 @@ local function onServerCommand(module, command, args)
 		GlobalStorageSiK.NetTrace.logClientRecv(command, args)
 	end
 
-	if command == "actionResult" then
+	if command == "scanProgress" then
+		local playerNum = tonumber(args and args.playerNum) or 0
+		local ui = terminalUiForPlayer(playerNum)
+		if ui and ui.terminalState and args
+			and ui.terminalState.networkId == args.networkId then
+			ui.terminalState.scanActive = args.state == "RUNNING" or args.state == "STALE_RETRY"
+			ui.terminalState.scanStatus = args
+			if args.snapshotAgeMs ~= nil then ui.terminalState.snapshotAgeMs = args.snapshotAgeMs end
+			if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+			local now = getTimestampMs and getTimestampMs() or 0
+			local panel = ui.networkPanel
+			if panel and panel._sikNetworkSurface and panel.isVisible and panel:isVisible()
+				and now >= (ui._gsScanStatusRefreshMs or 0)
+				and GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
+				ui._gsScanStatusRefreshMs = now + 1000
+				GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
+			end
+		end
+		return
+	elseif command == "actionResult" then
 		-- El servidor envía la clave (+ args) en vez del texto ya resuelto,
 		-- para que cada cliente lo traduzca a SU propio idioma en vez de
 		-- heredar el idioma configurado en el proceso del servidor - ver
@@ -130,6 +210,8 @@ local function onServerCommand(module, command, args)
 			continuing = GlobalStorageSiK.WithdrawClient.onActionResult(args) == true or continuing
 		end
 		local resolvedMessage = args and GlobalStorageSiK.I18n.resolveRemote(args.message)
+		local transferFeedback = (require "GS_TransferFeedback").showResult(args)
+		if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onActionResult(args) end
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onActionResult then
 			GlobalStorageSiK.TerminalSync.onActionResult(args)
 		end
@@ -138,15 +220,13 @@ local function onServerCommand(module, command, args)
 		end
 		-- Cada cola consume exclusivamente su operation ID. Una respuesta de
 		-- otra acción nunca libera ni hace avanzar depósitos o retiradas.
-		if not continuing then
+		if not continuing and not transferFeedback then
 			local failed = args and args.ok == false
-			local showOperation = not GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled
-				or GlobalStorageSiK.Sandbox.operationHaloFeedbackEnabled()
-			-- Los errores nunca se silencian. La opción solo controla feedback
-			-- funcional de procesos largos; el resto de mensajes conserva su flujo.
-			if failed or not isOperationFeedback(args) or showOperation then
-				showMessage(resolvedMessage or "Listo", failed)
+			local reason = args and (args.reason or args.transfer and args.transfer.reason)
+			if reason == "cancelled" or reason == "snapshot_stale" or reason == "selection_stale" then
+				failed = false
 			end
+			showMessage(resolvedMessage, failed, args and args.playerNum)
 		end
 		if args and args.jobType == "redistribute" then
 			if args.jobState == "finished" and (args.redistributeTiers or args.redistributeTopTypes) then
@@ -156,7 +236,10 @@ local function onServerCommand(module, command, args)
 			end
 			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 			if ui and args.jobState == "running" and ui.onRedistributeStarted then
-				ui:onRedistributeStarted(resolvedMessage)
+				ui:onRedistributeStarted(resolvedMessage, {
+					phase = args.progressPhase, checked = args.progressChecked,
+					total = args.progressTotal, moved = args.progressMoved,
+				})
 			elseif ui and ui.onRedistributeFinished then
 				-- Compatibilidad: una respuesta final de una version anterior del
 				-- servidor no llevaba jobState y se interpreta como finalizada.
@@ -164,14 +247,37 @@ local function onServerCommand(module, command, args)
 			end
 		end
 		if args and args.jobType == "zoneScan" then
-			local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-			if ui and ui.terminalState then
-				ui.terminalState.scanActive = args.jobState == "running"
+			local ui = terminalUiForPlayer(tonumber(args.playerNum) or 0)
+			if ui and ui.terminalState and ui.terminalState.networkId == args.networkId then
+				local scanState = args.jobState or "IDLE"
+				local running = scanState == "RUNNING" or scanState == "STALE_RETRY"
+					or scanState == "INVALIDATED_BY_MUTATION"
+				ui.terminalState.scanActive = running
 				ui.terminalState.scan = ui.terminalState.scan or {}
-				ui.terminalState.scan.running = args.jobState == "running"
+				ui.terminalState.scan.running = running
+				ui.terminalState.scanStatus = args.scanStatus or ui.terminalState.scanStatus or {}
+				ui.terminalState.scanStatus.state = scanState
+				ui.terminalState.scanStatus.reason = args.reason or ui.terminalState.scanStatus.reason
+				ui.terminalState.scanStatus.reasonCode = args.reasonCode or ui.terminalState.scanStatus.reasonCode
+				ui.terminalState.scanStatus.failedZones = args.failedZones or ui.terminalState.scanStatus.failedZones or 0
+				ui.terminalState.scanStatus.snapshotCertified = args.snapshotCertified == true
+				if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+				if scanState ~= "RUNNING" and args.ok == false and ui.setHeaderTransient then
+					ui:setHeaderTransient(resolvedMessage, "danger", 5200)
+				end
 				if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.refreshActiveTab then
 					GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
 				end
+			end
+		end
+		if args and args.ok and GlobalStorageSiK.TerminalNodeEditor
+			and GlobalStorageSiK.TerminalNodeEditor.instance then
+			if args.rebindCandidates then
+				GlobalStorageSiK.TerminalNodeEditor.instance:showRebindCandidates(args)
+			elseif args.rebindProposal then
+				GlobalStorageSiK.TerminalNodeEditor.instance:confirmRebindProposal(args)
+			elseif args.configTransferProposal then
+				GlobalStorageSiK.TerminalNodeEditor.instance:confirmConfigTransferProposal(args)
 			end
 		end
 		if args and args.transfer and GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
@@ -179,6 +285,15 @@ local function onServerCommand(module, command, args)
 			-- cache del tooltip global para que no siga mostrando el numero
 			-- de antes de la transferencia.
 			GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
+		end
+		local transfer = args and args.transfer
+		if transfer and transfer.networkId and transfer.inventoryRevision
+			and GlobalStorageSiK.RemoteItemDetail
+			and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
+			-- El detalle exacto se identifica por revision. Invalidar en el ACK
+			-- evita conservar una unidad retirada/depositada mientras llega el
+			-- terminalState de sincronizacion.
+			GlobalStorageSiK.RemoteItemDetail.invalidateNetwork(transfer.networkId)
 		end
 		if continuing then
 			GlobalStorageSiK.Log.detail("Client", "actionResult batch", resolvedMessage or "")
@@ -259,7 +374,16 @@ local function onServerCommand(module, command, args)
 			end
 		end
 	elseif command == "terminalState" then
+		local playerNum = tonumber(args and args.playerNum) or 0
+		args = applyInventoryCatalog(args, playerNum)
+		GlobalStorageSiK.Client.terminalStateByPlayer =
+			GlobalStorageSiK.Client.terminalStateByPlayer or {}
+		local previousState = GlobalStorageSiK.Client.terminalStateByPlayer[playerNum]
 		local itemCount = args and args.items and #args.items or 0
+		for i = 1, math.min(itemCount, 3) do
+			local row = args.items[i]
+			GlobalStorageSiK.NativeProduct.tracePathSample("clientReceive", row.fullType, row.nativePath)
+		end
 		local explicitOpen = args and args.openUi == true
 		local inventorySync = args and args.inventorySync == true
 		local openSeq = args and args.openSeq
@@ -276,42 +400,95 @@ local function onServerCommand(module, command, args)
 		-- el contador al valor que confirma el servidor, para no arrastrar el
 		-- desajuste a la siguiente apertura.
 		if explicitOpen and openSeq and GlobalStorageSiK.Client
-			and GlobalStorageSiK.Client.terminalOpenSeq
-			and openSeq ~= GlobalStorageSiK.Client.terminalOpenSeq then
-			if GlobalStorageSiK.Client.pendingTerminalOpen then
+			and GlobalStorageSiK.Client.terminalOpenSeqByPlayer
+			and GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum]
+			and openSeq ~= GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] then
+			if GlobalStorageSiK.Client.pendingTerminalOpenByPlayer
+				and GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] then
 				GlobalStorageSiK.Debug.log("Client", "terminalState", "ignored stale openSeq=" .. tostring(openSeq))
 				return
 			end
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "openSeq desync resync -> " .. tostring(openSeq))
+			GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] = openSeq
 			GlobalStorageSiK.Client.terminalOpenSeq = openSeq
 		end
+		if explicitOpen and GlobalStorageSiK.TerminalUI
+			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult then
+			GlobalStorageSiK.TerminalUI.onRemoteOpenResult(args, true)
+		end
 		if inventorySync then
-			args = mergeInventorySyncState(args, GlobalStorageSiK.Client.cachedTerminalState)
+			args = mergeInventorySyncState(args, previousState)
+		end
+		-- selection_stale conserva el gesto exact_group en espera de este
+		-- terminalState autoritativo. La reanudación es de una sola vez y sucede
+		-- antes de cualquier reconstrucción visual; no depende de páginas ni de
+		-- que la ventana llegue a repintarse.
+		if GlobalStorageSiK.WithdrawClient
+			and GlobalStorageSiK.WithdrawClient.onTerminalState then
+			GlobalStorageSiK.WithdrawClient.onTerminalState(args)
+		end
+		if args and args.networkId and args.inventoryRevision ~= nil
+			and (not previousState
+				or previousState.networkId ~= args.networkId
+				or previousState.inventoryRevision ~= args.inventoryRevision)
+			and GlobalStorageSiK.RemoteItemDetail
+			and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
+			GlobalStorageSiK.RemoteItemDetail.invalidateNetwork(args.networkId)
+		end
+		if args and args.networkId and args.inventoryRevision ~= nil
+			and (not previousState
+				or previousState.networkId ~= args.networkId
+				or previousState.inventoryRevision ~= args.inventoryRevision) then
+			-- itemDetails lleva revision y puede conservar su pagina visual stale e
+			-- inerte hasta la reconsulta. nodeContents se indexa solo por nodeId: se
+			-- invalida siempre para no editar capacidad/ruta contra datos antiguos.
+			GlobalStorageSiK.Client.nodeContentsCache = {}
+			nodeContentsOrder = {}
+			-- Conservar la pagina de itemDetails evita colapsar
+			-- grupos mientras llega la nueva y libera solo el pending de los grupos
+			-- expandidos para una unica reconsulta.
+			if GlobalStorageSiK.TerminalItems
+				and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
+				GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(args.networkId)
+			end
 		end
 		local deferVisibleRefresh = false
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onTerminalState then
 			deferVisibleRefresh = GlobalStorageSiK.TerminalSync.onTerminalState(args, inventorySync) == true
 		end
 		if not deferVisibleRefresh then
-			GlobalStorageSiK.Client.cachedTerminalState = args
+			GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = args
+			if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onTerminalState(args) end
+			local currentUi = terminalUiForPlayer(playerNum)
+			local currentPlayerNum = currentUi and tonumber(currentUi.playerNum) or 0
+			if currentPlayerNum == playerNum then
+				GlobalStorageSiK.Client.cachedTerminalState = args
+			end
 		end
 		if args and args.networkId and GlobalStorageSiK.Client then
+			GlobalStorageSiK.Client.activeNetworkIdByPlayer[playerNum] = args.networkId
 			GlobalStorageSiK.Client.activeNetworkId = args.networkId
 		end
 		if args and args.networks and GlobalStorageSiK.Client then
 			GlobalStorageSiK.Client.networkList = args.networks
 		end
 		if args and args.activeNetworkId and GlobalStorageSiK.Client then
+			GlobalStorageSiK.Client.activeNetworkIdByPlayer[playerNum] = args.activeNetworkId
 			GlobalStorageSiK.Client.activeNetworkId = args.activeNetworkId
 		end
 
-		local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local ui = terminalUiForPlayer(playerNum)
 		local uiVisible = ui ~= nil and (not ui.isVisible or ui:isVisible())
 		GlobalStorageSiK.Client.pendingTerminalOpen = false
+		if GlobalStorageSiK.Client.pendingTerminalOpenByPlayer then
+			GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] = nil
+		end
 
-		local player = GlobalStorageSiK.NetClient.getPlayer()
+		local player = GlobalStorageSiK.NetClient.getPlayer(playerNum)
 		local networkId = args and args.networkId
-			or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+			or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkIdByPlayer
+				and GlobalStorageSiK.Client.activeNetworkIdByPlayer[playerNum])
+			or (playerNum == 0 and GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
 			or GlobalStorageSiK.Network.getDefaultNetworkId()
 		local needAccess = GlobalStorageSiK.Sandbox
 			and GlobalStorageSiK.Sandbox.requireTerminalAccess
@@ -330,7 +507,10 @@ local function onServerCommand(module, command, args)
 						GlobalStorageSiK.TerminalAccess.clearSession(player)
 					end
 					if GlobalStorageSiK.TerminalUI.showBlocked then
-						GlobalStorageSiK.TerminalUI.showBlocked(accessReason or "terminal_out_of_range")
+					GlobalStorageSiK.TerminalUI.showBlocked({
+						playerNum = playerNum,
+						reason = accessReason or "terminal_out_of_range",
+					})
 					end
 					return
 				end
@@ -357,12 +537,13 @@ local function onServerCommand(module, command, args)
 		if deferVisibleRefresh then
 			GlobalStorageSiK.Log.detail("Client", "terminalState deferred during transfer",
 				"items=" .. tostring(itemCount))
-			if explicitOpen and not uiVisible and GlobalStorageSiK.Client.cachedTerminalState
-				and GlobalStorageSiK.Client.cachedTerminalState.networkId == args.networkId
+			local playerState = GlobalStorageSiK.Client.terminalStateByPlayer[playerNum]
+			if explicitOpen and not uiVisible and playerState
+				and playerState.networkId == args.networkId
 				and GlobalStorageSiK.TerminalUI and type(GlobalStorageSiK.TerminalUI.show) == "function" then
 				-- Reabrir con el modelo local ya confirmado en lugar de restaurar el
 				-- snapshot servidor anterior mientras termina la consolidación.
-				GlobalStorageSiK.TerminalUI.show(GlobalStorageSiK.Client.cachedTerminalState)
+				GlobalStorageSiK.TerminalUI.show(playerState)
 			end
 		elseif uiVisible then
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "refresh items=" .. tostring(itemCount))
@@ -372,7 +553,7 @@ local function onServerCommand(module, command, args)
 				end)
 				if not ok then
 					GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"))
+					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"), true)
 				end
 			end
 		elseif explicitOpen then
@@ -382,7 +563,7 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Log.info("Client", "terminalState", "open items=" .. tostring(itemCount))
 			if not GlobalStorageSiK.TerminalUI or type(GlobalStorageSiK.TerminalUI.show) ~= "function" then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show no disponible")
-				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
 				return
 			end
 			local ok, err = pcall(function()
@@ -390,7 +571,7 @@ local function onServerCommand(module, command, args)
 			end)
 			if not ok then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
-				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"))
+				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
 			elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.pendingInitialTab then
 				-- Ver terminalRegistered mas arriba: tras instalar un terminal
 				-- con exito, la ventana debe abrir directamente en Red (dev41:
@@ -406,10 +587,56 @@ local function onServerCommand(module, command, args)
 		else
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "cached items=" .. tostring(itemCount))
 		end
+	elseif command == "itemDetails" then
+		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}
+		-- Durante una transferencia visible puede diferirse la sustitucion del
+		-- snapshot global. La ventana abierta es la autoridad para decidir si
+		-- esta pagina de instancias pertenece a SU revision; el cache global es
+		-- solo el fallback cuando no hay terminal visible.
+		local visibleTerminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local activeState = visibleTerminal and visibleTerminal.terminalState
+			or GlobalStorageSiK.Client.cachedTerminalState
+		local sameNetwork = not activeState or not args or not args.networkId
+			or activeState.networkId == args.networkId
+		local sameRevision = not activeState or not args or args.inventoryRevision == nil
+			or activeState.inventoryRevision == args.inventoryRevision
+		local accepted = args and args.rowKey and sameNetwork and sameRevision
+		if accepted then
+			storeBounded(GlobalStorageSiK.Client.itemDetailsCache, itemDetailsOrder,
+				args.rowKey, args, MAX_ITEM_DETAIL_PAGES)
+		end
+		if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onDetailsReceived then
+			-- Una respuesta stale no puede limpiar pending ni reconstruir la lista:
+			-- hacerlo reabre la misma consulta bajo demanda en un bucle de frames.
+			GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted == true)
+		end
+	elseif command == "itemTooltipDetail" then
+		if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.onReceived then
+			GlobalStorageSiK.RemoteItemDetail.onReceived(args)
+		end
+	elseif command == "remoteNetworkCandidates" then
+		if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.onRemoteNetworkCandidates then
+			GlobalStorageSiK.TerminalUI.onRemoteNetworkCandidates(args)
+		end
 	elseif command == "nodeContents" then
+		if args and args.nodeId and GlobalStorageSiK.ContainerInventory then
+			GlobalStorageSiK.ContainerInventory.receive(args)
+		end
+		if args and args.catalogRows and GlobalStorageSiK.WithdrawClient then
+			GlobalStorageSiK.WithdrawClient.onTerminalState({ networkId = args.networkId,
+				sourceNodeId = args.nodeId, inventoryRevision = args.inventoryRevision,
+				snapshotRevision = args.snapshotRevision, snapshotCertified = args.snapshotCertified,
+				items = args.catalogRows })
+		end
 		GlobalStorageSiK.Client.nodeContentsCache = GlobalStorageSiK.Client.nodeContentsCache or {}
-		if args and args.nodeId then
-			GlobalStorageSiK.Client.nodeContentsCache[args.nodeId] = args
+		local activeState = GlobalStorageSiK.Client.cachedTerminalState
+		local sameNetwork = not activeState or not args or not args.networkId
+			or activeState.networkId == args.networkId
+		local sameRevision = not activeState or not args or args.inventoryRevision == nil
+			or activeState.inventoryRevision == args.inventoryRevision
+		if args and args.nodeId and sameNetwork and sameRevision then
+			storeBounded(GlobalStorageSiK.Client.nodeContentsCache, nodeContentsOrder,
+				args.nodeId, args, MAX_NODE_CONTENT_ENTRIES)
 		end
 		if GlobalStorageSiK.TerminalConfig and GlobalStorageSiK.TerminalConfig.onNodeContentsReceived then
 			GlobalStorageSiK.TerminalConfig.onNodeContentsReceived(args)
@@ -470,7 +697,7 @@ local function onServerCommand(module, command, args)
 		elseif reason == "out_of_network_range" then
 			msgKey = "IGUI_GS_TerminalOutOfNetworkRange"
 		end
-		showMessage(GlobalStorageSiK.I18n.text(msgKey))
+		showMessage(GlobalStorageSiK.I18n.text(msgKey), true)
 	elseif command == "terminalRegistered" then
 		if args and args.ok and args.networkId then
 			local player = GlobalStorageSiK.NetClient.getPlayer()
@@ -488,9 +715,11 @@ local function onServerCommand(module, command, args)
 			-- Aviso SIEMPRE (antes solo en modo "new" - unirse a una red ya
 			-- existente se quedaba sin ningún mensaje de confirmación, un
 			-- vacío informativo tras una acción que sí tuvo éxito).
-			if player and player.setHaloNote then
+			if player then
 				local msgKey = args.mode == "new" and "IGUI_GS_TerminalInstalledNew" or "IGUI_GS_TerminalInstalledJoined"
-				player:setHaloNote(GlobalStorageSiK.I18n.text(msgKey, args.networkId), 180, 220, 160, 350)
+				GlobalStorageSiK.UIFeedback.halo(player,
+					GlobalStorageSiK.I18n.text(msgKey, args.networkId), 180, 220, 160, 350,
+					{ tone = "success" })
 			end
 			-- Refrescar lista de redes para que el estado del selector (suspendido/activo) sea correcto.
 			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
@@ -523,7 +752,10 @@ local function onServerCommand(module, command, args)
 		end
 	elseif command == "itemNetworkCounts" then
 		if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived then
-			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType, args and args.networks or {}, args and args.hasAnyNetwork, args and args.mediaTitle)
+			GlobalStorageSiK.ItemNetworkTooltip.onCountsReceived(args and args.fullType,
+				args and args.networks or {}, args and args.hasAnyNetwork,
+				args and args.mediaTitle, args and args.mediaIndex, args and args.dynamicStateKey,
+				args and args.playerNum)
 		end
 	elseif command == "networkList" then
 		if not GlobalStorageSiK.Client then
@@ -553,22 +785,51 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.NetClient.sendCommand("getNetworkList", {})
 		end
 	elseif command == "terminalBlocked" then
+		local blockedPlayerNum = tonumber(args and args.playerNum) or 0
+		local remoteHandled = GlobalStorageSiK.TerminalUI
+			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult
+			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult(args, false)
+		if remoteHandled then
+			GlobalStorageSiK.Client.pendingTerminalOpen = false
+			if GlobalStorageSiK.Client.pendingTerminalOpenByPlayer then
+				GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[blockedPlayerNum] = nil
+			end
+			local remotePlayer = GlobalStorageSiK.NetClient.getPlayer(blockedPlayerNum)
+			if remotePlayer and GlobalStorageSiK.TerminalAccess
+				and GlobalStorageSiK.TerminalAccess.clearSession then
+				GlobalStorageSiK.TerminalAccess.clearSession(remotePlayer)
+			end
+			return
+		end
 		local trustServer = GlobalStorageSiK.TerminalAccess
 			and GlobalStorageSiK.TerminalAccess.trustServerForOpen
 			and GlobalStorageSiK.TerminalAccess.trustServerForOpen()
 		if trustServer and GlobalStorageSiK.Client and GlobalStorageSiK.Client.lastTerminalOpenTime then
 			local now = (getTimestamp and getTimestamp()) or 0
-			local mainUi = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+			local mainUi = terminalUiForPlayer(blockedPlayerNum)
 			local mainVisible = mainUi and mainUi.getIsVisible and mainUi:isVisible()
-			local hadState = GlobalStorageSiK.Client.cachedTerminalState ~= nil
+			local hadState = GlobalStorageSiK.Client.terminalStateByPlayer
+				and GlobalStorageSiK.Client.terminalStateByPlayer[blockedPlayerNum] ~= nil
 			if (mainVisible or hadState) and now - GlobalStorageSiK.Client.lastTerminalOpenTime < 1.5 then
 				GlobalStorageSiK.Debug.log("Client", "terminalBlocked", "ignored race after open reason=" .. tostring(args and args.reason))
 				return
 			end
 		end
 		GlobalStorageSiK.Client.pendingTerminalOpen = false
-		GlobalStorageSiK.Client.cachedTerminalState = nil
-		local player = GlobalStorageSiK.NetClient.getPlayer()
+		if GlobalStorageSiK.Client.terminalStateByPlayer then
+			GlobalStorageSiK.Client.terminalStateByPlayer[blockedPlayerNum] = nil
+		end
+		local blockedUi = terminalUiForPlayer(blockedPlayerNum)
+		if not blockedUi or (tonumber(blockedUi.playerNum) or 0) == blockedPlayerNum then
+			GlobalStorageSiK.Client.cachedTerminalState = nil
+		end
+		if GlobalStorageSiK.Client.clearTransientCaches then
+			if GlobalStorageSiK.Client.clearInventoryCatalog then
+				GlobalStorageSiK.Client.clearInventoryCatalog(blockedPlayerNum, args and args.networkId)
+			end
+			GlobalStorageSiK.Client.clearTransientCaches(blockedPlayerNum)
+		end
+		local player = GlobalStorageSiK.NetClient.getPlayer(blockedPlayerNum)
 		if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 			GlobalStorageSiK.TerminalAccess.clearSession(player)
 		end
@@ -580,7 +841,7 @@ local function onServerCommand(module, command, args)
 		end
 		GlobalStorageSiK.Log.info("Client", "terminalBlocked", args and args.reason or "no_access")
 		local payload = args or {}
-		local player = GlobalStorageSiK.NetClient.getPlayer()
+		local player = GlobalStorageSiK.NetClient.getPlayer(blockedPlayerNum)
 		if player and GlobalStorageSiK.TerminalRecipes then
 			local ok, enriched = pcall(GlobalStorageSiK.TerminalRecipes.serializeForClient, player, { blockedOnly = true })
 			if ok and enriched then
@@ -596,7 +857,7 @@ local function onServerCommand(module, command, args)
 			end
 		end
 		local rect
-		local mainUi = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local mainUi = terminalUiForPlayer(blockedPlayerNum)
 		if mainUi and mainUi.getIsVisible and mainUi:isVisible() then
 			rect = { x = mainUi:getX(), y = mainUi:getY(), w = mainUi:getWidth(), h = mainUi:getHeight() }
 		end
@@ -633,20 +894,135 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNetworkHistory then
 			GlobalStorageSiK.AdminDashboard.onNetworkHistory(args and args.networkId, args and args.events or {})
 		end
+	elseif command == "nativeAuditSummary" then
+		-- Resultado del boton "Auditar catalogo" (ver GS_NativeAudit.lua) -
+		-- solo el resumen llega aqui, el informe completo con muestras se
+		-- queda en el fichero de diagnostico del servidor.
+		if args and args.cached ~= true then
+			local msg = GlobalStorageSiK.I18n.text("IGUI_GS_NativeAuditSummary",
+				tostring(args.timeMs), tostring(args.totalTypes), tostring(args.pending),
+				tostring(args.unclassified), tostring(args.invalidPath), tostring(args.fileName))
+			GlobalStorageSiK.Log.info("NativeAudit", msg)
+			local player = GlobalStorageSiK.NetClient.getPlayer()
+			if player then
+				GlobalStorageSiK.UIFeedback.halo(player, msg, 220, 220, 220, 600)
+			end
+		end
+		-- Tanto una ejecucion nueva como la copia cacheada solicitada al abrir
+		-- alimentan la pestaña; la cache no repite halo ni log.
+		if args and GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeAuditSummary then
+			GlobalStorageSiK.AdminDashboard.onNativeAuditSummary(args)
+		end
+	elseif command == "nativeCorpusSummary" then
+		-- dev24: resultado del boton "Validar corpus" - suite DIFERENCIADA
+		-- de nativeAuditSummary, misma idea de solo mandar el resumen
+		-- agregado (la lista de divergencias se queda en
+		-- GlobalStorageSiK_NativeCorpus.log).
+		if args and GlobalStorageSiK.AdminDashboard and GlobalStorageSiK.AdminDashboard.onNativeCorpusSummary then
+			GlobalStorageSiK.AdminDashboard.onNativeCorpusSummary(args)
+		end
 	end
 end
 
 GlobalStorageSiK.Client = GlobalStorageSiK.Client or {}
 GlobalStorageSiK.Client.lastItemIndex = {}
 GlobalStorageSiK.Client.cachedTerminalState = nil
+GlobalStorageSiK.Client.terminalStateByPlayer = {}
+GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork = {}
 GlobalStorageSiK.Client.nodeContentsCache = {}
 GlobalStorageSiK.Client.pendingTerminalOpen = false
+GlobalStorageSiK.Client.pendingTerminalOpenByPlayer = {}
 GlobalStorageSiK.Client.lastTerminalOpenTime = 0
 GlobalStorageSiK.Client.terminalOpenSeq = 0
+GlobalStorageSiK.Client.terminalOpenSeqByPlayer = {}
 GlobalStorageSiK.Client.terminalManifest = nil
 GlobalStorageSiK.Client.activeNetworkId = nil
+GlobalStorageSiK.Client.activeNetworkIdByPlayer = {}
+
+function GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
+	payload = payload or {}
+	networkId = networkId or payload.networkId
+	if not networkId then return payload end
+	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local entry = cache[inventoryCatalogKey(playerNum, networkId)]
+	if entry then
+		payload.knownInventoryRevision = entry.inventoryRevision
+		payload.knownCatalogScope = entry.catalogScope
+	end
+	return payload
+end
+
+function GlobalStorageSiK.Client.clearInventoryCatalog(playerNum, networkId)
+	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+	local remove = {}
+	for key, entry in pairs(cache) do
+		local samePlayer = playerNum == nil or entry.playerNum == (tonumber(playerNum) or 0)
+		local sameNetwork = networkId == nil or entry.networkId == networkId
+		if samePlayer and sameNetwork then remove[#remove + 1] = key end
+	end
+	for i = 1, #remove do cache[remove[i]] = nil end
+end
+
+--- Registro neutral y acotado para que addons limpien UI/callbacks efímeros
+--- cuando Core cierra una sesión, una vida o un jugador local. La clave estable
+--- sustituye el handler anterior y evita listeners de lifecycle duplicados.
+function GlobalStorageSiK.Client.registerTransientCleanup(key, handler)
+	if type(key) ~= "string" or key == "" or #key > 64 or type(handler) ~= "function" then
+		return false
+	end
+	transientCleanupHandlers[key] = handler
+	return true
+end
+
+if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.UIFeedback.installCleanup then
+	GlobalStorageSiK.UIFeedback.installCleanup()
+end
+
+function GlobalStorageSiK.Client.clearTransientCaches(playerNum)
+	GlobalStorageSiK.Client.itemDetailsCache = {}
+	GlobalStorageSiK.Client.nodeContentsCache = {}
+	itemDetailsOrder = {}
+	nodeContentsOrder = {}
+	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.invalidateAll then
+		GlobalStorageSiK.RemoteItemDetail.invalidateAll()
+	end
+	if GlobalStorageSiK.ItemNetworkTooltip and GlobalStorageSiK.ItemNetworkTooltip.invalidateAll then
+		GlobalStorageSiK.ItemNetworkTooltip.invalidateAll()
+	end
+	if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.clearRevisionState then
+		GlobalStorageSiK.TerminalSync.clearRevisionState()
+	end
+	local cleanupKeys = {}
+	for key in pairs(transientCleanupHandlers) do cleanupKeys[#cleanupKeys + 1] = key end
+	table.sort(cleanupKeys)
+	for i = 1, #cleanupKeys do
+		local handler = transientCleanupHandlers[cleanupKeys[i]]
+		local ok, err = pcall(handler, playerNum)
+		if not ok then
+			GlobalStorageSiK.Log.error("Client", "transient cleanup " .. cleanupKeys[i], tostring(err))
+		end
+	end
+	if playerNum == nil then
+		GlobalStorageSiK.Client.terminalStateByPlayer = {}
+		GlobalStorageSiK.Client.cachedTerminalState = nil
+		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork = {}
+	else
+		playerNum = tonumber(playerNum) or 0
+		GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = nil
+		local ui = terminalUiForPlayer(playerNum)
+		if not ui or (tonumber(ui.playerNum) or 0) == playerNum then
+			GlobalStorageSiK.Client.cachedTerminalState = nil
+		end
+	end
+end
+
+local function logClientRuntimeIdentity()
+	local version = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION or "?"
+	GlobalStorageSiK.Log.runtimeIdentity("client", version)
+end
 
 Events.OnServerCommand.Add(onServerCommand)
+Events.OnGameStart.Add(logClientRuntimeIdentity)
 
 --- Expuesto para GS_Server.lua: en SP real, sendServerCommand()/
 --- Events.OnServerCommand NO entregan nada (confirmado con traza completa -

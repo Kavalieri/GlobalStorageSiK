@@ -74,13 +74,14 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 				else
 
-					local ok, reason = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
+					local ok, reason, snapshotsUpdated = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
 					})
 
 					if ok then
 
 						summary.moved = summary.moved + 1
+						if snapshotsUpdated ~= true then summary.snapshotsUpdated = false end
 
 					elseif reason == "filtered" then
 
@@ -118,7 +119,7 @@ end
 
 function GlobalStorageSiK.Bulk.depositFromPlayer(player, networkId, sourceIndex)
 
-	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, reason = nil }
+	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, reason = nil, snapshotsUpdated = true }
 
 
 

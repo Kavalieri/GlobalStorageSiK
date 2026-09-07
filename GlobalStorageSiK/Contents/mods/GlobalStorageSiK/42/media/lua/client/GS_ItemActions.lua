@@ -7,6 +7,7 @@
 
 require "GS_I18n"
 require "GS_NetClient"
+require "GS_UI_Feedback"
 require "GS_TerminalUI_Api"
 require "GS_TerminalAccess"
 require "GS_PlayerUtils"
@@ -25,7 +26,7 @@ require "GS_DiskProgramming"
 require "TimedActions/GS_ProgramDiskAction"
 require "TimedActions/GS_AddonInstallAction"
 require "TimedActions/ISTimedActionQueue"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Network"
 require "GS_Addons"
 require "ISUI/ISContextMenu"
@@ -91,7 +92,8 @@ end
 ---@return string
 local function moduleTierLabel(def)
 	local names, seen = {}, {}
-	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(def)
+	local ok, _, moduleTypes = GSSiK.API.Addon.moduleItemTypes(def.id)
+	if not ok then moduleTypes = {} end
 	for i = 1, #moduleTypes do
 		local fullType = moduleTypes[i]
 		if fullType and fullType ~= "" and not seen[fullType] then
@@ -173,7 +175,8 @@ local function hasAnyModuleTier(player, addonDef)
 	if not inv then
 		return false
 	end
-	local moduleTypes = GlobalStorageSiK.AddonRegistry.moduleItemTypes(addonDef)
+	local ok, _, moduleTypes = GSSiK.API.Addon.moduleItemTypes(addonDef.id)
+	if not ok then moduleTypes = {} end
 	for i = 1, #moduleTypes do
 		if moduleTypes[i] and (inv:getItemCountRecurse(moduleTypes[i]) or 0) >= 1 then
 			return true
@@ -216,7 +219,8 @@ local function buildInstallChecklistTooltip(player, addonDef, hasTerminalNear, n
 	local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(player, nid, anchor)
 	local readerLabel = (readerType and GlobalStorageSiK.I18n.typeDisplayName
 		and GlobalStorageSiK.I18n.typeDisplayName(readerType)) or T("IGUI_GS_AddonReaderTitle")
-	local knowsMag = player and GlobalStorageSiK.AddonRegistry.playerKnowsMagazine(player, addonDef.id)
+	local knowsOk, _, knowsMag = GSSiK.API.Addon.playerKnowsMagazine(player, addonDef.id)
+	knowsMag = player ~= nil and knowsOk == true and knowsMag == true
 	local magazineLabel = (addonDef.magazineType and GlobalStorageSiK.I18n.typeDisplayName
 		and GlobalStorageSiK.I18n.typeDisplayName(addonDef.magazineType)) or T("IGUI_GS_AddonStatusNeedMagazine")
 
@@ -241,14 +245,125 @@ end
 ---   GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey)
 --- labelKey es la clave de traducción del texto del menú contextual.
 GlobalStorageSiK.ItemActions._tabletItemLabels = GlobalStorageSiK.ItemActions._tabletItemLabels or {}
+GlobalStorageSiK.ItemActions._tabletItemActions = GlobalStorageSiK.ItemActions._tabletItemActions or {}
+GlobalStorageSiK.ItemActions._tabletItemGenerations = GlobalStorageSiK.ItemActions._tabletItemGenerations or {}
+GlobalStorageSiK.ItemActions._generation = tonumber(GlobalStorageSiK.ItemActions._generation) or 0
+GlobalStorageSiK.ItemActions._providers = GlobalStorageSiK.ItemActions._providers or {}
+GlobalStorageSiK.ItemActions._providerGenerations = GlobalStorageSiK.ItemActions._providerGenerations or {}
+local MAX_PROVIDERS = 32
+local MAX_PROVIDER_ACTIONS = 16
 
 ---@param fullType string
 ---@param labelKey string
-function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey)
+---@param onUse function|nil
+function GlobalStorageSiK.ItemActions.registerTabletItem(fullType, labelKey, onUse)
 	if not fullType or not labelKey then
+		return false, nil
+	end
+	GlobalStorageSiK.ItemActions._generation = GlobalStorageSiK.ItemActions._generation + 1
+	local generation = GlobalStorageSiK.ItemActions._generation
+	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = labelKey
+	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] =
+		type(onUse) == "function" and onUse or GlobalStorageSiK.ItemActions.onUseTerminalTablet
+	GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] = generation
+	return true, generation
+end
+
+function GlobalStorageSiK.ItemActions.removeTabletItemIfGeneration(fullType, generation)
+	if GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] ~= generation then
+		return false
+	end
+	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = nil
+	GlobalStorageSiK.ItemActions._tabletItemActions[fullType] = nil
+	GlobalStorageSiK.ItemActions._tabletItemGenerations[fullType] = nil
+	return true
+end
+
+--- Registro neutral de acciones propietarias de addons. Core solo valida,
+--- ordena y presenta; cada addon decide aplicabilidad, request y ejecución por
+--- su API autoritativa existente (sin protocolo nuevo ni switches por addon).
+---@param def table
+---@return boolean
+function GlobalStorageSiK.ItemActions.registerProvider(def)
+	if type(def) ~= "table" or type(def.id) ~= "string" or def.id == ""
+		or type(def.addonId) ~= "string" or def.addonId == ""
+		or type(def.capabilities) ~= "table" or type(def.actions) ~= "table"
+		or type(def.appliesTo) ~= "function" or type(def.buildRequest) ~= "function"
+		or (type(def.executeRequest) ~= "function" and type(def.execute) ~= "function")
+		or #def.actions == 0 or #def.actions > MAX_PROVIDER_ACTIONS then return false end
+	local count = 0
+	for _ in pairs(GlobalStorageSiK.ItemActions._providers) do count = count + 1 end
+	if not GlobalStorageSiK.ItemActions._providers[def.id] and count >= MAX_PROVIDERS then return false end
+	for i = 1, #def.actions do
+		local action = def.actions[i]
+		if type(action) ~= "table" or type(action.id) ~= "string" or action.id == ""
+			or type(action.labelKey) ~= "string" or action.labelKey == "" then return false end
+	end
+	GlobalStorageSiK.ItemActions._providers[def.id] = def
+	GlobalStorageSiK.ItemActions._generation = GlobalStorageSiK.ItemActions._generation + 1
+	local generation = GlobalStorageSiK.ItemActions._generation
+	GlobalStorageSiK.ItemActions._providerGenerations[def.id] = generation
+	return true, generation
+end
+
+function GlobalStorageSiK.ItemActions.removeProviderIfGeneration(providerId, generation)
+	if GlobalStorageSiK.ItemActions._providerGenerations[providerId] ~= generation then
+		return false
+	end
+	GlobalStorageSiK.ItemActions._providers[providerId] = nil
+	GlobalStorageSiK.ItemActions._providerGenerations[providerId] = nil
+	return true
+end
+
+local function sortedProviders()
+	local providers = {}
+	for _, provider in pairs(GlobalStorageSiK.ItemActions._providers) do
+		providers[#providers + 1] = provider
+	end
+	table.sort(providers, function(a, b) return a.id < b.id end)
+	return providers
+end
+
+local function invokeProvider(context, provider, action)
+	local okRequest, request = pcall(provider.buildRequest, action.id, context)
+	if not okRequest or type(request) ~= "table" then
+		GlobalStorageSiK.Log.error("ItemActions", "provider request " .. tostring(provider.id), request)
 		return
 	end
-	GlobalStorageSiK.ItemActions._tabletItemLabels[fullType] = labelKey
+	local execute = provider.executeRequest or provider.execute
+	local okExecute, err = pcall(execute, request, context)
+	if not okExecute then
+		GlobalStorageSiK.Log.error("ItemActions", "provider execute " .. tostring(provider.id), err)
+	end
+end
+
+--- Añade acciones declaradas a un menú ya elegido por el consumidor.
+--- `items` puede contener InventoryItem reales o filas serializadas del Almacén;
+--- ningún objeto se conserva después de construir/cerrar el menú.
+function GlobalStorageSiK.ItemActions.addProviderOptions(menu, playerArg, items, extra)
+	if (type(menu) ~= "table" and type(menu) ~= "function")
+		or type(items) ~= "table" or #items == 0 then return 0 end
+	local context = {
+		player = GlobalStorageSiK.PlayerUtils.resolve(playerArg),
+		playerArg = playerArg, items = items, extra = extra or {},
+	}
+	local added = 0
+	local targetMenu = type(menu) == "table" and menu or nil
+	local providers = sortedProviders()
+	for i = 1, #providers do
+		local provider = providers[i]
+		for j = 1, #provider.actions do
+			local action = provider.actions[j]
+			local okApplies, applies = pcall(provider.appliesTo, context, action.id)
+			if okApplies and applies == true then
+				if not targetMenu then targetMenu = menu() end
+				if not targetMenu then return added end
+				targetMenu:addOption(T(action.labelKey), context, invokeProvider, provider, action)
+				added = added + 1
+			end
+		end
+	end
+	return added
 end
 
 --- Deposita un ítem concreto en la red.
@@ -471,15 +586,18 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 						local freshRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
 						local freshTarget = GlobalStorageSiK.TerminalAccess.findNearestKnownComputer(p, freshRange)
 						if not freshTarget then
-							if p and p.setHaloNote then
-								p:setHaloNote(T("IGUI_GS_InstallReaderComputerNoneShort"), 220, 180, 100, 300)
+							if p then
+								GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_InstallReaderComputerNoneShort"),
+									220, 180, 100, 300, { tone = "warning" })
 							end
 							return
 						end
 						if freshTarget.alreadyInstalled then
-							if p and p.setHaloNote then
+							if p then
 								local keyLabel = GlobalStorageSiK.KeyBinding and GlobalStorageSiK.KeyBinding.getKeyLabel and GlobalStorageSiK.KeyBinding.getKeyLabel() or "F9"
-								p:setHaloNote(T("IGUI_GS_InstallReaderAlreadyInstalled", keyLabel), 220, 180, 100, 300)
+								GlobalStorageSiK.UIFeedback.halo(p,
+									T("IGUI_GS_InstallReaderAlreadyInstalled", keyLabel),
+									220, 180, 100, 300, { tone = "warning" })
 							end
 							return
 						end
@@ -530,14 +648,16 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 						local knows = GlobalStorageSiK.DiskProgramming.knowsProgram(player, id)
 						local option = sub:addOption(T(def.menuTextKey), player, function(p)
 							if not GlobalStorageSiK.DiskProgramming.knowsProgram(p, id) then
-								if p and p.setHaloNote then
-									p:setHaloNote(T("IGUI_GS_ProgramDiskFailBook"), 220, 180, 100, 300)
+								if p then
+									GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailBook"),
+										220, 180, 100, 300, { tone = "warning" })
 								end
 								return
 							end
 							if not GlobalStorageSiK.DiskProgramming.terminalInRange(p) then
-								if p and p.setHaloNote then
-									p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+								if p then
+									GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+										220, 180, 100, 300, { tone = "warning" })
 								end
 								return
 							end
@@ -583,7 +703,9 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 			-- Lector como ADDON en un terminal YA EXISTENTE - exactamente el
 			-- mismo caso que Craft/Builder/Antena, nunca deberia haberse
 			-- excluido. Sin esto, ese disquete no ofrecia ninguna opcion.
-			for _, addonDef in ipairs(GlobalStorageSiK.AddonRegistry.listSorted()) do
+			local listed, _, addonDefinitions = GSSiK.API.Addon.list()
+			if not listed then addonDefinitions = {} end
+			for _, addonDef in ipairs(addonDefinitions) do
 				if addonDef.installDiskItem == first:getFullType() and player then
 					local sub = ensureSub()
 					if sub then
@@ -616,18 +738,22 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 							-- hasRequiredInstallItems) SOLO podia ver la disquetera
 							-- en el inventario, nunca instalada como addon en la
 							-- red ya detectada.
-							local canInstall = GlobalStorageSiK.AddonRegistry.canInstallModule(player, addonId, nid, anchor)
+							local policyOk, _, canInstall = GSSiK.API.Addon.canInstall(player, addonId, nid, anchor)
+							canInstall = policyOk == true and canInstall == true
 							local option = sub:addOption(T("IGUI_GS_InstallAddonMenu", peripheralLabel), player, function(p)
 								local freshTarget, freshNid, freshAnchor = resolveNearbyNetworkContext(p)
 								if not freshTarget then
-									if p and p.setHaloNote then
-										p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+									if p then
+										GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+											220, 180, 100, 300, { tone = "warning" })
 									end
 									return
 								end
-								if not GlobalStorageSiK.AddonRegistry.canInstallModule(p, addonId, freshNid, freshAnchor) then
-									if p and p.setHaloNote then
-										p:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+								local freshPolicyOk, _, freshCanInstall = GSSiK.API.Addon.canInstall(p, addonId, freshNid, freshAnchor)
+								if not freshPolicyOk or not freshCanInstall then
+									if p then
+										GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_CraftMissing"),
+											220, 180, 100, 300, { tone = "warning" })
 									end
 									return
 								end
@@ -675,8 +801,8 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 					installed = installed or {}
 					local hasReader = GlobalStorageSiK.Addons.hasReaderAvailable(player, nid, anchor)
 					for addonId, _ in pairs(installed) do
-						local addonDef = GlobalStorageSiK.AddonRegistry.get(addonId)
-						if addonDef then
+						local definitionOk, _, addonDef = GSSiK.API.Addon.get(addonId)
+						if definitionOk and addonDef then
 							local sub = ensureSub()
 							if sub then
 								local peripheralLabel = moduleTierLabel(addonDef)
@@ -687,21 +813,25 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 								local option = sub:addOption(T("IGUI_GS_UninstallAddonMenu", peripheralLabel), player, function(p)
 									local freshTarget, freshNid, freshAnchor = resolveNearbyNetworkContext(p)
 									if not freshTarget or not freshNid then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_ProgramDiskFailTerminal"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end
 									if not GlobalStorageSiK.Addons.hasReaderAvailable(p, freshNid, freshAnchor) then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_NeedReaderNetworkOrInventoryMsg"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p,
+												T("IGUI_GS_NeedReaderNetworkOrInventoryMsg"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end
 									local requiredSkillFresh = GlobalStorageSiK.Sandbox.getAddonInstallSkillRequired()
 									if requiredSkillFresh > 0 and GlobalStorageSiK.CraftUtils.getElectricityLevel(p) < requiredSkillFresh then
-										if p and p.setHaloNote then
-											p:setHaloNote(T("IGUI_GS_CraftMissing"), 220, 180, 100, 300)
+										if p then
+											GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_CraftMissing"),
+												220, 180, 100, 300, { tone = "warning" })
 										end
 										return
 									end
@@ -739,10 +869,18 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 			if tabletLabelKey then
 				local sub = ensureSub()
 				if sub then
-					sub:addOption(T(tabletLabelKey), player, GlobalStorageSiK.ItemActions.onUseTerminalTablet, first)
+					local onUse = GlobalStorageSiK.ItemActions._tabletItemActions[fullType]
+						or GlobalStorageSiK.ItemActions.onUseTerminalTablet
+					sub:addOption(T(tabletLabelKey), player, onUse, first)
 				end
 			end
 		end
+
+		-- Los proveedores de addons comparten el submenú raíz, pero se evalúan
+		-- antes de Transferir para no crear una raíz vacía cuando ninguno aplica.
+		GlobalStorageSiK.ItemActions.addProviderOptions(ensureSub, playerArg, resolved, {
+			source = "inventory",
+		})
 
 		if GlobalStorageSiK.ItemActions.canTransfer(playerArg, resolved) then
 			GlobalStorageSiK.ItemActions.addTransferOptions(context, playerArg, resolved, ensureSub())

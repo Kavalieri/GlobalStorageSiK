@@ -1,0 +1,37 @@
+{
+  "inputs": {
+    "frameworkManifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    "generatorSha256": "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
+    "schemaSha256": "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
+    "surfaceSpecSha256": "6ddea54fe3d57437e1020bd9bc30c95b70cd89b1b6d5c49c139c802b53b05f8a",
+    "visualCanonicalizer": "sik-ui-dom-v2",
+    "visualMasterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
+    "visualSubtreeSha256": "09af53f74d8b483706fa1ad8b14e2a6f30834fef2b1e14f9412c956315fc3cb3"
+  },
+  "outputs": {
+    "htmlSha256": "e6f88ce8f0e263a15de1aefe0f43ef03845ec93bd5601060699849c4b4e0b80c",
+    "luaSha256": "99a0c07af91b00b925ae0d90801e32bff4a9b3ae28f1e84114558bd060509c87"
+  },
+  "runtime": {
+    "artifact": {
+      "moduleId": "GSSiK_Addon_Craft/UI/Generated/TabCraft",
+      "modulePath": "addons/GSSiK_Addon_Craft/Contents/mods/GSSiK_Addon_Craft/42/media/lua/client/GSSiK_Addon_Craft/UI/Generated/TabCraft.lua",
+      "repository": "global-storage-sik"
+    },
+    "callers": [
+      {
+        "modulePath": "addons/GSSiK_Addon_Craft/Contents/mods/GSSiK_Addon_Craft/42/media/lua/client/GSSiK_Addon_Craft_Client.lua",
+        "repository": "global-storage-sik",
+        "symbol": "Terminal.registerTab"
+      }
+    ],
+    "loader": {
+      "builderSymbol": "SiK.UI.SurfaceHost.mount",
+      "modulePath": "addons/GSSiK_Addon_Craft/Contents/mods/GSSiK_Addon_Craft/42/media/lua/client/GSSiK_Addon_Craft_TerminalUI.lua",
+      "repository": "global-storage-sik",
+      "symbol": "TerminalModule"
+    }
+  },
+  "runtimePolicy": "required",
+  "surfaceId": "tab-craft"
+}

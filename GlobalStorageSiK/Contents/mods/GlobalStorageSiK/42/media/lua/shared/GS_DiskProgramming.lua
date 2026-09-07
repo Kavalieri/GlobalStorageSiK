@@ -57,6 +57,99 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 	},
 }
 
+GlobalStorageSiK.DiskProgramming._programOwners =
+	GlobalStorageSiK.DiskProgramming._programOwners or {
+		network = "core",
+		uninstall = "core",
+		driveinstall = "core",
+	}
+GlobalStorageSiK.DiskProgramming._programGenerations =
+	GlobalStorageSiK.DiskProgramming._programGenerations or {}
+GlobalStorageSiK.DiskProgramming._addonProgramIds =
+	GlobalStorageSiK.DiskProgramming._addonProgramIds or {}
+
+local PROGRAM_FIELDS = {
+	"id", "recipeName", "manualItem", "outputItem", "menuTextKey",
+	"iconPath", "descKey",
+}
+
+local function validProgramString(value, limit)
+	return type(value) == "string" and value ~= "" and #value <= limit
+end
+
+local function copyProgram(def, explicitId)
+	if type(def) ~= "table" then return nil end
+	local programId = explicitId or def.id
+	if not validProgramString(programId, 64)
+		or not string.match(programId, "^[A-Za-z0-9_.%-]+$")
+		or not validProgramString(def.recipeName, 192)
+		or not validProgramString(def.manualItem, 128)
+		or not validProgramString(def.outputItem, 128)
+		or not validProgramString(def.menuTextKey, 128)
+		or not validProgramString(def.iconPath, 256)
+		or not validProgramString(def.descKey, 128)
+		or string.find(def.iconPath, "..", 1, true)
+		or string.sub(def.iconPath, 1, 1) == "/"
+		or string.find(def.iconPath, ":", 1, true) then
+		return nil
+	end
+	local copy = {}
+	for index = 1, #PROGRAM_FIELDS do
+		local field = PROGRAM_FIELDS[index]
+		copy[field] = def[field]
+	end
+	copy.id = programId
+	return copy
+end
+
+function GlobalStorageSiK.DiskProgramming._prepareAddonProgram(addonId, def)
+	if not validProgramString(addonId, 64) then
+		return false, "ERR_SCHEMA", nil
+	end
+	if def == nil then return true, "OK", nil end
+	if type(def) ~= "table" then return false, "ERR_SCHEMA", nil end
+	local prepared = copyProgram(def)
+	if not prepared then return false, "ERR_SCHEMA", nil end
+	local owner = GlobalStorageSiK.DiskProgramming._programOwners[prepared.id]
+	if owner ~= nil and owner ~= addonId then
+		return false, "ERR_PROGRAM_ID_CONFLICT", nil
+	end
+	return true, "OK", prepared
+end
+
+function GlobalStorageSiK.DiskProgramming._commitAddonProgram(addonId, generation, prepared)
+	local previousId = GlobalStorageSiK.DiskProgramming._addonProgramIds[addonId]
+	if previousId and (not prepared or previousId ~= prepared.id)
+		and GlobalStorageSiK.DiskProgramming._programOwners[previousId] == addonId then
+		GlobalStorageSiK.DiskProgramming.PROGRAMS[previousId] = nil
+		GlobalStorageSiK.DiskProgramming._programOwners[previousId] = nil
+		GlobalStorageSiK.DiskProgramming._programGenerations[previousId] = nil
+	end
+	if not prepared then
+		GlobalStorageSiK.DiskProgramming._addonProgramIds[addonId] = nil
+		return true
+	end
+	GlobalStorageSiK.DiskProgramming.PROGRAMS[prepared.id] = copyProgram(prepared)
+	GlobalStorageSiK.DiskProgramming._programOwners[prepared.id] = addonId
+	GlobalStorageSiK.DiskProgramming._programGenerations[prepared.id] = generation
+	GlobalStorageSiK.DiskProgramming._addonProgramIds[addonId] = prepared.id
+	return true
+end
+
+function GlobalStorageSiK.DiskProgramming._removeAddonProgramIfGeneration(addonId, generation)
+	local programId = GlobalStorageSiK.DiskProgramming._addonProgramIds[addonId]
+	if not programId
+		or GlobalStorageSiK.DiskProgramming._programOwners[programId] ~= addonId
+		or GlobalStorageSiK.DiskProgramming._programGenerations[programId] ~= generation then
+		return false
+	end
+	GlobalStorageSiK.DiskProgramming.PROGRAMS[programId] = nil
+	GlobalStorageSiK.DiskProgramming._programOwners[programId] = nil
+	GlobalStorageSiK.DiskProgramming._programGenerations[programId] = nil
+	GlobalStorageSiK.DiskProgramming._addonProgramIds[addonId] = nil
+	return true
+end
+
 --- Punto de registro para que cada addon aporte su propio disco programable
 --- (mismos campos que las entradas de arriba, incluidos iconPath/descKey
 --- para la tarjeta visual de la pestaña Programación) sin que el Core tenga
@@ -64,11 +157,13 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 ---@param id string
 ---@param def table { recipeName, manualItem, outputItem, menuTextKey, iconPath, descKey }
 function GlobalStorageSiK.DiskProgramming.registerProgram(id, def)
-	if not id or not def then
-		return
+	local prepared = copyProgram(def, id)
+	if not prepared or GlobalStorageSiK.DiskProgramming._programOwners[id] == "core" then
+		return false
 	end
-	def.id = id
-	GlobalStorageSiK.DiskProgramming.PROGRAMS[id] = def
+	GlobalStorageSiK.DiskProgramming.PROGRAMS[id] = prepared
+	GlobalStorageSiK.DiskProgramming._programOwners[id] = "legacy"
+	return true
 end
 
 ---@param player IsoPlayer|nil

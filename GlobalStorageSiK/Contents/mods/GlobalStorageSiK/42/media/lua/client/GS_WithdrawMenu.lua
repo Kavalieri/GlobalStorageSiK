@@ -64,7 +64,7 @@ local function doWithdraw(onWithdraw, player, rowData, amount)
 
 	if n < 1 then
 
-		n = 1
+		n = maxCount
 
 	end
 
@@ -74,9 +74,10 @@ local function doWithdraw(onWithdraw, player, rowData, amount)
 
 	end
 
-	local targetKey = GlobalStorageSiK.ContainerTargets.resolveWithdrawTarget(player)
-
-	onWithdraw(rowData, n, targetKey)
+	-- El contextual interno siempre retira al inventario del jugador. Un pane
+	-- concreto solo se elige mediante drag-and-drop; no existe destino oculto o
+	-- persistido en la UI de Almacen.
+	onWithdraw(rowData, n, nil)
 
 end
 
@@ -108,7 +109,10 @@ local function promptCustomAmount(player, rowData, onWithdraw)
 
 	GlobalStorageSiK.QuantityPrompt.show({
 
+		owner = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance,
+
 		title = T("IGUI_GS_WithdrawAmountPrompt"),
+		acceptText = T("IGUI_GS_QuantityWithdraw"),
 
 		default = 1,
 
@@ -151,14 +155,6 @@ function GlobalStorageSiK.WithdrawMenu.fillSubMenu(parentMenu, player, rowData, 
 	if not parentMenu or not rowData or not onWithdraw then
 
 		return
-
-	end
-
-
-
-	if not skipDestination then
-
-		GlobalStorageSiK.ContainerTargets.addDestinationSubMenu(parentMenu, player)
 
 	end
 
@@ -245,9 +241,7 @@ end
 ---@param onWithdraw fun(rowData: table, amount: number, targetKey: string|nil)|nil
 
 ---@param selectionRows table[]|nil
----@param parentSubMenu ISContextMenu|nil
-
-function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows, parentSubMenu)
+function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows)
 
 	if not context or not rowData or not onWithdraw then
 
@@ -261,9 +255,9 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 
 
 
-	GlobalStorageSiK.ContainerTargets.clearSessionTarget(player)
-
-	local host = parentSubMenu or (GlobalStorageSiK.ContextMenu and GlobalStorageSiK.ContextMenu.ensureRoot(context))
+	-- WithdrawMenu is terminal-internal: the caller already owns the exact menu
+	-- root. External inventory actions use TransferMenu/ItemActions instead.
+	local host = context
 
 	if not host then
 
@@ -276,10 +270,6 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 	local subMenu = ISContextMenu:getNew(host)
 
 	host:addSubMenu(root, subMenu)
-
-
-
-	GlobalStorageSiK.ContainerTargets.addDestinationSubMenu(subMenu, player)
 
 
 
@@ -312,4 +302,3 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 	end
 
 end
-

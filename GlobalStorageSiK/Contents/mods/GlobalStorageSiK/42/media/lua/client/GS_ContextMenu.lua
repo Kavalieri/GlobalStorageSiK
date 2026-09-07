@@ -10,7 +10,6 @@ require "GS_Utils"
 require "GS_Network"
 require "GS_Zones"
 require "GS_Categories"
-require "GS_ItemTaxonomy"
 require "GS_NetClient"
 require "GS_I18n"
 -- Solo la API ligera (GlobalStorageSiK.TerminalUI.requestOpen/requestOpenAt),

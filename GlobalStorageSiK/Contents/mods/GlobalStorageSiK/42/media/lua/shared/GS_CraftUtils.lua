@@ -159,14 +159,10 @@ function GlobalStorageSiK.CraftUtils.knowsRecipeStrict(player, recipeName)
 	local sm = getScriptManager and getScriptManager() or nil
 	local craftRecipe = resolveCraftRecipe(sm, recipeName)
 	if craftRecipe then
-		if player.isRecipeKnown then
-			local ok, known = pcall(function()
-				return player:isRecipeKnown(craftRecipe, true)
-			end)
-			if ok and known then
-				return true
-			end
-		end
+		-- `isRecipeKnown(recipe, true)` also accepts knowledge supplied by a
+		-- readable item currently available to the player.  This strict path is
+		-- used for permanent magazine requirements, so merely carrying the
+		-- magazine must not satisfy it.
 		if player.isRecipeActuallyKnown then
 			local ok, known = pcall(function()
 				return player:isRecipeActuallyKnown(craftRecipe)

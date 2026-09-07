@@ -2,8 +2,8 @@
 	GlobalStorageSiK - Relay de diagnostico del servidor dedicado
 
 	Agrupa lineas para no convertir cada Log.debug en un paquete de red. Mantiene
-	solo nombres de cuenta (no referencias Java persistentes), limita cola/lote y
-	se activa unicamente con la opcion sandbox explicita.
+	player+onlineId en la sesión para validar identidad contra la instancia actual,
+	limita cola/lote y se activa unicamente con la opcion sandbox explicita.
 ]]
 
 require "GS_Config"
@@ -15,12 +15,13 @@ if not (isServer and isServer()) or (isClient and isClient()) then
 end
 
 local Relay = GlobalStorageSiK.DebugRelay
-local subscribers = {}
+local subscribers = {} -- sessionId -> { username = string, player = player, onlineId = number|nil }
 local queue = {}
 local queueHead = 1
 local queueTail = 0
 local dropped = 0
 local lastFlushAt = 0
+local ADMIN_LEVEL = "admin"
 
 local MAX_QUEUE_LINES = 256
 local MAX_BATCH_LINES = 20
@@ -30,6 +31,34 @@ local FLUSH_INTERVAL_MS = 250
 
 local function relayEnabled()
 	return GlobalStorageSiK.Sandbox.debugRelayToClients()
+end
+
+local function playerAccessLevel(player)
+	local ok, accessLevel = pcall(function()
+		return player and player:getAccessLevel()
+	end)
+	if ok and accessLevel ~= nil then
+		return accessLevel
+	end
+	return nil
+end
+
+local function isExactAdmin(player)
+	return playerAccessLevel(player) == ADMIN_LEVEL
+end
+
+local function playerSession(player)
+	local ok, username = pcall(function() return player and player:getUsername() end)
+	if not ok or type(username) ~= "string" or username == "" then
+		return nil
+	end
+
+	local okOnlineId, resolvedOnlineId = pcall(function() return player:getOnlineID() end)
+	if not (okOnlineId and resolvedOnlineId ~= nil) then
+		return nil
+	end
+	local onlineId = resolvedOnlineId
+	return tostring(username) .. ":" .. tostring(onlineId), tostring(username), onlineId
 end
 
 local function subscriberCount()
@@ -64,15 +93,11 @@ local function enqueue(line)
 	return true
 end
 
-Relay.setServerSink(enqueue)
-
-local function usernameOf(player)
-	local ok, username = pcall(function() return player and player:getUsername() end)
-	if ok and type(username) == "string" and username ~= "" then
-		return username
-	end
-	return nil
+local function clearSubscriberBySession(sessionId)
+	subscribers[sessionId] = nil
 end
+
+Relay.setServerSink(enqueue)
 
 local function onlineSubscribers()
 	local result = {}
@@ -81,16 +106,21 @@ local function onlineSubscribers()
 	if players then
 		for i = 0, players:size() - 1 do
 			local player = players:get(i)
-			local username = usernameOf(player)
-			if username and subscribers[username] then
+			local sessionId = playerSession(player)
+			local entry = sessionId and subscribers[sessionId]
+			if sessionId and entry and entry.player == player and isExactAdmin(player) then
 				result[#result + 1] = player
-				seen[username] = true
+				seen[sessionId] = true
+			else
+				if sessionId then
+					clearSubscriberBySession(sessionId)
+				end
 			end
 		end
 	end
 	local stale = {}
-	for username in pairs(subscribers) do
-		if not seen[username] then stale[#stale + 1] = username end
+	for sessionId in pairs(subscribers) do
+		if not seen[sessionId] then stale[#stale + 1] = sessionId end
 	end
 	for i = 1, #stale do subscribers[stale[i]] = nil end
 	return result
@@ -131,27 +161,18 @@ local function flush()
 		clearQueue()
 		return
 	end
-	if queueHead > queueTail and dropped == 0 then return end
 	local recipients = onlineSubscribers()
 	if #recipients == 0 then
-		-- BUG REAL cerrado (2026-08-26, revision tecnica de Desarrollo +
-		-- reporte directo del usuario: "el relay deberia reenviar TODAS las
-		-- trazas SRV, si no aparecen es que no se reenvian o el servidor no
-		-- las ve"): onlineSubscribers() da de baja una cuenta del relay en
-		-- el instante en que no aparece en getOnlinePlayers() - un hueco
-		-- TRANSITORIO real durante el ciclo muerte->reaparicion (el
-		-- IsoPlayer viejo desaparece, el nuevo tarda en registrarse; el
-		-- cliente vuelve a suscribirse solo via Events.OnCreatePlayer, ver
-		-- GS_DebugRelayClient.lua). Vaciar la cola entera aqui destruye para
-		-- siempre cualquier linea generada justo en ese hueco (ej.
-		-- "OnPlayerDeath fired" del propio servidor) sin que el evento
-		-- autoritativo haya fallado en absoluto - un falso "no se disparo"
-		-- causado por el transporte, no por el evento. Ya no se vacia por
-		-- esto: la cola sigue acotada por MAX_QUEUE_LINES (256) y se entrega
-		-- en cuanto la cuenta vuelva a aparecer online (re-suscripcion
-		-- automatica tras respawn).
+		-- Si no hay suscriptores administrativos vigentes, mantener limpieza de sesión.
+		if queueHead <= queueTail or dropped > 0 then
+			clearQueue()
+		end
 		return
 	end
+	if queueHead > queueTail and dropped == 0 then
+		return
+	end
+	if queueHead > queueTail and dropped == 0 then return end
 	local payload = takeBatch()
 	if payload == "" then return end
 	for i = 1, #recipients do
@@ -163,15 +184,19 @@ end
 
 local function onClientCommand(module, command, player, args)
 	if module ~= GlobalStorageSiK.MOD_ID or command ~= "debugTraceSubscribe" then return end
-	local username = usernameOf(player)
-	if not username then return end
+	local sessionId, username, onlineId = playerSession(player)
+	if not sessionId or not username then return end
 	if relayEnabled() and args and args.enabled == true then
-		subscribers[username] = true
-		pcall(sendServerCommand, player, GlobalStorageSiK.MOD_ID, "debugTraceStatus", {
-			payload = "[SRV][GlobalStorageSiK:SYSTEM:DebugRelay] subscribed",
-		})
+		if isExactAdmin(player) then
+			subscribers[sessionId] = { username = username, player = player, onlineId = onlineId }
+			pcall(sendServerCommand, player, GlobalStorageSiK.MOD_ID, "debugTraceStatus", {
+				payload = "[SRV][GlobalStorageSiK:SYSTEM:DebugRelay] subscribed",
+			})
+		else
+			clearSubscriberBySession(sessionId)
+		end
 	else
-		subscribers[username] = nil
+		clearSubscriberBySession(sessionId)
 	end
 end
 

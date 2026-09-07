@@ -1,0 +1,37 @@
+{
+  "inputs": {
+    "frameworkManifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    "generatorSha256": "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
+    "schemaSha256": "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
+    "surfaceSpecSha256": "b528d833136842bd7f107c0962726278fe6e1f177fdd6e3f68af8a48416f13a8",
+    "visualCanonicalizer": "sik-ui-dom-v2",
+    "visualMasterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
+    "visualSubtreeSha256": "2b86e7f2bf052c736234ea4c9f156e4ee5927c34dbf305a5130c70587126b48c"
+  },
+  "outputs": {
+    "htmlSha256": "5d71fb5f05cd593c038a5918daf4897333f46bde4884d306129fa4da406b4995",
+    "luaSha256": "d310b69f4412a4c3b58e6c2b8f538b6642ade45d3f9217e6bd2462d10ea5d635"
+  },
+  "runtime": {
+    "artifact": {
+      "moduleId": "GSSiK_Addon_Builder/UI/Generated/TabBuilder",
+      "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder/UI/Generated/TabBuilder.lua",
+      "repository": "global-storage-sik"
+    },
+    "callers": [
+      {
+        "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_Client.lua",
+        "repository": "global-storage-sik",
+        "symbol": "Terminal.registerTab"
+      }
+    ],
+    "loader": {
+      "builderSymbol": "SiK.UI.SurfaceHost.mount",
+      "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_TerminalUI.lua",
+      "repository": "global-storage-sik",
+      "symbol": "TerminalModule"
+    }
+  },
+  "runtimePolicy": "required",
+  "surfaceId": "tab-builder"
+}

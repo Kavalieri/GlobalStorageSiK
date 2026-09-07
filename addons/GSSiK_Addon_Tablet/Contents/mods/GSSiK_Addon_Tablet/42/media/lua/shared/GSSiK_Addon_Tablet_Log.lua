@@ -8,19 +8,14 @@
 ]]
 
 require "GSSiK_Addon_Tablet_Sandbox"
-pcall(require, "GS_DebugRelay")
+local API = require "GSSiK_API"
 
 GSSiK_Addon_Tablet.Log = GSSiK_Addon_Tablet.Log or {}
 
-local function relay()
-	return GlobalStorageSiK and GlobalStorageSiK.DebugRelay or nil
-end
-
 local function requestRelay()
-	local r = relay()
-	if r and isClient and isClient() and not (isServer and isServer())
+	if isClient and isClient() and not (isServer and isServer())
 		and GSSiK_Addon_Tablet.Sandbox.isDebugMode() then
-		r.requestClientSubscription("Tablet")
+		API.Diagnostics.subscribe("Tablet")
 	end
 end
 
@@ -41,11 +36,10 @@ function GSSiK_Addon_Tablet.Log.debug(message)
 		return
 	end
 	requestRelay()
-	local r = relay()
-	local origin = r and r.processTag() or "?"
+	local _, _, origin = API.Diagnostics.processTag()
 	local line = "[" .. elapsedTag() .. "][" .. origin .. "] [GSSiK_Addon_Tablet:DEBUG] " .. tostring(message)
 	print(line)
-	if r then r.emit(line) end
+	API.Diagnostics.emit(line)
 end
 
 if Events and Events.OnCreatePlayer then

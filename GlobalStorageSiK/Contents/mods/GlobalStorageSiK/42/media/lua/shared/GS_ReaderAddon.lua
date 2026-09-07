@@ -13,7 +13,7 @@
 	sino desde GS_Addons.lua, que ya garantiza cargar despues del registro.
 ]]
 
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Config"
 require "GS_Sandbox"
 
@@ -32,7 +32,7 @@ local function resolveRecipeBookRequirement(recipeName)
 	return GlobalStorageSiK.Sandbox.requireRecipeBooks()
 end
 
-GlobalStorageSiK.AddonRegistry.register({
+GSSiK.API.Addon.register({
 	id = "Reader",
 	modId = "GlobalStorageSiK",
 	itemType = GlobalStorageSiK.Config.ITEM_TERMINAL_READER,

@@ -1,0 +1,58 @@
+{
+  "documentKind": "product-surface-spec",
+  "schemaId": "sik-ui-catalog-v1",
+  "schemaVersion": 1,
+  "frameworkRef": { "id": "SiKUIFramework", "manifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad" },
+  "visualBaseline": {
+    "masterPath": "Documentacion/UI/terminal-tabs.html",
+    "masterSha256": "3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e",
+    "selector": "[data-surface-id=\"tab-builder\"]",
+    "canonicalizer": "sik-ui-dom-v2",
+    "subtreeSha256": "2b86e7f2bf052c736234ea4c9f156e4ee5927c34dbf305a5130c70587126b48c",
+    "validation": "HTML_VALIDATED_BY_KAVA"
+  },
+  "product": { "id": "gssik-addon-builder", "namespace": "GSSiK_Addon_Builder" },
+  "surface": {
+    "id": "tab-builder", "kind": "embedded",
+    "owner": { "repository": "global-storage-sik", "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_TerminalUI.lua", "symbol": "TerminalModule" },
+    "callers": [{ "repository": "global-storage-sik", "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_Client.lua", "symbol": "Terminal.registerTab" }],
+    "profiles": ["compact", "standard", "wide"],
+    "root": {
+      "id": "builder-root", "type": "container", "variant": "fill",
+      "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+      "props": [], "actions": [], "children": [{
+        "id": "builder-block", "type": "block", "variant": "fill",
+        "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+        "props": [{ "name": "title", "value": { "kind": "i18n", "ref": "builder.title" } }, { "name": "help", "value": { "kind": "i18n", "ref": "builder.help" } }, { "name": "scrollable", "value": { "kind": "literal", "value": true } }],
+        "actions": [], "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }] }],
+        "children": [
+          { "id": "builder-status", "type": "control", "variant": "status", "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] }, "props": [{ "name": "kind", "value": { "kind": "literal", "value": "feedback" } }, { "name": "data", "value": { "kind": "data", "path": "builder.status" } }], "actions": [], "children": [] },
+          { "id": "builder-warning", "type": "control", "variant": "warning", "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] }, "props": [{ "name": "kind", "value": { "kind": "literal", "value": "feedback" } }, { "name": "data", "value": { "kind": "data", "path": "builder.warning" } }], "visual": { "visibleWhen": "has-warning" }, "actions": [], "children": [] },
+          { "id": "builder-interface", "type": "control", "variant": "copy", "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] }, "props": [{ "name": "kind", "value": { "kind": "literal", "value": "status" } }, { "name": "data", "value": { "kind": "data", "path": "builder.interface" } }], "actions": [], "children": [] },
+          { "id": "builder-open", "type": "control", "variant": "full", "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] }, "props": [{ "name": "kind", "value": { "kind": "literal", "value": "button" } }, { "name": "data", "value": { "kind": "data", "path": "builder.openMain" } }], "actions": [{ "event": "activate", "actionId": "builder.open-main" }], "children": [] }
+        ]
+      }]
+    }
+  },
+  "surfaceReferences": [], "assets": [],
+  "i18n": [
+    { "id": "builder.title", "translations": [{ "locale": "es", "text": "Construcción remota" }] },
+    { "id": "builder.help", "translations": [{ "locale": "es", "text": "Usa los recursos disponibles de la red." }] }
+  ],
+  "actionAllowlist": [{ "id": "builder.open-main", "events": ["activate"] }],
+  "contracts": {
+    "data": [
+      { "path": "builder.status", "schema": { "type": "any" } },
+      { "path": "builder.warning", "schema": { "type": "any", "nullable": true } },
+      { "path": "builder.interface", "schema": { "type": "any" } },
+      { "path": "builder.openMain", "schema": { "type": "any" } }
+    ],
+    "state": [],
+    "actionPayloads": [{ "actionId": "builder.open-main", "event": "activate", "payload": { "type": "any" } }]
+  },
+  "runtime": {
+    "artifact": { "repository": "global-storage-sik", "moduleId": "GSSiK_Addon_Builder/UI/Generated/TabBuilder", "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder/UI/Generated/TabBuilder.lua" },
+    "loader": { "repository": "global-storage-sik", "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_TerminalUI.lua", "symbol": "TerminalModule", "builderSymbol": "SiK.UI.SurfaceHost.mount" },
+    "callers": [{ "repository": "global-storage-sik", "modulePath": "addons/GSSiK_Addon_Builder/Contents/mods/GSSiK_Addon_Builder/42/media/lua/client/GSSiK_Addon_Builder_Client.lua", "symbol": "Terminal.registerTab" }]
+  }
+}

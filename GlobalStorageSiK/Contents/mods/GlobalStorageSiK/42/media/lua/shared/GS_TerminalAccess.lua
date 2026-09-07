@@ -21,7 +21,13 @@ require "GS_Debug"
 
 GlobalStorageSiK.TerminalAccess = {}
 
-require "GS_Addons"
+-- Do not require GS_Addons here. GS_Addons consumes GSSiK_API and the public
+-- API resolves TerminalAccess lazily when an addon registers a wireless
+-- provider. Loading it here closes the cycle
+-- TerminalAccess -> Addons -> GSSiK_API -> TerminalAccess and prevents the
+-- shared catalog (including Core's own reader) from finishing its bootstrap.
+-- The three call sites below are deliberately nil-safe because Addons is an
+-- optional capability at access-evaluation time.
 
 --- Log de diagnóstico de acceso (sandbox DebugMode).
 ---@param step string
@@ -302,13 +308,132 @@ end
 --- Varios addons pueden registrar su propio proveedor sin pisarse entre
 --- ellos ni tocar este fichero.
 GlobalStorageSiK.TerminalAccess._wirelessProviders = GlobalStorageSiK.TerminalAccess._wirelessProviders or {}
+GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration =
+	GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration or 0
+GlobalStorageSiK.TerminalAccess.MAX_WIRELESS_PROVIDERS = 32
+
+local function copyCapabilities(capabilities)
+	if capabilities == nil then return nil end
+	if type(capabilities) ~= "table" then return nil end
+	local copy = {}
+	for key, value in pairs(capabilities) do
+		if type(key) ~= "string" or key == ""
+			or (type(value) ~= "boolean" and type(value) ~= "string" and type(value) ~= "number") then
+			return nil
+		end
+		copy[key] = value
+	end
+	return copy
+end
+
+--- Internal preparation boundary used by GSSiK.API.Access. The returned
+--- definition owns its scalar metadata while retaining only the callbacks
+--- that must execute in the registering addon.
+---@param provider table
+---@return boolean ok
+---@return string code
+---@return table|nil prepared
+function GlobalStorageSiK.TerminalAccess._prepareWirelessProvider(provider)
+	if type(provider) ~= "table" or type(provider.id) ~= "string" or provider.id == ""
+		or #provider.id > 64 or type(provider.hasAccess) ~= "function" then
+		return false, "ERR_SCHEMA", nil
+	end
+	local callbackNames = {
+		"hasCraft", "hasBuilder", "getRange", "getRangeForNetwork", "canUseNetwork",
+	}
+	for index = 1, #callbackNames do
+		local name = callbackNames[index]
+		if provider[name] ~= nil and type(provider[name]) ~= "function" then
+			return false, "ERR_SCHEMA", nil
+		end
+	end
+	local capabilities = copyCapabilities(provider.capabilities)
+	if provider.capabilities ~= nil and capabilities == nil then
+		return false, "ERR_SCHEMA", nil
+	end
+	return true, "OK", {
+		id = provider.id,
+		hasAccess = provider.hasAccess,
+		hasCraft = provider.hasCraft,
+		hasBuilder = provider.hasBuilder,
+		getRange = provider.getRange,
+		getRangeForNetwork = provider.getRangeForNetwork,
+		canUseNetwork = provider.canUseNetwork,
+		capabilities = capabilities,
+	}
+end
+
+---@return number generation
+function GlobalStorageSiK.TerminalAccess._allocateWirelessProviderGeneration()
+	GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration =
+		GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration + 1
+	return GlobalStorageSiK.TerminalAccess._wirelessProviderGeneration
+end
+
+---@return number count
+function GlobalStorageSiK.TerminalAccess._countWirelessProviders()
+	return #GlobalStorageSiK.TerminalAccess._wirelessProviders
+end
+
+---@param provider table
+---@param generation number
+function GlobalStorageSiK.TerminalAccess._commitWirelessProvider(provider, generation)
+	provider._gssikGeneration = generation
+	local rebuilt = {}
+	local replaced = false
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		local current = GlobalStorageSiK.TerminalAccess._wirelessProviders[index]
+		if current and current.id == provider.id then
+			if not replaced then
+				rebuilt[#rebuilt + 1] = provider
+				replaced = true
+			end
+		else
+			rebuilt[#rebuilt + 1] = current
+		end
+	end
+	if not replaced then rebuilt[#rebuilt + 1] = provider end
+	GlobalStorageSiK.TerminalAccess._wirelessProviders = rebuilt
+end
+
+---@param providerId string
+---@param generation number
+---@return boolean removed
+function GlobalStorageSiK.TerminalAccess._removeWirelessProviderIfGeneration(providerId, generation)
+	local rebuilt = {}
+	local removed = false
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		local current = GlobalStorageSiK.TerminalAccess._wirelessProviders[index]
+		if current and current.id == providerId and current._gssikGeneration == generation then
+			removed = true
+		else
+			rebuilt[#rebuilt + 1] = current
+		end
+	end
+	if removed then
+		GlobalStorageSiK.TerminalAccess._wirelessProviders = rebuilt
+	end
+	return removed
+end
 
 ---@param provider table { hasAccess, hasCraft?, hasBuilder?, getRange }
 function GlobalStorageSiK.TerminalAccess.registerWirelessProvider(provider)
-	if not provider or not provider.hasAccess then
-		return
+	local ok, code, prepared = GlobalStorageSiK.TerminalAccess._prepareWirelessProvider(provider)
+	if not ok then return false, code end
+	local current = false
+	for index = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+		if GlobalStorageSiK.TerminalAccess._wirelessProviders[index].id == prepared.id then
+			current = true
+			break
+		end
 	end
-	table.insert(GlobalStorageSiK.TerminalAccess._wirelessProviders, provider)
+	if not current and GlobalStorageSiK.TerminalAccess._countWirelessProviders()
+		>= GlobalStorageSiK.TerminalAccess.MAX_WIRELESS_PROVIDERS then
+		return false, "ERR_CAPACITY"
+	end
+	local generation = GlobalStorageSiK.TerminalAccess._allocateWirelessProviderGeneration()
+	GlobalStorageSiK.TerminalAccess._commitWirelessProvider(prepared, generation)
+	return true, "OK"
 end
 
 --- Indica si el jugador lleva tableta de acceso remoto (cualquier addon
@@ -455,7 +580,8 @@ function GlobalStorageSiK.TerminalAccess.getPlayerKey(player)
 	if not player or not player.getUsername then
 		return nil
 	end
-	return player:getUsername()
+	local playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+	return tostring(player:getUsername()) .. ":" .. tostring(playerNum)
 end
 
 --- Resuelve networkId de un objeto terminal colocado.
@@ -709,7 +835,8 @@ function GlobalStorageSiK.TerminalAccess.findNearestRegisteredTerminal(player, n
 		end
 		for i = 1, #list do
 			local t = list[i]
-			if t and t.x and t.y then
+			if t and t.x and t.y and t.suspended ~= true
+				and t.status ~= "suspended" then
 				best, bestDist = considerTerminalCandidate(
 					best, bestDist, t.x, t.y, t.z or 0, maxRange, player, nid
 				)
@@ -786,6 +913,111 @@ function GlobalStorageSiK.TerminalAccess.findNearestTerminalAny(player, networkI
 		return world
 	end
 	return world or registered
+end
+
+--- Evalua exclusivamente acceso remoto por un proveedor inalambrico.
+--- No admite fallback por proximidad fisica ni coordenadas suministradas por
+--- cliente: recorre las anclas activas autoritativas de la red y exige que el
+--- mismo proveedor confirme capacidad y rango para esa ancla concreta.
+---@param player IsoPlayer|nil
+---@param networkId string|nil
+---@return boolean allowed
+---@return string|nil mode wireless_access|wireless_craft|wireless_builder|wireless_master
+---@return table|nil terminal
+---@return string|nil reason
+function GlobalStorageSiK.TerminalAccess.evaluateWireless(player, networkId)
+	if not player then
+		return false, nil, nil, "no_player"
+	end
+	if type(networkId) ~= "string" or networkId == "" then
+		return false, nil, nil, "network_not_found"
+	end
+	if not GlobalStorageSiK.TerminalAccess.hasAccessTablet(player) then
+		return false, nil, nil, "tablet_required"
+	end
+	local allowed, permissionReason = GlobalStorageSiK.Permissions.canAccess(player, networkId)
+	if not allowed then
+		return false, nil, nil, permissionReason or "no_permission"
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	GlobalStorageSiK.Network.ensureRegistry(registry)
+	local network = registry.networks and registry.networks[networkId] or nil
+	if not network then
+		return false, nil, nil, "network_not_found"
+	end
+	if not GlobalStorageSiK.TerminalRecord then
+		require "GS_TerminalRecord"
+	end
+	local anchors = GlobalStorageSiK.TerminalRecord
+		and GlobalStorageSiK.TerminalRecord.collectActiveAnchors
+		and GlobalStorageSiK.TerminalRecord.collectActiveAnchors(network) or {}
+	if #anchors == 0 then
+		return false, nil, nil, "no_terminal"
+	end
+
+	local best = nil
+	local bestDistance = math.huge
+	local diagnostic = nil
+	local diagnosticDistance = math.huge
+	local hadProvider = false
+	local hadSameFloor = false
+	for i = 1, #anchors do
+		local anchor = anchors[i]
+		if anchor and anchor.x and anchor.y then
+			local sameFloor = playerFloorZ(player) == math.floor(anchor.z or 0)
+			if sameFloor then hadSameFloor = true end
+			local distance = planarDistance(player, anchor.x, anchor.y)
+			for j = 1, #GlobalStorageSiK.TerminalAccess._wirelessProviders do
+				local provider = GlobalStorageSiK.TerminalAccess._wirelessProviders[j]
+				if provider.hasAccess and provider.hasAccess(player) then
+					local providerAllowed = not provider.canUseNetwork
+						or provider.canUseNetwork(player, networkId, anchor) == true
+					local range = 0
+					if providerAllowed and provider.getRangeForNetwork then
+						range = tonumber(provider.getRangeForNetwork(player, networkId, anchor)) or 0
+					elseif providerAllowed and provider.getRange then
+						range = tonumber(provider.getRange(player)) or 0
+					end
+					if providerAllowed then
+						hadProvider = true
+						local observed = {
+							x = anchor.x,
+							y = anchor.y,
+							z = anchor.z or 0,
+							networkId = networkId,
+							distance = distance,
+							wirelessRange = range,
+							providerId = provider.id,
+							capabilities = provider.capabilities,
+							sameFloor = sameFloor,
+						}
+						if distance < diagnosticDistance then
+							diagnosticDistance = distance
+							diagnostic = observed
+						end
+						if sameFloor and range > 0 and distance <= range
+								and distance < bestDistance then
+							bestDistance = distance
+							best = observed
+						end
+					end
+				end
+			end
+		end
+	end
+	if best then
+		return true, GlobalStorageSiK.TerminalAccess.refineWirelessMode(player, "wireless"), best, nil
+	end
+	if not hadProvider then
+		return false, nil, nil, "wireless_provider_unavailable"
+	end
+	if not diagnostic or (diagnostic.wirelessRange or 0) <= 0 then
+		return false, nil, diagnostic, "wireless_provider_unavailable"
+	end
+	if not hadSameFloor then
+		return false, nil, diagnostic, "tablet_out_of_range"
+	end
+	return false, nil, diagnostic, "antenna_out_of_range"
 end
 
 --- Busca el terminal GS más cercano dentro del rango indicado.

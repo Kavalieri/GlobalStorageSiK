@@ -1,0 +1,312 @@
+{
+  "documentKind": "product-surface-spec",
+  "schemaId": "sik-ui-catalog-v1",
+  "schemaVersion": 1,
+  "frameworkRef": {
+    "id": "SiKUIFramework",
+    "manifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad"
+  },
+  "product": { "id": "global-storage-sik", "namespace": "GlobalStorageSiK" },
+  "visualBaseline": {
+    "masterPath": "Documentacion/UI/terminal-tabs.html",
+    "masterSha256": "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
+    "selector": "[data-surface-id=\"tab-red\"]",
+    "subtreeSha256": "13cda2937e033d43b44568de0f0a2e86fb3e83831593db2e3cecfba8c8f59ac6",
+    "canonicalizer": "sik-ui-dom-v2",
+    "validation": "HTML_VALIDATED_BY_KAVA"
+  },
+  "surface": {
+    "id": "tab-red",
+    "kind": "embedded",
+    "owner": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Network.lua",
+      "symbol": "GlobalStorageSiK.TerminalNetwork"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalNetwork.buildZonesSection"
+      }
+    ],
+    "profiles": ["compact", "standard", "wide"],
+    "root": {
+      "id": "network-root",
+      "type": "block",
+      "variant": "fill",
+      "layout": {
+        "mode": "column",
+        "base": [
+          { "name": "fill", "value": { "kind": "literal", "value": true } },
+          { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }
+        ],
+        "overrides": []
+      },
+      "props": [
+        { "name": "title", "value": { "kind": "i18n", "ref": "network.title" } },
+        { "name": "help", "value": { "kind": "i18n", "ref": "network.help" } },
+        { "name": "scrollable", "value": { "kind": "literal", "value": false } }
+      ],
+      "actions": [],
+      "capabilities": [
+        {
+          "id": "block.header",
+          "props": [
+            { "name": "info-visible", "value": { "kind": "literal", "value": true } },
+            { "name": "actions", "value": { "kind": "data", "path": "network.headerActions" } }
+          ]
+        }
+      ],
+      "children": [
+        {
+          "id": "network-content",
+          "type": "container",
+          "variant": "stack",
+          "layout": {
+            "mode": "column",
+            "base": [
+              { "name": "fill", "value": { "kind": "literal", "value": true } },
+              { "name": "grow", "value": { "kind": "literal", "value": 1 } },
+              { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }
+            ],
+            "overrides": []
+          },
+          "props": [
+            { "name": "direction", "value": { "kind": "literal", "value": "column" } },
+            { "name": "overflow", "value": { "kind": "literal", "value": "clip" } }
+          ],
+          "actions": [],
+          "children": [
+        {
+          "id": "network-create-actions",
+          "type": "action-group",
+          "variant": "equal",
+          "layout": {
+            "mode": "row",
+            "base": [
+              { "name": "fill", "value": { "kind": "literal", "value": true } },
+              { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }
+            ],
+            "overrides": [
+              { "profileId": "compact", "bindings": [{ "name": "columns", "value": { "kind": "literal", "value": 1 } }] }
+            ]
+          },
+          "props": [{ "name": "mode", "value": { "kind": "literal", "value": "equal" } }],
+          "actions": [],
+          "children": [
+            {
+              "id": "network-create-room",
+              "type": "control",
+              "variant": "active",
+              "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "button" } },
+                { "name": "label", "value": { "kind": "i18n", "ref": "network.create.room" } },
+                { "name": "data", "value": { "kind": "data", "path": "network.createRoom" } }
+              ],
+              "actions": [{ "event": "activate", "actionId": "network.create-room" }],
+              "children": []
+            },
+            {
+              "id": "network-create-building",
+              "type": "control",
+              "variant": "default",
+              "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "button" } },
+                { "name": "label", "value": { "kind": "i18n", "ref": "network.create.building" } },
+                { "name": "data", "value": { "kind": "data", "path": "network.createBuilding" } }
+              ],
+              "actions": [{ "event": "activate", "actionId": "network.create-building" }],
+              "children": []
+            },
+            {
+              "id": "network-create-selection",
+              "type": "control",
+              "variant": "default",
+              "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "button" } },
+                { "name": "label", "value": { "kind": "i18n", "ref": "network.create.selection" } },
+                { "name": "data", "value": { "kind": "data", "path": "network.createSelection" } }
+              ],
+              "actions": [{ "event": "activate", "actionId": "network.create-selection" }],
+              "children": []
+            }
+          ]
+        },
+        {
+          "id": "network-table",
+          "type": "table",
+          "variant": "hierarchical",
+          "layout": {
+            "mode": "column",
+            "base": [
+              { "name": "fill", "value": { "kind": "literal", "value": true } },
+              { "name": "grow", "value": { "kind": "literal", "value": 1 } },
+              { "name": "clip", "value": { "kind": "literal", "value": true } }
+            ],
+            "overrides": []
+          },
+          "props": [{ "name": "data", "value": { "kind": "data", "path": "network.rows" } }],
+          "actions": [{ "event": "activate", "actionId": "network.activate-row" }],
+          "capabilities": [
+            {
+              "id": "table.expandable",
+              "props": [
+                { "name": "expandable", "value": { "kind": "literal", "value": true } },
+                { "name": "depth", "value": { "kind": "literal", "value": 2 } },
+                { "name": "connectors", "value": { "kind": "literal", "value": true } },
+                { "name": "child-pagination", "value": { "kind": "literal", "value": false } }
+              ]
+            },
+            {
+              "id": "table.row-interactions",
+              "props": [
+                { "name": "adapter", "value": { "kind": "literal", "value": "context.tableOptions" } },
+                { "name": "tooltip", "value": { "kind": "literal", "value": true } },
+                { "name": "contextMenu", "value": { "kind": "literal", "value": false } },
+                { "name": "drag", "value": { "kind": "literal", "value": false } },
+                { "name": "exactSelection", "value": { "kind": "literal", "value": true } }
+              ]
+            }
+          ],
+          "columns": [
+            { "key": "name", "labelRef": "network.column.name", "align": "left", "flex": 1, "min": 120 },
+            { "key": "protocol", "labelRef": "network.column.protocol", "align": "left", "flex": 1.7, "min": 180 },
+            { "key": "priority", "labelRef": "network.column.priority", "align": "center", "width": 60 },
+            { "key": "status", "labelRef": "network.column.status", "align": "center", "width": 76 },
+            { "key": "occupancy", "labelRef": "network.column.occupancy", "align": "right", "width": 60 }
+          ],
+          "children": []
+        },
+        {
+          "id": "network-rescan-block",
+          "type": "block",
+          "variant": "standard",
+          "layout": { "mode": "column", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }, { "name": "gap", "value": { "kind": "token", "ref": "spacing.8" } }], "overrides": [] },
+          "props": [
+            { "name": "title", "value": { "kind": "i18n", "ref": "network.rescan.title" } },
+            { "name": "help", "value": { "kind": "i18n", "ref": "network.rescan.help" } },
+            { "name": "scrollable", "value": { "kind": "literal", "value": false } }
+          ],
+          "visual": { "visibleWhen": "network-rescan-visible" },
+          "actions": [],
+          "capabilities": [{ "id": "block.header", "props": [{ "name": "info-visible", "value": { "kind": "literal", "value": true } }, { "name": "actions", "value": { "kind": "data", "path": "network.rescanHeaderActions" } }] }],
+          "children": [
+            {
+              "id": "network-rescan-feedback",
+              "type": "control",
+              "variant": "warning",
+              "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "alert-row" } },
+                { "name": "icon-key", "value": { "kind": "literal", "value": "sik.alert.warning.24" } },
+                { "name": "size", "value": { "kind": "literal", "value": 24 } },
+                { "name": "glow", "value": { "kind": "literal", "value": true } },
+                { "name": "data", "value": { "kind": "data", "path": "network.rescanFeedback" } }
+              ],
+              "visual": { "visibleWhen": "network-rescan-has-incident" },
+              "actions": [], "children": []
+            },
+            {
+              "id": "network-rescan-progress",
+              "type": "control",
+              "variant": "scan",
+              "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "alert-row" } },
+                { "name": "icon-key", "value": { "kind": "literal", "value": "sik.alert.warning.24" } },
+                { "name": "size", "value": { "kind": "literal", "value": 24 } },
+                { "name": "data", "value": { "kind": "data", "path": "network.scanProgress" } }
+              ],
+              "visual": { "visibleWhen": "network-scan-running" },
+              "actions": [], "children": []
+            },
+            {
+              "id": "network-rescan-action",
+              "type": "control",
+              "variant": "default",
+              "layout": { "mode": "row", "base": [{ "name": "fill", "value": { "kind": "literal", "value": true } }], "overrides": [] },
+              "props": [
+                { "name": "kind", "value": { "kind": "literal", "value": "button" } },
+                { "name": "label", "value": { "kind": "i18n", "ref": "network.rescan.action" } },
+                { "name": "data", "value": { "kind": "data", "path": "network.rescanAction" } }
+              ],
+              "actions": [{ "event": "activate", "actionId": "network.rescan" }],
+              "children": []
+            }
+          ]
+        }
+          ]
+        }
+      ]
+    }
+  },
+  "surfaceReferences": [],
+  "assets": [],
+  "i18n": [
+    { "id": "network.title", "translations": [{ "locale": "es", "text": "Zonas y nodos" }] },
+    { "id": "network.help", "translations": [{ "locale": "es", "text": "Crea zonas y configura sus contenedores. Orden de destino: primero debe pasar las reglas de zona; una regla propia válida gana a Global; entre destinos igual de específicos se evalúa la prioridad menor, primero de zona y después de contenedor; si empatan, decide la afinidad con el objeto." }] },
+    { "id": "network.create.room", "translations": [{ "locale": "es", "text": "Esta habitación" }] },
+    { "id": "network.create.building", "translations": [{ "locale": "es", "text": "Todo el edificio" }] },
+    { "id": "network.create.selection", "translations": [{ "locale": "es", "text": "Selección personalizada" }] },
+    { "id": "network.column.name", "translations": [{ "locale": "es", "text": "Nombre" }] },
+    { "id": "network.column.protocol", "translations": [{ "locale": "es", "text": "Protocolo" }] },
+    { "id": "network.column.priority", "translations": [{ "locale": "es", "text": "Prio." }] },
+    { "id": "network.column.status", "translations": [{ "locale": "es", "text": "Estado" }] },
+    { "id": "network.column.occupancy", "translations": [{ "locale": "es", "text": "%" }] },
+    { "id": "network.rescan.title", "translations": [{ "locale": "es", "text": "Reescaneo de toda la red" }] },
+    { "id": "network.rescan.help", "translations": [{ "locale": "es", "text": "Control administrativo de recuperación. Revisa todas las zonas para detectar contenedores nuevos, sustituidos, ausentes o modificados." }] },
+    { "id": "network.rescan.action", "translations": [{ "locale": "es", "text": "Reescanear toda la red" }] }
+  ],
+  "actionAllowlist": [
+    { "id": "network.create-room", "events": ["activate"] },
+    { "id": "network.create-building", "events": ["activate"] },
+    { "id": "network.create-selection", "events": ["activate"] },
+    { "id": "network.activate-row", "events": ["activate"] },
+    { "id": "network.rescan", "events": ["activate"] }
+  ],
+  "contracts": {
+    "data": [
+      { "path": "network.headerActions", "schema": { "type": "array", "items": { "type": "any" }, "nullable": true } },
+      { "path": "network.createRoom", "schema": { "type": "object", "properties": [] } },
+      { "path": "network.createBuilding", "schema": { "type": "object", "properties": [] } },
+      { "path": "network.createSelection", "schema": { "type": "object", "properties": [] } },
+      { "path": "network.rows", "schema": { "type": "object", "properties": [] } },
+      { "path": "network.rescanHeaderActions", "schema": { "type": "array", "items": { "type": "any" }, "nullable": true } },
+      { "path": "network.rescanFeedback", "schema": { "type": "any", "nullable": true } },
+      { "path": "network.scanProgress", "schema": { "type": "any", "nullable": true } },
+      { "path": "network.rescanAction", "schema": { "type": "object", "properties": [] } }
+    ],
+    "state": [],
+    "actionPayloads": [
+      { "actionId": "network.create-room", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "network.create-building", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "network.create-selection", "event": "activate", "payload": { "type": "any" } },
+      { "actionId": "network.activate-row", "event": "activate", "payload": { "type": "object", "properties": [] } },
+      { "actionId": "network.rescan", "event": "activate", "payload": { "type": "any" } }
+    ]
+  },
+  "runtime": {
+    "artifact": {
+      "repository": "global-storage-sik",
+      "moduleId": "GlobalStorageSiK/UI/Generated/TabNetwork",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GlobalStorageSiK/UI/Generated/TabNetwork.lua"
+    },
+    "loader": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Network.lua",
+      "symbol": "GlobalStorageSiK.TerminalNetwork",
+      "builderSymbol": "SiK.UI.SurfaceHost.mount"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalNetwork.buildZonesSection"
+      }
+    ]
+  }
+}

@@ -7,8 +7,8 @@
 
 require "GS_I18n"
 require "GS_Log"
-
-require "ISUI/ISTextBox"
+local UI = require "GS_UI_Framework"
+require "GS_UI_Feedback"
 
 GlobalStorageSiK.QuantityPrompt = {}
 
@@ -41,11 +41,12 @@ end
 --- Muestra halo de cantidad inválida.
 ---@param player IsoPlayer|nil
 local function showInvalid(player)
-	if not player or not player.setHaloNote then
+	if not player then
 		return
 	end
 	pcall(function()
-		player:setHaloNote(T("IGUI_GS_InvalidQuantity"), 220, 120, 120, 280)
+		GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_InvalidQuantity"),
+			220, 120, 120, 280, { tone = "danger" })
 	end)
 end
 
@@ -73,40 +74,47 @@ function GlobalStorageSiK.QuantityPrompt.show(options)
 		title = title .. " (" .. tostring(minVal) .. "-" .. tostring(maxVal) .. ")"
 	end
 
-	local function onClick(_, button, text)
-		if not button or button.internal ~= "OK" then
-			if options.onClose then
-				options.onClose()
-			end
-			return
-		end
-		local amount = GlobalStorageSiK.QuantityPrompt.parseAmount(text, minVal, maxVal)
-		if amount then
-			options.onConfirm(amount)
-		else
-			showInvalid(player)
-			if options.onClose then
-				options.onClose()
-			end
-		end
-	end
-
 	local ok, err = pcall(function()
-		local box = ISTextBox:new(0, 0, 300, 180, title, defaultText, nil, onClick, playerNum)
-		box:initialise()
-		box:addToUIManager()
-		if box.setOnlyNumbers then
-			box:setOnlyNumbers(true)
-		end
-		if box.setAlwaysOnTop then
-			box:setAlwaysOnTop(true)
-		end
-		if box.bringToTop then
-			box:bringToTop()
-		end
-		if UIManager and UIManager.pushToTop then
-			UIManager:pushToTop(box)
-		end
+		UI.Modal.input({
+			title = title,
+			owner = options.owner,
+			text = defaultText,
+			fieldTitle = maxVal and (T("IGUI_GS_QuantityAvailableNow") .. ": " .. tostring(maxVal))
+				or T("IGUI_GS_QuantityPrompt"),
+			fieldTooltip = maxVal and T("IGUI_GS_QuantityRangeHelp", minVal, maxVal)
+				or T("IGUI_GS_QuantityActionsHelp"),
+			actionsTitle = T("IGUI_GS_PermColActions"),
+			actionsTooltip = T("IGUI_GS_QuantityActionsHelp"),
+			acceptText = options.acceptText,
+			acceptActive = true,
+			playerNum = playerNum,
+			width = UI.Modal.STANDARD_MODAL_W,
+			numeric = true,
+			maxLength = math.max(1, #tostring(maxVal or 999999999)),
+			quantity = {
+				min = minVal,
+				max = maxVal,
+				step = 1,
+				decrementText = "−",
+				incrementText = "+",
+				decrementTooltip = T("IGUI_GS_QuantityDecrease"),
+				incrementTooltip = T("IGUI_GS_QuantityIncrease"),
+				maxText = T("IGUI_GS_QuantityMaximum") .. " "
+					.. T("IGUI_GS_PunctuationMiddleDot") .. " " .. tostring(maxVal or minVal),
+			},
+			validate = function(text)
+				local amount = GlobalStorageSiK.QuantityPrompt.parseAmount(text, minVal, maxVal)
+				if not amount then return false, "invalid_quantity" end
+				return true, amount
+			end,
+			onInvalid = function()
+				showInvalid(player)
+			end,
+			onAccept = function(amount)
+				options.onConfirm(amount)
+			end,
+			onCancel = options.onClose,
+		})
 	end)
 
 	if not ok then

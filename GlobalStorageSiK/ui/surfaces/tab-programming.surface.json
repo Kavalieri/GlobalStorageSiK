@@ -1,0 +1,469 @@
+{
+  "documentKind": "product-surface-spec",
+  "schemaId": "sik-ui-catalog-v1",
+  "schemaVersion": 1,
+  "frameworkRef": {
+    "id": "SiKUIFramework",
+    "manifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad"
+  },
+  "product": {
+    "id": "global-storage-sik",
+    "namespace": "GlobalStorageSiK"
+  },
+  "visualBaseline": {
+    "masterPath": "Documentacion/UI/terminal-tabs.html",
+    "masterSha256": "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
+    "selector": "[data-surface-id=\"tab-programming\"]",
+    "subtreeSha256": "df54539090c9c1cfac89dd5a53a3ee9fda0ffbc2ac33d1ad0fb6c31996a7ba26",
+    "canonicalizer": "sik-ui-dom-v2",
+    "validation": "HTML_VALIDATED_BY_KAVA"
+  },
+  "surface": {
+    "id": "tab-programming",
+    "kind": "embedded",
+    "owner": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Programming.lua",
+      "symbol": "GlobalStorageSiK.TerminalProgramming"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalUI"
+      }
+    ],
+    "profiles": [
+      "compact",
+      "standard",
+      "wide"
+    ],
+    "root": {
+      "id": "programming-root",
+      "type": "container",
+      "variant": "surface-root",
+      "layout": {
+        "mode": "column",
+        "base": [
+          {
+            "name": "fill",
+            "value": {
+              "kind": "literal",
+              "value": true
+            }
+          },
+          {
+            "name": "gap",
+            "value": {
+              "kind": "token",
+              "ref": "spacing.8"
+            }
+          }
+        ],
+        "overrides": []
+      },
+      "props": [
+        {
+          "name": "direction",
+          "value": {
+            "kind": "literal",
+            "value": "column"
+          }
+        },
+        {
+          "name": "overflow",
+          "value": {
+            "kind": "literal",
+            "value": "scroll"
+          }
+        }
+      ],
+      "actions": [],
+      "capabilities": [],
+      "children": [
+        {
+          "actions": [],
+          "capabilities": [
+            {
+              "id": "block.header",
+              "props": [
+                {
+                  "name": "info-visible",
+                  "value": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "children": [
+            {
+              "actions": [],
+              "children": [
+                {
+                  "actions": [],
+                  "children": [],
+                  "id": "programming-reader-resource",
+                  "layout": {
+                    "base": [
+                      {
+                        "name": "fill",
+                        "value": {
+                          "kind": "literal",
+                          "value": true
+                        }
+                      },
+                      {
+                        "name": "grow",
+                        "value": {
+                          "kind": "literal",
+                          "value": 1
+                        }
+                      }
+                    ],
+                    "mode": "column",
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "requirement-row"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "programming.resources.reader"
+                      }
+                    }
+                  ],
+                  "type": "control",
+                  "variant": "resource"
+                },
+                {
+                  "actions": [],
+                  "children": [],
+                  "id": "programming-blank-disk-resource",
+                  "layout": {
+                    "base": [
+                      {
+                        "name": "fill",
+                        "value": {
+                          "kind": "literal",
+                          "value": true
+                        }
+                      },
+                      {
+                        "name": "grow",
+                        "value": {
+                          "kind": "literal",
+                          "value": 1
+                        }
+                      }
+                    ],
+                    "mode": "column",
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "requirement-row"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "programming.resources.blankDisk"
+                      }
+                    }
+                  ],
+                  "type": "control",
+                  "variant": "resource"
+                }
+              ],
+              "id": "programming-resources-row",
+              "layout": {
+                "base": [
+                  {
+                    "name": "fill",
+                    "value": {
+                      "kind": "literal",
+                      "value": true
+                    }
+                  },
+                  {
+                    "name": "gap",
+                    "value": {
+                      "kind": "token",
+                      "ref": "spacing.8"
+                    }
+                  }
+                ],
+                "mode": "row",
+                "overrides": []
+              },
+              "props": [],
+              "type": "container",
+              "variant": "resource-row"
+            }
+          ],
+          "id": "programming-resources",
+          "layout": {
+            "base": [
+              {
+                "name": "fill",
+                "value": {
+                  "kind": "literal",
+                  "value": true
+                }
+              }
+            ],
+            "mode": "column",
+            "overrides": []
+          },
+          "props": [
+            {
+              "name": "title",
+              "value": {
+                "kind": "i18n",
+                "ref": "programming.resources.title"
+              }
+            },
+            {
+              "name": "help",
+              "value": {
+                "kind": "i18n",
+                "ref": "programming.help"
+              }
+            }
+          ],
+          "type": "block",
+          "variant": "standard"
+        },
+        {
+          "actions": [],
+          "capabilities": [
+            {
+              "id": "block.header",
+              "props": [
+                {
+                  "name": "info-visible",
+                  "value": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "children": [
+            {
+              "actions": [
+                {
+                  "actionId": "programming.run",
+                  "event": "activate"
+                }
+              ],
+              "children": [],
+              "id": "programming-cards",
+              "layout": {
+                "base": [
+                  {
+                    "name": "fill",
+                    "value": {
+                      "kind": "literal",
+                      "value": true
+                    }
+                  }
+                ],
+                "mode": "column",
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "items",
+                  "value": {
+                    "kind": "data",
+                    "path": "programming.cards"
+                  }
+                },
+                {
+                  "name": "maxColumns",
+                  "value": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                {
+                  "name": "columns",
+                  "value": {
+                    "kind": "literal",
+                    "value": 2
+                  }
+                },
+                {
+                  "name": "exactColumns",
+                  "value": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              ],
+              "type": "card-collection",
+              "variant": "output"
+            }
+          ],
+          "id": "programming-programs",
+          "layout": {
+            "base": [
+              {
+                "name": "fill",
+                "value": {
+                  "kind": "literal",
+                  "value": true
+                }
+              }
+            ],
+            "mode": "column",
+            "overrides": []
+          },
+          "props": [
+            {
+              "name": "title",
+              "value": {
+                "kind": "i18n",
+                "ref": "programming.programs.title"
+              }
+            },
+            {
+              "name": "help",
+              "value": {
+                "kind": "i18n",
+                "ref": "programming.help"
+              }
+            }
+          ],
+          "type": "block",
+          "variant": "standard"
+        }
+      ]
+    }
+  },
+  "surfaceReferences": [],
+  "assets": [],
+  "i18n": [
+    {
+      "id": "programming.title",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Grabación de disquetes"
+        }
+      ]
+    },
+    {
+      "id": "programming.help",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Graba programas disponibles en disquetes en blanco desde la red."
+        }
+      ]
+    },
+    {
+      "id": "programming.resources.title",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Recursos de grabación"
+        }
+      ]
+    },
+    {
+      "id": "programming.programs.title",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Programas"
+        }
+      ]
+    }
+  ],
+  "actionAllowlist": [
+    {
+      "id": "programming.run",
+      "events": [
+        "activate"
+      ]
+    }
+  ],
+  "contracts": {
+    "data": [
+      {
+        "path": "programming.status",
+        "schema": {
+          "type": "any"
+        }
+      },
+      {
+        "path": "programming.cards",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": []
+          }
+        }
+      },
+      {
+        "path": "programming.resources.reader",
+        "schema": {
+          "type": "any"
+        }
+      },
+      {
+        "path": "programming.resources.blankDisk",
+        "schema": {
+          "type": "any"
+        }
+      }
+    ],
+    "state": [],
+    "actionPayloads": [
+      {
+        "actionId": "programming.run",
+        "event": "activate",
+        "payload": {
+          "type": "any"
+        }
+      }
+    ]
+  },
+  "runtime": {
+    "artifact": {
+      "repository": "global-storage-sik",
+      "moduleId": "GlobalStorageSiK/UI/Generated/TabProgramming",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GlobalStorageSiK/UI/Generated/TabProgramming.lua"
+    },
+    "loader": {
+      "repository": "global-storage-sik",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Programming.lua",
+      "symbol": "GlobalStorageSiK.TerminalProgramming",
+      "builderSymbol": "SiK.UI.SurfaceHost.mount"
+    },
+    "callers": [
+      {
+        "repository": "global-storage-sik",
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "symbol": "GlobalStorageSiK.TerminalUI"
+      }
+    ]
+  }
+}

@@ -4,9 +4,8 @@
 	Fecha: 2026-08-05
 ]]
 
-require "GS_AddonRegistry"
-require "GS_DiskProgramming"
-require "GS_Sandbox"
+require "GSSiK_API"
+require "GSSiK_Addon_Tablet_Log"
 
 --- Nombre de receta -> slug usado por su opcion propia
 --- "Recipe_<slug>_RequireBook" (SandboxVars.GSSiK_Addon_Tablet.*, no Core).
@@ -38,24 +37,18 @@ local RECIPE_NAME_TO_SLUG = {
 local function resolveRecipeBookRequirement(recipeName)
 	local slug = RECIPE_NAME_TO_SLUG[recipeName]
 	if slug then
-		local v = SandboxVars.GSSiK_Addon_Tablet and SandboxVars.GSSiK_Addon_Tablet["Recipe_" .. slug .. "_RequireBook"]
+		local addonConfig = SandboxVars and SandboxVars.GSSiK_Addon_Tablet
+		local v = addonConfig and addonConfig["Recipe_" .. slug .. "_RequireBook"]
 		if v ~= nil then
 			return v == true
 		end
 	end
-	return GlobalStorageSiK.Sandbox.requireRecipeBooks()
+	-- Abstain instead of reading Core-owned sandbox state. GSSiK.API returns
+	-- this nil unchanged and Core applies its own configured fallback.
+	return nil
 end
 
-GlobalStorageSiK.DiskProgramming.registerProgram("tablet", {
-	recipeName = "Program GS Tablet Install Disk",
-	manualItem = "GSSiK_Addon_Tablet.GS_Manual_Tablet_DiskProgram",
-	outputItem = "GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet",
-	menuTextKey = "IGUI_GS_ProgramTabletDiskMenu",
-	iconPath = "media/textures/Item_GS_FloppyDisk_Tablet.png",
-	descKey = "IGUI_GS_ProgramTabletDiskDesc",
-})
-
-GlobalStorageSiK.AddonRegistry.register({
+local definition = {
 	id = "TabletLink",
 	modId = "GSSiK_Addon_Tablet",
 	-- Periferico: Antena WiFi GS. Va instalada en el terminal (emite
@@ -74,11 +67,20 @@ GlobalStorageSiK.AddonRegistry.register({
 	},
 	magazineType = "GSSiK_Addon_Tablet.GS_Manual_Antenna",
 	installDiskItem = "GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet",
+	diskProgram = {
+		id = "tablet",
+		recipeName = "Program GS Tablet Install Disk",
+		manualItem = "GSSiK_Addon_Tablet.GS_Manual_Tablet_DiskProgram",
+		outputItem = "GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet",
+		menuTextKey = "IGUI_GS_ProgramTabletDiskMenu",
+		iconPath = "media/textures/Item_GS_FloppyDisk_Tablet.png",
+		descKey = "IGUI_GS_ProgramTabletDiskDesc",
+	},
 	moduleRecipeName = "Build GS WiFi Antenna",
 	moduleSkillLevel = 6,
 	moduleCraftTime = 100,
 	-- Icono REAL del periferico (antena), no el icono de pestaña estilizado -
-	-- ver GS_TerminalUI_AddonBay.lua: la bahia usa este iconPath directamente
+	-- El Core entrega iconPath al CardCollection publico de SiK UI.
 	-- (reportado: "no se muestran los perifericos por su icono en las
 	-- bahias" - antes un mapa aparte en Core sobrescribia esto con el icono
 	-- de pestaña, ahora retirado). El icono de la pestaña propia (si la
@@ -124,4 +126,28 @@ GlobalStorageSiK.AddonRegistry.register({
 	descKey = "IGUI_GS_AddonTabletDesc",
 	workshopId = "3752379947",
 	resolveRecipeBookRequirement = resolveRecipeBookRequirement,
-})
+}
+
+-- The shared file can run before the client world has completed its addon
+-- bootstrap. Re-applying the same public definition at world start is
+-- idempotent and reconciles the dedicated-client registry without touching
+-- Core internals.
+local function registerDefinition()
+	return GSSiK.API.Addon.register(definition)
+end
+
+local registered, registerCode = registerDefinition()
+
+if not registered then
+	error("GSSiK Addon Tablet registration failed: " .. tostring(registerCode))
+end
+
+if Events and Events.OnGameStart then
+	Events.OnGameStart.Add(function()
+		local ok, code = registerDefinition()
+		if not ok then
+			GSSiK_Addon_Tablet.Log.debug(
+				"registration_reconcile_failed code=" .. tostring(code))
+		end
+	end)
+end

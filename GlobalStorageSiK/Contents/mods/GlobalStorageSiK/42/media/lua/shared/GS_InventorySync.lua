@@ -124,7 +124,7 @@ end
 ---@return boolean
 function GlobalStorageSiK.InventorySync.containerHasRoom(container, item, character)
 	if not container or not item then
-		return false
+		return false, "invalid_destination"
 	end
 	if character and character.isUnlimitedCarry and character.getInventory then
 		local unlimitedOk, unlimited = pcall(function()
@@ -140,7 +140,9 @@ function GlobalStorageSiK.InventorySync.containerHasRoom(container, item, charac
 			return container:hasRoomFor(character, item)
 		end)
 		if ok then
-			return result == true
+			if result == true then return true end
+			local inventory = character.getInventory and character:getInventory() or nil
+			return false, container == inventory and "carry_weight" or "destination_full"
 		end
 	end
 	if container.hasRoomFor then
@@ -148,7 +150,7 @@ function GlobalStorageSiK.InventorySync.containerHasRoom(container, item, charac
 			return container:hasRoomFor(item)
 		end)
 		if okLegacy then
-			return resultLegacy == true
+			return resultLegacy == true, resultLegacy ~= true and "destination_full" or nil
 		end
 	end
 	if container.getCapacity and container.getWeight then

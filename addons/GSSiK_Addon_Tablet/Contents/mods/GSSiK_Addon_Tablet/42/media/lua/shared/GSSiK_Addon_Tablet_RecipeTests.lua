@@ -8,8 +8,6 @@
 	(compatibilidad / addon aun sin sandbox-options.txt actualizado).
 ]]
 
-require "GS_Sandbox"
-
 GSSiK_Addon_Tablet_RecipeTests = GSSiK_Addon_Tablet_RecipeTests or {}
 
 local RECIPE_SLUGS = {

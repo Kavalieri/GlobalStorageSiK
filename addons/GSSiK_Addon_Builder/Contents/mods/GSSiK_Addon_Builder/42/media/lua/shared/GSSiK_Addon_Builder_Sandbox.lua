@@ -7,10 +7,10 @@
 GSSiK_Addon_Builder = GSSiK_Addon_Builder or {}
 GSSiK_Addon_Builder.Sandbox = {}
 
---- Version del addon para mostrar en su propia pestaña del terminal - se
---- sincroniza a mano con Contents/mods/GSSiK_Addon_Builder/42/mod.info
---- (modversion=) en cada release, mismo criterio que Core (GS_Config.MOD_VERSION).
-GSSiK_Addon_Builder.VERSION = "1.0.8-dev1"
+--- Version runtime del addon. Se sincroniza con
+--- Contents/mods/GSSiK_Addon_Builder/42/mod.info (modversion=); la interfaz la
+--- muestra solo en el footer compartido del terminal.
+GSSiK_Addon_Builder.VERSION = "1.5.0"
 
 --- Peso loot periférico instalable (Pizarra Digital GS).
 ---@return number
@@ -60,6 +60,6 @@ function GSSiK_Addon_Builder.Sandbox.isDebugCategoryEnabled(category)
 	if not GSSiK_Addon_Builder.Sandbox.isDebugMode() then return false end
 	local v = SandboxVars.GSSiK_Addon_Builder
 	if category == "Operations" then return v and v.DebugOperations == true end
-	if category == "Lifecycle" then return not v or v.DebugLifecycle ~= false end
-	return true
+	if category == "Lifecycle" then return v and v.DebugLifecycle == true end
+	return false
 end

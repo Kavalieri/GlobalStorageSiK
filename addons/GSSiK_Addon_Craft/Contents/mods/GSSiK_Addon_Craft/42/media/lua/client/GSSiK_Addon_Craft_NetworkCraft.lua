@@ -5,9 +5,9 @@
 	pedido explícito: Core no debería conocer ISWidgetHandCraftControl ni
 	NC_CraftActionPanel, eso es conocimiento exclusivo de este addon; el
 	Core solo expone infraestructura genérica de sesión/préstamo vía
-	GlobalStorageSiK.CraftSession).
+	GSSiK.API.WorkSession).
 	Descripción: Intercepta el arranque de crafteo (vanilla y Neat Crafting,
-	si está instalado) mientras hay una sesión GlobalStorageSiK.CraftSession
+	si está instalado) mientras hay una sesión GSSiK.API.WorkSession
 	activa para este addon ("Craft"): mueve al inventario del jugador los
 	ingredientes/herramientas que estén en un contenedor de red (confirmado
 	con datos reales que HandcraftLogic.performCurrentRecipe() en servidor no
@@ -18,30 +18,35 @@
 	terminar.
 ]]
 
-require "GS_NetworkCraftSession"
-require "GS_I18n"
+local API = require "GSSiK_API_Client"
 require "GSSiK_Addon_Craft_Log"
 require "GSSiK_Addon_Craft_ClaimCompat"
 require "GSSiK_Addon_Craft_BatchState"
 require "GSSiK_Addon_Craft_NetworkCook"
 
 local BatchState = GSSiK_Addon_Craft.BatchState
+local Session = API.WorkSession
+local Diagnostics = API.Diagnostics
 
 local ADDON_ID = "Craft"
 
 local function failCraftOperation(operationId, player, reasonKey)
 	if not operationId then return end
-	GlobalStorageSiK.CraftSession.abortOperation(operationId)
-	local reason = GlobalStorageSiK.I18n.text(reasonKey)
-	local message = GlobalStorageSiK.I18n.text("IGUI_GSSIK_CraftOperationFailedReturned", reason)
+	Session.abortOperation(operationId, player)
+	local reason = getText(reasonKey)
+	local message = getText("IGUI_GSSIK_CraftOperationFailedReturned", reason)
 	if player and player.setHaloNote then
 		player:setHaloNote(message, 255, 120, 100, 450)
 	end
 end
 
-GlobalStorageSiK.CraftSession.registerDebugSink(ADDON_ID, function(message)
-	GSSiK_Addon_Craft.Log.debug("Operations", message)
+local debugOk, debugCode, debugRegistration = Diagnostics.registerWorkSessionSink(ADDON_ID, function(message)
+        GSSiK_Addon_Craft.Log.debug("Operations", message)
 end)
+if debugOk ~= true then
+        error("GSSiK.API WorkSession debug sink: " .. tostring(debugCode))
+end
+GSSiK_Addon_Craft._workDebugRegistration = debugRegistration
 
 local originalTransferIfNeeded = nil
 local originalStartHandcraft = nil
@@ -75,7 +80,15 @@ local activeOperationId = nil
 ---@param items userdata|nil ArrayList de InventoryItem (getAllInputItems), puede ser nil
 ---@return function restore
 local function narrowContainersForAction(self, items)
-	return GlobalStorageSiK.CraftSession.narrowContainersForAction(self, items, ADDON_ID)
+	local ok, _, handle = Session.narrowInputs(self, items, ADDON_ID)
+	return function()
+		if ok and handle then handle:restore() end
+	end
+end
+
+local function activeSession()
+	local ok, _, value = Session.get(ADDON_ID)
+	return ok and value or nil
 end
 
 --- Reclama de la red, para el jugador, todos los ingredientes/herramientas
@@ -98,9 +111,9 @@ end
 ---@param operationId string
 ---@param batchCount number|nil
 ---@return table waitingIds, number waitingCount, number moved, number batchShortfall, boolean batchContractSupported
-local function claimNetworkCraftItems(player, logic, items, networkId, operationId, batchCount)
+local function claimNetworkCraftItems(player, logic, items, operationId, batchCount)
 	return GSSiK_Addon_Craft.claimRecipeItemsCompat(
-		player, logic, items, networkId, operationId, batchCount)
+		player, logic, items, operationId, batchCount)
 end
 
 --- Lee la cantidad de lote pedida en la ventana vanilla (entryBox), 1 si no
@@ -158,13 +171,13 @@ local function checkPendingCraftStarts()
 		if allReady or timedOut then
 			table.remove(pendingCraftStarts, i)
 			if timedOut and not allReady then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt ABORT operationId=" .. tostring(entry.operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt ABORT operationId=" .. tostring(entry.operationId)
 					.. " waitResult=timeout actionStarted=false")
 				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
 				BatchState.clear(entry.self)
 				return
 			end
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
 			local okFreshItems, freshItems = pcall(function()
@@ -192,7 +205,7 @@ local function checkPendingCraftStarts()
 			entry.self.craftTimes = entry.batchCount or 1
 			local okCall, errCall = pcall(originalStartHandcraft, entry.self, entry.force)
 			if not okCall then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt RESUME operationId=" .. tostring(entry.operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalStartHandcraft ERROR: " .. tostring(errCall))
 				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
 				BatchState.clear(entry.self)
@@ -206,7 +219,7 @@ end
 ---@param self table ISWidgetHandCraftControl
 ---@param force boolean|nil
 local function patchedStartHandcraft(self, force)
-	local sess = GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID)
+	local sess = activeSession()
 	if sess and self.logic and self.logic.getRecipeData then
 		local okRecipeData, recipeData = pcall(function() return self.logic:getRecipeData() end)
 		if okRecipeData and recipeData and recipeData.getAllInputItems then
@@ -226,29 +239,30 @@ local function patchedStartHandcraft(self, force)
 			if okCon and containers and containers.size then
 				containersCount = containers:size()
 			end
-			local operationId = GlobalStorageSiK.CraftSession.newOperationId(ADDON_ID)
-			self._gsOperationId = operationId
-			-- "craftAttemptStart" es solo para diagnostico (log estructurado
-			-- correlacionable via operationId en el servidor) - no cambia
-			-- ningun comportamiento de juego, ver GS_Server.lua.
-			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-				GlobalStorageSiK.NetClient.sendCommand("craftAttemptStart", {
-					operationId = operationId, addonId = ADDON_ID, recipe = recipeName,
-					networkId = sess.networkId, isCanBeDoneFromFloor = floorOk,
-					containersCliente = containersCount,
-				})
-			end
 			local batchCount = readVanillaBatchCount(self)
+			local operationOk, operationCode, operation = Session.startOperation({
+				addonId = ADDON_ID, player = self.player, kind = "handcraft",
+				recipeName = recipeName, batchCount = batchCount,
+				canUseFloor = floorOk, containerCount = containersCount,
+				diagnostics = true,
+			})
+			if operationOk ~= true or not operation then
+				GSSiK_Addon_Craft.Log.debug("Operations",
+					"craftAttempt rejected code=" .. tostring(operationCode))
+				return originalStartHandcraft(self, force)
+			end
+			local operationId = operation.operationId
+			self._gsOperationId = operationId
 			BatchState.begin(self, operationId, batchCount)
 			if okItems and items and items.size then
 				local waitingIds, waitingCount, moved, batchShortfall, batchContractSupported = claimNetworkCraftItems(
-					self.player, self.logic, items, sess.networkId, operationId, batchCount)
-				GlobalStorageSiK.CraftSession.debugLog(string.format(
+					self.player, self.logic, items, operationId, batchCount)
+				GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 					"craftAttempt START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
 					operationId, ADDON_ID, recipeName, tostring(sess.networkId),
 					tostring(floorOk), items:size(), moved, batchCount, containersCount))
 				if batchShortfall > 0 then
-					GlobalStorageSiK.CraftSession.debugLog("craftAttempt ABORT operationId=" .. operationId
+					GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt ABORT operationId=" .. operationId
 						.. " batchShortfall=" .. tostring(batchShortfall))
 					failCraftOperation(operationId, self.player, batchContractSupported
 						and "IGUI_GSSIK_CraftFailBatchMaterials" or "IGUI_GSSIK_CraftFailCoreUpdate")
@@ -264,7 +278,7 @@ local function patchedStartHandcraft(self, force)
 						operationId = operationId,
 						batchCount = batchCount,
 					})
-					GlobalStorageSiK.CraftSession.debugLog("craftAttempt WAIT operationId=" .. operationId .. " (esperando confirmacion del servidor)")
+					GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt WAIT operationId=" .. operationId .. " (esperando confirmacion del servidor)")
 					return
 				end
 			end
@@ -272,7 +286,7 @@ local function patchedStartHandcraft(self, force)
 			local invBefore = "?"
 			local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 			if okInv then invBefore = tostring(invSize) end
-			GlobalStorageSiK.CraftSession.debugLog("craftAttempt invBefore=" .. invBefore .. " operationId=" .. operationId)
+			GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt invBefore=" .. invBefore .. " operationId=" .. operationId)
 			activeOperationId = operationId
 			pcall(function() self.logic:autoPopulateInputs() end)
 			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
@@ -288,7 +302,7 @@ local function patchedStartHandcraft(self, force)
 			activeOperationId = nil
 			restore()
 			if not okCall then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt START ERROR operationId=" .. tostring(operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt START ERROR operationId=" .. tostring(operationId)
 					.. " error=" .. tostring(errCall))
 				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
 				BatchState.clear(self)
@@ -311,13 +325,15 @@ end
 ---@param item InventoryItem|userdata
 ---@param preventTransferWorldObjects boolean|nil
 local function patchedTransferIfNeeded(playerObj, item, preventTransferWorldObjects)
-	local sess = GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID)
+	local sess = activeSession()
 	if sess and instanceof then
 		local okType, isItem = pcall(instanceof, item, "InventoryItem")
 		if okType and isItem then
 			local container = item.getContainer and item:getContainer()
-			if container and GlobalStorageSiK.CraftSession.isNetworkContainer(container, sess.networkId) then
-				if GlobalStorageSiK.CraftSession.claimNetworkItem(playerObj, item, container, sess.networkId, activeOperationId) then
+			if container and activeOperationId then
+				local claimOk, _, claimed = Session.claimItem(activeOperationId,
+					playerObj, item, container)
+				if claimOk and claimed then
 					return
 				end
 				-- Sin espacio/peso real: dejamos que vanilla haga lo suyo
@@ -368,7 +384,7 @@ end
 ---@param self table ISWidgetHandCraftControl
 local function patchedOnHandcraftActionComplete(self)
 	local operationId, completed, expected, final = BatchState.completeUnit(self)
-	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	if operationId and activeSession() then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
@@ -376,11 +392,11 @@ local function patchedOnHandcraftActionComplete(self)
 		local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 		if okInv then invAfter = tostring(invSize) end
 		if final then
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt END operationId=%s recipe=%s units=%d/%d actionCompleted=true actionCancelled=false invAfter=%s",
 				tostring(operationId), recipeName, completed, expected, invAfter))
 		else
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt PROGRESS operationId=%s recipe=%s units=%d/%d",
 				tostring(operationId), recipeName, completed, expected))
 		end
@@ -396,7 +412,7 @@ local function patchedOnHandcraftActionComplete(self)
 		if expected > 1 and self and type(self.setCraftQuantity) == "function" then
 			self:setCraftQuantity(1)
 		end
-		GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+		Session.completeOperation(operationId, self.player)
 	end
 	return result
 end
@@ -404,11 +420,11 @@ end
 ---@param self table ISWidgetHandCraftControl
 local function patchedOnHandcraftActionCancelled(self)
 	local operationId, completed, expected = BatchState.cancel(self)
-	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	if operationId and activeSession() then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
-		GlobalStorageSiK.CraftSession.debugLog(string.format(
+		GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 			"craftAttempt END operationId=%s recipe=%s units=%d/%d actionCompleted=false actionCancelled=true",
 			tostring(operationId), recipeName, completed, expected))
 	end
@@ -434,7 +450,7 @@ local pendingNeatCraftStarts = {}
 ---@param force boolean|nil
 ---@param craftTimes number|nil
 local function patchedNeatStartHandcraft(self, force, craftTimes)
-	local sess = GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID)
+	local sess = activeSession()
 	if sess and self.logic and self.logic.getRecipeData then
 		local okRecipeData, recipeData = pcall(function() return self.logic:getRecipeData() end)
 		if okRecipeData and recipeData and recipeData.getAllInputItems then
@@ -448,26 +464,30 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			local containersCount = 0
 			local okCon, containers = pcall(function() return self.logic:getContainers() end)
 			if okCon and containers and containers.size then containersCount = containers:size() end
-			local operationId = GlobalStorageSiK.CraftSession.newOperationId(ADDON_ID)
-			self._gsOperationId = operationId
-			if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-				GlobalStorageSiK.NetClient.sendCommand("craftAttemptStart", {
-					operationId = operationId, addonId = ADDON_ID, recipe = recipeName,
-					networkId = sess.networkId, isCanBeDoneFromFloor = floorOk,
-					containersCliente = containersCount,
-				})
+			local batchCount = tonumber(craftTimes) or 1
+			local operationOk, operationCode, operation = Session.startOperation({
+				addonId = ADDON_ID, player = self.player, kind = "neat_handcraft",
+				recipeName = recipeName, batchCount = batchCount,
+				canUseFloor = floorOk, containerCount = containersCount,
+				diagnostics = true,
+			})
+			if operationOk ~= true or not operation then
+				GSSiK_Addon_Craft.Log.debug("Operations",
+					"craftAttempt(neat) rejected code=" .. tostring(operationCode))
+				return originalNeatStartHandcraft(self, force, craftTimes)
 			end
+			local operationId = operation.operationId
+			self._gsOperationId = operationId
 			if okItems and items and items.size then
-				local batchCount = tonumber(craftTimes) or 1
 				BatchState.begin(self, operationId, batchCount)
 				local waitingIds, waitingCount, moved, batchShortfall, batchContractSupported = claimNetworkCraftItems(
-					self.player, self.logic, items, sess.networkId, operationId, batchCount)
-				GlobalStorageSiK.CraftSession.debugLog(string.format(
+					self.player, self.logic, items, operationId, batchCount)
+				GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 					"craftAttempt(neat) START operationId=%s addonId=%s recipe=%s networkId=%s isCanBeDoneFromFloor=%s inputs=%d movidosDeRed=%d batchCount=%d containersCliente=%d",
 					operationId, ADDON_ID, recipeName, tostring(sess.networkId),
 					tostring(floorOk), items:size(), moved, batchCount, containersCount))
 				if batchShortfall > 0 then
-					GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) ABORT operationId=" .. operationId
+					GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) ABORT operationId=" .. operationId
 						.. " batchShortfall=" .. tostring(batchShortfall))
 					failCraftOperation(operationId, self.player, batchContractSupported
 						and "IGUI_GSSIK_CraftFailBatchMaterials" or "IGUI_GSSIK_CraftFailCoreUpdate")
@@ -481,7 +501,7 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 						startedAt = getTimestampMs and getTimestampMs() or 0,
 						operationId = operationId,
 					})
-					GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) WAIT operationId=" .. operationId .. " (esperando confirmacion del servidor)")
+					GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) WAIT operationId=" .. operationId .. " (esperando confirmacion del servidor)")
 					return
 				end
 			end
@@ -489,7 +509,7 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			local invBefore = "?"
 			local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 			if okInv then invBefore = tostring(invSize) end
-			GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) invBefore=" .. invBefore .. " operationId=" .. operationId)
+			GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) invBefore=" .. invBefore .. " operationId=" .. operationId)
 			activeOperationId = operationId
 			pcall(function() self.logic:autoPopulateInputs() end)
 			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
@@ -504,7 +524,7 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			activeOperationId = nil
 			restore()
 			if not okCall then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) START ERROR operationId=" .. tostring(operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) START ERROR operationId=" .. tostring(operationId)
 					.. " error=" .. tostring(errCall))
 				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailStart")
 				BatchState.clear(self)
@@ -543,13 +563,13 @@ local function checkPendingNeatCraftStarts()
 		if allReady or timedOut then
 			table.remove(pendingNeatCraftStarts, i)
 			if timedOut and not allReady then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) ABORT operationId=" .. tostring(entry.operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) ABORT operationId=" .. tostring(entry.operationId)
 					.. " waitResult=timeout actionStarted=false")
 				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailClaimTimeout")
 				BatchState.clear(entry.self)
 				return
 			end
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt(neat) RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
 			local okFreshItems, freshItems = pcall(function()
@@ -571,7 +591,7 @@ local function checkPendingNeatCraftStarts()
 			-- reanudar, deberia dejar canPerformCurrentRecipe() en true.
 			pcall(function() entry.self.logic:autoPopulateInputs() end)
 			local okCanPerform, canPerform = pcall(function() return entry.self.logic and entry.self.logic:canPerformCurrentRecipe() end)
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt(neat) RESUME operationId=%s tras autoPopulateInputs canPerformCurrentRecipe=%s",
 				tostring(entry.operationId), tostring(okCanPerform and canPerform)))
 			if not entry.force and okCanPerform and canPerform == false then
@@ -583,7 +603,7 @@ local function checkPendingNeatCraftStarts()
 			end
 			local okCall, errCall = pcall(originalNeatStartHandcraft, entry.self, entry.force, entry.craftTimes)
 			if not okCall then
-				GlobalStorageSiK.CraftSession.debugLog("craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
+				GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt(neat) RESUME operationId=" .. tostring(entry.operationId)
 					.. " originalNeatStartHandcraft ERROR: " .. tostring(errCall))
 				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailStart")
 				BatchState.clear(entry.self)
@@ -597,7 +617,7 @@ end
 ---@param self table NC_CraftActionPanel
 local function patchedNeatOnHandcraftActionComplete(self)
 	local operationId, completed, expected, final = BatchState.completeUnit(self)
-	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	if operationId and activeSession() then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
@@ -605,17 +625,17 @@ local function patchedNeatOnHandcraftActionComplete(self)
 		local okInv, invSize = pcall(function() return self.player:getInventory():getItems():size() end)
 		if okInv then invAfter = tostring(invSize) end
 		if final then
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt(neat) END operationId=%s recipe=%s units=%d/%d actionCompleted=true actionCancelled=false invAfter=%s",
 				tostring(operationId), recipeName, completed, expected, invAfter))
 		else
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt(neat) PROGRESS operationId=%s recipe=%s units=%d/%d",
 				tostring(operationId), recipeName, completed, expected))
 		end
 	end
 	if final then
-		GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+		Session.completeOperation(operationId, self.player)
 	end
 	return originalNeatOnHandcraftActionComplete(self)
 end
@@ -623,11 +643,11 @@ end
 ---@param self table NC_CraftActionPanel
 local function patchedNeatOnHandcraftActionCancelled(self)
 	local operationId, completed, expected = BatchState.cancel(self)
-	if operationId and GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID) then
+	if operationId and activeSession() then
 		local recipeName = "?"
 		local ok, name = pcall(function() return self.logic and self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 		if ok and name then recipeName = name end
-		GlobalStorageSiK.CraftSession.debugLog(string.format(
+		GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 			"craftAttempt(neat) END operationId=%s recipe=%s units=%d/%d actionCompleted=false actionCancelled=true",
 			tostring(operationId), recipeName, completed, expected))
 	end
@@ -638,8 +658,8 @@ local function patchedNeatOnHandcraftActionCancelled(self)
 end
 
 --- Instala/restaura los hooks de este addon - registrado en Core via
---- registerAddonHooks, llamado automaticamente al arrancar/terminar CUALQUIER
---- sesion (Core no distingue, cada addon comprueba getActiveSession(ADDON_ID)
+--- WorkSession.registerLifecycle, llamado al arrancar/terminar CUALQUIER
+--- sesion (Core no distingue, cada addon comprueba WorkSession.get(ADDON_ID)
 --- dentro de su propio hook antes de actuar).
 local function installCraftHooks()
 	if ISInventoryPaneContextMenu and ISInventoryPaneContextMenu.transferIfNeeded then
@@ -711,5 +731,12 @@ local function craftTickHandler()
 	GSSiK_Addon_Craft_NetworkCook.tick()
 end
 
-GlobalStorageSiK.CraftSession.registerAddonHooks(ADDON_ID, installCraftHooks, uninstallCraftHooks)
-GlobalStorageSiK.CraftSession.registerTickHandler(ADDON_ID, craftTickHandler)
+local lifecycleOk, lifecycleCode, lifecycleRegistration = Session.registerLifecycle(ADDON_ID, {
+        install = installCraftHooks,
+        uninstall = uninstallCraftHooks,
+        tick = craftTickHandler,
+})
+if lifecycleOk ~= true then
+        error("GSSiK.API WorkSession lifecycle: " .. tostring(lifecycleCode))
+end
+GSSiK_Addon_Craft._workLifecycleRegistration = lifecycleRegistration

@@ -7,6 +7,7 @@
 
 require "GS_Sandbox"
 require "GS_DebugRelay"
+require "GS_DiagnosticsSession"
 
 GlobalStorageSiK.Log = GlobalStorageSiK.Log or {}
 GlobalStorageSiK.Log._detailNoticeShown = GlobalStorageSiK.Log._detailNoticeShown or {}
@@ -28,8 +29,7 @@ end
 
 --- Mapa area de log (primer argumento de cada llamada Log.debug/Debug.log en
 --- todo el mod) -> categoria de sandbox (ver GS_Sandbox.debugCategoryEnabled).
---- Un area sin entrada aqui NO se filtra por categoria (solo por DebugMode
---- maestro) - ver el comentario de debugCategoryEnabled() sobre por que.
+--- Un area sin entrada queda apagada: ninguna traza evita su gate granular.
 local AREA_CATEGORY = {
 	NetTrace = "Network",
 	Client = "Network",
@@ -57,11 +57,21 @@ local AREA_CATEGORY = {
 	Deposit = "Inventory",
 	DepositClient = "Inventory",
 	TransferQueue = "Inventory",
+	ZoneScanJob = "Inventory",
+	NativeProduct = "Inventory",
 	NetworkReadAction = "Inventory",
 	CraftSession = "Craft",
 	RedistributeJob = "Inventory",
 	ItemTaxonomy = "Inventory",
 	Subcategories = "Inventory",
+	-- Proyección cliente de la taxonomía sobre la columna vanilla Categoría.
+	-- Comparte Inventario porque sus sondas son exclusivamente de ítems y se
+	-- activan solo durante la prueba dirigida de DEV31.
+	VanillaInventoryProjection = "Inventory",
+	-- Migración recuperable y acotada de protocolos legacy persistidos. Tiene
+	-- categoría propia para obtener evidencia de primera/segunda pasada sin
+	-- activar el resto del inventario ni el subsistema de permisos.
+	RuleMigration = "RuleMigration",
 	Router = "Router",
 	-- dev36: categoria "UI" (antes cubria NodeNaming + TerminalUI a la vez,
 	-- sin poder separarlos) retirada y sustituida por un arbol propio "SiK UI"
@@ -71,16 +81,17 @@ local AREA_CATEGORY = {
 	-- nombrado de terminal (servidor de nombres), no forma parte del
 	-- framework visual - se separa en su propia categoria para no perderla.
 	NodeNaming = "NodeNaming",
-	-- General/framework: apertura de ventana, refresco de pestaña, fallos de
-	-- TerminalUI - antes "UI" (compartida con NodeNaming), ahora bajo el
-	-- arbol SiK UI. Tambien gobierna GS_UIDebug.lua (arbol de widgets, clicks,
-	-- solapes) - ver GlobalStorageSiK.Sandbox.debugCategoryEnabled("SiKUI"),
-	-- sustituye al antiguo interruptor independiente DebugModeUI.
+	-- Adaptador de diagnostico SiK.UI: el framework posee montaje, arbol,
+	-- geometria, solapes e interaccion; Global Storage solo aporta este gate y
+	-- su logger. Sustituye al antiguo interruptor independiente DebugModeUI.
 	TerminalUI = "SiKUI",
-	-- Geometria de columnas de SiK_UI.Table (GS_SiK_UI_Table.lua) - ancho
+	SiKUI = "SiKUI",
+	-- Geometria de columnas de SiK.UI.Table (SiK/UI/Table.lua) - ancho
 	-- resuelto por columna, solo se traza cuando el ancho disponible cambia
 	-- de verdad (resize), nunca por fotograma.
 	SiKUITable = "SiKUITable",
+	AdminTableRuntime = "AdminTableRuntime",
+	RecordedMediaRuntime = "RecordedMediaRuntime",
 	-- Motor de scroll/lista virtual (GS_TerminalUI_Scroll.lua) - crecimiento
 	-- de pool y cambios de dataset (Almacen y cualquier lista virtualizada).
 	SiKUIScroll = "SiKUIScroll",
@@ -88,15 +99,16 @@ local AREA_CATEGORY = {
 	-- GS_TerminalUI_Extensions.lua) - registro/reutilizacion de panel,
 	-- visibilidad y activacion/cancelacion de clic.
 	SiKUITabs = "SiKUITabs",
+	-- Diagnósticos P0 separados para no obligar a activar el árbol UI entero.
+	TabIcons = "TabIcons",
+	ExactWithdraw = "ExactWithdraw",
+	WithdrawClient = "ExactWithdraw",
+	OptionsTables = "OptionsTables",
 	-- Caja de busqueda de SiK UI (antes "SearchDiag", pedido explicito
 	-- 2026-08-18: sin esta entrada dependia solo del interruptor maestro).
 	-- Renombrada en dev36 para agrupar bajo el mismo arbol SiK UI en vez de
 	-- quedar suelta.
 	SiKUISearch = "SiKUISearch",
-	-- Categoria propia (pedido explicito 2026-08-21, fase dev Better Sorting):
-	-- traza de normalizacion de categorias por item, alto volumen (Log.detail),
-	-- debe poder apagarse sin tocar el resto de diagnosticos activos.
-	CompatCategories = "CompatCategories",
 	-- Categoria propia (pedido explicito 2026-08-21, prueba de bonus de
 	-- capacidad por rasgo tipo Organizado): confirma si/cuanto bonus personal
 	-- se detecto por contenedor durante la prueba, sin depender del
@@ -136,36 +148,21 @@ local AREA_CATEGORY = {
 }
 
 --- Ficheros de depuración por categoría, uno por bloque individual del
---- sandbox (pedido explicito 2026-08-26, mismo patron ya usado en
---- SiKCorpseLootGuard - ver SCLG_FileLog.lua): cuando una categoria esta
---- activa, sus lineas se escriben ADEMAS de en consola (ese camino no
---- cambia en absoluto) en su propio fichero "GlobalStorageSiK_Debug_
---- <Categoria>.log" en <carpeta Zomboid>/Lua/ - asi se puede revisar solo
---- Permissions, o solo Network, sin buscarlo entre miles de lineas de otras
---- categorias mezcladas en console.txt. Motivo real: la investigacion de
---- identidad de personaje (UUID/owner/reconciliacion) genera trazas de la
---- categoria Permissions intercaladas con el resto de logs del servidor -
---- tenerla en su propio fichero facilita compartirlo/revisarlo aparte.
+--- sandbox. Cada proceso crea una sesión bajo
+--- Lua/SiKDiagnostics/GlobalStorageSiK/<sessionId>/; Permissions usa su
+--- suite y run propios, y el resto queda bajo debug/. Las rutas únicas
+--- evitan que una ejecución sobrescriba otra y session.json conserva el
+--- inventario de evidencias de la sesión.
 --- API real getFileWriter(nombre, relativeToModData, append), misma que
 --- usa SCLG_FileLog.lua (confirmada en scripts vanilla, ej. forageSystem.lua).
---- CAMBIO explicito (2026-08-26, pedido directo: "los ficheros que creamos y
---- limpiamos en cada reinicio durante el debug, quizas deberian sobrevivir,
---- con lineas de Inicio y fin al realizar cada test, para poder comparar
---- entre ejecuciones y lanzamientos"): la version anterior VACIABA el
---- fichero de una categoria la primera vez que escribia algo en cada
---- arranque de proceso - util para "solo lo de ahora" pero imposible de usar
---- para comparar una ronda de pruebas contra la anterior sin haber copiado
---- el fichero a mano entre medias. Ahora nunca se trunca - siempre append -
---- y la primera linea de una categoria en cada arranque de proceso es un
+--- La primera línea de una categoría en cada arranque de proceso es un
 --- separador "=== INICIO <categoria> <fecha/hora> proceso=<CLI/SRV/HOST/SP>
---- ===" que delimita visualmente donde empieza cada sesion dentro del mismo
---- historico. No hay marca de "FIN" fiable (no existe un evento de apagado
+--- ===". No hay marca de "FIN" fiable (no existe un evento de apagado
 --- limpio garantizado en un servidor dedicado que se pueda capturar desde
---- Lua) - el limite de una sesion es, en la practica, el INICIO de la
---- siguiente. Una categoria que nunca llega a escribir en esta sesion (esta
---- desactivada, o no genero ninguna traza) no toca su fichero en absoluto.
+--- Lua). Una categoría desactivada o sin trazas no crea una evidencia vacía.
 local FILE_LOG_PREFIX = "GlobalStorageSiK_Debug_"
 local categoryFileStartedThisRun = {}
+local categoryFilePath = {}
 
 ---@return string
 local function fileTimestamp()
@@ -179,7 +176,15 @@ local function writeCategoryFile(category, line)
 	if not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
 		return
 	end
-	local fileName = FILE_LOG_PREFIX .. category .. ".log"
+	local fileName = categoryFilePath[category]
+	if not fileName and GlobalStorageSiK.DiagnosticsSession then
+		local suite = category == "Permissions" and "permissions" or "debug"
+		local kind = category == "Permissions" and "permissions" or string.lower(tostring(category))
+		local run = GlobalStorageSiK.DiagnosticsSession.beginRun(suite, { kind })
+		fileName = run.paths[kind]
+		categoryFilePath[category] = fileName
+	end
+	fileName = fileName or (FILE_LOG_PREFIX .. category .. ".log")
 	if not categoryFileStartedThisRun[category] then
 		categoryFileStartedThisRun[category] = true
 		local okStart, startWriter = pcall(getFileWriter, fileName, true, true)
@@ -221,6 +226,50 @@ local function write(level, area, message, detail)
 	end
 end
 
+-- Diagnostics are opt-in and bounded even when an existing caller logs in a
+-- loop. Fixed category keys bound memory; no timer/listener is installed.
+local normalBudget = {}
+local function writeNormal(level, category, area, message, detail)
+	local now = getTimestampMs and tonumber(getTimestampMs()) or 0
+	local bucket = normalBudget[category]
+	if not bucket or now < bucket.startedAt or now - bucket.startedAt >= 1000 then
+		local skipped = bucket and bucket.skipped or 0
+		bucket = { startedAt = now, lines = 0, bytes = 0, skipped = 0 }
+		normalBudget[category] = bucket
+		if skipped > 0 then
+			write("DEBUG", area, "diagnostics throttled", "category=" .. category .. " skipped=" .. skipped)
+			bucket.lines = 1
+			bucket.bytes = 256
+		end
+	end
+	if bucket.lines >= 20 or bucket.bytes >= 8192 then
+		bucket.skipped = bucket.skipped + 1
+		return
+	end
+	local text = tostring(message)
+	if detail ~= nil then text = text .. " | " .. tostring(detail) end
+	if #text > 1024 then
+		text = "oversized diagnostic omitted bytes=" .. tostring(#text)
+	end
+	if bucket.bytes + #text > 8192 then
+		bucket.skipped = bucket.skipped + 1
+		return
+	end
+	bucket.lines = bucket.lines + 1
+	bucket.bytes = bucket.bytes + #text
+	write(level, area, text)
+end
+
+--- Identidad mínima de la build efectiva, siempre visible una vez al arrancar.
+--- No es una traza de diagnóstico opcional: permite demostrar qué árbol cargó
+--- cada proceso antes de atribuir a código actual un resultado de QA antiguo.
+---@param role string
+---@param version string|nil
+function GlobalStorageSiK.Log.runtimeIdentity(role, version)
+	write("SYSTEM", "RuntimeIdentity", tostring(role or "runtime"),
+		"version=" .. tostring(version or "?"))
+end
+
 --- Error siempre visible (compatible con Error Magnifier).
 ---@param area string
 ---@param message string
@@ -251,10 +300,10 @@ function GlobalStorageSiK.Log.info(area, message, detail)
 		return
 	end
 	local category = AREA_CATEGORY[area]
-	if category and not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
+	if not category or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
 		return
 	end
-	write("INFO", area, message, detail)
+	writeNormal("INFO", category, area, message, detail)
 end
 
 --- Traza solo con DebugMode sandbox.
@@ -266,10 +315,10 @@ function GlobalStorageSiK.Log.debug(area, message, detail)
 		return
 	end
 	local category = AREA_CATEGORY[area]
-	if category and not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
+	if not category or not GlobalStorageSiK.Sandbox.debugCategoryEnabled(category) then
 		return
 	end
-	write("DEBUG", area, message, detail)
+	writeNormal("DEBUG", category, area, message, detail)
 end
 
 --- Traza de alto volumen dentro de la categoria del area. Se usa para

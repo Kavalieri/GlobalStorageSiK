@@ -14,6 +14,7 @@ GlobalStorageSiK.NetworkResolve = GlobalStorageSiK.NetworkResolve or {}
 --- Comandos que NO deben heredar networkId de la sesión/UI automáticamente.
 GlobalStorageSiK.NetworkResolve.SESSION_EXEMPT = {
 	openTerminal = true,
+	getRemoteNetworkCandidates = true,
 	prepareTerminalPlacement = true,
 	registerTerminal = true,
 	getNetworkList = true,
@@ -92,9 +93,20 @@ function GlobalStorageSiK.NetworkResolve.resolveOpenTerminal(player, args)
 	local hint = args.terminalHint
 	if hint and hint.networkId and hint.networkId ~= "" then
 		local resolved = GlobalStorageSiK.Network.resolveNetworkId(hint.networkId)
-		if resolved then
-			return resolved, hint, nil
+		if resolved and hint.x and hint.y then
+			local at = GlobalStorageSiK.Network.findNetworkIdAtTerminal(
+				hint.x, hint.y, hint.z or 0, { activeOnly = true }
+			)
+			if at == resolved then
+				return resolved, {
+					x = math.floor(hint.x),
+					y = math.floor(hint.y),
+					z = math.floor(hint.z or 0),
+					networkId = resolved,
+				}, nil
+			end
 		end
+		return nil, nil, "terminal_unlinked"
 	end
 
 	if hint and hint.x and hint.y and not hint.networkId then

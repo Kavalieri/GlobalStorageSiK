@@ -8,7 +8,7 @@
 require "TimedActions/ISBaseTimedAction"
 require "GS_TerminalRecipes"
 require "GS_AddonRecipes"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_NetClient"
 
 GS_CraftTerminalTimedAction = ISBaseTimedAction:derive("GS_CraftTerminalTimedAction")
@@ -20,8 +20,8 @@ function GS_CraftTerminalTimedAction:isValid()
 	end
 	local addonId = GlobalStorageSiK.AddonRecipes.addonIdFromCardId(self.recipeId)
 	if addonId then
-		local def = GlobalStorageSiK.AddonRegistry.get(addonId)
-		if not def then
+		local ok, _, def = GSSiK.API.Addon.get(addonId)
+		if not ok or not def then
 			return false
 		end
 		return GlobalStorageSiK.AddonRecipes.canCraftModule(self.character, def) == true

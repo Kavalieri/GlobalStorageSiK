@@ -4,32 +4,38 @@
 	Fecha: 2026-08-13 (migrado desde GS_NetworkCraftSession.lua del Core -
 	pedido explícito: Core no debería conocer ISBuildingObject, eso es
 	conocimiento exclusivo de este addon; el Core solo expone infraestructura
-	genérica de sesión/préstamo vía GlobalStorageSiK.CraftSession).
+	genérica de sesión/préstamo vía GSSiK.API.WorkSession).
 	Descripción: Reclama de la red al inventario del jugador los inputs reales
 	seleccionados por BuildLogic, crea para la acción una copia de BuildLogic
 	que solo ve ese inventario y deja que ISBuildAction complete la ruta
 	vanilla. Compartido por las ventanas vanilla y Neat Building.
 ]]
 
-require "GS_NetworkCraftSession"
-require "GS_I18n"
+local API = require "GSSiK_API_Client"
 require "GSSiK_Addon_Builder_Log"
+
+local Session = API.WorkSession
+local Diagnostics = API.Diagnostics
 
 local ADDON_ID = "Builder"
 
 local function failBuildOperation(operationId, player, reasonKey)
 	if not operationId then return end
-	GlobalStorageSiK.CraftSession.abortOperation(operationId)
-	local reason = GlobalStorageSiK.I18n.text(reasonKey)
-	local message = GlobalStorageSiK.I18n.text("IGUI_GSSIK_BuilderOperationFailedReturned", reason)
+	Session.abortOperation(operationId, player)
+	local reason = getText(reasonKey)
+	local message = getText("IGUI_GSSIK_BuilderOperationFailedReturned", reason)
 	if player and player.setHaloNote then
 		player:setHaloNote(message, 255, 120, 100, 450)
 	end
 end
 
-GlobalStorageSiK.CraftSession.registerDebugSink(ADDON_ID, function(message)
+local debugOk, debugCode, debugRegistration = Diagnostics.registerWorkSessionSink(ADDON_ID, function(message)
 	GSSiK_Addon_Builder.Log.debug("Operations", message)
 end)
+if debugOk ~= true then
+	error("GSSiK.API WorkSession debug sink: " .. tostring(debugCode))
+end
+GSSiK_Addon_Builder._workDebugRegistration = debugRegistration
 
 local originalTryBuild = nil
 local originalBuildActionStart = nil
@@ -233,7 +239,7 @@ local function markBuildOperationComplete(action, source)
 			end
 		end)
 		if source == "perform" or source == "forceComplete" then
-			GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+			Session.completeOperation(operationId, character)
 		else
 			local reasonKey = source == "forceStop" and "IGUI_GSSIK_BuilderFailInvalid"
 				or "IGUI_GSSIK_BuilderFailCancelled"
@@ -267,7 +273,7 @@ local function patchedBuildActionPerform(self)
 		queueBuildVerification(self)
 	else
 		markBuildOperationComplete(self, "forceStop")
-		GlobalStorageSiK.CraftSession.debugLog("buildAttempt PERFORM ERROR: " .. tostring(result))
+		GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt PERFORM ERROR: " .. tostring(result))
 	end
 	return ok and result or nil
 end
@@ -297,15 +303,15 @@ local function patchedBuildActionStart(self)
 			beforeSpriteCounts = before.spriteCounts,
 		}
 	end
-	local ok, result = GlobalStorageSiK.CraftSession.withContainerInjectionSuspended(
+	local ok, result = Session.withContainerInjectionSuspended(
 		originalBuildActionStart, self)
 	if not ok then
-		GlobalStorageSiK.CraftSession.debugLog("buildAttempt ACTION START ERROR operationId="
+		GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt ACTION START ERROR operationId="
 			.. tostring(self._gsBuilderOperationId) .. " error=" .. tostring(result))
 		markBuildOperationComplete(self, "forceStop")
 		return nil
 	end
-	GlobalStorageSiK.CraftSession.debugLog("buildAttempt ACTION START operationId="
+	GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt ACTION START operationId="
 		.. tostring(self._gsBuilderOperationId) .. " containers=physicalOnly")
 	return result
 end
@@ -352,7 +358,8 @@ local function createInventoryBuildLogic(buildObject, player, craftRecipe)
 	if originalLogic and originalLogic.getContainers then
 		pcall(function() originalContainers = originalLogic:getContainers() end)
 	end
-	local localContainers = GlobalStorageSiK.CraftSession.tableToArrayList({ player:getInventory() })
+	local localContainers = ArrayList.new()
+	localContainers:add(player:getInventory())
 	if originalLogic then
 		pcall(function()
 			originalLogic:setContainers(localContainers)
@@ -428,7 +435,7 @@ local function startInventoryBuild(buildObject, x, y, z, player, craftRecipe, op
 	buildObject.buildPanelLogic = originalLogic
 	restoreContainers()
 	if not ok then
-		GlobalStorageSiK.CraftSession.debugLog("buildAttempt START ERROR operationId="
+		GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt START ERROR operationId="
 			.. tostring(operationId) .. " error=" .. tostring(result))
 		failBuildOperation(operationId, player, "IGUI_GSSIK_BuilderFailStart")
 		if player.getPlayerNum and lastOperationByPlayer[player:getPlayerNum()] == operationId then
@@ -442,7 +449,7 @@ local function startInventoryBuild(buildObject, x, y, z, player, craftRecipe, op
 		-- skipBuildAction es la unica ruta instantanea conocida. Sin accion y
 		-- sin ese flag, vanilla/Neat rechazaron el intento: informar y devolver.
 		if buildObject.skipBuildAction then
-			GlobalStorageSiK.CraftSession.markOperationComplete(operationId)
+			Session.completeOperation(operationId, player)
 		else
 			failBuildOperation(operationId, player, "IGUI_GSSIK_BuilderFailInvalid")
 		end
@@ -483,14 +490,14 @@ local function checkPendingBuildStarts()
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_BUILD_TIMEOUT_MS
 		if allReady then
 			table.remove(pendingBuildStarts, i)
-			GlobalStorageSiK.CraftSession.debugLog(string.format(
+			GSSiK_Addon_Builder.Log.debug("Operations", string.format(
 				"buildAttempt RESUME operationId=%s waitResult=%s",
 				tostring(entry.operationId), "allReady"))
 			startInventoryBuild(entry.self, entry.x, entry.y, entry.z,
 				entry.player, entry.craftRecipe, entry.operationId)
 		elseif timedOut then
 			table.remove(pendingBuildStarts, i)
-			GlobalStorageSiK.CraftSession.debugLog("buildAttempt ABORT operationId="
+			GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt ABORT operationId="
 				.. tostring(entry.operationId) .. " timeout esperando materiales")
 			failBuildOperation(entry.operationId, entry.player, "IGUI_GSSIK_BuilderFailClaimTimeout")
 			if entry.player and entry.player.getPlayerNum
@@ -523,12 +530,12 @@ local function checkPendingBuildStarts()
 			-- limpiado otros campos de la accion entre forceComplete y perform.
 			action._gsBuilderOperationId = entry.operationId
 			if found then
-				GlobalStorageSiK.CraftSession.debugLog("buildAttempt VERIFIED operationId="
+				GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt VERIFIED operationId="
 					.. tostring(entry.operationId) .. " matchedSprite=" .. tostring(foundSprite)
 					.. " objects=" .. tostring(entry.beforeObjectCount) .. "->" .. tostring(current.objectCount))
 				markBuildOperationComplete(action, "perform")
 			else
-				GlobalStorageSiK.CraftSession.debugLog("buildAttempt VERIFY FAILED operationId="
+				GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt VERIFY FAILED operationId="
 					.. tostring(entry.operationId) .. " expectedSprites="
 					.. table.concat(entry.expectedSprites or {}, ",") .. " actualSprites="
 					.. table.concat(current.spriteNames, ",") .. " objects="
@@ -545,7 +552,8 @@ end
 ---@param y number
 ---@param z number
 local function patchedTryBuild(self, x, y, z)
-	local sess = GlobalStorageSiK.CraftSession.getActiveSession(ADDON_ID)
+	local sessionOk, _, sess = Session.get(ADDON_ID)
+	if sessionOk ~= true then sess = nil end
 	if sess and self.objectInfo then
 		local playerObj = getSpecificPlayer and self.player and getSpecificPlayer(self.player) or nil
 		local okRecipe, craftRecipe = pcall(function()
@@ -563,16 +571,34 @@ local function patchedTryBuild(self, x, y, z)
 				-- hooks de ISBuildAction.perform/stop sepan que operacion
 				-- marcar como terminada cuando la accion nativa acabe de
 				-- verdad (ver markBuildOperationComplete).
-				local operationId = GlobalStorageSiK.CraftSession.newOperationId(ADDON_ID)
-				if playerObj.getPlayerNum then
-					lastOperationByPlayer[playerObj:getPlayerNum()] = operationId
-				end
 				local recipeName = "?"
 				local okName, name = pcall(function() return craftRecipe:getName() end)
 				if okName and name then recipeName = name end
-				local waitingIds, waitingCount, claimed = GlobalStorageSiK.CraftSession.claimRecipeItems(
-					playerObj, logic, inputs, sess.networkId, operationId, 1)
-				GlobalStorageSiK.CraftSession.debugLog(string.format(
+				local operationOk, operationCode, operation = Session.startOperation({
+					addonId = ADDON_ID, player = playerObj, kind = "build",
+					recipeName = recipeName, batchCount = 1, diagnostics = true,
+				})
+				if operationOk ~= true or not operation then
+					GSSiK_Addon_Builder.Log.debug("Operations",
+						"buildAttempt rejected code=" .. tostring(operationCode))
+					return originalTryBuild(self, x, y, z)
+				end
+				local operationId = operation.operationId
+				if playerObj.getPlayerNum then
+					lastOperationByPlayer[playerObj:getPlayerNum()] = operationId
+				end
+				local claimOk, claimCode, claim = Session.claimRecipeInputs(
+					operationId, playerObj, logic, inputs, 1)
+				if claimOk ~= true or not claim then
+					GSSiK_Addon_Builder.Log.debug("Operations",
+						"build claim rejected code=" .. tostring(claimCode))
+					failBuildOperation(operationId, playerObj, "IGUI_GSSIK_BuilderFailInvalid")
+					return
+				end
+				local waitingIds = claim.waitingIds or {}
+				local waitingCount = claim.waitingCount or 0
+				local claimed = claim.claimedCount or 0
+				GSSiK_Addon_Builder.Log.debug("Operations", string.format(
 					"buildAttempt START operationId=%s recipe=%s networkId=%s inputs=%s reclamados=%s",
 					operationId, recipeName, tostring(sess.networkId), tostring(inputs:size()), tostring(claimed)))
 				if waitingCount > 0 then
@@ -584,7 +610,7 @@ local function patchedTryBuild(self, x, y, z)
 						startedAt = getTimestampMs and getTimestampMs() or 0,
 						operationId = operationId,
 					})
-					GlobalStorageSiK.CraftSession.debugLog("buildAttempt WAIT operationId=" .. operationId
+					GSSiK_Addon_Builder.Log.debug("Operations", "buildAttempt WAIT operationId=" .. operationId
 						.. " (esperando confirmacion del servidor)")
 					return
 				end
@@ -662,5 +688,12 @@ local function uninstallBuilderHooks()
 	end
 end
 
-GlobalStorageSiK.CraftSession.registerAddonHooks(ADDON_ID, installBuilderHooks, uninstallBuilderHooks)
-GlobalStorageSiK.CraftSession.registerTickHandler(ADDON_ID, checkPendingBuildStarts)
+local lifecycleOk, lifecycleCode, lifecycleRegistration = Session.registerLifecycle(ADDON_ID, {
+	install = installBuilderHooks,
+	uninstall = uninstallBuilderHooks,
+	tick = checkPendingBuildStarts,
+})
+if lifecycleOk ~= true then
+	error("GSSiK.API WorkSession lifecycle: " .. tostring(lifecycleCode))
+end
+GSSiK_Addon_Builder._workLifecycleRegistration = lifecycleRegistration

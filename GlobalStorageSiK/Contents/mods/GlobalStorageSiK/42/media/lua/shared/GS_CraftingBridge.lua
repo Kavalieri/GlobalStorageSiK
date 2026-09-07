@@ -6,7 +6,7 @@
 ]]
 
 require "GS_Network"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Permissions"
 
 GlobalStorageSiK.CraftingBridge = GlobalStorageSiK.CraftingBridge or {}
@@ -53,7 +53,8 @@ function GlobalStorageSiK.CraftingBridge.mergeContainerLists(base, networkId, pl
 	for i = 1, #(base or {}) do
 		merged[#merged + 1] = base[i]
 	end
-	if not GlobalStorageSiK.AddonRegistry.isModActive("Craft") then
+	local activeOk, _, active = GSSiK.API.Addon.isActive("Craft")
+	if not activeOk or not active then
 		return merged
 	end
 	local extras = GlobalStorageSiK.CraftingBridge.collectNetworkContainers(networkId, player)

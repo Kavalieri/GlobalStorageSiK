@@ -1,0 +1,37 @@
+{
+  "inputs": {
+    "frameworkManifestSha256": "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    "generatorSha256": "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
+    "schemaSha256": "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
+    "surfaceSpecSha256": "1f30e7f89fa1e6ddbc504c23af11ea09b440f7a6270935ebae05d1aa4605e376",
+    "visualCanonicalizer": "sik-ui-dom-v2",
+    "visualMasterSha256": "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
+    "visualSubtreeSha256": "aedf9e0c9768ab039794e3a25eda32d178b37e4a4d59b86098ac5c95ca36481e"
+  },
+  "outputs": {
+    "htmlSha256": "9c3569deff45e9adb52b95a6f550079e74b790eef66017352842548e919ab03e",
+    "luaSha256": "73120bb95bb2090032fcbfeeca0cd96d27df8c8d77bf3a910bbabd056c9cf93c"
+  },
+  "runtime": {
+    "artifact": {
+      "moduleId": "GlobalStorageSiK/UI/Generated/TabWarehouse",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GlobalStorageSiK/UI/Generated/TabWarehouse.lua",
+      "repository": "global-storage-sik"
+    },
+    "callers": [
+      {
+        "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI.lua",
+        "repository": "global-storage-sik",
+        "symbol": "GlobalStorageSiK.TerminalUI"
+      }
+    ],
+    "loader": {
+      "builderSymbol": "SiK.UI.SurfaceHost.mount",
+      "modulePath": "GlobalStorageSiK/Contents/mods/GlobalStorageSiK/42/media/lua/client/GS_TerminalUI_Items.lua",
+      "repository": "global-storage-sik",
+      "symbol": "GlobalStorageSiK.TerminalItems"
+    }
+  },
+  "runtimePolicy": "required",
+  "surfaceId": "tab-warehouse"
+}

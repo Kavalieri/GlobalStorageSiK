@@ -4,9 +4,8 @@
 	Fecha: 2025-06-27
 ]]
 
-require "GS_AddonRegistry"
-require "GS_DiskProgramming"
-require "GS_Sandbox"
+require "GSSiK_API"
+require "GSSiK_Addon_Builder_Log"
 
 --- Nombre de receta -> slug usado por su opcion propia
 --- "Recipe_<slug>_RequireBook" (SandboxVars.GSSiK_Addon_Builder.*, no Core).
@@ -25,24 +24,18 @@ local RECIPE_NAME_TO_SLUG = {
 local function resolveRecipeBookRequirement(recipeName)
 	local slug = RECIPE_NAME_TO_SLUG[recipeName]
 	if slug then
-		local v = SandboxVars.GSSiK_Addon_Builder and SandboxVars.GSSiK_Addon_Builder["Recipe_" .. slug .. "_RequireBook"]
+		local addonConfig = SandboxVars and SandboxVars.GSSiK_Addon_Builder
+		local v = addonConfig and addonConfig["Recipe_" .. slug .. "_RequireBook"]
 		if v ~= nil then
 			return v == true
 		end
 	end
-	return GlobalStorageSiK.Sandbox.requireRecipeBooks()
+	-- Abstain instead of reading Core-owned sandbox state. GSSiK.API returns
+	-- this nil unchanged and Core applies its own configured fallback.
+	return nil
 end
 
-GlobalStorageSiK.DiskProgramming.registerProgram("builder", {
-	recipeName = "Program GS Builder Install Disk",
-	manualItem = "GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram",
-	outputItem = "GSSiK_Addon_Builder.GS_FloppyDisk_Builder",
-	menuTextKey = "IGUI_GS_ProgramBuilderDiskMenu",
-	iconPath = "media/textures/Item_GS_FloppyDisk_Builder.png",
-	descKey = "IGUI_GS_ProgramBuilderDiskDesc",
-})
-
-GlobalStorageSiK.AddonRegistry.register({
+local definition = {
 	id = "Builder",
 	modId = "GSSiK_Addon_Builder",
 	-- Periferico: Pizarra Digital GS. Se ensambla a mano en el menu de
@@ -54,13 +47,22 @@ GlobalStorageSiK.AddonRegistry.register({
 	-- se consume. Se suma al lector universal GS_TerminalReader (siempre
 	-- exigido, sea cual sea el addon).
 	installDiskItem = "GSSiK_Addon_Builder.GS_FloppyDisk_Builder",
+	diskProgram = {
+		id = "builder",
+		recipeName = "Program GS Builder Install Disk",
+		manualItem = "GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram",
+		outputItem = "GSSiK_Addon_Builder.GS_FloppyDisk_Builder",
+		menuTextKey = "IGUI_GS_ProgramBuilderDiskMenu",
+		iconPath = "media/textures/Item_GS_FloppyDisk_Builder.png",
+		descKey = "IGUI_GS_ProgramBuilderDiskDesc",
+	},
 	moduleRecipeName = "Build GS Digital Whiteboard",
 	moduleSkillLevel = 5,
 	moduleCraftTime = 110,
 	-- Icono REAL del periferico (pizarra digital) para la bahia de expansion -
 	-- ver nota identica en GSSiK_Addon_Tablet_Register.lua. El icono de la
-	-- pestaña Build del terminal sigue siendo GS_TabBuilder.png, definido
-	-- aparte en GSSiK_Addon_Builder_Client.lua - no se toca, es correcto.
+	-- pestaña Build del terminal usa el derivado canónico propiedad del addon,
+	-- suministrado al Tab neutral por el cliente sin acoplar Core a este asset.
 	iconPath = "media/textures/Item_GS_DigitalWhiteboard.png",
 	-- Ingredientes del boton "crafteo instantaneo" de la pestaña Addons: el
 	-- montaje final consume las 3 piezas ya fabricadas (cada una con receta
@@ -81,4 +83,28 @@ GlobalStorageSiK.AddonRegistry.register({
 	descKey = "IGUI_GS_AddonBuilderDesc",
 	workshopId = "3752437465",
 	resolveRecipeBookRequirement = resolveRecipeBookRequirement,
-})
+}
+
+-- The shared file can run before the client world has completed its addon
+-- bootstrap. Re-applying the same public definition at world start is
+-- idempotent and reconciles the dedicated-client registry without touching
+-- Core internals.
+local function registerDefinition()
+	return GSSiK.API.Addon.register(definition)
+end
+
+local registered, registerCode = registerDefinition()
+
+if not registered then
+	error("GSSiK Addon Builder registration failed: " .. tostring(registerCode))
+end
+
+if Events and Events.OnGameStart then
+	Events.OnGameStart.Add(function()
+		local ok, code = registerDefinition()
+		if not ok then
+			GSSiK_Addon_Builder.Log.debug("Lifecycle",
+				"registration_reconcile_failed code=" .. tostring(code))
+		end
+	end)
+end

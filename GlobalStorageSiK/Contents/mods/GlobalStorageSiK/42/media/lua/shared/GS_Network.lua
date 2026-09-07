@@ -46,6 +46,17 @@ function GlobalStorageSiK.Network.ensureRegistry(registry)
 		if not registry._migrateV1080 and GlobalStorageSiK.NetworkMigrate.runV1080 then
 			GlobalStorageSiK.NetworkMigrate.runV1080(registry)
 		end
+		local wantedSnapshotSchema = GlobalStorageSiK.Config.ITEM_SNAPSHOT_SCHEMA
+		if wantedSnapshotSchema and registry._itemSnapshotSchema ~= wantedSnapshotSchema then
+			-- itemSnapshot es cache derivada, no inventario autoritativo. Una cache
+			-- de esquema anterior puede conservar rutas fluidas incompatibles; se
+			-- invalida una sola vez y el siguiente acceso/scan la reconstruye.
+			for _, node in pairs(registry.nodes) do node.itemSnapshot = nil end
+			registry._itemSnapshotSchema = wantedSnapshotSchema
+			if isServer and isServer() and ModData and ModData.transmit then
+				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			end
+		end
 	end
 end
 
@@ -392,6 +403,38 @@ end
 
 local lastLiveContainerSourceSignature = {}
 
+-- Instrumentación acumulada, sin logs por llamada ni contenido cacheado. Sirve
+-- para demostrar repeticiones antes de introducir una instantánea por
+-- operación; el consumidor puede leer/resetear las métricas en una prueba
+-- dirigida sin afectar a la resolución normal.
+local liveContainerMetrics = {
+	calls = 0,
+	byNetwork = {},
+}
+
+function GlobalStorageSiK.Network.getLiveContainerMetrics(reset)
+	local out = { calls = liveContainerMetrics.calls, byNetwork = {} }
+	for nid, metrics in pairs(liveContainerMetrics.byNetwork) do
+		out.byNetwork[nid] = { calls = metrics.calls }
+	end
+	if reset then
+		liveContainerMetrics.calls = 0
+		liveContainerMetrics.byNetwork = {}
+	end
+	return out
+end
+
+local function recordLiveContainerCall(nid)
+	liveContainerMetrics.calls = liveContainerMetrics.calls + 1
+	local key = tostring(nid or "")
+	local metrics = liveContainerMetrics.byNetwork[key]
+	if not metrics then
+		metrics = { calls = 0 }
+		liveContainerMetrics.byNetwork[key] = metrics
+	end
+	metrics.calls = metrics.calls + 1
+end
+
 --- Prioridad efectiva de la zona sin duplicarla en la entrada persistente del
 --- nodo. En cliente MP puede venir serializada junto al nodo; en autoridad se
 --- resuelve siempre desde la fuente de verdad registry.zones.
@@ -430,6 +473,10 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	if not nid then
 		return live
 	end
+	-- Cuenta también las llamadas que no llegan a resolver contenedores. No
+	-- guarda filas vivas: capacidad, contenido, permisos y accesibilidad deben
+	-- reevaluarse siempre por operación.
+	recordLiveContainerCall(nid)
 
 	if GlobalStorageSiK.ZoneRefresh and GlobalStorageSiK.ZoneRefresh.getActiveNodes then
 		local nodes = GlobalStorageSiK.ZoneRefresh.getActiveNodes(nid)

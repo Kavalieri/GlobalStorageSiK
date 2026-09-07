@@ -8,8 +8,29 @@
 require "GS_TerminalUI_BlockedPanel"
 require "GS_Log"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.TerminalBlockedUI = {}
 GlobalStorageSiK.TerminalBlockedUI.instance = nil
+
+local TERMINAL_GEOMETRY_KEY = "terminal-shell"
+local TERMINAL_GEOMETRY_VERSION = 2
+
+local function resolveShellRect(playerNum, x, y, width, height)
+	local viewport = UI.Viewport.resolve(playerNum)
+	local profile = "terminal"
+	local rect = UI.Window.resolveBounds({
+		playerNum = playerNum,
+		profile = profile,
+		geometryKey = TERMINAL_GEOMETRY_KEY,
+		geometryVersion = TERMINAL_GEOMETRY_VERSION,
+		x = x, y = y, w = width, h = height,
+	})
+	-- Saved geometry is restored once, when GS_TerminalUI applies Window with
+	-- the same geometry key during initialise.
+	rect.profile = profile
+	return rect
+end
 
 ---@param panel ISPanel|nil
 local function safeClosePanel(panel)
@@ -35,15 +56,26 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		GlobalStorageSiK.TerminalBlockedPanel.ensureEvents()
 	end
 
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local playerNum = tonumber(state and state.playerNum) or 0
+	GlobalStorageSiK.TerminalBlockedUI.instances = GlobalStorageSiK.TerminalBlockedUI.instances or {}
+	local ui = nil
+	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.getInstanceForPlayer then
+		ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	elseif GlobalStorageSiK.TerminalUI then
+		ui = GlobalStorageSiK.TerminalUI.instance
+	end
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (nunca crear segunda ventana).
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", state or {})
 		end
 		ui:setVisible(true)
-		ui:bringToTop()
+		if not wasVisible or (state and state.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		GlobalStorageSiK.TerminalBlockedUI.instance = ui
+		GlobalStorageSiK.TerminalBlockedUI.instances[playerNum] = ui
 		return
 	end
 
@@ -52,21 +84,22 @@ function GlobalStorageSiK.TerminalBlockedUI.showFromMain(state, keepX, keepY, ke
 		return
 	end
 
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	local w = keepW or math.min(960, math.max(820, math.floor(sw * 0.78)))
-	local h = keepH or math.min(900, math.max(680, math.floor(sh * 0.86)))
-	local x = keepX or ((sw - w) / 2)
-	local y = keepY or ((sh - h) / 2)
-	ui = GS_TerminalUI:new(x, y, w, h)
+	local rect = resolveShellRect(playerNum, keepX, keepY, keepW, keepH)
+	ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, playerNum)
+	ui._sikWindowProfile = rect.profile
 	ui.terminalState = {}
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalUI.instance = ui
+	if GlobalStorageSiK.TerminalUI.setInstanceForPlayer then
+		GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
+	else
+		GlobalStorageSiK.TerminalUI.instance = ui
+	end
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 		GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", state or {})
 	end
 	GlobalStorageSiK.TerminalBlockedUI.instance = ui
+	GlobalStorageSiK.TerminalBlockedUI.instances[playerNum] = ui
 end
 
 ---@param state table|string|nil
@@ -76,8 +109,14 @@ end
 
 ---@param state table|nil
 function GlobalStorageSiK.TerminalBlockedUI.refresh(state)
-	local ui = GlobalStorageSiK.TerminalBlockedUI.instance
-		or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	local playerNum = tonumber(state and state.playerNum) or 0
+	local ui = nil
+	if GlobalStorageSiK.TerminalBlockedUI.instances then
+		ui = GlobalStorageSiK.TerminalBlockedUI.instances[playerNum]
+	elseif playerNum == 0 then
+		ui = GlobalStorageSiK.TerminalBlockedUI.instance
+			or (GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
+	end
 	if not ui or ui.accessMode ~= "blocked" then
 		return
 	end

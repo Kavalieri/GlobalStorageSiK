@@ -5,39 +5,65 @@
 	compartida de coincidencia) y GS_TerminalUI_NodeEditor.lua (quien lo abre).
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
-require "ISUI/ISTextEntryBox"
-require "ISUI/ISComboBox"
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Window"
 require "GS_TerminalUI_Config"
 require "GS_RulesUI"
+local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.FilterEditor = {}
 GlobalStorageSiK.FilterEditor.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
-local PAD = 14
-local ENTRY_H = FONT_HGT_SMALL + 8
-local BTN_H = FONT_HGT_SMALL + 10
+local CONTROL_METRICS = UI.Controls.metrics("compact")
+local PALETTE = UI.Theme.palette()
+local ENTRY_H = CONTROL_METRICS.inputHeight
+local BTN_H = CONTROL_METRICS.buttonHeight
 local RESULT_ROW_H = FONT_HGT_SMALL + 6
 local MAX_RESULTS = 12
+local BLOCK_GAP = 8
 
 --- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua
 --- y GS_TerminalUI_ZoneEditor.lua) - se usa en el borde superior del modal
 --- para reforzar visualmente que operador se esta configurando.
 local RULE_OP_COLOR = {
-	OR  = GlobalStorageSiK.SiK_UI.PALETTE.ruleOr,
-	AND = GlobalStorageSiK.SiK_UI.PALETTE.ruleAnd,
-	NOT = GlobalStorageSiK.SiK_UI.PALETTE.ruleNot,
+	OR  = PALETTE.ruleOr,
+	AND = PALETTE.ruleAnd,
+	NOT = PALETTE.ruleNot,
 }
 
-GS_FilterEditorUI = ISPanel:derive("GS_FilterEditorUI")
+local function addCopy(parent, x, y, width, text, tone, theme)
+	local control = UI.Controls.copyText(parent, {
+		x = x, y = y, w = width, text = text, font = UIFont.Small,
+		lineGap = 0, tone = tone or "textMuted", theme = theme,
+		playerNum = parent.playerNum,
+	})
+	if control.setMouseTransparent then control:setMouseTransparent(true) end
+	return control
+end
+
+local function addCombo(parent, x, y, width, onChange)
+	local combo = UI.Controls.combo(parent, {
+		x = x, y = y, w = width, h = ENTRY_H, items = {},
+		playerNum = parent.playerNum, onChange = onChange,
+	})
+	UI.Controls.styleCombo(combo)
+	return combo
+end
+
+local function addField(parent, x, y, width, numeric, onChange)
+	local field = UI.Controls.field(parent, {
+		x = x, y = y, w = width, h = ENTRY_H, text = "",
+		numeric = numeric == true, playerNum = parent.playerNum,
+		onChange = onChange,
+	})
+	UI.Controls.styleField(field)
+	return field
+end
+
+GS_FilterEditorUI = UI.Window.derive("GS_FilterEditorUI")
 
 local NAME_MODES = { "contains", "exact", "startsWith", "endsWith" }
 local NAME_MODE_LABELS = {
@@ -63,6 +89,10 @@ local FILTER_TYPE_LABELS = {
 	tag = "IGUI_GS_FilterTypeTag",
 	item = "IGUI_GS_FilterTypeItem",
 }
+
+function GS_FilterEditorUI:new(x, y, width, height)
+	return UI.Window.newInstance(self, x, y, width, height)
+end
 
 --- Índice de todos los ítems del juego (fullType -> nombre visible),
 --- construido UNA vez y reutilizado (evita recorrer ScriptManager en cada
@@ -117,79 +147,107 @@ local function searchItems(query)
 end
 
 function GS_FilterEditorUI:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	self.backgroundColor = { r = 0.08, g = 0.09, b = 0.11, a = 0.96 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
-	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
 	self.operator = self.operator or "OR"
 	self.filterType = self.filterType or "category"
 	self.selectedItem = nil
-	self:buildLayout()
+        UI.Modal.apply(self, {
+                kind = "task", profile = "editor", resizable = false,
+                title = T("IGUI_GS_FilterEditorTitle") .. " - "
+                        .. T("IGUI_GS_FilterEditorOperatorLabel", self.operator),
+                onClose = function() GlobalStorageSiK.FilterEditor.instance = nil end,
+        })
+        self:buildLayout()
+end
+
+local function layoutHost(panel)
+        local host = panel.contentHost or panel
+        local rect = host and host.contentRect and host:contentRect()
+        if not rect then
+                local frame = panel:contentRect()
+                rect = frame and frame.w and { x = 0, y = 0, w = frame.w, h = frame.h } or { x = 0, y = 0, w = 0, h = 0 }
+        end
+        return host, rect
 end
 
 function GS_FilterEditorUI:destroy()
 	GlobalStorageSiK.FilterEditor.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
+	if UI.Modal and UI.Modal.close then
+		UI.Modal.close(self, "product")
+	else
+		self:dispose()
 	end
 end
 
-function GS_FilterEditorUI:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
+local function clearContent(panel)
+	for i = #(panel._contentWidgets or {}), 1, -1 do
+		local child = panel._contentWidgets[i]
+		if child and child.dispose then child:dispose()
+		elseif child then
+			panel:removeChild(child)
+			if child.removeFromUIManager then child:removeFromUIManager() end
+		end
 	end
+	panel._contentWidgets = {}
 end
 
-function GS_FilterEditorUI:prerender()
-	ISPanel.prerender(self)
-	GlobalStorageSiK.SiK_UI.renderPanelBackground(self)
-	-- Franja superior del color del operador (dev26 ronda 3) - mismo trio
-	-- que las tarjetas de reglas y el modal de contradicciones, refuerza de
-	-- un vistazo que operador se esta configurando sin depender solo del texto.
-	local color = RULE_OP_COLOR[self.operator] or RULE_OP_COLOR.OR
-	self:drawRect(0, 0, self.width, 3, 1, color[1], color[2], color[3])
-	local title = T("IGUI_GS_FilterEditorTitle") .. " - " .. T("IGUI_GS_FilterEditorOperatorLabel", self.operator or "OR")
-	-- Truncar por si acaso (idioma largo, operador largo) en vez de dejar
-	-- que se salga por encima del boton de cerrar como antes (bug real con
-	-- captura del usuario, incluso ya con el panel mas ancho).
-	local closeW = self.closeBtn and self.closeBtn.width or 24
-	local titleMaxW = self.width - self.padding - 4 - closeW - 8
-	title = GlobalStorageSiK.SiK_UI.truncateText(title, titleMaxW, UIFont.Medium)
-	self:drawText(title, self.padding + 2,
-		math.floor((self.headerHeight - FONT_HGT_MEDIUM) / 2), 1, 1, 1, 1, UIFont.Medium)
-	if self.closeBtn then
-		self.closeBtn:bringToTop()
+local function own(panel, child)
+	panel._contentWidgets[#panel._contentWidgets + 1] = child
+	return child
+end
+
+function GS_FilterEditorUI:captureDraft()
+	self._drafts = self._drafts or {}
+	local draft = self._drafts[self.filterType] or {}
+	if self.filterType == "category" then
+		draft.main = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
+		draft.sub = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
+		draft.leaf = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catLeafCombo)
+	elseif self.filterType == "name" then
+		draft.mode = self.nameModeCombo and self.nameModeCombo.selected or draft.mode
+		draft.value = self.nameEntry and self.nameEntry:getText() or draft.value or ""
+	elseif self.filterType == "weight" then
+		draft.mode = self.weightModeCombo and self.weightModeCombo.selected or draft.mode
+		draft.value = self.weightEntry and self.weightEntry:getText() or draft.value or ""
+		draft.value2 = self.weightEntry2 and self.weightEntry2:getText() or draft.value2 or ""
+	elseif self.filterType == "tag" then
+		draft.value = self.tagEntry and self.tagEntry:getText() or draft.value or ""
+	elseif self.filterType == "item" then
+		draft.query = self.itemSearchEntry and self.itemSearchEntry:getText() or draft.query or ""
+		draft.selected = self.selectedItem
 	end
+	self._drafts[self.filterType] = draft
 end
 
 --- Reconstruye el cuerpo del formulario según self.filterType.
 function GS_FilterEditorUI:buildLayout()
-	for i = #(self.childrenInOrder or {}), 1, -1 do
-		local child = self.childrenInOrder[i]
-		if child ~= self.closeBtn then
-			self:removeChild(child)
-			if child.removeFromUIManager then child:removeFromUIManager() end
-		end
-	end
+	if self._layoutBusy then return end
+	self._layoutBusy = true
+	self:captureDraft()
+	clearContent(self)
 
-	local pad = self.padding
-	local innerW = self.width - pad * 2
-	local y = self.headerHeight + pad
+	local host, content = layoutHost(self)
+	local operatorColor = RULE_OP_COLOR[self.operator] or RULE_OP_COLOR.OR
+	local filterBlock = own(self, UI.Block.create({
+		parent = host, x = 0, y = 0, w = content.w,
+		title = T("IGUI_GS_FilterPathTitle"),
+		tooltip = T("IGUI_GS_FilterPathTitle"), accent = operatorColor,
+		playerNum = self.playerNum,
+	}))
+	self.filterBlock = filterBlock
+	local column = filterBlock:beginColumn()
 
-	-- Tipo de filtro
-	local typeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterTypeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	typeLbl:initialise()
-	self:addChild(typeLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.typeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.typeCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.typeCombo)
+	local typeLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_FilterTypeLabel"))
+	column:label(typeLabel, typeLabel.height, 2)
+	self.typeCombo = addCombo(column.parent, 0, 0, column.width, function()
+		self:captureDraft()
+		local idx = self.typeCombo.selected or 1
+		self.filterType = FILTER_TYPES[idx] or "name"
+		self:buildLayout()
+	end)
 	for i = 1, #FILTER_TYPES do
 		self.typeCombo:addOption(T(FILTER_TYPE_LABELS[FILTER_TYPES[i]]))
 	end
@@ -197,36 +255,38 @@ function GS_FilterEditorUI:buildLayout()
 	for i = 1, #FILTER_TYPES do
 		if FILTER_TYPES[i] == self.filterType then self.typeCombo.selected = i end
 	end
-	self.typeCombo.onChange = function()
-		local idx = self.typeCombo.selected or 1
-		self.filterType = FILTER_TYPES[idx] or "name"
-		self:buildLayout()
-	end
-	self:addChild(self.typeCombo)
-	y = y + ENTRY_H + 10
+	column:block(self.typeCombo, ENTRY_H)
 
 	if self.filterType == "category" then
-		y = self:buildCategoryFields(pad, innerW, y)
+		self:buildCategoryFields(column)
 	elseif self.filterType == "name" then
-		y = self:buildNameFields(pad, innerW, y)
+		self:buildNameFields(column)
 	elseif self.filterType == "weight" then
-		y = self:buildWeightFields(pad, innerW, y)
+		self:buildWeightFields(column)
 	elseif self.filterType == "tag" then
-		y = self:buildTagFields(pad, innerW, y)
+		self:buildTagFields(column)
 	elseif self.filterType == "item" then
-		y = self:buildItemFields(pad, innerW, y)
+		self:buildItemFields(column)
 	end
+	column:finish()
 
-	y = y + 6
-	self.addBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, innerW, BTN_H, T("IGUI_GS_FilterAddBtn"), self, function()
-		self:onAddClicked()
-	end, nil, true)
-	self:addChild(self.addBtn)
-	y = y + BTN_H + pad
+	local actions = own(self, UI.Block.create({
+		parent = host, x = 0, y = filterBlock.y + filterBlock.h + BLOCK_GAP,
+		w = content.w, title = T("IGUI_GS_PermColActions"),
+		tooltip = T("IGUI_GS_PermColActions"), playerNum = self.playerNum,
+	}))
+	self.actionsBlock = actions
+	local actionColumn = actions:beginColumn()
+	self.addBtn = UI.Controls.button(actionColumn.parent, {
+		x = 0, y = 0, w = actionColumn.width, h = BTN_H,
+		text = T("IGUI_GS_FilterAddBtn"), fullWidth = true,
+		onClick = function() self:onAddClicked() end,
+	})
+	actionColumn:block(self.addBtn, BTN_H)
+	actionColumn:finish()
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
+	self._layoutBusy = false
+	UI.Modal.fitContent(self, actions.y + actions.h, { center = true })
 end
 
 --- Categoria > Subcategoria > Sub-subcategoria en cascada VERTICAL (a
@@ -234,220 +294,190 @@ end
 --- Reutiliza los mismos
 --- helpers compartidos de GS_TerminalUI_Config.lua (mismo catalogo completo,
 --- no solo lo que la red tiene ahora).
-function GS_FilterEditorUI:buildCategoryFields(pad, innerW, y)
-	local mainLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryMainLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	mainLbl:initialise()
-	self:addChild(mainLbl)
-	y = y + FONT_HGT_SMALL + 2
+function GS_FilterEditorUI:buildCategoryFields(column)
+	local draft = (self._drafts and self._drafts.category) or {}
+	local mainLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_NodeCategoryMainLabel"))
+	column:label(mainLabel, mainLabel.height, 2)
 
-	self.catMainCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.catMainCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.catMainCombo)
-	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, "")
-	self:addChild(self.catMainCombo)
-	y = y + ENTRY_H + 8
-
-	local subLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategorySubLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	subLbl:initialise()
-	self:addChild(subLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.catSubCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.catSubCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.catSubCombo)
-	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, "", "", {})
-	self:addChild(self.catSubCombo)
-	y = y + ENTRY_H + 8
-
-	local leafLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeCategoryLeafLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	leafLbl:initialise()
-	self:addChild(leafLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	self.catLeafCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.catLeafCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.catLeafCombo)
-	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, "", "", "")
-	self:addChild(self.catLeafCombo)
-
-	self.catMainCombo.onChange = function()
+	self.catMainCombo = addCombo(column.parent, 0, 0, column.width, function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
 		GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, mainKey, "", {})
 		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, "", "")
-	end
-	self.catSubCombo.onChange = function()
+	end)
+	-- El catálogo de reglas es de autoría, no un inventario de reservas. Dos
+	-- destinos pueden aceptar exactamente la misma ruta; prioridad y afinidad
+	-- resuelven el destino cuando se deposite el objeto.
+	GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(self.catMainCombo, {}, draft.main)
+	column:block(self.catMainCombo, ENTRY_H)
+
+	local subLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_NodeCategorySubLabel"))
+	column:label(subLabel, subLabel.height, 2)
+
+	self.catSubCombo = addCombo(column.parent, 0, 0, column.width, function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
 		local subKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catSubCombo)
 		GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo, mainKey, subKey, "")
-	end
-	y = y + ENTRY_H + 4
-	return y
+	end)
+	GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(self.catSubCombo, draft.main or "", draft.sub, {})
+	column:block(self.catSubCombo, ENTRY_H)
+
+	local leafLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_NodeCategoryLeafLabel"))
+	column:label(leafLabel, leafLabel.height, 2)
+
+	self.catLeafCombo = addCombo(column.parent, 0, 0, column.width)
+	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo,
+		draft.main or "", draft.sub or "", draft.leaf)
+	column:block(self.catLeafCombo, ENTRY_H)
 end
 
-function GS_FilterEditorUI:buildNameFields(pad, innerW, y)
-	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	modeLbl:initialise()
-	self:addChild(modeLbl)
-	y = y + FONT_HGT_SMALL + 2
+function GS_FilterEditorUI:buildNameFields(column)
+	local draft = (self._drafts and self._drafts.name) or {}
+	local modeLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterModeLabel"))
+	column:label(modeLabel, modeLabel.height, 2)
 
-	self.nameModeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.nameModeCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.nameModeCombo)
+	self.nameModeCombo = addCombo(column.parent, 0, 0, column.width)
 	for i = 1, #NAME_MODES do
 		self.nameModeCombo:addOption(T(NAME_MODE_LABELS[NAME_MODES[i]]))
 	end
-	self.nameModeCombo.selected = 1
-	self:addChild(self.nameModeCombo)
-	y = y + ENTRY_H + 8
+	self.nameModeCombo.selected = draft.mode or 1
+	column:block(self.nameModeCombo, ENTRY_H)
 
-	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterValueLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	valLbl:initialise()
-	self:addChild(valLbl)
-	y = y + FONT_HGT_SMALL + 2
+	local valueLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterValueLabel"))
+	column:label(valueLabel, valueLabel.height, 2)
 
-	self.nameEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
-	self.nameEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
-	self.nameEntry:instantiate()
-	self:addChild(self.nameEntry)
-	y = y + ENTRY_H + 4
-	return y
+	self.nameEntry = addField(column.parent, 0, 0, column.width)
+	self.nameEntry:setText(draft.value or "")
+	column:block(self.nameEntry, ENTRY_H)
 end
 
-function GS_FilterEditorUI:buildWeightFields(pad, innerW, y)
-	local modeLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterModeLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	modeLbl:initialise()
-	self:addChild(modeLbl)
-	y = y + FONT_HGT_SMALL + 2
+function GS_FilterEditorUI:buildWeightFields(column)
+	local draft = (self._drafts and self._drafts.weight) or {}
+	local modeLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterModeLabel"))
+	column:label(modeLabel, modeLabel.height, 2)
 
-	self.weightModeCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, self, nil)
-	self.weightModeCombo:initialise()
-	GlobalStorageSiK.SiK_UI.styleComboBox(self.weightModeCombo)
+	self.weightModeCombo = addCombo(column.parent, 0, 0, column.width, function()
+		self:captureDraft()
+		self:buildLayout()
+	end)
 	for i = 1, #WEIGHT_MODES do
 		self.weightModeCombo:addOption(T(WEIGHT_MODE_LABELS[WEIGHT_MODES[i]]))
 	end
-	self.weightModeCombo.selected = 1
-	self.weightModeCombo.onChange = function()
-		self:buildLayout()
-	end
-	self:addChild(self.weightModeCombo)
-	y = y + ENTRY_H + 8
+	self.weightModeCombo.selected = draft.mode or 1
+	column:block(self.weightModeCombo, ENTRY_H)
 
 	local idx = self.weightModeCombo.selected or 1
 	local mode = WEIGHT_MODES[idx] or "eq"
 
-	local valLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterWeightValueLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	valLbl:initialise()
-	self:addChild(valLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	local halfW = mode == "between" and math.floor((innerW - 8) / 2) or innerW
-	self.weightEntry = ISTextEntryBox:new("", pad, y, halfW, ENTRY_H)
-	self.weightEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.weightEntry)
-	self.weightEntry:instantiate()
-	if self.weightEntry.setOnlyNumbers then self.weightEntry:setOnlyNumbers(true) end
-	self:addChild(self.weightEntry)
+	local valueLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_FilterWeightValueLabel"))
+	column:label(valueLabel, valueLabel.height, 2)
 
 	if mode == "between" then
-		self.weightEntry2 = ISTextEntryBox:new("", pad + halfW + 8, y, halfW, ENTRY_H)
-		self.weightEntry2:initialise()
-		GlobalStorageSiK.SiK_UI.styleTextEntry(self.weightEntry2)
-		self.weightEntry2:instantiate()
-		if self.weightEntry2.setOnlyNumbers then self.weightEntry2:setOnlyNumbers(true) end
-		self:addChild(self.weightEntry2)
+		self.weightEntry = addField(column.parent, 0, 0, 1, true)
+		self.weightEntry2 = addField(column.parent, 0, 0, 1, true)
+		self.weightEntry:setText(draft.value or "")
+		self.weightEntry2:setText(draft.value2 or "")
+		column:row(ENTRY_H, { { widget = self.weightEntry }, { widget = self.weightEntry2 } })
 	else
+		self.weightEntry = addField(column.parent, 0, 0, column.width, true)
+		self.weightEntry:setText(draft.value or "")
 		self.weightEntry2 = nil
+		column:block(self.weightEntry, ENTRY_H)
 	end
-	y = y + ENTRY_H + 4
-	return y
 end
 
-function GS_FilterEditorUI:buildTagFields(pad, innerW, y)
-	local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterTagHint"), 0.5, 0.54, 0.58, 1, UIFont.Small, true)
-	hintLbl:initialise()
-	self:addChild(hintLbl)
-	y = y + FONT_HGT_SMALL + 6
-
-	self.tagEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
-	self.tagEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.tagEntry)
-	self.tagEntry:instantiate()
-	self:addChild(self.tagEntry)
-	y = y + ENTRY_H + 4
-	return y
+function GS_FilterEditorUI:buildTagFields(column)
+	local draft = (self._drafts and self._drafts.tag) or {}
+	local hint = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterTagHint"), "textMuted", {
+		textMuted = { r = 0.5, g = 0.54, b = 0.58, a = 1 },
+	})
+	column:label(hint, hint.height)
+	self.tagEntry = addField(column.parent, 0, 0, column.width)
+	self.tagEntry:setText(draft.value or "")
+	column:block(self.tagEntry, ENTRY_H)
 end
 
-function GS_FilterEditorUI:buildItemFields(pad, innerW, y)
-	local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterItemSearchLabel"), GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[1], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[2], GlobalStorageSiK.SiK_UI.PALETTE.textSecondary[3], 1, UIFont.Small, true)
-	hintLbl:initialise()
-	self:addChild(hintLbl)
-	y = y + FONT_HGT_SMALL + 2
+function GS_FilterEditorUI:buildItemFields(column)
+	local draft = (self._drafts and self._drafts.item) or {}
+	local searchLabel = addCopy(column.parent, 0, 0, column.width,
+		T("IGUI_GS_FilterItemSearchLabel"))
+	column:label(searchLabel, searchLabel.height, 2)
 
-	self.itemSearchEntry = ISTextEntryBox:new("", pad, y, innerW, ENTRY_H)
-	self.itemSearchEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.itemSearchEntry)
-	self.itemSearchEntry:instantiate()
-	self.itemSearchEntry.onTextChange = function()
+	self.itemSearchEntry = addField(column.parent, 0, 0, column.width, false, function()
 		self:refreshItemResults()
-	end
-	self:addChild(self.itemSearchEntry)
-	y = y + ENTRY_H + 6
+	end)
+	self.itemSearchEntry:setText(draft.query or "")
+	column:block(self.itemSearchEntry, ENTRY_H)
+	self.selectedItem = draft.selected
 
 	if self.selectedItem then
-		local selLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_FilterItemSelected", self.selectedItem.name), 0.5, 0.78, 0.5, 1, UIFont.Small, true)
-		selLbl:initialise()
-		self:addChild(selLbl)
-		y = y + FONT_HGT_SMALL + 6
+		local selected = addCopy(column.parent, 0, 0, column.width,
+			T("IGUI_GS_FilterItemSelected", self.selectedItem.name), "success", {
+				success = { r = 0.5, g = 0.78, b = 0.5, a = 1 },
+			})
+		column:label(selected, selected.height)
 	end
 
-	self.itemResultsHost = ISPanel:new(pad, y, innerW, 0)
-	self.itemResultsHost:initialise()
-	self.itemResultsHost.drawBackground = false
-	self.itemResultsHost.backgroundColor = { r = 0, g = 0, b = 0, a = 0 }
-	self.itemResultsHost.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-	self:addChild(self.itemResultsHost)
-	self._itemResultsY = y
-	y = self:refreshItemResults()
-	return y
+	self.itemResultsHost = UI.Controls.panel(column.parent, {
+		x = 0, y = 0, w = column.width, h = 0, drawBackground = false,
+		backgroundColor = { r = 0, g = 0, b = 0, a = 0 },
+		borderColor = { r = 0, g = 0, b = 0, a = 0 },
+		controlId = "filterItemResultsHost", playerNum = self.playerNum,
+	})
+	self.itemResultsHost:setHeight(0)
+	self._itemResultsBaseHeight = 0
+	column:block(self.itemResultsHost, 0, 0)
+	column:space(self:refreshItemResults(true))
 end
 
 --- Repinta la lista de resultados de búsqueda de ítem (sin reconstruir todo el formulario).
 ---@return number newY
-function GS_FilterEditorUI:refreshItemResults()
+function GS_FilterEditorUI:refreshItemResults(initial)
 	if not self.itemResultsHost then
-		return self._itemResultsY or 0
+		return 0
 	end
 	for i = #(self.itemResultsHost.childrenInOrder or {}), 1, -1 do
 		local child = self.itemResultsHost.childrenInOrder[i]
-		self.itemResultsHost:removeChild(child)
-		if child.removeFromUIManager then child:removeFromUIManager() end
+		if child.dispose then child:dispose()
+		else
+			self.itemResultsHost:removeChild(child)
+			if child.removeFromUIManager then child:removeFromUIManager() end
+		end
 	end
 	local query = self.itemSearchEntry and self.itemSearchEntry:getText() or ""
-	local results = searchItems(query)
+	local searched = searchItems(query)
+	-- Una regla de ítem exacto tampoco reserva el ítem para un único destino.
+	-- Mostrar todos los resultados evita que el editor contradiga el routing.
+	local results = searched
 	local innerW = self.itemResultsHost.width
 	local ry = 0
 	for i = 1, #results do
 		local r = results[i]
-		local btn = GlobalStorageSiK.SiK_UI.createButton(0, ry, innerW, RESULT_ROW_H, r.name, self.itemResultsHost, function()
-			self.selectedItem = { fullType = r.fullType, name = r.name }
-			self:buildLayout()
-		end, nil, true)
-		self.itemResultsHost:addChild(btn)
+		UI.Controls.button(self.itemResultsHost, {
+			x = 0, y = ry, w = innerW, h = RESULT_ROW_H, text = r.name,
+			fullWidth = true,
+			onClick = function()
+				self.selectedItem = { fullType = r.fullType, name = r.name }
+				self:buildLayout()
+			end,
+		})
 		ry = ry + RESULT_ROW_H + 3
 	end
 	self.itemResultsHost:setHeight(math.max(0, ry))
-	local newY = (self._itemResultsY or 0) + ry + 4
-	-- Ajusta la altura total del panel si la lista de resultados cambió,
-	-- sin reconstruir el resto del formulario (evita perder el foco del
-	-- campo de búsqueda mientras el jugador escribe).
-	if self.addBtn then
-		self.addBtn:setY(newY + 2)
-		newY = newY + BTN_H + self.padding + 2
-		self:setHeight(newY)
-		GlobalStorageSiK.SiK_UI.layoutModalFrame(self, self.padding)
+	local previous = self._itemResultsBaseHeight or 0
+	self._itemResultsBaseHeight = ry
+	if not initial and self.filterBlock and self.actionsBlock and ry ~= previous then
+		self.filterBlock:setBounds(self.filterBlock.x, self.filterBlock.y,
+			self.filterBlock.w, self.filterBlock.h + ry - previous)
+		self.actionsBlock:setBounds(self.actionsBlock.x,
+			self.filterBlock.y + self.filterBlock.h + BLOCK_GAP,
+			self.actionsBlock.w, self.actionsBlock.h)
+		UI.Modal.fitContent(self, self.actionsBlock.y + self.actionsBlock.h, { center = true })
 	end
-	return newY
+	return ry
 end
 
 function GS_FilterEditorUI:onAddClicked()
@@ -462,7 +492,7 @@ function GS_FilterEditorUI:onAddClicked()
 		-- guarda SIEMPRE la clave del nivel MAS ESPECIFICO elegido.
 		local key = (leafKey ~= "" and leafKey) or (subKey ~= "" and subKey) or (mainKey ~= "" and mainKey) or nil
 		if not key then return end
-		filter = { type = "category", value = key }
+		filter = { type = "category", value = key, nativePath = key }
 
 	elseif self.filterType == "name" then
 		local val = self.nameEntry and self.nameEntry:getText() or ""
@@ -540,15 +570,23 @@ end
 function GS_FilterEditorUI:confirmContradiction(conflict, newRule, conflictContainerName)
 	local existingLabel = GlobalStorageSiK.RulesUI.describeCondition(conflict.condition)
 	local newLabel = GlobalStorageSiK.RulesUI.describeCondition(newRule.condition)
-	local message
+	local question, consequences
 	if conflictContainerName then
-		message = T("IGUI_GS_RuleContradictionConfirmCross", conflictContainerName, conflict.op, existingLabel, newRule.op, newLabel)
+		question = T("IGUI_GS_RuleContradictionCrossQuestion", conflictContainerName,
+			conflict.op, existingLabel, newRule.op, newLabel)
+		consequences = T("IGUI_GS_RuleContradictionCrossConsequences", conflictContainerName,
+			conflict.op, existingLabel, newRule.op, newLabel)
 	else
-		message = T("IGUI_GS_RuleContradictionConfirm", conflict.op, existingLabel, newRule.op, newLabel)
+		question = T("IGUI_GS_RuleContradictionQuestion", conflict.op, existingLabel, newRule.op, newLabel)
+		consequences = T("IGUI_GS_RuleContradictionConsequences", conflict.op, existingLabel, newRule.op, newLabel)
 	end
-	GlobalStorageSiK.SiK_UI.Modal.confirm(message, function()
-		self:sendAddRule(newRule)
-	end)
+	Confirmation.show({
+		owner = self,
+		title = T("IGUI_GS_FilterEditorTitle"),
+		question = question,
+		consequences = consequences,
+		onAccept = function() self:sendAddRule(newRule) end,
+	})
 end
 
 --- Abre el editor de regla (motor AND/OR/NOT, dev26) para un contenedor o
@@ -556,7 +594,8 @@ end
 ---@param target table { kind="node"|"zone", id=string, rules=table|nil } - rules = lista actual del propietario, para el detector de contradicciones
 ---@param operator string "OR"|"AND"|"NOT" - operador con el que se combinara la regla creada
 ---@param onAdded function|nil callback tras enviar la regla al servidor
-function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded)
+---@param parentModal table|nil editor de zona/contenedor que conserva el foco y la capa
+function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded, parentModal)
 	if not target or not target.id then return end
 	if GlobalStorageSiK.FilterEditor.instance then
 		GlobalStorageSiK.FilterEditor.instance:destroy()
@@ -567,14 +606,13 @@ function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded)
 	-- por el boton de cerrar). Solo el ANCHO se comparte con
 	-- resolveEditorWindowSize(); el alto sigue calculandose del contenido
 	-- real como siempre, este modal no es una ventana redimensionable.
-	local panelW = GlobalStorageSiK.SiK_UI.resolveEditorWindowSize()
+	local panelW = UI.Window.resolveBounds({ profile = "editor" }).w
 	local ui = GS_FilterEditorUI:new(0, 0, panelW, 200)
 	ui.target = target
 	ui.operator = operator or "OR"
 	ui.onAdded = onAdded
 	ui:initialise()
-	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.centerModal(ui)
-	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
+	if parentModal then UI.Modal.presentChild(parentModal, ui)
+	else UI.Modal.show(ui) end
 	GlobalStorageSiK.FilterEditor.instance = ui
 end

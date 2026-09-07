@@ -4,23 +4,20 @@
 	Fecha: 2025-06-24
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISButton"
-require "ISUI/ISLabel"
-require "ISUI/ISTextEntryBox"
-require "ISUI/ISComboBox"
 require "GS_I18n"
-require "GS_ItemTaxonomy"
-require "GS_Subcategories"
-require "GS_TerminalUI_Scroll"
-require "GS_SiK_UI_Core"
+require "GS_NativeProduct"
+require "GS_CategoryResolution"
+
+local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.TerminalConfig = {}
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
+local CONTROL_METRICS = UI.Controls.metrics()
 local BLOCK_GAP = 10
-local ENTRY_H = FONT_HGT_SMALL + 6
+local ENTRY_H = CONTROL_METRICS.inputHeight
 
 --- Etiqueta de membresía del nodo.
 ---@param node table
@@ -72,13 +69,25 @@ end
 ---@param onClick function
 ---@return ISButton
 local function createFullButton(x, y, w, title, target, onClick)
-	local h = FONT_HGT_SMALL + 10
-	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
+        return UI.Controls.button(nil, {
+                x = x, y = y, w = w, h = CONTROL_METRICS.buttonHeight,
+                text = title, onClick = function() return onClick(target) end,
+        })
 end
 
 --- Crea botón compacto SiK UI.
-local function createRowButton(x, y, w, h, title, target, onClick)
-	return GlobalStorageSiK.SiK_UI.createButton(x, y, w, h, title, target, onClick)
+local function createRowButton(x, y, w, h, title, target, onClick, danger)
+        return UI.Controls.button(nil, {
+                x = x, y = y, w = w, h = h, text = title, danger = danger == true,
+                onClick = function() return onClick(target) end,
+        })
+end
+
+local function createCopy(x, y, w, text, tone)
+	return UI.Controls.copyText(nil, {
+		x = x, y = y, w = math.max(1, w), text = text or "",
+		tone = tone or "text", font = UIFont.Small, lineGap = 2,
+	})
 end
 
 --- Texto de categoría seleccionada en combo (vacío = cualquiera).
@@ -87,6 +96,10 @@ end
 function GlobalStorageSiK.TerminalConfig.getSelectedCategory(combo)
 	if not combo then
 		return ""
+	end
+	if combo.getSelectedItem then
+		local item = combo:getSelectedItem()
+		if item and item.value ~= nil then return tostring(item.value) end
 	end
 	if combo.categoryKeys then
 		local idx = combo.selected or 1
@@ -99,58 +112,15 @@ function GlobalStorageSiK.TerminalConfig.getSelectedCategory(combo)
 	return text
 end
 
---- Cuenta opciones de un ISComboBox (Lua 5.1 / PZ).
----@param combo ISComboBox
----@return number
-local function comboOptionCount(combo)
-	if combo.options and combo.options.size then
-		return combo.options:size()
-	end
-	return 1
-end
-
---- Texto de opción de combo por índice 1-based.
----@param combo ISComboBox
----@param index number
----@return string|nil
-local function comboOptionText(combo, index)
-	if combo.getOptionText then
-		return combo:getOptionText(index)
-	end
-	if combo.options and combo.options.get then
-		local opt = combo.options:get(index - 1)
-		if type(opt) == "string" then
-			return opt
-		end
-		if opt and opt.text then
-			return opt.text
-		end
-	end
-	return nil
-end
-
 --- Etiqueta de display para cualquier clave (vanilla o gs_*).
 ---@param key string
 ---@return string
 local function categoryLabel(key)
-	local EXT = GlobalStorageSiK.ItemTaxonomy.EXT_GROUP_PREFIX
-	local SUB = GlobalStorageSiK.ItemTaxonomy.SUBGROUP_PREFIX
-	if key:sub(1, #EXT) == EXT then
-		return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(key:sub(#EXT + 1), nil)
+	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
+	if nativePath then
+		return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel
 	end
-	if key:sub(1, #SUB) == SUB then
-		local rest = key:sub(#SUB + 1)
-		local sep = rest:find("::", 1, true)
-		if sep then
-			local groupKey = rest:sub(1, sep - 1)
-			return GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(groupKey, nil) .. " / "
-				.. GlobalStorageSiK.ItemTaxonomy.hierarchyLabel(rest:sub(sep + 2), groupKey)
-		end
-	end
-	if GlobalStorageSiK.Subcategories and GlobalStorageSiK.Subcategories.isSubcategoryKey(key) then
-		return "  " .. GlobalStorageSiK.Subcategories.label(key)
-	end
-	return GlobalStorageSiK.ItemTaxonomy.translateMainKey(key)
+	return tostring(key or "Misc")
 end
 
 --- Rellena combo mostrando subcategorías GS anidadas bajo su categoría vanilla madre.
@@ -161,43 +131,32 @@ function GlobalStorageSiK.TerminalConfig.fillCategoryCombo(combo, categories, se
 	if not combo then
 		return
 	end
-	combo:clear()
+	local entries = { { text = T("IGUI_GS_CategoryAny"), value = "" } }
 	combo.categoryKeys = { "" }
-	combo:addOption(T("IGUI_GS_CategoryAny"))
 
-	local GSSub = GlobalStorageSiK.Subcategories
 	for i = 1, #(categories or {}) do
 		local key = categories[i]
 		combo.categoryKeys[#combo.categoryKeys + 1] = key
-		combo:addOption(GlobalStorageSiK.ItemTaxonomy.translateMainKey(key))
-		-- Subcategorías que cuelgan de esta categoría vanilla
-		if GSSub and GSSub.childrenOf then
-			local children = GSSub.childrenOf(key)
-			for j = 1, #children do
-				local sub = children[j]
-				combo.categoryKeys[#combo.categoryKeys + 1] = sub.key
-				combo:addOption("  " .. GSSub.label(sub.key))
-			end
-		end
+		entries[#entries + 1] = { text = categoryLabel(key), value = key }
 	end
 
 	local target = selectedCategory
 	if not target or target == "" then
-		combo.selected = 1
+		combo:setItems(entries, 1)
 		return
 	end
 
 	for i = 2, #combo.categoryKeys do
 		if combo.categoryKeys[i] ~= "" and string.lower(combo.categoryKeys[i]) == string.lower(target) then
-			combo.selected = i
+			combo:setItems(entries, i)
 			return
 		end
 	end
 
 	-- Clave no estaba en el catálogo: añadirla al final
 	combo.categoryKeys[#combo.categoryKeys + 1] = target
-	combo:addOption(categoryLabel(target))
-	combo.selected = #combo.categoryKeys
+	entries[#entries + 1] = { text = categoryLabel(target), value = target }
+	combo:setItems(entries, #entries)
 end
 
 --- Rellena combo de categoria PRINCIPAL a partir del CATALOGO COMPLETO del
@@ -213,15 +172,17 @@ end
 ---@param combo ISComboBox
 ---@param items table[]|nil sin uso, ver nota de arriba
 ---@param selectedKey string|nil
-function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, selectedKey)
+function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, selectedKey, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_CategoryAny"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectMainFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows())
+	local filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then
@@ -241,15 +202,19 @@ end
 ---@param mainKey string|nil categoria principal ya elegida ("" = ninguna -> combo vacio)
 ---@param selectedKey string|nil
 ---@param items table[]|nil sin uso, ver nota de fillMainCategoryCombo
-function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, selectedKey, items)
+function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, selectedKey, items, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectSubFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows(), mainKey)
+	local filters = GlobalStorageSiK.NativeProduct.decodePath(mainKey)
+		and GlobalStorageSiK.NativeProduct.listOptions(mainKey)
+		or {}
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then
@@ -270,15 +235,24 @@ end
 ---@param mainKey string|nil categoria de Nivel 1 ya elegida
 ---@param subKey string|nil categoria de Nivel 2 ya elegida, o "" para no restringir
 ---@param selectedKey string|nil
-function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, subKey, selectedKey)
+function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, subKey, selectedKey, isAvailable)
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
 	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
-	local filters = GlobalStorageSiK.ItemTaxonomy.collectLeafFilters(GlobalStorageSiK.ItemTaxonomy.getFullCatalogRows(), mainKey, subKey)
+	-- La cascada es estricta: L3 solo existe tras elegir L2. Usar L1 como
+	-- parent repetia las opciones L2 dentro del tercer combo.
+	local filters = {}
+	if subKey and subKey ~= "" then
+		filters = GlobalStorageSiK.NativeProduct.decodePath(subKey)
+			and GlobalStorageSiK.NativeProduct.listOptions(subKey)
+			or {}
+	end
 	for i = 1, #filters do
-		combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-		combo:addOption(filters[i].label)
+		if not isAvailable or isAvailable(filters[i].key) then
+			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
+			combo:addOption(filters[i].label)
+		end
 	end
 	combo.selected = 1
 	if selectedKey and selectedKey ~= "" then
@@ -305,23 +279,22 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 
 	local pad = 8
 	local y = startY or pad
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	local innerW = UI.Scroll.contentWidth(scroll)
 	local renameW = 78
 	local deleteW = 72
 	local btnGap = 6
 	local entryW = innerW - renameW - deleteW - btnGap * 2
 
-	local pal = GlobalStorageSiK.SiK_UI.PALETTE
 	if not zones or #zones == 0 then
-		local emptyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NoZonesYet"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small, true)
-		emptyLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, emptyLbl)
+		local emptyLbl = createCopy(pad, y, innerW - pad,
+			T("IGUI_GS_NoZonesYet"), "textMuted")
+		UI.Scroll.addChild(scroll, emptyLbl)
 		return y + FONT_HGT_SMALL + pad
 	end
 
-	local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZonesManageHint"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small, true)
-	hintLbl:initialise()
-	GlobalStorageSiK.TerminalScroll.addChild(scroll, hintLbl)
+	local hintLbl = createCopy(pad, y, innerW - pad,
+		T("IGUI_GS_ZonesManageHint"), "textMuted")
+	UI.Scroll.addChild(scroll, hintLbl)
 	y = y + FONT_HGT_SMALL + 8
 
 	for i = 1, #zones do
@@ -329,32 +302,35 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, z
 		local row = {}
 		local line = string.format("[%s] %s", zone.source or "?", zone.name or zone.id)
 
-		row.headerLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, pal.textPrimary[1], pal.textPrimary[2], pal.textPrimary[3], 1, UIFont.Small, true)
-		row.headerLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.headerLbl)
+		row.headerLbl = createCopy(pad, y, innerW - pad, line, "text")
+		UI.Scroll.addChild(scroll, row.headerLbl)
 		y = y + FONT_HGT_SMALL + 4
 
-		row.nameLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_ZoneRenameLabel"), pal.textMuted[1], pal.textMuted[2], pal.textMuted[3], 1, UIFont.Small, true)
-		row.nameLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameLbl)
+		row.nameLbl = createCopy(pad, y, innerW - pad,
+			T("IGUI_GS_ZoneRenameLabel"), "textMuted")
+		UI.Scroll.addChild(scroll, row.nameLbl)
 		y = y + FONT_HGT_SMALL + 2
 
-		row.nameEntry = ISTextEntryBox:new(zone.name or "", pad, y, entryW, ENTRY_H)
-		row.nameEntry:initialise()
-		GlobalStorageSiK.SiK_UI.styleTextEntry(row.nameEntry)
-		row.nameEntry:instantiate()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameEntry)
+		row.nameEntry = UI.Controls.field(nil, {
+			x = pad, y = y, w = entryW, h = ENTRY_H, text = zone.name or "",
+		})
+		UI.Scroll.addChild(scroll, row.nameEntry)
 
 		row.renameBtn = createRowButton(pad + entryW + btnGap, y, renameW, ENTRY_H, T("IGUI_GS_Rename"), scroll, function()
 			terminal:onRenameZone(zone.id, row.nameEntry:getText())
 		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.renameBtn)
+		UI.Scroll.addChild(scroll, row.renameBtn)
 
 		row.deleteBtn = createRowButton(pad + entryW + btnGap + renameW + btnGap, y, deleteW, ENTRY_H, T("IGUI_GS_DeleteZone"), scroll, function()
-			terminal:onDeleteZone(zone.id)
-		end)
-		GlobalStorageSiK.SiK_UI.applyDangerButton(row.deleteBtn)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.deleteBtn)
+			Confirmation.show({
+				owner = terminal,
+				title = T("IGUI_GS_DeleteZone"),
+				question = T("IGUI_GS_ZoneDeleteQuestion", zone.name or "?"),
+				consequences = T("IGUI_GS_ZoneDeleteConsequences", tonumber(zone.nodeCount) or 0),
+				onAccept = function() terminal:onDeleteZone(zone.id) end,
+			})
+		end, true)
+		UI.Scroll.addChild(scroll, row.deleteBtn)
 
 		y = y + ENTRY_H + BLOCK_GAP
 		table.insert(scroll.zoneRows, row)
@@ -371,9 +347,9 @@ function GlobalStorageSiK.TerminalConfig.refreshZonesPanel(scroll, terminal, zon
 	if not scroll or not terminal then
 		return
 	end
-	GlobalStorageSiK.TerminalScroll.clear(scroll, true)
+	UI.Scroll.clear(scroll, true)
 	local y = GlobalStorageSiK.TerminalConfig.refreshZonesPanelAt(scroll, terminal, zones, 8)
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y)
+	UI.Scroll.setContentHeight(scroll, y)
 end
 
 --- Ajusta geometría de filas en scroll de zonas.
@@ -384,7 +360,7 @@ function GlobalStorageSiK.TerminalConfig.layoutZonesScroll(scroll, innerW)
 		return
 	end
 	local pad = 8
-	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	local w = UI.Scroll.contentWidth(scroll)
 	local renameW = 78
 	local deleteW = 72
 	local btnGap = 6
@@ -405,13 +381,11 @@ function GlobalStorageSiK.TerminalConfig.buildNodesHeader(panel)
 	end
 	panel.nodesHeaderBuilt = true
 	local pad = panel.contentPad or 8
-	local _pal = GlobalStorageSiK.SiK_UI.PALETTE
-	panel.nodesHelpLbl = ISLabel:new(
-		pad, 0, FONT_HGT_SMALL, T("IGUI_GS_NodesHelpShort"),
-		_pal.textMuted[1], _pal.textMuted[2], _pal.textMuted[3], 1, UIFont.Small, true
-	)
-	panel.nodesHelpLbl:initialise()
-	panel:addChild(panel.nodesHelpLbl)
+	panel.nodesHelpLbl = UI.Controls.copyText(panel, {
+		x = pad, y = 0, w = math.max(1, panel.width - pad * 2),
+		text = T("IGUI_GS_NodesHelpShort"), tone = "textMuted",
+		font = UIFont.Small, lineGap = 2,
+	})
 end
 
 --- Refresca panel tras recibir contenido de nodo.
@@ -439,7 +413,7 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 		if plainHost and scroll and scroll.addChild then
 			scroll:addChild(widget)
 		else
-			GlobalStorageSiK.TerminalScroll.addChild(scroll, widget)
+			UI.Scroll.addChild(scroll, widget)
 		end
 	end
 	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
@@ -454,9 +428,7 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 	else
 		sourceLbl = T("IGUI_GS_NodeContentsEmpty")
 	end
-	local _rpal = GlobalStorageSiK.SiK_UI.PALETTE
-	local srcLabel = ISLabel:new(pad, y, FONT_HGT_SMALL, sourceLbl, _rpal.textMuted[1], _rpal.textMuted[2], _rpal.textMuted[3], 1, UIFont.Small, true)
-	srcLabel:initialise()
+	local srcLabel = createCopy(pad, y, innerW - pad, sourceLbl, "textMuted")
 	adopt(srcLabel)
 	y = y + FONT_HGT_SMALL + 6
 
@@ -478,14 +450,13 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 		local name = GlobalStorageSiK.I18n.itemDisplayName(row.fullType, row.displayName)
 		local cat = GlobalStorageSiK.I18n.itemCategoryDisplay(row.fullType, row.category, row.subCategory, row.gsSubKeysStr)
 		local line = string.format("- %s  [%s] x%d", name, cat, row.count or 0)
-		local lbl = ISLabel:new(pad + 12, y, FONT_HGT_SMALL, line, _rpal.textSecondary[1], _rpal.textSecondary[2], _rpal.textSecondary[3], 1, UIFont.Small, true)
-		lbl:initialise()
+		local lbl = createCopy(pad + 12, y, innerW - pad - 12, line, "text")
 		adopt(lbl)
 		y = y + FONT_HGT_SMALL + 2
 	end
 	if #rows > 24 then
-		local moreLbl = ISLabel:new(pad + 20, y, FONT_HGT_SMALL, "…", _rpal.textMuted[1], _rpal.textMuted[2], _rpal.textMuted[3], 1, UIFont.Small, true)
-		moreLbl:initialise()
+		local moreLbl = createCopy(pad + 20, y, innerW - pad - 20,
+			"…", "textMuted")
 		adopt(moreLbl)
 		y = y + FONT_HGT_SMALL + 2
 	end
@@ -502,21 +473,20 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 		return
 	end
 	scroll.expandedNodes = scroll.expandedNodes or {}
-	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll, true)
+	local savedOffset = UI.Scroll.getScrollOffset(scroll)
+	UI.Scroll.clear(scroll, true)
 	scroll.nodeRows = {}
 
 	local pad = 8
 	local y = pad
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	local innerW = UI.Scroll.contentWidth(scroll)
 
-	local _npal = GlobalStorageSiK.SiK_UI.PALETTE
 	if not nodes or #nodes == 0 then
-		local emptyLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NoNodesYet"), _npal.textMuted[1], _npal.textMuted[2], _npal.textMuted[3], 1, UIFont.Small, true)
-		emptyLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, emptyLbl)
-		GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + FONT_HGT_SMALL + pad)
-		GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
+		local emptyLbl = createCopy(pad, y, innerW - pad,
+			T("IGUI_GS_NoNodesYet"), "textMuted")
+		UI.Scroll.addChild(scroll, emptyLbl)
+		UI.Scroll.setContentHeight(scroll, y + FONT_HGT_SMALL + pad)
+		UI.Scroll.setScrollOffset(scroll, savedOffset)
 		return
 	end
 
@@ -530,33 +500,33 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 		local expanded = scroll.expandedNodes[nodeId] == true
 		local btnH = FONT_HGT_SMALL + 10
 
-		row.headerLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, GlobalStorageSiK.TerminalConfig.formatNodeHeader(node), _npal.textPrimary[1], _npal.textPrimary[2], _npal.textPrimary[3], 1, UIFont.Small, true)
-		row.headerLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.headerLbl)
+		row.headerLbl = createCopy(pad, y, innerW - pad,
+			GlobalStorageSiK.TerminalConfig.formatNodeHeader(node), "text")
+		UI.Scroll.addChild(scroll, row.headerLbl)
 		y = y + FONT_HGT_SMALL + 6
 
-		row.nameLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_NodeRenameLabel"), _npal.textMuted[1], _npal.textMuted[2], _npal.textMuted[3], 1, UIFont.Small, true)
-		row.nameLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameLbl)
+		row.nameLbl = createCopy(pad, y, innerW - pad,
+			T("IGUI_GS_NodeRenameLabel"), "textMuted")
+		UI.Scroll.addChild(scroll, row.nameLbl)
 		y = y + FONT_HGT_SMALL + 2
 
-		row.nameEntry = ISTextEntryBox:new(node.displayName or node.name or "", pad, y, innerW, ENTRY_H)
-		row.nameEntry:initialise()
-		GlobalStorageSiK.SiK_UI.styleTextEntry(row.nameEntry)
-		row.nameEntry:instantiate()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.nameEntry)
+		row.nameEntry = UI.Controls.field(nil, {
+			x = pad, y = y, w = innerW, h = ENTRY_H,
+			text = node.displayName or node.name or "",
+		})
+		UI.Scroll.addChild(scroll, row.nameEntry)
 		y = y + ENTRY_H + 4
 
-		row.catLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_CategoryLabel"), 0.68, 0.72, 0.76, 1, UIFont.Small, true)
-		row.catLbl:initialise()
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.catLbl)
+		row.catLbl = createCopy(pad, y, innerW - pad,
+			T("IGUI_GS_CategoryLabel"), "textMuted")
+		UI.Scroll.addChild(scroll, row.catLbl)
 		y = y + FONT_HGT_SMALL + 2
 
-		row.catCombo = ISComboBox:new(pad, y, innerW, ENTRY_H, scroll, nil)
-		row.catCombo:initialise()
-		GlobalStorageSiK.SiK_UI.styleComboBox(row.catCombo)
+		row.catCombo = UI.Controls.combo(nil, {
+			x = pad, y = y, w = innerW, h = ENTRY_H,
+		})
 		GlobalStorageSiK.TerminalConfig.fillCategoryCombo(row.catCombo, categories, primaryCategory)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.catCombo)
+		UI.Scroll.addChild(scroll, row.catCombo)
 		y = y + ENTRY_H + 6
 
 		row.saveBtn = createFullButton(pad, y, innerW, T("IGUI_GS_NodeSaveAll"), scroll, function()
@@ -568,7 +538,7 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 				nil
 			)
 		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.saveBtn)
+		UI.Scroll.addChild(scroll, row.saveBtn)
 		y = y + btnH + 4
 
 		local enabledLabel = currentlyEnabled and T("IGUI_GS_NodeBtnDisable") or T("IGUI_GS_NodeBtnEnable")
@@ -581,19 +551,22 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 				nil
 			)
 		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.toggleBtn)
+		UI.Scroll.addChild(scroll, row.toggleBtn)
 		y = y + btnH + 4
 
 		local membLabel = isExcluded and T("IGUI_GS_NodeBtnInclude") or T("IGUI_GS_NodeBtnExclude")
-		row.membershipBtn = createFullButton(pad, y, innerW, membLabel, scroll, function()
-			if isExcluded then
-				terminal:onUpdateNode(nodeId, row.nameEntry:getText(), GlobalStorageSiK.TerminalConfig.getSelectedCategory(row.catCombo), true, "active")
-			else
-				terminal:onUpdateNode(nodeId, row.nameEntry:getText(), GlobalStorageSiK.TerminalConfig.getSelectedCategory(row.catCombo), false, "excluded")
-			end
-		end)
-		row.membershipBtn.borderColor = isExcluded and { r = 0.35, g = 0.45, b = 0.35, a = 0.9 } or { r = 0.45, g = 0.35, b = 0.35, a = 0.9 }
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.membershipBtn)
+		row.membershipBtn = UI.Controls.button(nil, {
+			x = pad, y = y, w = innerW, h = CONTROL_METRICS.buttonHeight,
+			text = membLabel, active = isExcluded,
+			onClick = function()
+				if isExcluded then
+					terminal:onUpdateNode(nodeId, row.nameEntry:getText(), GlobalStorageSiK.TerminalConfig.getSelectedCategory(row.catCombo), true, "active")
+				else
+					terminal:onUpdateNode(nodeId, row.nameEntry:getText(), GlobalStorageSiK.TerminalConfig.getSelectedCategory(row.catCombo), false, "excluded")
+				end
+			end,
+		})
+		UI.Scroll.addChild(scroll, row.membershipBtn)
 		y = y + btnH + 4
 
 		local expandLabel = expanded and T("IGUI_GS_NodeCollapse") or T("IGUI_GS_NodeExpand")
@@ -604,26 +577,25 @@ function GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nod
 			end
 			GlobalStorageSiK.TerminalConfig.refreshNodesPanel(scroll, terminal, nodes, categories)
 		end)
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, row.expandBtn)
+		UI.Scroll.addChild(scroll, row.expandBtn)
 		y = y + btnH + 4
 
 		if expanded then
 			y = GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, terminal, node, y, pad, innerW)
 		end
 
-		local sep = ISPanel:new(pad, y, innerW, 1)
-		sep:initialise()
-		sep.drawBackground = true
-		sep.backgroundColor = { r = 0.28, g = 0.28, b = 0.28, a = 0.55 }
-		sep.borderColor = { r = 0, g = 0, b = 0, a = 0 }
-		GlobalStorageSiK.TerminalScroll.addChild(scroll, sep)
+		local sep = UI.Controls.separator(nil, {
+			x = pad, y = y, w = innerW, h = 1,
+			controlId = "terminalConfigSeparator", playerNum = terminal.playerNum,
+		})
+		UI.Scroll.addChild(scroll, sep)
 		y = y + BLOCK_GAP + 8
 
 		table.insert(scroll.nodeRows, row)
 	end
 
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, y + pad)
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
+	UI.Scroll.setContentHeight(scroll, y + pad)
+	UI.Scroll.setScrollOffset(scroll, savedOffset)
 end
 
 --- Ajusta geometría de filas en scroll de contenedores (ancho responsivo).
@@ -633,7 +605,7 @@ function GlobalStorageSiK.TerminalConfig.layoutNodesScroll(scroll, innerW)
 	if not scroll or not scroll.nodeRows then
 		return
 	end
-	local w = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
+	local w = UI.Scroll.contentWidth(scroll)
 	for i = 1, #scroll.nodeRows do
 		local row = scroll.nodeRows[i]
 		if row.nameEntry then

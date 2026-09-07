@@ -12,9 +12,59 @@ require "GS_PlayerUtils"
 require "GS_UIDebug"
 require "GS_Log"
 
+local UI = require "GS_UI_Framework"
+
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
+GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or {}
 
 local DEFER_REFRESH_ITEM_COUNT = 150
+local TERMINAL_GEOMETRY_KEY = "terminal-shell"
+local TERMINAL_GEOMETRY_VERSION = 2
+
+function GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	return GlobalStorageSiK.TerminalUI.instances[tonumber(playerNum) or 0]
+end
+
+function GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
+	playerNum = tonumber(playerNum) or 0
+	GlobalStorageSiK.TerminalUI.instances[playerNum] = ui
+	if ui then GlobalStorageSiK.TerminalUI.instance = ui end
+	return ui
+end
+
+function GlobalStorageSiK.TerminalUI.removeInstanceForPlayer(playerNum, expected)
+	playerNum = tonumber(playerNum) or 0
+	local current = GlobalStorageSiK.TerminalUI.instances[playerNum]
+	if expected and current ~= expected then return false end
+	GlobalStorageSiK.TerminalUI.instances[playerNum] = nil
+	if GlobalStorageSiK.TerminalUI.instance == current then
+		GlobalStorageSiK.TerminalUI.instance = nil
+		local keys = {}
+		for key in pairs(GlobalStorageSiK.TerminalUI.instances) do keys[#keys + 1] = key end
+		table.sort(keys)
+		if #keys > 0 then
+			GlobalStorageSiK.TerminalUI.instance = GlobalStorageSiK.TerminalUI.instances[keys[1]]
+		end
+	end
+	return true
+end
+
+local function resolveShellRect(player)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local viewport = UI.Viewport.resolve(playerNum)
+	local profile = "terminal"
+	local rect = UI.Window.resolveBounds({
+		playerNum = playerNum,
+		profile = profile,
+		geometryKey = TERMINAL_GEOMETRY_KEY,
+		geometryVersion = TERMINAL_GEOMETRY_VERSION,
+	})
+	-- resolveBounds owns only safe default geometry. GS_TerminalUI applies this
+	-- same key through Window.apply, the single owner of saved geometry.
+	rect.profile = profile
+	rect.geometryVersion = TERMINAL_GEOMETRY_VERSION
+	return rect
+end
 
 --- Cierra la ventana principal si existe (modo completo).
 local function closeMainTerminal()
@@ -36,6 +86,7 @@ end
 ---@return table
 local function buildBlockedPayload(player, reason)
 	local payload = {
+		playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0,
 		reason = reason,
 		proximityRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
 		wirelessRange = GlobalStorageSiK.Sandbox.getWirelessRange(),
@@ -55,21 +106,35 @@ end
 --- Aplica estado al panel; difiere refrescos muy grandes un tick para evitar bloqueos.
 ---@param ui GS_TerminalUI
 ---@param state table|nil
-local function applyTerminalState(ui, state)
+local function applyTerminalState(ui, state, forceDeferred)
 	if not ui or not ui.refreshFromState then
 		return
 	end
 	local itemCount = state and state.items and #state.items or 0
+	ui._gsPendingTerminalState = state
 	local function runRefresh()
-		local ok, err = pcall(ui.refreshFromState, ui, state)
+		local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
+			and type(getTimestampMs) == "function" and getTimestampMs() or nil
+		local pendingState = ui._gsPendingTerminalState
+		ui._gsPendingTerminalState = nil
+		local ok, err = pcall(ui.refreshFromState, ui, pendingState)
 		if not ok then
 			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
 		end
+		if startedMs then
+			GlobalStorageSiK.UIDebug.action("state_refresh",
+				"durationMs=" .. tostring(getTimestampMs() - startedMs)
+					.. " items=" .. tostring(pendingState and pendingState.items and #pendingState.items or 0)
+					.. " deferred=" .. tostring(forceDeferred == true))
+		end
 	end
-	if itemCount > DEFER_REFRESH_ITEM_COUNT and Events and Events.OnTick then
+	if (forceDeferred or itemCount > DEFER_REFRESH_ITEM_COUNT) and Events and Events.OnTick then
+		if ui._gsTerminalRefreshQueued then return end
+		ui._gsTerminalRefreshQueued = true
 		local function deferOnce()
 			Events.OnTick.Remove(deferOnce)
-			if GlobalStorageSiK.TerminalUI.instance == ui then
+			ui._gsTerminalRefreshQueued = nil
+			if GlobalStorageSiK.TerminalUI.getInstanceForPlayer(ui.playerNum) == ui then
 				runRefresh()
 			end
 		end
@@ -82,10 +147,14 @@ end
 --- Abre o refresca la ventana principal del terminal.
 ---@param state table|nil
 function GlobalStorageSiK.TerminalUI.show(state)
+	local showStartedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
+		and type(getTimestampMs) == "function" and getTimestampMs() or nil
 	if GlobalStorageSiK.TerminalAccessGuard and GlobalStorageSiK.TerminalAccessGuard.ensure then
 		GlobalStorageSiK.TerminalAccessGuard.ensure()
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	local playerNum = tonumber(state and state.playerNum) or 0
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(playerNum)
+		or (playerNum == 0 and getPlayer and getPlayer() or nil)
 	local networkId = state and state.networkId
 		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
 		or (GlobalStorageSiK.Network and GlobalStorageSiK.Network.getDefaultNetworkId())
@@ -97,29 +166,39 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		and GlobalStorageSiK.TerminalAccess.trustServerForOpen()
 	local serverConfirmed = state and state.openUi == true
 		and state.terminalAnchor and state.accessMode
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	local stateUpdate = ui ~= nil and state and state.openUi ~= true
 	if needAccess and player and GlobalStorageSiK.TerminalAccess.validateServerOpen
-		and not (trustServer and serverConfirmed) then
+		and not stateUpdate and not (trustServer and serverConfirmed) then
 		if GlobalStorageSiK.UIDebug then
 			GlobalStorageSiK.UIDebug.log("OPEN", "revalidando en cliente pese a openUi=%s (trustServer=%s serverConfirmed=%s)",
 				tostring(state and state.openUi), tostring(trustServer), tostring(serverConfirmed))
 		end
 		local accessOk, _, _, accessReason = GlobalStorageSiK.TerminalAccess.validateServerOpen(player, networkId, state)
 		if not accessOk then
-			GlobalStorageSiK.TerminalUI.showBlocked(accessReason)
+			GlobalStorageSiK.TerminalUI.showBlocked({
+				playerNum = playerNum, reason = accessReason,
+			})
 			return
 		end
 	end
-	local ui = GlobalStorageSiK.TerminalUI.instance
 	GlobalStorageSiK.UIDebug.log("OPEN", "show() reuse=%s items=%d nid=%s",
 		tostring(ui ~= nil), (state and state.items and #state.items) or 0, tostring(networkId))
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar (no crear segunda ventana).
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
+		GlobalStorageSiK.TerminalUI.instance = ui
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 		end
 		applyTerminalState(ui, state)
 		ui:setVisible(true)
-		ui:bringToTop()
+		-- Los estados periódicos refrescan datos, no el z-order. Solo una apertura
+		-- explícita o la reaparición de una ventana oculta puede elevar el shell;
+		-- Modal.raiseOwner conserva después cualquier modal hijo por encima.
+		if not wasVisible or (state and state.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == ui then
 			GlobalStorageSiK.TerminalBlockedUI.instance = nil
 		end
@@ -131,22 +210,27 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		return
 	end
 
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	local w = math.min(1200, math.max(900, math.floor(sw * 0.85)))
-	local h = math.min(1000, math.max(720, math.floor(sh * 0.90)))
-	local x = (sw - w) / 2
-	local y = (sh - h) / 2
-	ui = GS_TerminalUI:new(x, y, w, h)
+	local rect = resolveShellRect(player)
+	ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, playerNum)
+	ui._sikWindowProfile = rect.profile
 	ui.terminalState = state or {}
 	ui:initialise()
 	ui:addToUIManager()
-	GlobalStorageSiK.TerminalUI.instance = ui
-	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d", x, y, w, h)
+	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
+	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d",
+		rect.x, rect.y, rect.w, rect.h)
+	if showStartedMs then
+		GlobalStorageSiK.UIDebug.action("shell_visible",
+			"durationMs=" .. tostring(getTimestampMs() - showStartedMs)
+				.. " contentDeferred=true")
+	end
 	if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 		GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 	end
-	applyTerminalState(ui, state)
+	-- El shell ya esta en UIManager: construir/refrescar el contenido activo en
+	-- el siguiente tick permite que la ventana se pinte antes del trabajo pesado
+	-- y coalesce cualquier snapshot que llegue durante esa apertura.
+	applyTerminalState(ui, state, true)
 end
 
 --- Muestra ventana bloqueada por acceso denegado (sin round-trip al servidor).
@@ -179,18 +263,23 @@ function GlobalStorageSiK.TerminalUI.showBlocked(payloadOrReason, rect)
 		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 		payload = buildBlockedPayload(player, payloadOrReason)
 	end
+	local playerNum = tonumber(payload and payload.playerNum) or 0
 	local rx = rect and rect.x
 	local ry = rect and rect.y
 	local rw = rect and rect.w
 	local rh = rect and rect.h
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar.
 	if ui then
+		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
+		GlobalStorageSiK.TerminalUI.instance = ui
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "blocked", payload)
 		end
 		ui:setVisible(true)
-		ui:bringToTop()
+		if not wasVisible or (payload and payload.openUi == true) then
+			UI.Modal.raiseOwner(ui)
+		end
 		GlobalStorageSiK.TerminalBlockedUI.instance = ui
 		return
 	end
@@ -204,6 +293,151 @@ end
 --- Solicita abrir el terminal: validación en cliente primero; en MP el servidor confirma.
 function GlobalStorageSiK.TerminalUI.requestOpen()
 	GlobalStorageSiK.TerminalUI.requestOpenAt(nil, nil)
+end
+
+--- Solicita al servidor la lista autoritativa de redes que pueden abrirse por
+--- un proveedor inalambrico ahora mismo. Solo se conserva un callback acotado;
+--- una nueva solicitud invalida la anterior y no instala listeners propios.
+---@param callback function
+---@return number|nil requestId
+function GlobalStorageSiK.TerminalUI.requestRemoteNetworks(callback, playerArg)
+	if type(callback) ~= "function" or not GlobalStorageSiK.NetClient then
+		return nil
+	end
+	local seq = (GlobalStorageSiK.TerminalUI._remoteNetworkRequestSeq or 0) + 1
+	if seq > 2147483647 then seq = 1 end
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	GlobalStorageSiK.TerminalUI._remoteNetworkRequests =
+		GlobalStorageSiK.TerminalUI._remoteNetworkRequests or {}
+	GlobalStorageSiK.TerminalUI._remoteNetworkRequestSeq = seq
+	GlobalStorageSiK.TerminalUI._remoteNetworkRequests[playerNum] = {
+		requestId = seq,
+		callback = callback,
+	}
+	local sent = GlobalStorageSiK.NetClient.sendCommand("getRemoteNetworkCandidates", {
+		requestId = seq,
+	}, player)
+	if not sent then
+		GlobalStorageSiK.TerminalUI._remoteNetworkRequests[playerNum] = nil
+		return nil
+	end
+	return seq
+end
+
+function GlobalStorageSiK.TerminalUI.cancelRemoteNetworkRequest(requestId, playerArg)
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local requests = GlobalStorageSiK.TerminalUI._remoteNetworkRequests or {}
+	local pending = requests[playerNum]
+	if pending and (requestId == nil or requestId == pending.requestId) then
+		requests[playerNum] = nil
+	end
+end
+
+---@param payload table|nil
+function GlobalStorageSiK.TerminalUI.onRemoteNetworkCandidates(payload)
+	payload = payload or {}
+	local playerNum = tonumber(payload.playerNum) or 0
+	local requests = GlobalStorageSiK.TerminalUI._remoteNetworkRequests or {}
+	local pending = requests[playerNum]
+	if not pending or payload.requestId ~= pending.requestId then
+		return
+	end
+	local callback = pending.callback
+	requests[playerNum] = nil
+	if type(callback) == "function" then
+		local ok, err = pcall(callback, payload.networks or {}, payload.reason)
+		if not ok then
+			GlobalStorageSiK.Log.error("TerminalUI", "remote network callback", tostring(err))
+		end
+	end
+end
+
+local function nextOpenSequence(player)
+	GlobalStorageSiK.Client.terminalOpenSeqByPlayer =
+		GlobalStorageSiK.Client.terminalOpenSeqByPlayer or {}
+	GlobalStorageSiK.Client.pendingTerminalOpenByPlayer =
+		GlobalStorageSiK.Client.pendingTerminalOpenByPlayer or {}
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local seq = (GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] or 0) + 1
+	if seq > 2147483647 then seq = 1 end
+	GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] = seq
+	GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] = true
+	-- Compatibilidad temporal con consumidores del terminal físico que todavía
+	-- consultan los escalares históricos. La correlación autoritativa usa siempre
+	-- el mapa por playerNum y nunca deja que otro jugador local pise esta solicitud.
+	GlobalStorageSiK.Client.terminalOpenSeq = seq
+	GlobalStorageSiK.Client.pendingTerminalOpen = true
+	return playerNum, seq
+end
+
+local function clearPendingOpen(playerNum, seq)
+	local pending = GlobalStorageSiK.Client.pendingTerminalOpenByPlayer or {}
+	local sequences = GlobalStorageSiK.Client.terminalOpenSeqByPlayer or {}
+	if seq == nil or sequences[playerNum] == seq then pending[playerNum] = nil end
+	GlobalStorageSiK.Client.pendingTerminalOpen = false
+end
+
+function GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(requestId, playerArg)
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
+	local pending = requests[playerNum]
+	if pending and (requestId == nil or requestId == pending.requestId) then
+		requests[playerNum] = nil
+		clearPendingOpen(playerNum, pending.requestId)
+	end
+end
+
+---@return boolean handled true solo para la solicitud remota exacta en vuelo
+function GlobalStorageSiK.TerminalUI.onRemoteOpenResult(payload, accepted)
+	payload = payload or {}
+	local playerNum = tonumber(payload.playerNum) or 0
+	local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
+	local pending = requests[playerNum]
+	if not pending or tonumber(payload.openSeq) ~= pending.requestId then return false end
+	requests[playerNum] = nil
+	clearPendingOpen(playerNum, pending.requestId)
+	if type(pending.callback) == "function" then
+		local ok, err = pcall(pending.callback, accepted == true, payload.reason, payload)
+		if not ok then GlobalStorageSiK.Log.error("TerminalUI", "remote open callback", tostring(err)) end
+	end
+	return true
+end
+
+--- Apertura remota explicita. No envia coordenadas ni cambia primero la sesion:
+--- el servidor resuelve anclas activas y revalida proveedor, rango y permisos.
+---@param networkId string
+---@param callback function|nil recibe (accepted, reason, payload)
+---@return number|nil requestId
+function GlobalStorageSiK.TerminalUI.requestOpenNetwork(networkId, playerArg, callback)
+	if type(networkId) ~= "string" or networkId == "" or #networkId > 128
+		or not GlobalStorageSiK.NetClient then
+		return nil
+	end
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	if not player then return nil end
+	local playerNum, openSeq = nextOpenSequence(player)
+	GlobalStorageSiK.TerminalUI._remoteOpenRequests =
+		GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
+	GlobalStorageSiK.TerminalUI._remoteOpenRequests[playerNum] = {
+		requestId = openSeq, networkId = networkId, callback = callback,
+	}
+	local payload = {
+		openSeq = openSeq,
+		remoteAccess = true,
+	}
+	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
+	end
+	local sent = GlobalStorageSiK.NetClient.sendNetworkCommand("openTerminal", networkId, payload, player)
+	if not sent then
+		GlobalStorageSiK.TerminalUI._remoteOpenRequests[playerNum] = nil
+		clearPendingOpen(playerNum, openSeq)
+		return nil
+	end
+	return openSeq
 end
 
 --- Abre el terminal vinculado a un objeto concreto (menú contextual).
@@ -238,6 +472,10 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 				terminalHint = hint,
 				networkId = openNetworkId,
 			}
+			if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+				payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
+					player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
+			end
 			GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 		end
 		return
@@ -293,6 +531,10 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 			networkId = openNetworkId,
 			terminalHint = hint or terminal,
 		}, openNetworkId)
+		if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
+			payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
+				player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
+		end
 		GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
 	end
 end

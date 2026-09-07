@@ -20,14 +20,10 @@
 	texto en vez de dejar un combo vacío.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
-require "ISUI/ISComboBox"
-require "ISUI/ISTextEntryBox"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_TerminalAccess"
-require "GS_SiK_UI_Core"
+local UI = require "GS_UI_Framework"
 require "GS_Config"
 require "GS_Sandbox"
 
@@ -36,16 +32,14 @@ GlobalStorageSiK.TerminalInstallReaderChoice.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
+local CONTROL_METRICS = UI.Controls.metrics("task")
 local PAD = 14
 local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 10
-local ENTRY_H = FONT_HGT_SMALL + 8
 local PANEL_W = 480
 local SECTION_GAP = 16
 local NETWORK_INFO_LINE_COUNT = 8
 
-GS_TerminalInstallReaderChoice = ISPanel:derive("GS_TerminalInstallReaderChoice")
+GS_TerminalInstallReaderChoice = UI.Window.derive("GS_TerminalInstallReaderChoice")
 
 ---@return table[]
 local function networkRows()
@@ -74,7 +68,7 @@ local function recoverySummaryLines(row, textW)
 	}
 	local lines = {}
 	for i = 1, #texts do
-		local wrapped = GlobalStorageSiK.SiK_UI.wrapTextLines(texts[i], textW, UIFont.Small)
+		local wrapped = UI.Controls.wrapText(texts[i], textW, UIFont.Small)
 		for j = 1, #wrapped do lines[#lines + 1] = wrapped[j] end
 	end
 	return lines
@@ -93,17 +87,12 @@ end
 ---@param g number
 ---@param b number
 ---@return table[] labels, number yAfter
-local function addWrappedLabel(panel, x, y, w, text, r, g, b)
-	local labels = {}
-	local lines = GlobalStorageSiK.SiK_UI.wrapTextLines(text, w, UIFont.Small)
-	for i = 1, #lines do
-		local lbl = ISLabel:new(x, y, FONT_HGT_SMALL, lines[i], r, g, b, 1, UIFont.Small, true)
-		lbl:initialise()
-		panel:addChild(lbl)
-		labels[#labels + 1] = lbl
-		y = y + FONT_HGT_SMALL + LINE_GAP
-	end
-	return labels, y
+local function addWrappedLabel(panel, x, y, w, text, tone)
+	local label = UI.Controls.copyText(panel, {
+		x = x, y = y, w = w, text = text, tone = tone or "textMuted",
+		lineGap = LINE_GAP, playerNum = panel.playerNum,
+	})
+	return { label }, y + label.height
 end
 
 local function selectedRecoveryRow(panel)
@@ -116,19 +105,16 @@ local function refreshRecoverySelection(panel)
 	local lines = row and recoverySummaryLines(row, panel.width - PAD * 2) or {}
 	for i = 1, #(panel.networkInfoLbls or {}) do
 		local lbl = panel.networkInfoLbls[i]
-		lbl.name = lines[i] or ""
+		lbl:setText(lines[i] or "")
 		lbl:setVisible(lines[i] ~= nil)
 	end
 	if panel.networkActionBtn then
 		local label = row and ((row.activeTerminals or 0) > 0
 			and T("IGUI_GS_NetLinkAction") or T("IGUI_GS_NetReactivateAction"))
 			or T("IGUI_GS_NetLinkAction")
-		panel.networkActionBtn._sikUiLabel = label
-		-- _sikUiLocked (2026-08-26, auditoria de botones): aspecto visual
-		-- atenuado en vez de la textura gris generica de setEnable - el
-		-- gating real de clic sigue en setEnable.
-		panel.networkActionBtn._sikUiLocked = row == nil
-		panel.networkActionBtn:setEnable(row ~= nil)
+		panel.networkActionBtn:setText(label)
+		panel.networkActionBtn:setLocked(row == nil)
+		panel.networkActionBtn:setEnabled(row ~= nil)
 	end
 end
 
@@ -136,34 +122,33 @@ end
 ---@return number
 local function measurePanelHeight(rows)
 	local textW = PANEL_W - PAD * 2
-	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
+	local introLines = UI.Controls.wrapText(
 		T("IGUI_GS_InstallReaderIntro", GlobalStorageSiK.Sandbox.getTerminalNetworkRange()),
 		textW, UIFont.Small)
 	local h = PAD
-	h = h + FONT_HGT_MEDIUM + LINE_GAP
 	h = h + #introLines * (FONT_HGT_SMALL + LINE_GAP) + PAD
 	-- Bloque "Red nueva": titulo + entry+boton
-	h = h + FONT_HGT_SMALL + 4 + ENTRY_H + SECTION_GAP
+	h = h + FONT_HGT_SMALL + 4 + CONTROL_METRICS.inputHeight + SECTION_GAP
 	-- Separador
 	h = h + 1 + SECTION_GAP
 	-- Bloque "Red existente": titulo + N filas, o el aviso "sin redes" (con
 	-- ajuste de linea - puede ocupar mas de 1 linea segun idioma/longitud).
 	h = h + FONT_HGT_SMALL + 6
 	if #rows == 0 then
-		local noNetLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
+		local noNetLines = UI.Controls.wrapText(
 			T("IGUI_GS_InstallReaderNoNetworks"), textW, UIFont.Small)
 		h = h + #noNetLines * (FONT_HGT_SMALL + LINE_GAP) + 4
 	else
-		h = h + ENTRY_H + 6
+		h = h + CONTROL_METRICS.inputHeight + 6
 		h = h + NETWORK_INFO_LINE_COUNT * (FONT_HGT_SMALL + LINE_GAP)
-		h = h + BTN_H + 10
+		h = h + CONTROL_METRICS.buttonHeight + 10
 	end
 	h = h + PAD
 	return math.max(320, h)
 end
 
 function GS_TerminalInstallReaderChoice:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	-- Mismo fondo neutro que la ventana principal del terminal y las de
 	-- Conseguir PC/Fabricar lector (GS_PCAcquireUI.lua/GS_ReaderAcquireUI.lua):
 	-- el valor anterior (0.08, 0.09, 0.11) tenia el azul mas alto que el
@@ -172,10 +157,14 @@ function GS_TerminalInstallReaderChoice:initialise()
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
+	UI.Modal.apply(self, {
+		kind = "task", padding = PAD, playerNum = self.playerNum,
+		width = self.width, height = self.height, resizable = false,
+		title = T("IGUI_GS_InstallReaderTitle"),
+		onClose = function()
+			GlobalStorageSiK.TerminalInstallReaderChoice.instance = nil
+		end,
+	})
 	self.statusMsg = nil
 	self.busy = false
 	self:buildLayout()
@@ -183,25 +172,16 @@ end
 
 function GS_TerminalInstallReaderChoice:destroy()
 	GlobalStorageSiK.TerminalInstallReaderChoice.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
-	end
-end
-
-function GS_TerminalInstallReaderChoice:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
-		return true
-	end
-	return ISPanel.onKeyRelease(self, key)
+	if self._sikWindowApplied and not self._sikDisposed then
+		UI.Modal.close(self, "destroy")
+	elseif self.removeFromUIManager then self:removeFromUIManager() end
 end
 
 ---@param msg string
 function GS_TerminalInstallReaderChoice:setStatus(msg)
 	self.statusMsg = msg
 	if self.statusLabel then
-		self.statusLabel.name = msg or ""
+		self.statusLabel:setStatus(msg or "", "warning")
 	end
 end
 
@@ -245,103 +225,116 @@ end
 ---@param textW number
 ---@return number y tras el bloque
 function GS_TerminalInstallReaderChoice:buildLinkSection(y, textW)
-	local pad = PAD
+	local host = self.contentHost or self
+	local pad = 0
 	local rows = self.networkRows or {}
 
 	-- createSectionLabel (pedido 2026-08-26, "ajustarse a la nueva UI y las
 	-- herramientas ya generadas") en vez del ISLabel suelto con color a mano
 	-- que tenia antes - mismo titulo de bloque que el resto del proyecto.
-	self.linkTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_InstallReaderLinkTitle"))
-	self:addChild(self.linkTitle)
-	y = y + FONT_HGT_SMALL + 6
+	self.linkTitle = UI.Controls.sectionTitle(host, {
+		x = pad, y = y, w = textW, text = T("IGUI_GS_InstallReaderLinkTitle"),
+		playerNum = self.playerNum,
+	})
+	y = y + self.linkTitle.height + 6
 
 	self.networkBtns = {}
 	self.networkInfoLbls = {}
 	self.networkCombo = nil
 	self.networkActionBtn = nil
 	if #rows == 0 then
-		self.noNetworksLbls, y = addWrappedLabel(self, pad, y, textW, T("IGUI_GS_InstallReaderNoNetworks"), 0.7, 0.55, 0.4)
+		self.noNetworksLbls, y = addWrappedLabel(host, pad, y, textW,
+			T("IGUI_GS_InstallReaderNoNetworks"), "warning")
 		y = y + 4
 	else
-		self.networkCombo = ISComboBox:new(pad, y, textW, ENTRY_H, self, nil)
-		self.networkCombo:initialise()
-		GlobalStorageSiK.SiK_UI.styleComboBox(self.networkCombo)
+		local comboItems = {}
 		for i = 1, #rows do
 			local row = rows[i]
 			local status = (row.activeTerminals or 0) > 0
 				and T("IGUI_GS_NetStatusActive") or T("IGUI_GS_NetStatusSuspended")
-			self.networkCombo:addOption((row.label or row.networkId or "?") .. " - " .. status)
+			comboItems[#comboItems + 1] = {
+				text = (row.label or row.networkId or "?") .. " - " .. status,
+				value = row,
+			}
 		end
-		self.networkCombo.onChange = function() refreshRecoverySelection(self) end
-		self:addChild(self.networkCombo)
-		y = y + ENTRY_H + 6
+		self.networkCombo = UI.Controls.combo(host, {
+			x = pad, y = y, w = textW, h = CONTROL_METRICS.inputHeight, items = comboItems,
+			playerNum = self.playerNum,
+			onChange = function() refreshRecoverySelection(self) end,
+		})
+		y = y + CONTROL_METRICS.inputHeight + 6
 
 		for i = 1, NETWORK_INFO_LINE_COUNT do
-			local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, "", 0.78, 0.82, 0.88, 1, UIFont.Small, true)
-			lbl:initialise()
-			self:addChild(lbl)
+			local lbl = UI.Controls.copyText(host, {
+				x = pad, y = y, w = textW, text = "", tone = "textMuted",
+				lineGap = LINE_GAP, playerNum = self.playerNum,
+			})
 			self.networkInfoLbls[#self.networkInfoLbls + 1] = lbl
 			y = y + FONT_HGT_SMALL + LINE_GAP
 		end
-		self.networkActionBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_NetLinkAction"), self, function()
+		self.networkActionBtn = UI.Controls.button(host, {
+			x = pad, y = y, w = textW, h = CONTROL_METRICS.buttonHeight,
+			text = T("IGUI_GS_NetLinkAction"), fullWidth = true,
+			playerNum = self.playerNum, onClick = function()
 				self:onLinkTo(selectedRecoveryRow(self))
-			end, nil, true)
-		self:addChild(self.networkActionBtn)
+			end,
+		})
 		self.networkBtns[1] = self.networkActionBtn
-		y = y + BTN_H + 6
+		y = y + CONTROL_METRICS.buttonHeight + 6
 		refreshRecoverySelection(self)
 	end
 	return y
 end
 
 function GS_TerminalInstallReaderChoice:buildLayout()
-	local pad = PAD
-	local y = pad
-	local textW = self.width - pad * 2
+	local host = self.contentHost or self
+	local pad = 0
+	local rect = { x = 0, y = 0, w = host.width or 0, h = host.height or 0 }
+	local y = rect.y
+	local textW = rect.w
+	local x = rect.x
 
-	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_InstallReaderTitle"))
-	self:addChild(title)
-	y = y + FONT_HGT_MEDIUM + LINE_GAP
-
-	local introLabels = {}
 	local linkRange = GlobalStorageSiK.Sandbox.getTerminalNetworkRange()
-	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(
-		T("IGUI_GS_InstallReaderIntro", linkRange), textW, UIFont.Small)
-	for i = 1, #introLines do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, introLines[i], 0.78, 0.82, 0.88, 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		introLabels[#introLabels + 1] = lbl
-		y = y + FONT_HGT_SMALL + LINE_GAP
-	end
+	local intro = UI.Controls.copyText(host, {
+		x = x, y = y, w = textW,
+		text = T("IGUI_GS_InstallReaderIntro", linkRange),
+		tone = "textMuted", lineGap = LINE_GAP, playerNum = self.playerNum,
+	})
+	y = y + intro.height
 	y = y + 6
 
 	-- ── Bloque "Red nueva": nombre + Crear, un solo clic ────────────────────
-	self.newTitle = GlobalStorageSiK.SiK_UI.createSectionLabel(pad, y, T("IGUI_GS_InstallReaderNewTitle"))
-	self:addChild(self.newTitle)
-	y = y + FONT_HGT_SMALL + 4
+	self.newTitle = UI.Controls.sectionTitle(host, {
+		x = x, y = y, w = textW, text = T("IGUI_GS_InstallReaderNewTitle"),
+		playerNum = self.playerNum,
+	})
+	y = y + self.newTitle.height + 4
 
-	local createW = GlobalStorageSiK.SiK_UI.measureButtonWidth(
-		T("IGUI_GS_InstallReaderCreateBtn"), UIFont.Small, 14, 100, math.floor(textW * 0.4))
-	self.nameEntry = ISTextEntryBox:new(T("IGUI_GS_InstallReaderNameDefault"), pad, y, textW - createW - 6, ENTRY_H)
-	self.nameEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
-	self.nameEntry:instantiate()
-	self:addChild(self.nameEntry)
-
-	self.createBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + textW - createW, y, createW, ENTRY_H, T("IGUI_GS_InstallReaderCreateBtn"), self, function()
+	self.createBtn = UI.Controls.button(host, {
+		x = x + textW - 100, y = y, w = 100, h = CONTROL_METRICS.inputHeight,
+		text = T("IGUI_GS_InstallReaderCreateBtn"), playerNum = self.playerNum,
+		onClick = function()
 			self:onCreateNew()
-		end)
-	self:addChild(self.createBtn)
-	y = y + ENTRY_H + SECTION_GAP
+		end,
+	})
+	UI.Controls.fitButtonToContent(self.createBtn, {
+		text = T("IGUI_GS_InstallReaderCreateBtn"), padding = 14,
+		minWidth = 100, maxWidth = math.floor(textW * 0.4),
+	})
+	local createW = self.createBtn.width
+	self.createBtn:setX(x + textW - createW)
+	self.nameEntry = UI.Controls.field(host, {
+		x = x, y = y, w = textW - createW - 6, h = CONTROL_METRICS.inputHeight,
+		text = T("IGUI_GS_InstallReaderNameDefault"), playerNum = self.playerNum,
+	})
+	y = y + CONTROL_METRICS.inputHeight + SECTION_GAP
 
 	-- ── Separador visual entre los dos bloques ──────────────────────────────
-	self.sepLine = ISPanel:new(pad, y, textW, 1)
-	self.sepLine:initialise()
-	self.sepLine.backgroundColor = { r = 0.3, g = 0.32, b = 0.36, a = 0.6 }
-	self:addChild(self.sepLine)
+	self.sepLine = UI.Controls.panel(host, {
+		x = x, y = y, w = textW, h = 1, drawBackground = true,
+		backgroundColor = { r = 0.3, g = 0.32, b = 0.36, a = 0.6 },
+		controlId = "readerChoiceSeparator", playerNum = self.playerNum,
+	})
 	y = y + 1 + SECTION_GAP
 
 	-- ── Bloque "Red existente": una red por fila, un solo clic ──────────────
@@ -349,19 +342,15 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	y = self:buildLinkSection(y, textW)
 	y = y + 6
 
-	self.statusLabel = ISLabel:new(pad, y, FONT_HGT_SMALL, self.statusMsg or "", 0.95, 0.75, 0.35, 1, UIFont.Small, true)
-	self.statusLabel:initialise()
-	self:addChild(self.statusLabel)
+	self.statusLabel = UI.Controls.status(host, {
+		x = x, y = y, w = textW, h = FONT_HGT_SMALL,
+		text = self.statusMsg or "", tone = "warning", playerNum = self.playerNum,
+	})
 	y = y + FONT_HGT_SMALL + pad
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(introLabels)
-	GlobalStorageSiK.SiK_UI.makeMousePassthrough(title)
-	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.statusLabel)
-	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.newTitle)
-	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.linkTitle)
-	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.noNetworksLbls or {})
-	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.networkInfoLbls or {})
+	UI.Modal.fitContent(self, y, {
+		contentBottom = true, bottomPadding = 0, center = true,
+	})
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "TerminalInstallReaderChoice")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "TerminalInstallReaderChoice")
@@ -371,8 +360,9 @@ end
 --- Reconstruye solo el bloque "Red existente" al llegar datos del servidor
 --- (mantiene el nombre ya escrito en el campo "Red nueva").
 function GS_TerminalInstallReaderChoice:rebuildLinkSection()
-	local pad = PAD
-	local textW = self.width - pad * 2
+	local host = self.contentHost or self
+	local pad = 0
+	local textW = host.width or 0
 	local startY = self.sepLine and (self.sepLine:getY() + 1 + SECTION_GAP) or nil
 	if not startY then
 		return
@@ -385,18 +375,15 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 		toRemove[#toRemove + 1] = lbl
 	end
 	for _, w in ipairs(toRemove) do
-		if w then
-			self:removeChild(w)
-			if w.removeFromUIManager then w:removeFromUIManager() end
-		end
+		if w and w.dispose then w:dispose()
+		elseif w then host:removeChild(w) end
 	end
 	for _, btn in ipairs(self.networkBtns or {}) do
-		self:removeChild(btn)
-		if btn.removeFromUIManager then btn:removeFromUIManager() end
+		if btn.dispose then btn:dispose() else host:removeChild(btn) end
 	end
 	if self.networkCombo then
-		self:removeChild(self.networkCombo)
-		if self.networkCombo.removeFromUIManager then self.networkCombo:removeFromUIManager() end
+		if self.networkCombo.dispose then self.networkCombo:dispose()
+		else host:removeChild(self.networkCombo) end
 	end
 	self.linkTitle, self.noNetworksLbls, self.networkBtns, self.networkInfoLbls = nil, nil, {}, {}
 	self.networkCombo, self.networkActionBtn = nil, nil
@@ -406,11 +393,7 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 		self.statusLabel:setY(y)
 	end
 	y = y + FONT_HGT_SMALL + pad
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.centerModal(self)
-	GlobalStorageSiK.SiK_UI.makeMousePassthrough(self.linkTitle)
-	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.noNetworksLbls or {})
-	GlobalStorageSiK.SiK_UI.setMouseTransparentAll(self.networkInfoLbls or {})
+	UI.Modal.fitContent(self, y, { contentBottom = true, bottomPadding = 0 })
 end
 
 --- Abre el diálogo. `target` = { x, y, z, object } del ordenador ya detectado.
@@ -430,11 +413,10 @@ function GlobalStorageSiK.TerminalInstallReaderChoice.show(player, target)
 	local panelH = measurePanelHeight(networkRows())
 	local ui = GS_TerminalInstallReaderChoice:new(0, 0, PANEL_W, panelH)
 	ui.player = player
+	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	ui.target = target
 	ui:initialise()
-	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.centerModal(ui)
-	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
+	UI.Modal.show(ui)
 	GlobalStorageSiK.TerminalInstallReaderChoice.instance = ui
 end
 

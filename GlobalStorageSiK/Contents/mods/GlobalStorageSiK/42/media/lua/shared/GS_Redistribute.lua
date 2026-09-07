@@ -14,6 +14,9 @@ require "GS_Power"
 require "GS_Zones"
 require "GS_ZonePriority"
 require "GS_I18n"
+require "GS_CategoryResolution"
+require "GS_OperationPacing"
+require "GS_Permissions"
 
 GlobalStorageSiK.Redistribute = {}
 
@@ -22,19 +25,14 @@ GlobalStorageSiK.Redistribute = {}
 -- una red ya ordenada podía recorrer miles de ítems contra todos los nodos en
 -- un único tick porque moved seguía en cero. Dos movimientos por paso reducen
 -- además los pares remove/add que el servidor debe replicar a los clientes.
-local MAX_INDEX_ITEMS_PER_STEP = 50
-local MAX_MOVE_ITEMS_PER_STEP = 25
-local MAX_MOVES_PER_STEP = 2
-local MAX_STEP_MS = 5
-
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
 end
 
-local function timeBudgetExceeded(startedAt, inspected)
+local function timeBudgetExceeded(startedAt, inspected, pacing)
 	if inspected <= 0 or startedAt <= 0 then return false end
 	local current = nowMs()
-	return current > 0 and current - startedAt >= MAX_STEP_MS
+	return current > 0 and current - startedAt >= (pacing.cpuBudgetMs or 5)
 end
 
 --- Construye tabla zoneId -> zone.priority (1 = zona principal) para la red.
@@ -164,6 +162,7 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 
 	local bestByTier = {}
 	local bestUnrestricted = nil
+	local compatible = false
 	local fullType = item.getFullType and item:getFullType() or nil
 	local strictNoMatch = GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch
 		and GlobalStorageSiK.Sandbox.rejectDepositIfNoMatch()
@@ -173,11 +172,15 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 	}
 	for i = 1, #liveNodes do
 		local live = liveNodes[i]
-		local matchTier = cachedMatchTier(session, i, item, fullType)
-		if matchTier then
+		local matchTier = not live.unavailable and cachedMatchTier(session, i, item, fullType)
+		if matchTier and not (session.sourceNodeId and live.container == fromLive.container) then
 			local isSelf = (live.container == fromLive.container)
+			local affinityTier = matchTier >= 4 and GlobalStorageSiK.Router.unrestrictedAffinityTier(
+				item, i, affinityIndex, isSelf) or nil
+			local allowed = matchTier < 4 or affinityTier < 6 or not strictNoMatch
+			if allowed then compatible = true end
 			local hasSpace = isSelf or GlobalStorageSiK.Router.containerHasSpace(live.container, item, character)
-			if hasSpace then
+			if hasSpace and allowed then
 				if matchTier < 4 then
 					-- Categoria/filtro configurado a mano: sin cambios, sigue
 					-- ganando siempre a la familia "sin restriccion" de abajo.
@@ -188,8 +191,6 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 				else
 					-- Sin categoria configurada: la prioridad del contenedor
 					-- manda, la afinidad solo desempata (ver unrestrictedCandidateBetter).
-					local affinityTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(
-						item, i, affinityIndex, isSelf)
 					if affinityTier < 6 or not strictNoMatch then
 						local candidate = { live = live, index = i, affinityTier = affinityTier }
 						if not bestUnrestricted
@@ -217,7 +218,7 @@ local function pickRedistributeTarget(item, fromIndex, session, character)
 		end
 		return bestUnrestricted.live, bestUnrestricted.index, bestUnrestricted.affinityTier
 	end
-	return nil, nil, nil
+	return nil, nil, nil, compatible and "destination_full" or "no_compatible_destination"
 end
 
 local function incrementSummaryCount(counts, key)
@@ -237,7 +238,9 @@ local function updateTypeCount(session, nodeIndex, fullType, delta)
 end
 
 local function updateAffinityCount(session, nodeIndex, item, delta)
-	local affinityKey = GlobalStorageSiK.ItemTaxonomy.affinityKeyFromItem(item)
+	local fullType = item and item.getFullType and item:getFullType() or nil
+	local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
+	local affinityKey = resolved and resolved.routingIdentity
 	if not affinityKey then return end
 	local counts = session.affinityCountsByNode[nodeIndex]
 	if not counts then
@@ -287,11 +290,44 @@ local function beginSession(player, networkId)
 	}, summary
 end
 
-local function stepIndex(session, startedAt)
+-- A job yields between batches. Re-resolve membership, permissions, rules and
+-- physical identity before using its captured item references again.
+local function revalidateSession(session, player)
+	if not GlobalStorageSiK.Permissions.canAccess(player, session.networkId) then return "no_permission" end
+	if GlobalStorageSiK.Permissions.shouldEnforce()
+		and not GlobalStorageSiK.Permissions.isAdminPlayer(player, session.networkId) then return "no_permission" end
+	local registry = GlobalStorageSiK.Zones.getRegistry()
+	local sourceFound = not session.sourceNodeId
+	session.matchTiersByType = {}
+	session.zonePriorityOf = buildZonePriorityLookup(registry, session.networkId)
+	for i = 1, #session.liveNodes do
+		local live = session.liveNodes[i]
+		local entry = live.entry and registry.nodes and registry.nodes[live.entry.id]
+		local zone = entry and registry.zones and registry.zones[entry.zoneId]
+		local allowed = entry and zone and zone.networkId == session.networkId
+			and entry.enabled ~= false and entry.membership ~= "excluded" and zone.enabled ~= false
+			and GlobalStorageSiK.Permissions.canAccessZone(player, session.networkId, entry.zoneId)
+		if allowed then
+			local object = GlobalStorageSiK.Network.findWorldObject(entry)
+			allowed = object and GlobalStorageSiK.Utils.getObjectContainer(object, entry.containerIndex) == live.container
+				and GlobalStorageSiK.Utils.isNetworkStorageContainer(object, entry.containerIndex)
+		end
+		live.unavailable = not allowed
+		if allowed then
+			live.entry, live.zoneRules, live.zoneEnabled = entry, zone.rules, true
+			live.zonePriority = zone.priority
+			if entry.id == session.sourceNodeId then sourceFound = true end
+		end
+	end
+	if not sourceFound then return "source_unavailable" end
+	return nil
+end
+
+local function stepIndex(session, startedAt, pacing)
 	local inspected = 0
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < MAX_INDEX_ITEMS_PER_STEP
-		and not timeBudgetExceeded(startedAt, inspected) do
+		and inspected < (pacing.indexItemsPerStep or 50)
+		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
 		local live = session.liveNodes[nodeIndex]
 		local container = live and live.container
@@ -320,21 +356,21 @@ local function stepIndex(session, startedAt)
 		session.nodeIndex = 1
 		session.itemIndex = 1
 	end
-	return inspected
+	return inspected, timeBudgetExceeded(startedAt, inspected, pacing)
 end
 
-local function stepMoves(session, player, summary, startedAt)
+local function stepMoves(session, player, summary, startedAt, pacing)
 	local inspected = 0
-	local configured = tonumber(GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()) or MAX_MOVES_PER_STEP
-	-- Una opción dañada o antigua con 0 no puede dejar el cursor vivo para
-	-- siempre. El techo local continúa prevaleciendo aunque Sandbox sea mayor.
-	local maxMoves = math.max(1, math.min(configured, MAX_MOVES_PER_STEP))
+	local maxMoves = pacing.maxMovesPerStep or 2
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < MAX_MOVE_ITEMS_PER_STEP
+		and inspected < (pacing.inspectedPerStep or 25)
 		and summary.moved < maxMoves
-		and not timeBudgetExceeded(startedAt, inspected) do
+		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
 		local refs = session.itemRefsByNode[nodeIndex] or {}
+		if session.liveNodes[nodeIndex].unavailable or (session.sourceNodeId
+			and (not session.liveNodes[nodeIndex].entry
+			or session.liveNodes[nodeIndex].entry.id ~= session.sourceNodeId)) then refs = {} end
 		if session.itemIndex > #refs then
 			session.nodeIndex = nodeIndex + 1
 			session.itemIndex = 1
@@ -347,7 +383,7 @@ local function stepMoves(session, player, summary, startedAt)
 			local container = fromLive and fromLive.container
 			local fullType = item and item.getFullType and item:getFullType() or nil
 			if item and container and container:contains(item) then
-				local target, targetIndex, targetTier = pickRedistributeTarget(item, nodeIndex, session, player)
+				local target, targetIndex, targetTier, targetReason = pickRedistributeTarget(item, nodeIndex, session, player)
 				if target and target.container and target.container ~= container then
 					if GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player) then
 						summary.moved = summary.moved + 1
@@ -364,6 +400,10 @@ local function stepMoves(session, player, summary, startedAt)
 					end
 				else
 					summary.skipped = summary.skipped + 1
+					if session.sourceNodeId then
+						summary.blockedReason = targetReason
+						summary.blocked = (summary.blocked or 0) + 1
+					end
 				end
 			else
 				-- El mundo puede cambiar mientras el job cede tiempo a otros procesos.
@@ -374,7 +414,7 @@ local function stepMoves(session, player, summary, startedAt)
 			end
 		end
 	end
-	return inspected
+	return inspected, timeBudgetExceeded(startedAt, inspected, pacing)
 end
 
 --- Redistribuye una porción acotada de la red y conserva el cursor/cachés en
@@ -385,27 +425,37 @@ end
 ---@param session table|nil
 ---@return table summary
 ---@return table|nil session
-function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session)
+function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session, pacing, options)
 	local summary = { moved = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil }
 	if session and session.networkId ~= networkId then session = nil end
 	if not session then
 		local initial
 		session, initial = beginSession(player, networkId)
 		if not session then return initial, nil end
+		session.pacing = pacing or GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
+		session.sourceNodeId = options and options.sourceNodeId or nil
 	end
+	local effectivePacing = session.pacing
+		or pacing or GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
+	session.pacing = effectivePacing
 	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
 		summary.reason = "remote_disabled"; return summary, session
 	end
 	if not GlobalStorageSiK.Power.networkPowered(networkId) then
 		summary.reason = "no_power"; return summary, session
 	end
+	local invalid = revalidateSession(session, player)
+	if invalid then summary.reason = invalid; return summary, session end
 
 	local startedAt = nowMs()
+	local inspected, budgetExhausted
 	if session.phase == "index" then
-		stepIndex(session, startedAt)
+		inspected, budgetExhausted = stepIndex(session, startedAt, effectivePacing)
 	else
-		stepMoves(session, player, summary, startedAt)
+		inspected, budgetExhausted = stepMoves(session, player, summary, startedAt, effectivePacing)
 	end
+	summary.inspected = inspected or 0
+	summary.budgetExhaustions = budgetExhausted and 1 or 0
 	summary.phase = session.phase
 	summary.checked = session.phase == "index" and session.indexed or session.processed
 	summary.total = session.total

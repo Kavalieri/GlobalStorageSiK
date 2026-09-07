@@ -15,8 +15,9 @@
 ]]
 
 require "TimedActions/ISBaseTimedAction"
+require "GS_UI_Feedback"
 require "GS_NetClient"
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_Addons"
 require "GS_Sandbox"
 
@@ -28,7 +29,13 @@ function GS_AddonInstallAction:isValid()
 		return false
 	end
 	if self.mode == "install" then
-		return GlobalStorageSiK.AddonRegistry.canInstallModule(self.character, self.addonId, self.networkId, self.anchor) == true
+		local ok, _, allowed = GSSiK.API.Addon.canInstall(
+			self.character,
+			self.addonId,
+			self.networkId,
+			self.anchor
+		)
+		return ok == true and allowed == true
 	end
 	-- Desinstalar: mismo par de requisitos ya revalidados por el boton antes
 	-- de arrancar esta accion (disquetera disponible + disquete de
@@ -60,8 +67,10 @@ end
 --- misma leccion: si se interrumpe, avisar localmente sin esperar red.
 function GS_AddonInstallAction:stop()
 	ISBaseTimedAction.stop(self)
-	if not self._performed and self.character and self.character.setHaloNote then
-		self.character:setHaloNote(GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"), 220, 180, 100, 300)
+	if not self._performed and self.character then
+		GlobalStorageSiK.UIFeedback.halo(self.character,
+			GlobalStorageSiK.I18n.text("IGUI_GS_CraftCancelled"),
+			220, 180, 100, 300, { tone = "warning", channel = "timed-action" })
 	end
 end
 

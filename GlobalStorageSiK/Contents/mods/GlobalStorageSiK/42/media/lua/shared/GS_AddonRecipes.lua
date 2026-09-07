@@ -5,13 +5,32 @@
 	Descripción: Serializa recetas de módulos registrados y ejecuta craft en servidor.
 ]]
 
-require "GS_AddonRegistry"
+require "GSSiK_API"
 require "GS_CraftUtils"
 require "GS_Sandbox"
 require "GS_I18n"
 require "GS_InventorySync"
 
 GlobalStorageSiK.AddonRecipes = GlobalStorageSiK.AddonRecipes or {}
+
+local AddonAPI = GSSiK.API.Addon
+local DEFAULT_MODULE_SKILL = AddonAPI.defaults().moduleSkillLevel
+
+local function addonDefinition(addonId)
+	local ok, _, definition = AddonAPI.get(addonId)
+	if ok then return definition end
+	return nil
+end
+
+local function addonIsActive(addonId)
+	local ok, _, active = AddonAPI.isActive(addonId)
+	return ok == true and active == true
+end
+
+local function playerKnowsModuleRecipe(player, addonId)
+	local ok, _, known = AddonAPI.playerKnowsModuleRecipe(player, addonId)
+	return ok == true and known == true
+end
 
 ---@param fullType string|nil
 ---@return string
@@ -81,13 +100,13 @@ function GlobalStorageSiK.AddonRecipes.canCraftModule(player, def)
 	if not player or not def then
 		return false, "invalid"
 	end
-	if not GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
+	if not addonIsActive(def.id) then
 		return false, "mod_off"
 	end
-	if not GlobalStorageSiK.AddonRegistry.playerKnowsModuleRecipe(player, def.id) then
+	if not playerKnowsModuleRecipe(player, def.id) then
 		return false, "book"
 	end
-	local skillLevel = def.moduleSkillLevel or GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL
+	local skillLevel = def.moduleSkillLevel or DEFAULT_MODULE_SKILL
 	local skillHave = GlobalStorageSiK.CraftUtils.getElectricityLevel(player)
 	if skillHave < skillLevel then
 		return false, "skill"
@@ -116,7 +135,7 @@ end
 ---@param addonId string
 ---@return table|nil
 function GlobalStorageSiK.AddonRecipes.serializeModuleForClient(player, addonId)
-	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
+	local def = addonDefinition(addonId)
 	if not def then
 		return nil
 	end
@@ -133,9 +152,9 @@ function GlobalStorageSiK.AddonRecipes.serializeModuleForClient(player, addonId)
 			ok = have >= (ing.count or 1),
 		})
 	end
-	local skillLevel = def.moduleSkillLevel or GlobalStorageSiK.AddonRegistry.DEFAULT_MODULE_SKILL
+	local skillLevel = def.moduleSkillLevel or DEFAULT_MODULE_SKILL
 	local skillHave = player and GlobalStorageSiK.CraftUtils.getElectricityLevel(player) or 0
-	local knowsBook = player and GlobalStorageSiK.AddonRegistry.playerKnowsModuleRecipe(player, addonId)
+	local knowsBook = player and playerKnowsModuleRecipe(player, addonId)
 	local nearBench = not GlobalStorageSiK.Sandbox.requireWorkbench()
 	local hasLight = true
 	if player and not (isServer and isServer()) then
@@ -174,8 +193,10 @@ end
 ---@return table
 function GlobalStorageSiK.AddonRecipes.serializeAllForClient(player)
 	local recipes = {}
-	for _, def in ipairs(GlobalStorageSiK.AddonRegistry.listSorted()) do
-		if GlobalStorageSiK.AddonRegistry.isModActive(def.id) then
+	local listed, _, definitions = AddonAPI.list()
+	if not listed then definitions = {} end
+	for _, def in ipairs(definitions) do
+		if addonIsActive(def.id) then
 			local row = GlobalStorageSiK.AddonRecipes.serializeModuleForClient(player, def.id)
 			if row then
 				recipes[#recipes + 1] = row
@@ -190,7 +211,7 @@ end
 ---@return boolean
 ---@return string
 function GlobalStorageSiK.AddonRecipes.craftModule(player, addonId)
-	local def = GlobalStorageSiK.AddonRegistry.get(addonId)
+	local def = addonDefinition(addonId)
 	if not def or not player then
 		return false, GlobalStorageSiK.I18n.text("IGUI_GS_CraftFail")
 	end

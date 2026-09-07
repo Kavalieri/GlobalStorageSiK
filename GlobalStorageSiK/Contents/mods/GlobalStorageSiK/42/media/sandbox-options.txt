@@ -1,5 +1,74 @@
 VERSION = 1,
 
+option GlobalStorageSiK.LocalPerformanceProfile
+{
+	type = enum,
+	numValues = 3,
+	default = 1,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalPerformanceProfile,
+}
+
+option GlobalStorageSiK.LocalBatchUnits
+{
+	type = integer,
+	default = 10,
+	min = 1,
+	max = 100,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalBatchUnits,
+}
+
+option GlobalStorageSiK.LocalBatchDelayMs
+{
+	type = integer,
+	default = 400,
+	min = 0,
+	max = 1000,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalBatchDelayMs,
+}
+
+option GlobalStorageSiK.LocalAutoSortMovesPerStep
+{
+	type = integer,
+	default = 2,
+	min = 1,
+	max = 20,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalAutoSortMovesPerStep,
+}
+
+option GlobalStorageSiK.LocalAutoSortMoveDelayMs
+{
+	type = integer,
+	default = 1000,
+	min = 0,
+	max = 2000,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalAutoSortMoveDelayMs,
+}
+
+option GlobalStorageSiK.LocalInspectedPerStep
+{
+	type = integer,
+	default = 25,
+	min = 10,
+	max = 500,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalInspectedPerStep,
+}
+
+option GlobalStorageSiK.LocalCpuBudgetMs
+{
+	type = integer,
+	default = 5,
+	min = 1,
+	max = 15,
+	page = GlobalStorageSiK_LocalPerformance,
+	translation = GlobalStorageSiK_LocalCpuBudgetMs,
+}
+
 option GlobalStorageSiK.TerminalProximityRange
 {
 	type = integer,
@@ -185,7 +254,7 @@ option GlobalStorageSiK.DebugMode
 option GlobalStorageSiK.DebugRelayToClients
 {
 	type = boolean,
-	default = true,
+	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugRelayToClients,
 }
@@ -198,13 +267,6 @@ option GlobalStorageSiK.DebugCatNetwork
 	translation = GlobalStorageSiK_DebugCatNetwork,
 }
 
-option GlobalStorageSiK.DebugDetailNetwork
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailNetwork,
-}
 
 option GlobalStorageSiK.DebugCatTerminalAccess
 {
@@ -230,13 +292,6 @@ option GlobalStorageSiK.DebugCatCraft
 	translation = GlobalStorageSiK_DebugCatCraft,
 }
 
-option GlobalStorageSiK.DebugDetailCraft
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailCraft,
-}
 
 option GlobalStorageSiK.DebugCatInventory
 {
@@ -246,13 +301,6 @@ option GlobalStorageSiK.DebugCatInventory
 	translation = GlobalStorageSiK_DebugCatInventory,
 }
 
-option GlobalStorageSiK.DebugDetailInventory
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailInventory,
-}
 
 option GlobalStorageSiK.DebugCatTooltip
 {
@@ -268,6 +316,14 @@ option GlobalStorageSiK.DebugCatRouter
 	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugCatRouter,
+}
+
+option GlobalStorageSiK.DebugCatRuleMigration
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatRuleMigration,
 }
 
 option GlobalStorageSiK.DebugCatNodeNaming
@@ -286,20 +342,12 @@ option GlobalStorageSiK.DebugCatSiKUI
 	translation = GlobalStorageSiK_DebugCatSiKUI,
 }
 
-option GlobalStorageSiK.DebugCatSiKUITable
+option GlobalStorageSiK.DebugCatRecordedMediaRuntime
 {
 	type = boolean,
 	default = false,
 	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatSiKUITable,
-}
-
-option GlobalStorageSiK.DebugCatSiKUIScroll
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatSiKUIScroll,
+	translation = GlobalStorageSiK_DebugCatRecordedMediaRuntime,
 }
 
 option GlobalStorageSiK.DebugCatSiKUITabs
@@ -310,28 +358,36 @@ option GlobalStorageSiK.DebugCatSiKUITabs
 	translation = GlobalStorageSiK_DebugCatSiKUITabs,
 }
 
+option GlobalStorageSiK.DebugCatTabIcons
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatTabIcons,
+}
+
+option GlobalStorageSiK.DebugCatExactWithdraw
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatExactWithdraw,
+}
+
+option GlobalStorageSiK.DebugCatOptionsTables
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatOptionsTables,
+}
+
 option GlobalStorageSiK.DebugCatSiKUISearch
 {
 	type = boolean,
 	default = false,
 	page = GlobalStorageSiK_Debug,
 	translation = GlobalStorageSiK_DebugCatSiKUISearch,
-}
-
-option GlobalStorageSiK.DebugCatCompatCategories
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugCatCompatCategories,
-}
-
-option GlobalStorageSiK.DebugDetailCompatCategories
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailCompatCategories,
 }
 
 option GlobalStorageSiK.DebugCatCapacityBonus
@@ -366,13 +422,6 @@ option GlobalStorageSiK.DebugCatAddons
 	translation = GlobalStorageSiK_DebugCatAddons,
 }
 
-option GlobalStorageSiK.DebugDetailCapacityBonus
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailCapacityBonus,
-}
 
 option GlobalStorageSiK.DebugCatLiteratureRead
 {
@@ -382,13 +431,6 @@ option GlobalStorageSiK.DebugCatLiteratureRead
 	translation = GlobalStorageSiK_DebugCatLiteratureRead,
 }
 
-option GlobalStorageSiK.DebugDetailRouter
-{
-	type = boolean,
-	default = false,
-	page = GlobalStorageSiK_Debug,
-	translation = GlobalStorageSiK_DebugDetailRouter,
-}
 
 option GlobalStorageSiK.DebugSkipTerminalAccess
 {
@@ -482,13 +524,6 @@ option GlobalStorageSiK.BulkDepositEnabled
 	translation = GlobalStorageSiK_BulkDepositEnabled,
 }
 
-option GlobalStorageSiK.OperationHaloFeedback
-{
-	type = boolean,
-	default = true,
-	page = GlobalStorageSiK_Items,
-	translation = GlobalStorageSiK_OperationHaloFeedback,
-}
 
 option GlobalStorageSiK.RejectDepositIfNoMatch
 {

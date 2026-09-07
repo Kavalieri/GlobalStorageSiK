@@ -1,190 +1,127 @@
---[[
-	GlobalStorageSiK - Pestaña Red ("Zonas y nodos", sin sub-pestañas)
-	Autor: SiK
-	Fecha: 2025-06-29 (simplificada 2026-08-26, dev41)
-	Descripción: Hasta dev40 esta pestaña tenía 3 sub-pestañas propias
-	             (Red | Admin | Nodos). Pedido explícito del usuario: Red se
-	             queda SOLO con la tabla "Zonas y nodos" (creador de zonas +
-	             tabla desplegable), ocupando toda la pestaña sin barra de
-	             sub-pestañas; "Admin" y el antiguo resumen "Red" se mudan tal
-	             cual a la nueva pestaña fija "Configuración" (ver
-	             GS_TerminalUI_Options.lua). Mismo contenido, mismo Lua de
-	             GS_TerminalUI_Nodes.lua, cero cambio de comportamiento interno.
-]]
+-- Global Storage SiK - declarative Red tab surface adapter.
+-- The validated tab-red surface owns visible widgets and geometry.
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
-require "GS_I18n"
-require "GS_TerminalUI_Scroll"
 require "GS_Log"
-require "GS_TerminalUI_Nodes"
+require "GS_UI_Framework"
 
-GlobalStorageSiK.TerminalNetwork = {}
+local TabNetworkSpec = require "GlobalStorageSiK/UI/Generated/TabNetwork"
+local TabNetworkContext = require "GlobalStorageSiK/UI/TabNetworkContext"
 
-local NETWORK_UI_VERSION = 25
+GlobalStorageSiK.TerminalNetwork = GlobalStorageSiK.TerminalNetwork or {}
 
---- Comprueba que la UI del scroll único sigue válida (sin widgets huérfanos).
-local function isUiHealthy(ui)
-	return ui and ui.built and ui.version == NETWORK_UI_VERSION
+local Network = GlobalStorageSiK.TerminalNetwork
+local SURFACE_ID = "tab-red"
+Network.surfaceId = SURFACE_ID
+
+local function panelBounds(panel)
+	local width = panel and panel.getWidth and panel:getWidth() or panel and panel.width or 1
+	local height = panel and panel.getHeight and panel:getHeight() or panel and panel.height or 1
+	return { x = 0, y = 0, w = math.max(1, tonumber(width) or 1),
+		h = math.max(1, tonumber(height) or 1) }
 end
 
---- Construye el estado persistente del scroll único (se llama una sola vez
---- por reconstrucción, p.ej. tras un cambio de ancho).
-local function buildUi(scroll)
-	GlobalStorageSiK.TerminalScroll.clear(scroll, false)
-	local prevUi = scroll._gsNetUi
-	return {
-		built          = true,
-		version        = NETWORK_UI_VERSION,
-		collapsedZones = (prevUi and prevUi.collapsedZones) or {},
-		nodesEmbedBuilt = false,
-		_lastInnerW    = GlobalStorageSiK.TerminalScroll.contentWidth(scroll),
-		_lastInnerH    = scroll.height or 0,
-	}
-end
-
---- Garantiza que networkPanel tiene un scroll creado y su UI es válida.
----@return ISPanel scroll
----@return table ui
-local function ensureScroll(networkPanel)
-	if not networkPanel.tabScroll then
-		local w = math.max(180, networkPanel:getWidth())
-		local h = math.max(160, networkPanel:getHeight())
-		local scroll = GlobalStorageSiK.TerminalScroll.createInteractive(networkPanel, 0, 0, w, h)
-		scroll:setVisible(true)
-		networkPanel.tabScroll = scroll
+local function release(panel)
+	if not panel then return false end
+	local released = false
+	if panel._sikNetworkSurface then
+		panel._sikNetworkSurface:dispose()
+		panel._sikNetworkSurface = nil
+		released = true
 	end
-	local scroll = networkPanel.tabScroll
-	if not isUiHealthy(scroll._gsNetUi) then
-		scroll._gsNetUi = buildUi(scroll)
+	if panel._sikNetworkContext then
+		panel._sikNetworkContext:dispose()
+		panel._sikNetworkContext = nil
+		released = true
 	end
-	return scroll, scroll._gsNetUi
+	panel.netZonesBuilt = false
+	return released
 end
 
--- ---------------------------------------------------------------------------
--- API pública
--- ---------------------------------------------------------------------------
+local function snapshotFor(terminal, panel, state)
+	local adapter = panel and panel._sikNetworkContext
+	if not adapter then return nil, "context_unavailable" end
+	local snapshot, reason = adapter:snapshot(state)
+	if not snapshot then return nil, reason end
+	snapshot.viewport = panelBounds(panel)
+	return snapshot
+end
 
---- Marca la pestaña Red como construida (el scroll real se crea perezosamente
---- en el primer refresh, igual que antes).
----@param terminal GS_TerminalUI
----@param networkPanel ISPanel
-function GlobalStorageSiK.TerminalNetwork.buildZonesSection(terminal, networkPanel)
-	if networkPanel.netZonesBuilt then return end
+function Network.buildZonesSection(terminal, networkPanel)
+	if not terminal or not networkPanel then return nil, "invalid_network_parent" end
+	release(networkPanel)
+	local adapter, adapterReason = TabNetworkContext.create(terminal)
+	if not adapter then return nil, adapterReason end
+	networkPanel._sikNetworkContext = adapter
+	local snapshot, snapshotReason = snapshotFor(terminal, networkPanel, terminal.terminalState)
+	if not snapshot then
+		adapter:dispose()
+		networkPanel._sikNetworkContext = nil
+		return nil, snapshotReason
+	end
+	local surface, surfaceReason = SiK.UI.SurfaceHost.mount(networkPanel, TabNetworkSpec, {
+		context = snapshot,
+		bounds = snapshot.viewport,
+		followParent = true,
+	})
+	if not surface then
+		adapter:dispose()
+		networkPanel._sikNetworkContext = nil
+		if GlobalStorageSiK.Log then
+			GlobalStorageSiK.Log.error("TerminalUI", "tab-red build failed", tostring(surfaceReason))
+		end
+		return nil, surfaceReason
+	end
+	networkPanel._sikNetworkSurface = surface
 	networkPanel.netZonesBuilt = true
-	networkPanel.networkMainScroll = nil
+	return surface
 end
 
---- Refresca el contenido (usado al cambiar a esta pestaña).
----@param terminal GS_TerminalUI
----@param state table|nil
-function GlobalStorageSiK.TerminalNetwork.refreshActiveTab(terminal, state)
-	GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, state)
+function Network.refreshActiveTab(terminal, state)
+	return Network.refreshScroll(terminal, state)
 end
 
---- Refresca el contenido al recibir datos nuevos del servidor.
----@param terminal GS_TerminalUI
----@param state table|nil
-function GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, state)
-	local np = terminal.networkPanel
-	if not np then return end
-	state = state or terminal.terminalState or {}
-
-	local scroll, ui = ensureScroll(np)
-	np.networkMainScroll = scroll
-
-	local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-
-	local y = 8
-	local ok, err = pcall(function()
-		y = GlobalStorageSiK.TerminalNodes.embedInNetworkScroll(scroll, terminal, ui, y, innerW)
-	end)
-	if not ok then
-		GlobalStorageSiK.Log.error("TerminalUI", "Network.refreshScroll failed", tostring(err))
-	end
-
-	local contentBottom = math.max((y or 8) + 16, 200)
-	ui.contentBottom = contentBottom
-	ui._lastInnerH = scroll.height or 0
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, contentBottom)
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
+function Network.refreshScroll(terminal, state)
+	local panel = terminal and terminal.networkPanel
+	if not panel then return nil, "network_panel_unavailable" end
+	local surface = panel._sikNetworkSurface
+	if not surface then return Network.buildZonesSection(terminal, panel) end
+	local snapshot, reason = snapshotFor(terminal, panel, state)
+	if not snapshot then return nil, reason end
+	return surface:refresh(snapshot)
 end
 
---- Alias de compatibilidad (código externo puede llamar layoutUi con scroll+ui).
----@param scroll ISPanel
----@param ui table
-function GlobalStorageSiK.TerminalNetwork.layoutUi(scroll, ui)
-	if not ui or not ui.built then return end
-	if ui.nodesEmbedPanel and GlobalStorageSiK.TerminalScroll.isLiveWidget(ui.nodesEmbedPanel) then
-		local innerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-		local embedH = ui.nodesEmbedHeight or math.max(140, ui.nodesEmbedPanel:getHeight() or 140)
-		GlobalStorageSiK.TerminalScroll.setContentY(scroll, ui.nodesEmbedPanel, ui.nodesEmbedY or 8)
-		ui.nodesEmbedPanel:setWidth(innerW)
-		ui.nodesEmbedPanel:setHeight(embedH)
-		GlobalStorageSiK.TerminalNodes.layout(ui.nodesEmbedPanel, innerW, embedH, 0, 0)
-	end
+function Network.layoutUi(_, ui)
+	return ui
 end
 
---- Solo geometría: ajusta tamaños al cambiar dimensiones de ventana.
----@param terminal GS_TerminalUI
-function GlobalStorageSiK.TerminalNetwork.syncScrollLayout(terminal)
-	local np = terminal.networkPanel
-	if not np or not np.tabScroll then return end
-
-	local scroll = np.tabScroll
-	local ui = scroll._gsNetUi
-	if not ui then return end
-
-	local newInnerW = GlobalStorageSiK.TerminalScroll.contentWidth(scroll)
-	if ui._lastInnerW and math.abs(newInnerW - ui._lastInnerW) > 1 then
-		scroll._gsNetUi = nil
-		GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, terminal.terminalState)
-		if scroll._gsNetUi then scroll._gsNetUi._lastInnerW = newInnerW end
-		return
-	end
-	local newInnerH = scroll.height or 0
-	if not ui._lastInnerH or math.abs(newInnerH - ui._lastInnerH) > 1 then
-		ui._lastInnerH = newInnerH
-		GlobalStorageSiK.TerminalNetwork.refreshScroll(terminal, terminal.terminalState)
-		return
-	end
-
-	local savedOffset = GlobalStorageSiK.TerminalScroll.getScrollOffset(scroll)
-	GlobalStorageSiK.TerminalScroll.setContentHeight(scroll, ui.contentBottom or 200)
-	GlobalStorageSiK.TerminalScroll.setScrollOffset(scroll, savedOffset)
-	GlobalStorageSiK.TerminalScroll.ensureScrollBars(scroll)
+function Network.syncScrollLayout(terminal)
+	local panel = terminal and terminal.networkPanel
+	local surface = panel and panel._sikNetworkSurface
+	if not surface then return false end
+	return surface:reflow(panelBounds(panel))
 end
 
---- Layout externo: resize del panel de contenido al cambiar tamaño de ventana.
----@param terminal GS_TerminalUI
----@param innerW number
----@param innerH number
-function GlobalStorageSiK.TerminalNetwork.layout(terminal, innerW, innerH)
-	local np = terminal.networkPanel
-	if not np then return end
-
-	if np.tabScroll then
-		GlobalStorageSiK.TerminalScroll.resize(np.tabScroll, innerW, innerH)
-	end
-
-	if terminal.activeTabKey == "network" then
-		GlobalStorageSiK.TerminalNetwork.syncScrollLayout(terminal)
-	end
+function Network.layout(terminal, innerW, innerH)
+	local panel = terminal and terminal.networkPanel
+	local surface = panel and panel._sikNetworkSurface
+	if not surface then return false end
+	return surface:reflow({ x = 0, y = 0,
+		w = math.max(1, tonumber(innerW) or 1), h = math.max(1, tonumber(innerH) or 1) })
 end
 
---- Alias de compatibilidad (no usado internamente, pero puede llamarse desde legacy).
-function GlobalStorageSiK.TerminalNetwork.ensureUi(terminal, scroll)
-	return scroll and scroll._gsNetUi or {}
+function Network.ensureUi(terminal)
+	local panel = terminal and terminal.networkPanel
+	if not panel then return nil, "network_panel_unavailable" end
+	return panel._sikNetworkSurface or Network.buildZonesSection(terminal, panel)
 end
 
---- Devuelve el scroll de esta pestaña (usado por Scroll utils).
----@param terminal GS_TerminalUI
----@return ISPanel[]
-function GlobalStorageSiK.TerminalNetwork.getAllTabScrolls(terminal)
-	local np = terminal and terminal.networkPanel
-	if np and np.tabScroll then
-		return { np.tabScroll }
-	end
+-- SiK.UI Block/Table own the only scroll/gutter on this surface.
+function Network.getAllTabScrolls()
 	return {}
 end
+
+function Network.dispose(terminal)
+	return release(terminal and terminal.networkPanel)
+end
+
+return Network

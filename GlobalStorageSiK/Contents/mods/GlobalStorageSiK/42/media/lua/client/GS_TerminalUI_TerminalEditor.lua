@@ -9,28 +9,29 @@
 	             (ISModalDialog vainilla, azul), sin ninguna otra opcion.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
-require "ISUI/ISTextEntryBox"
 require "GS_I18n"
 require "GS_NetClient"
-require "GS_SiK_UI_Core"
-require "GS_SiK_UI_Window"
 require "GS_TerminalUI_BlockedPanel"
+local UI = require "GS_UI_Framework"
+local Confirmation = require "GS_Confirmation"
 
 GlobalStorageSiK.TerminalTerminalEditor = {}
 GlobalStorageSiK.TerminalTerminalEditor.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
-local PAD = 14
 local LINE_GAP = 6
-local ENTRY_H = FONT_HGT_SMALL + 8
-local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 420
+local CONTROL_METRICS = UI.Controls.metrics("compact")
+local PANEL_W = UI.Modal.STANDARD_MODAL_W
 
-GS_TerminalEditorUI = ISPanel:derive("GS_TerminalEditorUI")
+local function addCopy(parent, x, y, width, text, tone)
+	return UI.Controls.copyText(parent, {
+		x = x, y = y, w = width, text = text, font = UIFont.Small,
+		tone = tone or "textMuted", playerNum = parent.playerNum,
+	})
+end
+
+GS_TerminalEditorUI = UI.Window.derive("GS_TerminalEditorUI")
 
 ---@param row table|nil
 ---@return string
@@ -43,31 +44,45 @@ local function statusText(row)
 end
 
 function GS_TerminalEditorUI:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
-	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
+	UI.Modal.apply(self, {
+		kind = "compact", resizable = true, contentMode = "dock",
+		title = T("IGUI_GS_TerminalEditorTitle"),
+		onClose = function()
+			if self.editorDock then self.editorDock:dispose(); self.editorDock = nil end
+			GlobalStorageSiK.TerminalTerminalEditor.instance = nil
+		end,
+	})
+	self:setHeader({ titleParts = { prefix = T("IGUI_GS_TerminalEditorTitle"), name = self.row.label } })
+	local originalReflow = self.reflow
+	self.reflow = function(panel)
+		originalReflow(panel)
+		panel:reflowEditor()
+		return panel
+	end
 	self:buildLayout()
+end
+
+local function layoutHost(panel)
+	local host = panel.contentHost or panel
+	local rect = host and host.contentRect and host:contentRect()
+	if not rect then
+		local frame = panel:contentRect()
+		rect = frame and frame.w and { x = 0, y = 0, w = frame.w, h = frame.h } or { x = 0, y = 0, w = 0, h = 0 }
+	end
+	return host, rect
 end
 
 function GS_TerminalEditorUI:destroy()
 	GlobalStorageSiK.TerminalTerminalEditor.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
+	if self.close then
+		self:close("product")
+	else
+		self:setVisible(false)
+		if self.removeFromUIManager then self:removeFromUIManager() end
 	end
-end
-
-function GS_TerminalEditorUI:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
-		return true
-	end
-	return ISPanel.onKeyRelease(self, key)
 end
 
 --- Refresca despues de una accion con exito: la ventana principal ya recibe
@@ -113,7 +128,8 @@ end
 function GS_TerminalEditorUI:onToggleCoverage()
 	local marking = GlobalStorageSiK.TerminalBlockedPanel.toggleSingleTerminalCoverage(self.row)
 	if self.coverageBtn then
-		self.coverageBtn._sikUiLabel = marking and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
+		self.coverageBtn:setText(marking and T("IGUI_GS_HideTerminalCoverage")
+			or T("IGUI_GS_ShowTerminalCoverage"))
 	end
 end
 
@@ -125,105 +141,77 @@ function GS_TerminalEditorUI:onDelete()
 	self:closeAfterAction()
 end
 
---- Eliminar definitivamente un terminal SANO (presente, no suspendido/ausente)
---- puede sorprender - se pide confirmacion. Las entradas ya rotas/ausentes se
---- borran directo, no hay nada real que perder ahi.
+--- Toda eliminación de terminal, también una entrada ausente o rota, requiere
+--- confirmación explícita antes de enviar la mutación autoritativa.
 function GS_TerminalEditorUI:onDeleteClicked()
-	local healthy = self.row and not self.row.missing and self.row.present ~= false
-		and not self.row.suspended and not self.row.unknown
-	if not healthy then
-		self:onDelete()
-		return
-	end
-	GlobalStorageSiK.SiK_UI.Modal.confirm(T("IGUI_GS_UninstallConfirm"), function()
-		self:onDelete()
-	end)
+	Confirmation.show({
+		owner = self,
+		title = T("IGUI_GS_TerminalEditorTitle"),
+		question = T("IGUI_GS_UninstallQuestion"),
+		consequences = T("IGUI_GS_UninstallConsequences"),
+		onAccept = function() self:onDelete() end,
+	})
 end
 
 function GS_TerminalEditorUI:buildLayout()
-	local pad = PAD
-	local y = pad
-	local textW = self.width - pad * 2
+	local host = self.contentHost
+	self.editorDock = UI.ScrollDock.create({ parent = host, x = 0, y = 0,
+		w = host.width, h = host.height, padding = 0, playerNum = self.playerNum })
+	local identity = UI.Block.create({ parent = self.editorDock.contentHost,
+		w = host.width, title = T("IGUI_GS_TerminalIdentity"),
+		tooltip = T("IGUI_GS_TerminalIdentityHint"), playerNum = self.playerNum })
+	self.identityBlock = identity
+	self.nameTitle = addCopy(identity.childParent, 0, 0, host.width,
+		T("IGUI_GS_TerminalEditorNameLabel"), "text")
+	self.nameEntry = UI.Controls.field(identity.childParent, {
+		text = self.row.label or "", playerNum = self.playerNum,
+		onSubmit = function() self:onRename() end,
+	})
 	local row = self.row
-
-	local title = GlobalStorageSiK.SiK_UI.createWindowTitleLabel(pad, y, T("IGUI_GS_TerminalEditorTitle"))
-	self:addChild(title)
-	y = y + FONT_HGT_MEDIUM + LINE_GAP
-
-	local coordsLbl = ISLabel:new(pad, y, FONT_HGT_SMALL,
-		string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0),
-		0.78, 0.82, 0.88, 1, UIFont.Small, true)
-	coordsLbl:initialise()
-	self:addChild(coordsLbl)
-	y = y + FONT_HGT_SMALL + 2
-
-	local statusLbl = ISLabel:new(pad, y, FONT_HGT_SMALL,
-		T("IGUI_GS_TerminalEditorStatus", statusText(row), row.controller and T("IGUI_GS_TerminalController") or T("IGUI_GS_TerminalSecondary")),
-		0.7, 0.75, 0.8, 1, UIFont.Small, true)
-	statusLbl:initialise()
-	self:addChild(statusLbl)
-	y = y + FONT_HGT_SMALL + LINE_GAP + 4
-
-	-- ── Nombre ───────────────────────────────────────────────────────────
-	local nameTitle = ISLabel:new(pad, y, FONT_HGT_SMALL, T("IGUI_GS_TerminalEditorNameLabel"), 0.88, 0.9, 0.94, 1, UIFont.Small, true)
-	nameTitle:initialise()
-	self:addChild(nameTitle)
-	y = y + FONT_HGT_SMALL + 4
-
-	local renameW = 110
-	self.nameEntry = ISTextEntryBox:new(row.label or "", pad, y, textW - renameW - 6, ENTRY_H)
-	self.nameEntry:initialise()
-	GlobalStorageSiK.SiK_UI.styleTextEntry(self.nameEntry)
-	self.nameEntry:instantiate()
-	self:addChild(self.nameEntry)
-
-	self.renameBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad + textW - renameW, y, renameW, ENTRY_H, T("IGUI_GS_TerminalEditorRenameBtn"), self, function()
-			self:onRename()
-		end)
-	self:addChild(self.renameBtn)
-	y = y + ENTRY_H + LINE_GAP + 8
-
-	-- ── Acciones ─────────────────────────────────────────────────────────
+	self.statusLabel = addCopy(identity.childParent, 0, 0, host.width,
+		T("IGUI_GS_TerminalEditorStatus", statusText(row),
+			row.controller and T("IGUI_GS_TerminalController") or T("IGUI_GS_TerminalSecondary"))
+		.. " " .. T("IGUI_GS_PunctuationMiddleDot") .. " "
+		.. string.format("%d, %d, %d", row.x or 0, row.y or 0, row.z or 0), "textMuted")
+	self.actionsBlock = UI.Block.create({ parent = self.editorDock.fixedBottomHost,
+		w = host.width, title = T("IGUI_GS_PermColActions"),
+		tooltip = T("IGUI_GS_TerminalActionsHint"), playerNum = self.playerNum })
+	local actions = self.actionsBlock.childParent
 	local isActive = not row.missing and row.present ~= false and not row.suspended and not row.unknown
-	if isActive and not row.controller then
-		self.controllerBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorMakeControllerBtn"), self, function()
-				self:onSetController()
-			end)
-		self:addChild(self.controllerBtn)
-		y = y + BTN_H + LINE_GAP
-	end
+	self.controllerBtn = UI.Controls.button(actions, {
+		text = T("IGUI_GS_TerminalEditorMakeControllerBtn"), enabled = isActive and not row.controller,
+		playerNum = self.playerNum, onClick = function() self:onSetController() end })
+	self.suspendBtn = UI.Controls.button(actions, {
+		text = T("IGUI_GS_TerminalEditorSuspendBtn"), enabled = isActive,
+		playerNum = self.playerNum, onClick = function() self:onSuspend() end })
+	self.deleteBtn = UI.Controls.button(actions, {
+		text = T("IGUI_GS_TerminalEditorDeleteBtn"), danger = true,
+		playerNum = self.playerNum, onClick = function() self:onDeleteClicked() end })
+	self:reflowEditor()
+	UI.Modal.fitContent(self, self.identityBlock.h + self.actionsBlock.h + 8,
+		{ bottomPadding = 0, center = true })
+	self:reflowEditor()
+end
 
-	if isActive then
-		self.suspendBtn = GlobalStorageSiK.SiK_UI.createButton(
-			pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorSuspendBtn"), self, function()
-				self:onSuspend()
-			end)
-		self:addChild(self.suspendBtn)
-		y = y + BTN_H + LINE_GAP
-	end
-
-	local coverageLabel = GlobalStorageSiK.TerminalBlockedPanel._singleMarking
-		and GlobalStorageSiK.TerminalBlockedPanel._singleMarkedRow == row
-		and T("IGUI_GS_HideTerminalCoverage") or T("IGUI_GS_ShowTerminalCoverage")
-	self.coverageBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, coverageLabel, self, function()
-			self:onToggleCoverage()
-		end)
-	self:addChild(self.coverageBtn)
-	y = y + BTN_H + LINE_GAP
-
-	self.deleteBtn = GlobalStorageSiK.SiK_UI.createButton(
-		pad, y, textW, BTN_H, T("IGUI_GS_TerminalEditorDeleteBtn"), self, function()
-			self:onDeleteClicked()
-		end)
-	self:addChild(self.deleteBtn)
-	y = y + BTN_H + pad
-
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	GlobalStorageSiK.SiK_UI.centerModal(self)
+function GS_TerminalEditorUI:reflowEditor()
+	if not self.editorDock or self._layoutBusy then return end
+	self._layoutBusy = true
+	local host = self.contentHost
+	self.editorDock:reflow({ x = 0, y = 0, w = host.width, h = host.height })
+	local width = self.editorDock:getContentRect().w
+	self.identityBlock:setBounds(0, 0, width, self.identityBlock.h)
+	local identity = self.identityBlock:beginColumn()
+	identity:block(self.nameTitle, self.nameTitle.height)
+	identity:block(self.nameEntry, CONTROL_METRICS.inputHeight)
+	identity:block(self.statusLabel, self.statusLabel.height)
+	self.editorDock:setContentHeight(identity:finish())
+	self.actionsBlock:setBounds(0, 0, host.width, self.actionsBlock.h)
+	local actions = self.actionsBlock:beginColumn()
+	actions:row(CONTROL_METRICS.buttonHeight, {
+		{ widget = self.controllerBtn }, { widget = self.suspendBtn },
+		{ widget = self.deleteBtn } })
+	self.editorDock:setFixedBottomHeight(actions:finish())
+	self._layoutBusy = false
 end
 
 --- Abre (o reemplaza) el editor de un terminal concreto.
@@ -243,6 +231,6 @@ function GlobalStorageSiK.TerminalTerminalEditor.open(terminal, row)
 	ui.terminal = terminal
 	ui.row = row
 	ui:initialise()
-	ui:addToUIManager()
+	UI.Modal.presentChild(terminal, ui)
 	GlobalStorageSiK.TerminalTerminalEditor.instance = ui
 end

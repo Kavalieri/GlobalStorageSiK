@@ -7,27 +7,23 @@
 	GS_PCAcquireUI.lua, incluido el refresco en vivo de bajo coste.
 ]]
 
-require "ISUI/ISPanel"
-require "ISUI/ISLabel"
 require "GS_I18n"
 require "GS_NetClient"
 require "GS_Sandbox"
 require "GS_ReaderAcquire"
-require "GS_SiK_UI_Core"
+local UI = require "GS_UI_Framework"
 require "TimedActions/GS_AcquireReaderAction"
 
 GlobalStorageSiK.ReaderAcquireUI = {}
 GlobalStorageSiK.ReaderAcquireUI.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
-local LINE_GAP = 4
-local BTN_H = FONT_HGT_SMALL + 10
-local PANEL_W = 640
+local BLOCK_GAP = 8
+local CONTROL_METRICS = UI.Controls.metrics("task")
+local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
 
-GS_ReaderAcquireUI = ISPanel:derive("GS_ReaderAcquireUI")
+GS_ReaderAcquireUI = UI.Window.derive("GS_ReaderAcquireUI")
 
 ---@return string[]
 local function itemDisplayNames()
@@ -50,7 +46,7 @@ local function buildStatusLines(player)
 	local status = GlobalStorageSiK.ReaderAcquire.status(player)
 	local lines = {}
 	lines[#lines + 1] = {
-		text = (status.manual and T("IGUI_GS_ReaderAcquireHasManual") or T("IGUI_GS_ReaderAcquireNeedManual")),
+		text = T("IGUI_GS_ProgrammingRecipeRequirement", GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.ReaderAcquire.MANUAL_ITEM)),
 		ok = status.manual,
 		icon = GlobalStorageSiK.ReaderAcquire.MANUAL_ITEM,
 	}
@@ -90,79 +86,97 @@ local function buildStatusLines(player)
 end
 
 function GS_ReaderAcquireUI:initialise()
-	ISPanel.initialise(self)
+	UI.Window.callBase(self, "initialise")
 	-- Mismo fondo que la ventana principal del terminal (GS_TerminalUI.lua),
 	-- no el tono azulado que usaban antes las ventanas propias sueltas.
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
-	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
-	GlobalStorageSiK.SiK_UI.setupModalPanel(self, function()
-		self:destroy()
-	end, PAD)
+	UI.Modal.apply(self, {
+		kind = "task", padding = PAD, playerNum = self.playerNum,
+		owner = self.modalOwner, resizable = false,
+		title = T("IGUI_GS_ReaderAcquireOpenBtn"),
+		onClose = function()
+			GlobalStorageSiK.ReaderAcquireUI.instance = nil
+		end,
+	})
 	self:buildLayout()
 end
 
 function GS_ReaderAcquireUI:destroy()
 	GlobalStorageSiK.ReaderAcquireUI.instance = nil
-	self:setVisible(false)
-	if self.removeFromUIManager then
-		self:removeFromUIManager()
-	end
+	if self._sikWindowApplied and not self._sikDisposed then
+		UI.Modal.close(self, "destroy")
+	elseif self.removeFromUIManager then self:removeFromUIManager() end
 end
 
-function GS_ReaderAcquireUI:onKeyRelease(key)
-	if key == Keyboard.KEY_ESCAPE then
-		self:destroy()
+local function clearContent(panel)
+	for i = #(panel._contentWidgets or {}), 1, -1 do
+		local child = panel._contentWidgets[i]
+		if child and child.dispose then child:dispose()
+		elseif child then
+			panel:removeChild(child)
+			if child.removeFromUIManager then child:removeFromUIManager() end
+		end
 	end
+	panel._contentWidgets = {}
+end
+
+local function own(panel, child)
+	panel._contentWidgets[#panel._contentWidgets + 1] = child
+	return child
+end
+
+local function requirementTexture(icon)
+	if type(icon) == "string" and GlobalStorageSiK.CraftUtils
+	and GlobalStorageSiK.CraftUtils.getItemIconTexture then
+		return GlobalStorageSiK.CraftUtils.getItemIconTexture(icon)
+	end
+	return icon
+end
+
+local function requirementsSignature(lines)
+	local parts = {}
+	for _, spec in ipairs(lines) do
+		parts[#parts + 1] = table.concat({ spec.text or "", spec.ok and "1" or "0" }, "|")
+	end
+	return table.concat(parts, "")
 end
 
 --- (Re)construye todo el contenido a partir del estado actual.
 function GS_ReaderAcquireUI:buildLayout()
-	for i = #(self.childrenInOrder or {}), 1, -1 do
-		local child = self.childrenInOrder[i]
-		if child ~= self.closeBtn then
-			self:removeChild(child)
-			if child.removeFromUIManager then child:removeFromUIManager() end
-		end
-	end
-
-	local pad = self.padding
-	local textW = self.width - pad * 2
-	local y = self.headerHeight + pad
-
-	local introLines = GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_ReaderAcquireIntro"), textW, UIFont.Small)
-	for _, line in ipairs(introLines) do
-		local lbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.75, 0.78, 0.82, 1, UIFont.Small, true)
-		lbl:initialise()
-		self:addChild(lbl)
-		y = y + FONT_HGT_SMALL + 2
-	end
-	y = y + 6
+	clearContent(self)
+	local host = self.contentHost or self
+	local rect = { x = 0, y = 0, w = host.width or 0, h = host.height or 0 }
+	local textW = rect.w
+	local requirements = own(self, UI.Block.create({
+		parent = host, x = rect.x, y = rect.y, w = textW,
+		title = T("IGUI_GS_AcquireRequirements"),
+		tooltip = not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled()
+			and T("IGUI_GS_SolderingIronFindHint") or T("IGUI_GS_AcquireRequirements"), playerNum = self.playerNum,
+	}))
+	local requirementColumn = requirements:beginColumn()
 
 	local lines, allReady = buildStatusLines(self.player)
-	local sigParts = {}
-	for _, spec in ipairs(lines) do
-		sigParts[#sigParts + 1] = spec.ok and "1" or "0"
-		y = GlobalStorageSiK.SiK_UI.addRequirementLine(self, pad, y, textW, spec.icon, spec.text, spec.ok)
-		y = y + 2
-	end
-	self._lastSig = table.concat(sigParts, "")
-	y = y + 10
+	local reqRect = requirements:getContentRect()
+	local function row(spec) return { text = spec.text, texture = requirementTexture(spec.icon),
+		tone = spec.ok and "success" or "danger" } end
+	local groups = { { rows = { row(lines[1]), row(lines[2]), row(lines[#lines - 1]), row(lines[#lines]) } },
+		{ rows = {} } }
+	for i = 3, #lines - 2 do groups[2].rows[#groups[2].rows + 1] = row(lines[i]) end
+	self.requirementsHandle = UI.Requirements.create({ parent = requirementColumn.parent,
+		x = 0, y = 0, w = reqRect.w, groups = groups, playerNum = self.playerNum })
+	requirementColumn:block(self.requirementsHandle.panel, self.requirementsHandle.height)
+	self._lastSig = requirementsSignature(lines)
+	self._layoutWidth = textW
 
-	-- Nota "vas a necesitar un soldador" (pedido 2026-08-26, "puertas de
-	-- entrada" del ecosistema) - solo cuando EnableSolderingIronCraft esta
-	-- desactivado (por defecto). Mismo texto que el tooltip del propio
-	-- soldador (GS_ItemNetworkTooltip.lua), sin duplicar la redaccion.
-	if not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled() then
-		for _, line in ipairs(GlobalStorageSiK.SiK_UI.wrapTextLines(T("IGUI_GS_SolderingIronFindHint"), textW, UIFont.Small)) do
-			local hintLbl = ISLabel:new(pad, y, FONT_HGT_SMALL, line, 0.62, 0.68, 0.72, 1, UIFont.Small, true)
-			hintLbl:initialise()
-			self:addChild(hintLbl)
-			y = y + FONT_HGT_SMALL + LINE_GAP
-		end
-		y = y + 6
-	end
+	requirementColumn:finish()
+
+	local actions = own(self, UI.Block.create({
+		parent = host, x = rect.x, y = requirements.y + requirements.h + BLOCK_GAP,
+		w = textW, title = T("IGUI_GS_PermColActions"),
+		tooltip = T("IGUI_GS_PermColActions"), playerNum = self.playerNum,
+	}))
+	local actionColumn = actions:beginColumn()
 
 	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
 	-- criterio aplicado a Programacion): antes el boton se dejaba SIEMPRE
@@ -172,26 +186,32 @@ function GS_ReaderAcquireUI:buildLayout()
 	-- de verdad mientras falte cualquier requisito, con el motivo en el
 	-- tooltip - la revalidacion en el momento del clic deja de hacer falta
 	-- porque un boton bloqueado no puede pulsarse.
-	self.craftBtn = GlobalStorageSiK.SiK_UI.createButton(pad, y, textW, BTN_H, T("IGUI_GS_ReaderAcquireCraftBtn"), self, function()
+	self.craftBtn = UI.Controls.button(actionColumn.parent, {
+		x = 0, y = 0, w = textW, h = CONTROL_METRICS.buttonHeight,
+		text = T("IGUI_GS_ReaderAcquireCraftBtn"), fullWidth = true,
+		enabled = allReady, locked = not allReady,
+		tooltip = not allReady and T("IGUI_GS_CraftMissing") or nil,
+		playerNum = self.playerNum, onClick = function()
 		if not self.player then return end
 		ISTimedActionQueue.add(GS_AcquireReaderAction:new(self.player))
 		self:destroy()
-	end, nil, true, not allReady)
-	if not allReady then
-		self.craftBtn:setTooltip(T("IGUI_GS_CraftMissing"))
-	end
-	self:addChild(self.craftBtn)
-	y = y + BTN_H + pad
+	end,
+	})
+	actionColumn:block(self.craftBtn, CONTROL_METRICS.buttonHeight)
+	actionColumn:finish()
 
-	self:setHeight(y)
-	GlobalStorageSiK.SiK_UI.layoutModalFrame(self, pad)
-	-- Centrar verticalmente SOLO la primera vez (apertura inicial): ver
-	-- comentario equivalente en GS_PCAcquireUI.lua:buildLayout(). Mismo bug,
-	-- mismo fix - refresh() reconstruia el layout en cada cambio de
-	-- inventario y la ventana saltaba al centro, perdiendo la posicion
-	-- arrastrada por el jugador.
-	if not self._positioned then
-		self:setY(math.floor((getCore():getScreenHeight() - self.height) / 2))
+	-- fitContent resuelve el viewport una vez; los refrescos conservan la
+	-- posicion a la que el jugador haya arrastrado la ventana.
+	local previousX = self:getX()
+	local previousY = self:getY()
+	local wasPositioned = self._positioned == true
+	UI.Modal.fitContent(self, actions.y + actions.h, {
+		contentBottom = true, bottomPadding = 0, center = not wasPositioned,
+	})
+	if wasPositioned then
+		self:setX(previousX)
+		self:setY(previousY)
+	else
 		self._positioned = true
 	end
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
@@ -213,12 +233,10 @@ function GS_ReaderAcquireUI:refresh(force)
 		return
 	end
 	local lines = buildStatusLines(self.player)
-	local sigParts = {}
-	for i = 1, #lines do
-		sigParts[#sigParts + 1] = lines[i].ok and "1" or "0"
-	end
-	local sig = table.concat(sigParts, "")
-	if not force and sig == self._lastSig then
+	local sig = requirementsSignature(lines)
+	local host = self.contentHost or self
+	local widthChanged = self._layoutWidth ~= (host.width or 0)
+	if not force and not widthChanged and sig == self._lastSig then
 		return
 	end
 	self._lastSig = sig
@@ -227,7 +245,8 @@ function GS_ReaderAcquireUI:refresh(force)
 end
 
 ---@param player IsoPlayer|nil
-function GlobalStorageSiK.ReaderAcquireUI.show(player)
+---@param owner ISPanel|nil
+function GlobalStorageSiK.ReaderAcquireUI.show(player, owner)
 	player = player or (GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()) or getPlayer()
 	if not player then
 		return
@@ -237,10 +256,11 @@ function GlobalStorageSiK.ReaderAcquireUI.show(player)
 	end
 	local ui = GS_ReaderAcquireUI:new(0, 0, PANEL_W, 200)
 	ui.player = player
+	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+	ui.modalOwner = owner
 	ui:initialise()
-	ui:addToUIManager()
-	GlobalStorageSiK.SiK_UI.centerModal(ui)
-	GlobalStorageSiK.SiK_UI.finalizeModalShow(ui)
+	if owner then UI.Modal.presentChild(owner, ui)
+	else UI.Modal.show(ui) end
 	GlobalStorageSiK.ReaderAcquireUI.instance = ui
 end
 
