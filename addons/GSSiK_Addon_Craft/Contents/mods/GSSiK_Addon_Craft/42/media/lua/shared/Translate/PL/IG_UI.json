@@ -20,5 +20,8 @@
 	"IGUI_GSSIK_CraftFailStart": "gra nie mogła rozpocząć akcji",
 	"IGUI_GSSIK_CraftFailInvalid": "receptura nie jest już prawidłowa",
 	"IGUI_GSSIK_CraftFailBatchMaterials": "brakuje materiałów do wykonania żądanej liczby sztuk",
-	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core jest nieaktualny; zaktualizuj Core przed tworzeniem serii"
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core jest nieaktualny; zaktualizuj Core przed tworzeniem serii",
+	"IGUI_GS_ItemActionRefill": "Uzupełnij materiałami z sieci",
+	"IGUI_GS_ItemActionReload": "Przeładuj materiałami z sieci",
+	"IGUI_GS_ProgramCraftDiskDesc": "Dyskietka instalacyjna drukarki 3D GS: wytwarzanie przedmiotów z materiałów sieci."
 }

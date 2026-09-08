@@ -20,5 +20,8 @@
 	"IGUI_GSSIK_CraftFailStart": "il gioco non ha potuto avviare l’azione",
 	"IGUI_GSSIK_CraftFailInvalid": "la ricetta non è più valida",
 	"IGUI_GSSIK_CraftFailBatchMaterials": "non ci sono materiali sufficienti per la quantità richiesta",
-	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core non è aggiornato; aggiorna Core prima della creazione in serie"
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core non è aggiornato; aggiorna Core prima della creazione in serie",
+	"IGUI_GS_ItemActionRefill": "Riempi con materiali della rete",
+	"IGUI_GS_ItemActionReload": "Ricarica con materiali della rete",
+	"IGUI_GS_ProgramCraftDiskDesc": "Dischetto di installazione della stampante 3D GS: crea oggetti con i materiali della rete."
 }

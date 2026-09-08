@@ -5,7 +5,7 @@
 	"IGUI_GS_SectionCraftRemote": "网络库存制作",
 	"IGUI_GS_CraftRemoteHint": "打开游戏原版制作界面；只要你有终端访问权限，网络容器就会被加入其中。",
 	"IGUI_GS_CraftOpenVanilla": "打开原版制作",
-	"IGUI_GS_CraftOpenNeat": "打开 Neat 制作",
+	"IGUI_GS_CraftOpenNeat": "打开 Neat Crafting",
 	"IGUI_GS_CraftOpenCook": "打开烹饪",
 	"IGUI_GS_CraftInterfaceNeat": "已检测界面：Neat Crafting",
 	"IGUI_GS_CraftInterfaceVanilla": "已检测界面：游戏制作",
@@ -20,5 +20,8 @@
 	"IGUI_GSSIK_CraftFailStart": "游戏无法启动该操作",
 	"IGUI_GSSIK_CraftFailInvalid": "配方已无效",
 	"IGUI_GSSIK_CraftFailBatchMaterials": "材料不足，无法完成所请求的批量制作",
-	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core 版本过旧；批量制作前请更新 Core"
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core 版本过旧；批量制作前请更新 Core",
+	"IGUI_GS_ItemActionRefill": "使用网络材料补充",
+	"IGUI_GS_ItemActionReload": "使用网络材料重新装填",
+	"IGUI_GS_ProgramCraftDiskDesc": "GS 3D 打印机外设的安装软盘：使用网络材料制作物品。"
 }

@@ -5,7 +5,7 @@
 	"IGUI_GS_SectionCraftRemote": "Herstellung mit Netzwerkinventar",
 	"IGUI_GS_CraftRemoteHint": "Öffnet das normale Herstellungsmenü; Netzwerkbehälter werden hinzugefügt, solange du Terminalzugriff hast.",
 	"IGUI_GS_CraftOpenVanilla": "Herstellung öffnen",
-	"IGUI_GS_CraftOpenNeat": "Neat Herstellung öffnen",
+	"IGUI_GS_CraftOpenNeat": "Neat Crafting öffnen",
 	"IGUI_GS_CraftOpenCook": "Kochen öffnen",
 	"IGUI_GS_CraftInterfaceNeat": "Erkannte Oberfläche: Neat Crafting",
 	"IGUI_GS_CraftInterfaceVanilla": "Erkannte Oberfläche: Spiel-Crafting",
@@ -20,5 +20,8 @@
 	"IGUI_GSSIK_CraftFailStart": "das Spiel konnte die Aktion nicht starten",
 	"IGUI_GSSIK_CraftFailInvalid": "das Rezept ist nicht mehr gültig",
 	"IGUI_GSSIK_CraftFailBatchMaterials": "für die gewünschte Menge sind nicht genügend Materialien vorhanden",
-	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core ist veraltet; aktualisiere Core vor der Stapelherstellung"
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core ist veraltet; aktualisiere Core vor der Stapelherstellung",
+	"IGUI_GS_ItemActionRefill": "Mit Netzwerkmaterialien auffüllen",
+	"IGUI_GS_ItemActionReload": "Mit Netzwerkmaterialien nachladen",
+	"IGUI_GS_ProgramCraftDiskDesc": "Installationsdiskette für den GS 3D-Drucker: Gegenstände mit Netzwerkmaterialien herstellen."
 }

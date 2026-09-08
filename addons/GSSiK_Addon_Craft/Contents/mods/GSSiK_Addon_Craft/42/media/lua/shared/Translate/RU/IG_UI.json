@@ -20,5 +20,8 @@
 	"IGUI_GSSIK_CraftFailStart": "игра не смогла запустить действие",
 	"IGUI_GSSIK_CraftFailInvalid": "рецепт больше недействителен",
 	"IGUI_GSSIK_CraftFailBatchMaterials": "недостаточно материалов для указанного количества",
-	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core устарел; обновите Core перед пакетным крафтом"
+	"IGUI_GSSIK_CraftFailCoreUpdate": "Global Storage Core устарел; обновите Core перед пакетным крафтом",
+	"IGUI_GS_ItemActionRefill": "Заполнить материалами из сети",
+	"IGUI_GS_ItemActionReload": "Перезарядить материалами из сети",
+	"IGUI_GS_ProgramCraftDiskDesc": "Установочная дискета 3D-принтера GS: изготовление предметов из материалов сети."
 }

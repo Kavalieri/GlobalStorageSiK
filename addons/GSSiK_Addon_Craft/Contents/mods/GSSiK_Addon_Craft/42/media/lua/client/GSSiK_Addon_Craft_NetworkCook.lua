@@ -180,6 +180,7 @@ local function patchedCookStartHandcraft(self, force, craftTimes)
 			if operationOk ~= true or not operation then
 				GSSiK_Addon_Craft.Log.debug("Operations",
 					"cookAttempt rejected code=" .. tostring(operationCode))
+				if operationCode == "ERR_SESSION" then return false end
 				return originalCookStartHandcraft(self, force, craftTimes)
 			end
 			local operationId = operation.operationId

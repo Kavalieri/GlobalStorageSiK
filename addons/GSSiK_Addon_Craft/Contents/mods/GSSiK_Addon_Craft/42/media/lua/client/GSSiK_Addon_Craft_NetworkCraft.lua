@@ -249,6 +249,7 @@ local function patchedStartHandcraft(self, force)
 			if operationOk ~= true or not operation then
 				GSSiK_Addon_Craft.Log.debug("Operations",
 					"craftAttempt rejected code=" .. tostring(operationCode))
+				if operationCode == "ERR_SESSION" then return false end
 				return originalStartHandcraft(self, force)
 			end
 			local operationId = operation.operationId
@@ -474,6 +475,7 @@ local function patchedNeatStartHandcraft(self, force, craftTimes)
 			if operationOk ~= true or not operation then
 				GSSiK_Addon_Craft.Log.debug("Operations",
 					"craftAttempt(neat) rejected code=" .. tostring(operationCode))
+				if operationCode == "ERR_SESSION" then return false end
 				return originalNeatStartHandcraft(self, force, craftTimes)
 			end
 			local operationId = operation.operationId
