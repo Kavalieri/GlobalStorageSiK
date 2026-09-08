@@ -11,5 +11,9 @@
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "les matériaux ne sont pas arrivés à temps",
 	"IGUI_GSSIK_BuilderFailCancelled": "action annulée",
 	"IGUI_GSSIK_BuilderFailStart": "le jeu n’a pas pu démarrer l’action",
-	"IGUI_GSSIK_BuilderFailInvalid": "l’emplacement n’est plus valide"
+	"IGUI_GSSIK_BuilderFailInvalid": "l’emplacement n’est plus valide",
+	"IGUI_GS_BuildInterfaceDetected": "Interface détectée : {1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "Construction du jeu",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Disquette d'installation du tableau blanc numérique GS : construire avec les matériaux du réseau."
 }

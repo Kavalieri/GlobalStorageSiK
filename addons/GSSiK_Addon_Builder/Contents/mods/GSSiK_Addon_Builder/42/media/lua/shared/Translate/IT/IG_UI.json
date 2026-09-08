@@ -11,5 +11,9 @@
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "i materiali non sono arrivati in tempo",
 	"IGUI_GSSIK_BuilderFailCancelled": "azione annullata",
 	"IGUI_GSSIK_BuilderFailStart": "il gioco non ha potuto avviare l’azione",
-	"IGUI_GSSIK_BuilderFailInvalid": "la posizione non è più valida"
+	"IGUI_GSSIK_BuilderFailInvalid": "la posizione non è più valida",
+	"IGUI_GS_BuildInterfaceDetected": "Interfaccia rilevata: {1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "Costruzione del gioco",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Dischetto di installazione della lavagna digitale GS: costruisci con i materiali della rete."
 }

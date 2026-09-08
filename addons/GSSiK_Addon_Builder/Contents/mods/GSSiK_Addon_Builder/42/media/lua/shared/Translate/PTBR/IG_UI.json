@@ -11,5 +11,9 @@
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "os materiais não chegaram a tempo",
 	"IGUI_GSSIK_BuilderFailCancelled": "ação cancelada",
 	"IGUI_GSSIK_BuilderFailStart": "o jogo não conseguiu iniciar a ação",
-	"IGUI_GSSIK_BuilderFailInvalid": "o local não é mais válido"
+	"IGUI_GSSIK_BuilderFailInvalid": "o local não é mais válido",
+	"IGUI_GS_BuildInterfaceDetected": "Interface detectada: {1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "Construção do jogo",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Disquete de instalação do quadro branco digital GS: construir com materiais da rede."
 }

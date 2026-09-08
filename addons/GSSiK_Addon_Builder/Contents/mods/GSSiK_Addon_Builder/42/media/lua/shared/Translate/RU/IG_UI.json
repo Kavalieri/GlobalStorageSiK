@@ -11,5 +11,9 @@
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "материалы не прибыли вовремя",
 	"IGUI_GSSIK_BuilderFailCancelled": "действие отменено",
 	"IGUI_GSSIK_BuilderFailStart": "игра не смогла запустить действие",
-	"IGUI_GSSIK_BuilderFailInvalid": "место больше недействительно"
+	"IGUI_GSSIK_BuilderFailInvalid": "место больше недействительно",
+	"IGUI_GS_BuildInterfaceDetected": "Обнаружен интерфейс: {1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "Строительство в игре",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Установочная дискета цифровой доски GS: строительство из материалов сети."
 }

@@ -11,5 +11,9 @@
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "materiały nie dotarły na czas",
 	"IGUI_GSSIK_BuilderFailCancelled": "akcja anulowana",
 	"IGUI_GSSIK_BuilderFailStart": "gra nie mogła rozpocząć akcji",
-	"IGUI_GSSIK_BuilderFailInvalid": "miejsce nie jest już prawidłowe"
+	"IGUI_GSSIK_BuilderFailInvalid": "miejsce nie jest już prawidłowe",
+	"IGUI_GS_BuildInterfaceDetected": "Wykryty interfejs: {1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "Budowanie w grze",
+	"IGUI_GS_ProgramBuilderDiskDesc": "Dyskietka instalacyjna cyfrowej tablicy GS: budowanie z materiałów sieci."
 }

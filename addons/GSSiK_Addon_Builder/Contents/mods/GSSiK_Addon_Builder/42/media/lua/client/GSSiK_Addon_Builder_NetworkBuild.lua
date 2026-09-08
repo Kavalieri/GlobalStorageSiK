@@ -581,6 +581,7 @@ local function patchedTryBuild(self, x, y, z)
 				if operationOk ~= true or not operation then
 					GSSiK_Addon_Builder.Log.debug("Operations",
 						"buildAttempt rejected code=" .. tostring(operationCode))
+					if operationCode == "ERR_SESSION" then return false end
 					return originalTryBuild(self, x, y, z)
 				end
 				local operationId = operation.operationId

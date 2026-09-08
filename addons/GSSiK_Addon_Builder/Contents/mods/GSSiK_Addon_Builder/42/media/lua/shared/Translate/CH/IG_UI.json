@@ -1,15 +1,19 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "写入Builder磁盘",
+	"IGUI_GS_ProgramBuilderDiskMenu": "寫入 Builder 磁碟",
 	"IGUI_GS_TabBuilder": "建造",
 	"IGUI_GS_AddonBuilderTitle": "建造",
-	"IGUI_GS_AddonBuilderDesc": "建造扩展：需要杂志（电力5级）。在扩展标签页制作并安装模块。",
-	"IGUI_GS_SectionBuildRemote": "網絡庫存建造",
-	"IGUI_GS_CraftOpenBuildVanilla": "打开原版建造",
-	"IGUI_GS_CraftOpenBuildNeat": "打开 Neat 建造",
-	"IGUI_GS_BuildRemoteHint": "打开游戏原版建造界面；只要你有终端访问权限，网络容器就会被加入其中。",
+	"IGUI_GS_AddonBuilderDesc": "建造擴充：需要雜誌（電力 5 級）。在擴充標籤頁製作並安裝模組。",
+	"IGUI_GS_SectionBuildRemote": "網路庫存建造",
+	"IGUI_GS_CraftOpenBuildVanilla": "開啟原版建造",
+	"IGUI_GS_CraftOpenBuildNeat": "開啟 Neat Building",
+	"IGUI_GS_BuildRemoteHint": "開啟遊戲原版建造介面；只要你有終端存取權限，網路容器就會加入其中。",
 	"IGUI_GSSIK_BuilderOperationFailedReturned": "建造失敗：{1}。借用的物品將退回倉庫。",
 	"IGUI_GSSIK_BuilderFailClaimTimeout": "材料未及時送達",
 	"IGUI_GSSIK_BuilderFailCancelled": "操作已取消",
 	"IGUI_GSSIK_BuilderFailStart": "遊戲無法啟動該操作",
-	"IGUI_GSSIK_BuilderFailInvalid": "放置位置已失效"
+	"IGUI_GSSIK_BuilderFailInvalid": "放置位置已失效",
+	"IGUI_GS_BuildInterfaceDetected": "已偵測介面：{1}",
+	"IGUI_GS_BuildInterfaceNeat": "Neat Building",
+	"IGUI_GS_BuildInterfaceVanilla": "遊戲建造介面",
+	"IGUI_GS_ProgramBuilderDiskDesc": "GS 數位白板周邊設備的安裝磁碟：使用網路材料建造。"
 }
