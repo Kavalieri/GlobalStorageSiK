@@ -15,6 +15,9 @@ GlobalStorageSiK.CategoryResolution = GlobalStorageSiK.CategoryResolution or {}
 
 local Resolution = GlobalStorageSiK.CategoryResolution
 local cache = {}
+if GlobalStorageSiK.CatalogManager.registerFullTypeCache then
+	GlobalStorageSiK.CatalogManager.registerFullTypeCache("category-resolution", cache)
+end
 
 local VANILLA_KEYS = {
 	Ammo = true, Appearance = true, Bag = true, Camping = true, Cartography = true,

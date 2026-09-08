@@ -20,7 +20,8 @@ GlobalStorageSiK.NetworkResolve.SESSION_EXEMPT = {
 	getNetworkList = true,
 	getRecoveryNetworks = true,
 	createNetwork = true,
-	setActiveNetwork = true,
+	getTaxonomyOverrides = true,
+	changeTaxonomyOverride = true,
 }
 
 ---@param command string|nil

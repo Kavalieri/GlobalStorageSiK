@@ -93,6 +93,14 @@ local SECURITY_TOKENS = toSet({ "padlock" })
 ---@return table|nil evidence
 local function classifySurvival(fullType, si)
 	if not si then return nil end
+	-- The seed tag proves identity even if a modded name also contains
+	-- battery/radio/engine, or the type name cannot be read at all.
+	-- Original regression: RyeSeed/CornSeed are seeds, while edible SeedPaste
+	-- has no isseed tag. Food explicitly yields to this same structural signal.
+	local isSeedTag = U.tagByLocation("base", "isseed")
+	if isSeedTag and U.hasTag(si, isSeedTag) then
+		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
+	end
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end
 	local itemType = U.itemTypeLower(si)
@@ -117,18 +125,6 @@ local function classifySurvival(fullType, si)
 		return { l1 = "vehicles", l2 = "consumable", l3 = nil }, {}, {}, U.evidence("name_vehicles_consumable", 30)
 	end
 
-	-- dev17 (hallazgo de sistemas sobre dev16): "Base.RyeSeed -> food_drink/
-	-- other_food, debería ganar Agricultura". Confirmado leyendo items.txt
-	-- real: RyeSeed/CornSeed/etc. llevan el tag oficial `base:isseed`
-	-- (Base.SeedPaste, harina de semilla molida y sí comestible, NO lo
-	-- lleva) - señal fuerte (confianza 95, tag oficial) comprobada ANTES
-	-- del token débil "seed" de abajo. GS_NativeClassifierFood.lua veta su
-	-- propio reclamo cuando detecta este mismo tag, así que esta regla
-	-- decide sin colisión.
-	local isSeedTag = U.tagByLocation("base", "isseed")
-	if isSeedTag and U.hasTag(si, isSeedTag) then
-		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
-	end
 	local displayCategory = U.displayCategoryLower(si)
 	-- DEV32.4.3: en runtime Kahlua algunos ScriptItem generados no devolvieron
 	-- `base:literature` por getItemType aunque sus propiedades B42 sí eran

@@ -130,6 +130,11 @@ function GlobalStorageSiK.DepositSources.getContainerWorldId(container)
 	if not container then
 		return nil
 	end
+	-- A bag is an inventory item, never its supporting world storage object.
+	local item = container.getContainingItem and container:getContainingItem() or nil
+	if item and item.getInventory and item:getInventory() == container then
+		return nil
+	end
 	local parent = container.getParent and container:getParent() or nil
 	if not parent or not parent.getSquare then
 		return nil
@@ -185,6 +190,58 @@ function GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container)
 	return false
 end
 
+--- Obtiene ID de ítem para clave de mochila.
+---@param item InventoryItem|nil
+---@return number|nil
+local function bagItemId(item)
+	if not item or not item.getID then
+		return nil
+	end
+	local ok, id = pcall(function()
+		return item:getID()
+	end)
+	-- Kahlua may expose a Java numeric value; normalize its wire identity.
+	id = ok and tonumber(tostring(id)) or nil
+	if id and id == id and id ~= math.huge
+		and id ~= -math.huge and id == math.floor(id) then
+		return id
+	end
+	return nil
+end
+
+-- Personal tabs follow ISInventoryPage: equipped containers and direct key rings.
+-- This does not expand the separate automatic deposit-all collection.
+local function isPersonalBagItem(player, item)
+	if not item or not item.getInventory or not bagItemId(item) then return false end
+	local keyRing = (ItemType and item.isItemType and item:isItemType(ItemType.KEY_RING))
+		or (ItemTag and item.hasTag and item:hasTag(ItemTag.KEY_RING))
+	return keyRing == true or (item.getCategory and item:getCategory() == "Container"
+		and player.isEquipped and player:isEquipped(item) == true)
+end
+
+local function collectInventoryTargets(player)
+	local list = GlobalStorageSiK.DepositSources.collectPlayerContainers(player)
+	local seen = {}
+	for i = 1, #list do seen[list[i]] = true end
+	local inv = player and player.getInventory and player:getInventory() or nil
+	local items = inv and inv.getItems and inv:getItems() or nil
+	if items then
+		for i = 0, items:size() - 1 do
+			local item = items:get(i)
+			-- Explicit targets remain accessible after unequipping into main.
+			-- This resolver list is separate from personal tabs and deposit-all.
+			if item and item.getInventory and bagItemId(item) then
+				local bag = item:getInventory()
+				if bag and not seen[bag] then
+					seen[bag] = true
+					list[#list + 1] = bag
+				end
+			end
+		end
+	end
+	return list
+end
+
 --- Indica si el contenedor pertenece al inventario del jugador (principal o mochila equipada).
 ---@param player IsoPlayer
 ---@param container ItemContainer|nil
@@ -205,6 +262,16 @@ function GlobalStorageSiK.DepositSources.isPlayerContainer(player, container)
 				if item and item.getInventory and item:getInventory() == container then
 					return true
 				end
+			end
+		end
+	end
+	local inv = player.getInventory and player:getInventory() or nil
+	local items = inv and inv.getItems and inv:getItems() or nil
+	if items then
+		for i = 0, items:size() - 1 do
+			local item = items:get(i)
+			if isPersonalBagItem(player, item) and item:getInventory() == container then
+				return true
 			end
 		end
 	end
@@ -231,6 +298,24 @@ function GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, contai
 		return false
 	end
 
+	-- A dropped InventoryContainer belongs to its world item, not the floor
+	-- UI's synthetic ItemContainer. Resolve the current square each time.
+	local item = container.getContainingItem and container:getContainingItem() or nil
+	if item and item.getInventory and item:getInventory() == container then
+		local world = item.getWorldItem and item:getWorldItem() or nil
+		local sq = world and world.getSquare and world:getSquare() or nil
+		if not sq or not world.getItem or world:getItem() ~= item then return false end
+		if sq:getZ() ~= playerSq:getZ()
+			or sq:DistToProper(playerSq) > GlobalStorageSiK.DepositSources.getRange() then
+			return false
+		end
+		if sq ~= playerSq and (not playerSq.canReachTo or not playerSq:canReachTo(sq)) then
+			return false
+		end
+		if SafeHouse and SafeHouse.isSafehouseAllowLoot
+			and not SafeHouse.isSafehouseAllowLoot(sq, player) then return false end
+		return true
+	end
 	local parent = container.getParent and container:getParent() or nil
 	if not parent then
 		return false
@@ -326,6 +411,17 @@ local function scanSquare(player, sq, list, seen)
 	if specials then
 		for i = 0, specials:size() - 1 do
 			tryAddFromObject(player, specials:get(i), list, seen)
+		end
+	end
+	-- Vanilla ISInventoryPage enumerates dropped bags through world objects.
+	local worldObjects = sq.getWorldObjects and sq:getWorldObjects() or nil
+	if worldObjects then
+		for i = 0, worldObjects:size() - 1 do
+			local world = worldObjects:get(i)
+			local item = world and world.getItem and world:getItem() or nil
+			if item and item.getInventory then
+				tryAddNearby(player, item:getInventory(), list, seen)
+			end
 		end
 	end
 	-- En dedicado la colección global de vehículos de la celda puede no estar
@@ -492,22 +588,6 @@ function GlobalStorageSiK.DepositSources.resolveEntry(player, listIndex)
 	return entries[idx]
 end
 
---- Obtiene ID de ítem para clave de mochila.
----@param item InventoryItem|nil
----@return number|nil
-local function bagItemId(item)
-	if not item or not item.getID then
-		return nil
-	end
-	local ok, id = pcall(function()
-		return item:getID()
-	end)
-	if ok then
-		return id
-	end
-	return nil
-end
-
 --- Genera clave estable de un contenedor accesible (cliente → servidor).
 ---@param player IsoPlayer
 ---@param container ItemContainer
@@ -515,6 +595,12 @@ end
 function GlobalStorageSiK.DepositSources.buildContainerKey(player, container)
 	if not container then
 		return nil
+	end
+	-- Item identity survives equipping, dropping and picking up this same bag.
+	local item = container.getContainingItem and container:getContainingItem() or nil
+	if item and item.getInventory and item:getInventory() == container then
+		local id = bagItemId(item)
+		return id and ("bag:" .. tostring(id)) or nil
 	end
 
 	local worldId = GlobalStorageSiK.DepositSources.getContainerWorldId(container)
@@ -558,6 +644,16 @@ function GlobalStorageSiK.DepositSources.buildContainerKey(player, container)
 		end
 	end
 
+	local inv = player and player.getInventory and player:getInventory() or nil
+	local items = inv and inv.getItems and inv:getItems() or nil
+	if items then
+		for i = 0, items:size() - 1 do
+			local item = items:get(i)
+			if isPersonalBagItem(player, item) and item:getInventory() == container then
+				return "bag:" .. tostring(bagItemId(item))
+			end
+		end
+	end
 	return nil
 end
 
@@ -571,7 +667,7 @@ function GlobalStorageSiK.DepositSources.resolveContainerKey(player, key)
 	end
 
 	local candidates = {}
-	for _, c in ipairs(GlobalStorageSiK.DepositSources.collectPlayerContainers(player)) do
+	for _, c in ipairs(collectInventoryTargets(player)) do
 		table.insert(candidates, c)
 	end
 	for _, c in ipairs(GlobalStorageSiK.DepositSources.collectNearbyContainers(player)) do

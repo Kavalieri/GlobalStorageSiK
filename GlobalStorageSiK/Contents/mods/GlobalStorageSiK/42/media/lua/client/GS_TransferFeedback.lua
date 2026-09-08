@@ -10,14 +10,27 @@ local reasonKeys = {
 	no_space = "IGUI_GS_TransferDestinationFull",
 	no_compatible_destination = "IGUI_GS_TransferNoCompatible",
 	source_unavailable = "IGUI_GS_TransferSourceUnavailable",
+	target_unavailable = "IGUI_GS_WithdrawTargetUnavailable",
+	invalid_destination = "IGUI_GS_WithdrawTargetUnavailable",
+	floor_state_uncertain = "IGUI_GS_TransferUncertain",
+	floor_sync_uncertain = "IGUI_GS_TransferUncertain",
+	floor_busy = "IGUI_GS_TransferWarning",
+	floor_request_stale = "IGUI_GS_TransferWarning",
+	floor_request_repeated = "IGUI_GS_TransferWarning",
+	special_drop_required = "IGUI_GS_TransferWarning",
+	move_failed = "IGUI_GS_TransferWarning",
+	transfer_failed = "IGUI_GS_TransferWarning",
 	no_permission = "IGUI_GS_RequireAdminRole",
 }
 
 function Feedback.showResult(args)
-	local transfer = args and args.transfer
+	local transfer = args and (args.transfer or args.deposit)
 	local reason = transfer and tostring(transfer.reason or "") or ""
 	if string.sub(reason, 1, 8) == "partial:" then reason = string.sub(reason, 9) end
 	local key = reasonKeys[reason]
+	if transfer and (transfer.reconcile == true or args.deposit and args.deposit.reconcile == true) then
+		key = "IGUI_GS_TransferUncertain"
+	end
 	if not key then return false end
 	if transfer.op == "redistribute" and reason == "destination_full" then key = "IGUI_GS_TransferCompatibleFull" end
 	local playerNum = tonumber(args.playerNum) or 0

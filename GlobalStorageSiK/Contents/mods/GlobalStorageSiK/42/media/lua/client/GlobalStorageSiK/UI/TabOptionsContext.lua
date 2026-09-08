@@ -32,33 +32,6 @@ local function semantic(envelope)
 	return type(envelope) == "table" and envelope or {}
 end
 
-local function networkId(row)
-	if type(row) ~= "table" then return nil end
-	return row.networkId or row.id
-end
-
-local function networkLabel(row)
-	if type(row) ~= "table" then return text("IGUI_GS_NetNoNetworks") end
-	return row.label or row.name or networkId(row) or "?"
-end
-
-local function networkRows(state)
-	if type(state.networks) == "table" and #state.networks > 0 then return state.networks end
-	local client = GlobalStorageSiK.Client
-	if client and type(client.networkList) == "table" then return client.networkList end
-	return {}
-end
-
-local function selectedNetwork(state, selectedId)
-	local rows = networkRows(state)
-	local wanted = selectedId or state.networkId or state.activeNetworkId
-		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
-	for index = 1, #rows do
-		if networkId(rows[index]) == wanted then return rows[index] end
-	end
-	return rows[1]
-end
-
 local function status(value, tone, indicator)
 	return { text = tostring(value or ""), tone = tone or "text", indicator = indicator == true }
 end
@@ -232,12 +205,6 @@ end
 -- fallback embedded in generated Lua and every locale can use its own catalog.
 local function runtimeI18n()
 	return {
-		["options.state.network.title"] = text("IGUI_GS_NetSelected"),
-		["options.state.network.help"] = text("IGUI_GS_OptionsNetworkHelp"),
-		["options.state.network.current"] = text("IGUI_GS_OptionsNetworkCurrent"),
-		["options.state.network.selected"] = text("IGUI_GS_NetSelected"),
-		["options.state.network.use"] = text("IGUI_GS_NetUseSelected"),
-		["options.state.network.refresh"] = text("IGUI_GS_NetRefreshList"),
 		["options.state.operational.title"] = text("IGUI_GS_OptionsEnergyTitle"),
 		["options.state.operational.help"] = text("IGUI_GS_OptionsEnergyHelp"),
 		["options.state.operational.power"] = text("IGUI_GS_ValPowerOk"),
@@ -275,7 +242,10 @@ local function runtimeI18n()
 		["options.admin.column.member-role"] = text("IGUI_GS_PermColRole"),
 		["options.admin.column.member-name"] = text("IGUI_GS_PermColMemberName"),
 		["options.admin.column.connection"] = text("IGUI_GS_PermColConnection"),
-		["options.admin.succession.help"] = text("IGUI_GS_PermSuccessionHint"),
+		["options.admin.succession.title"] = text("IGUI_GS_SuccessionTitle"),
+		["options.admin.succession.header-help"] = text("IGUI_GS_SuccessionHeaderHelp"),
+		["options.admin.succession.no-backup-help"] = text("IGUI_GS_SuccessionNoBackupHelp"),
+		["options.admin.succession.help"] = text("IGUI_GS_SuccessionBody"),
 		["options.admin.succession.warning"] = text("IGUI_GS_PermNoBackupWarn"),
 		["options.admin.claim"] = text("IGUI_GS_ClaimOwnershipButton"),
 		["options.admin.access.title"] = text("IGUI_GS_PermAddBlockTitle"),
@@ -290,18 +260,6 @@ function TabOptionsContext.create(terminal)
 	if type(terminal) ~= "table" then return nil, "invalid_terminal" end
 	local context = { terminal = terminal, terminalRows = {}, memberRows = {}, accessPicks = {}, disposed = false }
 	context.actions = {
-		["options.select-network"] = function(envelope) context.selectedNetworkId = semantic(envelope).value; return true end,
-		["options.use-network"] = function()
-			if not context.selectedNetworkId then return false, "network_not_selected" end
-			local client = GlobalStorageSiK.NetClient
-			if not client or type(client.sendNetworkCommand) ~= "function" then return false, "network_client_unavailable" end
-			return client.sendNetworkCommand("setActiveNetwork", context.selectedNetworkId, {})
-		end,
-		["options.refresh-networks"] = function()
-			local client = GlobalStorageSiK.NetClient
-			if not client or type(client.sendCommand) ~= "function" then return false, "network_client_unavailable" end
-			return client.sendCommand("getNetworkList", {})
-		end,
 		["options.open-terminal"] = function(envelope)
 			local row = context.terminalRows[semantic(envelope).rowKey]
 			local editor = GlobalStorageSiK.TerminalTerminalEditor
@@ -354,17 +312,6 @@ function TabOptionsContext.create(terminal)
 		if self.disposed then return nil, "disposed" end
 		local state = serverState or terminal.terminalState or {}
 		local perms = state.permissions or {}
-		local activeId = state.activeNetworkId or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
-		local selected = selectedNetwork(state, self.selectedNetworkId)
-		self.selectedNetworkId = networkId(selected) or activeId
-		local networkItems = {}
-		if selected and self.selectedNetworkId then
-			networkItems[1] = {
-				id = self.selectedNetworkId,
-				value = self.selectedNetworkId,
-				text = networkLabel(selected),
-			}
-		end
 		self.terminalRows, self.memberRows, self.accessPicks = {}, {}, {}
 		local terminals = normalizeTerminalRows(state, self.terminalRows)
 		local members = normalizeMemberRows(perms, self.memberRows)
@@ -381,17 +328,17 @@ function TabOptionsContext.create(terminal)
 		if antennaInstalled and GlobalStorageSiK.TerminalAccess
 			and GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork then
 			antennaRange = GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(
-				playerFor(terminal), self.selectedNetworkId, state.terminalAnchor)
+				playerFor(terminal), state.networkId or state.activeNetworkId, state.terminalAnchor)
 		end
 		local role = perms.playerRole or perms.role or "member"
 		local isOwner, isAdmin = role == "owner", role == "admin" or role == "owner"
+		local backupCount = tonumber(perms.backupMemberCount)
+		local backupKnown = backupCount ~= nil and backupCount == backupCount and backupCount >= 0
 		GlobalStorageSiK.Log.debug("OptionsTables", "snapshot rows terminals="
 			.. tostring(#terminals) .. " members=" .. tostring(#members))
 		return {
 			data = { options = {
 				state = {
-					selectedNetwork = { items = networkItems, selected = self.selectedNetworkId },
-					networkActions = {},
 					power = status(powered and text("IGUI_GS_ValPowerOk") or text("IGUI_GS_ValPowerOff"), powered and "success" or "danger", true),
 					terminalStatus = status(text("IGUI_GS_StatsTerminals", terminalCount)),
 					zonesStatus = status(text("IGUI_GS_StatsZones", zoneCount)),
@@ -404,26 +351,29 @@ function TabOptionsContext.create(terminal)
 				},
 				admin = {
 					terminalHeaderActions = {}, terminals = terminals, memberHeaderActions = {}, members = members,
-					successionHint = status(text("IGUI_GS_PermSuccessionHint"), "textMuted"), backupWarning = status(text("IGUI_GS_PermNoBackupWarn"), "warning"),
+					successionHint = status(text("IGUI_GS_SuccessionBody"), "textMuted"),
+					backupWarning = status(text("IGUI_GS_PermNoBackupWarn"), "textMuted"),
+					successionIndicator = { icon = "sik.alert.warning.24", tooltip = text("IGUI_GS_SuccessionTooltip"), severity = "warning" },
+					noBackupIndicator = { icon = "sik.alert.warning.24", tooltip = text("IGUI_GS_SuccessionNoBackupTooltip"), severity = "warning" },
 					canClaim = status(text("IGUI_GS_ClaimOwnershipButton"), "warning"),
 					access = { items = access, selected = self.selectedAccessKey,
 						subject = { items = access, selected = self.selectedAccessKey } }, accessActions = {},
 				},
 			} },
 			state = { options = {
-				state = { selectedNetwork = { items = networkItems, selected = self.selectedNetworkId } },
 				admin = { access = { subject = { items = access, selected = self.selectedAccessKey } } },
 			} },
 			conditions = {
-				owner = isOwner, ["owner-without-backup"] = isOwner and #(perms.allowedUsers or {}) == 0,
+				owner = isOwner, ["owner-without-backup"] = isOwner and backupKnown and backupCount == 0,
+				["owner-with-backup"] = isOwner and (not backupKnown or backupCount > 0),
 				["can-claim-as-admin"] = perms.canClaimAsAdmin == true, ["admin-or-owner"] = isAdmin,
 				["add-without-selection"] = isAdmin and self.selectedAccessKey == nil,
 				["tablet-addon-installed"] = antennaInstalled,
 			},
 			i18n = runtimeI18n(),
 			tableOptions = {
-				["options-terminals-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
-				["options-members-table"] = { rowHeight = 32, autoHeight = true, minRows = 0 },
+				["options-terminals-table"] = { autoHeight = true, minRows = 0 },
+				["options-members-table"] = { autoHeight = true, minRows = 0 },
 			},
 			actions = self.actions, playerNum = terminal.playerNum or 0,
 		}

@@ -11,7 +11,8 @@
 	  escopeta) usa el mismo limite honesto ya documentado (§3.4) - nunca
 	  revolver/subfusil por nombre.
 	- Municion: AmmoType real sobre un item que NO es el arma en si.
-	NO cubre todavia piezas de arma ni explosivos generales - sin una señal publica
+	- Piezas de arma: ItemType base:weaponpart confirmado en scripts B42.
+	NO cubre todavia explosivos generales - sin una señal publica
 	confirmada y fiable sobre el script item para distinguirlos (evita
 	inventar heuristicas de nombre, confianza 0 segun §6) - quedan
 	pendientes de un getter/tag confirmado en una ronda posterior. La unica
@@ -49,6 +50,12 @@ local function classifyCombat(fullType, si)
 			U.evidence("exact_fulltype_incendiary", 100)
 	end
 	if not si then return nil end
+	-- B42 declares weapon parts structurally, including RedDot and modded
+	-- parts whose names contain no weapon token. No translated category probe.
+	if U.itemTypeLower(si) == "base:weaponpart" then
+		return { l1 = "combat", l2 = "firearm", l3 = "weapon_part" },
+			{ weaponPart = true }, {}, U.evidence("script_item_type_weapon_part", 100)
+	end
 
 	-- Cuerpo a cuerpo: WeaponCategory es un Set - un arma puede tener mas de
 	-- una categoria (§3.5); la primera que coincida en este orden fijo

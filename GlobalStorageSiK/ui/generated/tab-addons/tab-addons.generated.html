@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;d1c7a8587c942667127a1cbaf2c51b8704d8b7b947e3366351accc40ee700147&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;b01f7523de52271a369439a341fe58557633a369d0b8ec09928844b7a1567145&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef&quot;,
+  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;e7c7721718c8825e709b4063298a4779daf88913e1df6f54f7e701efba51d7c8&quot;
 }">
   <title>tab-addons</title>
@@ -909,6 +909,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   font: 11px/1.45 var(--sik-font);
   text-align: left;
 }
+.sik-tooltip--scrollable { position: relative; left: 0; top: 0; width: 240px; height: 100px; display: block; pointer-events: auto; overscroll-behavior: contain; }
 .sik-floating-tooltip { position: fixed !important; z-index: 200 !important; display: block !important; pointer-events: none; box-shadow: 0 8px 22px #000c; }
 .sik-floating-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-floating-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
@@ -1728,6 +1729,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(refreshOverflow);
     document.querySelectorAll(".sik-block-viewport, .sik-scroll-region").forEach((viewport) => observer.observe(viewport));
+  }
+})();
+
+/* Product state fixture; uses the existing rail interaction and shared components. */
+(() => {
+  const reader = new URLSearchParams(location.search).get('reader') || 'installed';
+  const installed = reader === 'installed';
+  document.documentElement.dataset.reader = reader;
+  const tab = document.querySelector('[data-tab="programming"]');
+  const panel = document.querySelector('[data-panel="programming"]');
+  if (!installed) {
+    if (tab.classList.contains('is-active')) document.querySelector('[data-tab="warehouse"]').click();
+    tab.hidden = true;
+    panel.hidden = true;
+    panel.inert = true;
+    const slot = document.querySelector('[data-addon-id="Reader"]');
+    slot.dataset.addonState = 'not-installed';
+    slot.classList.remove('is-active');
+    const label = slot.querySelector('[data-addon-part="stateLabel"]');
+    label.textContent = 'No instalado aquí';
+    label.classList.remove('is-installed');
+    const tooltip = slot.querySelector('.sik-tooltip em');
+    tooltip.textContent = 'Instala la disquetera en este terminal para abrir Programación.';
   }
 })();
 </script>

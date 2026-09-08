@@ -169,7 +169,8 @@ function GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
 		return nil
 	end
 	local maxPerZone = GlobalStorageSiK.Sandbox.getMaxContainersPerZone()
-	local detected, limitHit, zoneLoaded, excludedEntryIds = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
+	local detected, limitHit, zoneLoaded, excludedEntryIds, scanError = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
+	if scanError then return nil, scanError end
 	if zoneLoaded then
 		zone.everScanLoaded = true
 	end
@@ -197,7 +198,7 @@ function GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	local totals = {
 		added = 0, updated = 0, offline = 0, zones = 0,
-		limitHit = false, outOfRange = 0, removedIneligible = 0,
+		limitHit = false, outOfRange = 0, removedIneligible = 0, failedZones = 0,
 	}
 	local maxPerZone = GlobalStorageSiK.Sandbox.getMaxContainersPerZone()
 	local zones = sortedNetworkZones(registry, networkId)
@@ -205,31 +206,31 @@ function GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 	for i = 1, #zones do
 		local zone = zones[i]
 		totals.zones = totals.zones + 1
-		local detected, limitHit, zoneLoaded, excludedEntryIds = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
-		if zoneLoaded then
-			zone.everScanLoaded = true
-		end
-		local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
-			registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded,
-			excludedEntryIds
-		)
-		totals.added = totals.added + summary.added
-		totals.updated = totals.updated + summary.updated
-		totals.offline = totals.offline + summary.offline
-		totals.outOfRange = totals.outOfRange + (summary.outOfRange or 0)
-		totals.removedIneligible = totals.removedIneligible + (summary.removedIneligible or 0)
-		if limitHit then
-			totals.limitHit = true
+		local detected, limitHit, zoneLoaded, excludedEntryIds, scanError = GlobalStorageSiK.ZoneScanner.scanZone(zone, maxPerZone)
+		if scanError then
+			totals.failedZones = totals.failedZones + 1
+		else
+			if zoneLoaded then zone.everScanLoaded = true end
+			local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
+				registry, zone, detected, GlobalStorageSiK.ZonePriority.zoneArea(zone), zoneLoaded,
+				excludedEntryIds
+			)
+			totals.added = totals.added + summary.added
+			totals.updated = totals.updated + summary.updated
+			totals.offline = totals.offline + summary.offline
+			totals.outOfRange = totals.outOfRange + (summary.outOfRange or 0)
+			totals.removedIneligible = totals.removedIneligible + (summary.removedIneligible or 0)
+			if limitHit then totals.limitHit = true end
 		end
 	end
 
-	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+	if totals.zones > totals.failedZones and GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 
 	-- Todas las zonas de esta red acaban de recorrer sus contenedores cargados.
 	-- GS_Index puede reutilizar esas capturas sin repetir el mismo barrido.
-	totals._freshSnapshotScope = "network"
+	if totals.failedZones == 0 then totals._freshSnapshotScope = "network" end
 	return totals
 end
 

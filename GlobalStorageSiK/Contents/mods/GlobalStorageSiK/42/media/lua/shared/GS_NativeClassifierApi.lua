@@ -31,6 +31,10 @@
 
 require "GS_CatalogManager"
 require "GS_NativeTaxonomyRegistry"
+require "GS_NativeCanonicalOverrides"
+require "GS_NativeEvidencePriority"
+require "GS_NativeSourceCategoryBridge"
+require "GS_NativeWorldOverrides"
 
 GlobalStorageSiK.NativeClassifier = GlobalStorageSiK.NativeClassifier or {}
 
@@ -39,6 +43,9 @@ GlobalStorageSiK.NativeClassifier = GlobalStorageSiK.NativeClassifier or {}
 --- por completo en cada cambio real de catalogEpoch, correcto por
 --- construccion, sin bookkeeping por entrada.
 local classificationCache = GlobalStorageSiK.CatalogManager.createEpochCache()
+if GlobalStorageSiK.CatalogManager.registerFullTypeCache then
+	GlobalStorageSiK.CatalogManager.registerFullTypeCache("native-classification", classificationCache)
+end
 
 -- Contadores de producto DEV30. Son deliberadamente escalares y se reinician
 -- con catalogEpoch: permiten demostrar que una apertura/filtro/sort posterior
@@ -60,13 +67,15 @@ local function resetMetrics()
 end
 
 GlobalStorageSiK.CatalogManager.onEpochChanged(resetMetrics)
+GlobalStorageSiK.CatalogManager.onEpochChanged(GlobalStorageSiK.NativeSourceCategoryBridge.resetMetrics)
 
 --- Lista ordenada de clasificadores por bloque, registrados por cada ronda
 --- de implementacion (Combate, Herramientas, Materiales...). Cada
 --- clasificador es function(fullType, scriptItem) -> primaryPath, facets,
 --- attributes, evidence | nil (nil si no le corresponde clasificar este
 --- fullType - el siguiente clasificador de la lista lo intenta). Se prueban
---- en el orden de registro, nunca en paralelo ni por prioridad implicita.
+--- en el orden de registro; ese orden deshace empates de evidencia L1.
+--- Las prioridades explicitas viven en GS_NativeEvidencePriority.
 local blockClassifiers = {}
 --- Nombre legible de cada bloque (mismo indice que blockClassifiers) - solo
 --- para diagnostico (auditoria, errores) - nunca decide nada por si mismo.
@@ -136,7 +145,7 @@ local function buildPrimaryPath(l1, l2, l3)
 end
 
 --- Construye el NativeClassificationResult final para un fullType, a partir
---- de lo que devuelva el primer clasificador de bloque que reclame el tipo.
+--- de la evidencia mas fuerte; el orden de registro deshace los empates.
 --- Nunca instancia el objeto (los clasificadores de bloque reciben el
 --- ScriptItem ya resuelto via GlobalStorageSiK.I18n.getScriptItem, misma
 --- fuente unica de siempre - nunca sm:getItem a pelo).
@@ -186,11 +195,26 @@ local function computeClassification(fullType)
 		}
 	end
 
+	-- Product corrections precede heuristics, but never override debug exclusion.
+	local canonicalPath, canonicalFacets, canonicalAttributes, canonicalEvidence =
+		GlobalStorageSiK.NativeCanonicalOverrides.resolve(fullType, scriptItem)
+	if canonicalPath then
+		return {
+			schemaVersion = 1,
+			catalogEpoch = GlobalStorageSiK.CatalogManager.getEpoch(),
+			catalogFingerprint = GlobalStorageSiK.CatalogManager.getCatalogFingerprint(),
+			fullType = fullType, classificationScope = "script",
+			primaryPath = canonicalPath, facets = canonicalFacets,
+			attributes = canonicalAttributes, evidence = canonicalEvidence,
+			legacyAliases = {},
+		}
+	end
 	local blockErrors = nil
+	local bestResult, bestRank = nil, -1
 	for i = 1, #blockClassifiers do
 		local ok, primaryPath, facets, attributes, evidence = pcall(blockClassifiers[i], fullType, scriptItem)
 		if ok and primaryPath then
-			return {
+			local result = {
 				schemaVersion = 1,
 				catalogEpoch = GlobalStorageSiK.CatalogManager.getEpoch(),
 				catalogFingerprint = GlobalStorageSiK.CatalogManager.getCatalogFingerprint(),
@@ -202,11 +226,32 @@ local function computeClassification(fullType)
 				evidence = evidence or { primary = { source = "unknown", scope = "script", confidence = 0 }, supporting = {}, conflicting = {} },
 				legacyAliases = {},
 			}
+			local rank, kind = GlobalStorageSiK.NativeEvidencePriority.resolve(primaryPath, evidence, scriptItem)
+			if result.evidence.primary then result.evidence.primary.l1Kind = kind end
+			if rank > bestRank then bestResult, bestRank = result, rank end
+			-- An exact identity is final; otherwise a later structural block
+			-- must still get its chance after an early name-only candidate.
+			if rank == 3 then break end
 		elseif not ok then
 			blockErrors = blockErrors or {}
 			blockErrors[#blockErrors + 1] = (blockNames[i] or ("block#" .. tostring(i))) .. ": " .. tostring(primaryPath)
 		end
 	end
+	if bestRank < 1 then
+		local path, facets, attributes, evidence = GlobalStorageSiK.NativeSourceCategoryBridge.resolve(fullType, scriptItem)
+		if path then
+			GlobalStorageSiK.NativeSourceCategoryBridge.record(evidence)
+			return {
+				schemaVersion = 1,
+				catalogEpoch = GlobalStorageSiK.CatalogManager.getEpoch(),
+				catalogFingerprint = GlobalStorageSiK.CatalogManager.getCatalogFingerprint(),
+				fullType = fullType, classificationScope = "script",
+				primaryPath = path, facets = facets, attributes = attributes,
+				evidence = evidence, legacyAliases = {},
+			}
+		end
+	end
+	if bestResult then return bestResult end
 	if blockErrors then
 		return {
 			schemaVersion = 1,
@@ -262,6 +307,31 @@ local PENDING_RESULT = {
 	pending = true,
 }
 
+-- Staff comparisons must evaluate the current product default, without reading
+-- or changing the effective cache. The returned result is freshly constructed.
+function GlobalStorageSiK.NativeClassifier.classifyDefault(fullType)
+	if not GlobalStorageSiK.NativeWorldOverrides.validFullType(fullType) then return nil end
+	if not sealed or not GlobalStorageSiK.CatalogManager.isReady() then return PENDING_RESULT end
+	return computeClassification(fullType)
+end
+
+local function applyWorldPath(fullType, result)
+	if result.evidence and result.evidence.primary
+		and result.evidence.primary.source == "script_is_debug_only" then return result end
+	local scriptItem = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.getScriptItem
+		and GlobalStorageSiK.I18n.getScriptItem(fullType)
+	local path, evidence = GlobalStorageSiK.NativeWorldOverrides.resolve(fullType, scriptItem)
+	if not path then return result end
+	-- Override only the static route. Keep real script facets/attributes and any
+	-- classifier error evidence; dynamic instance routes remain owned by resolution.
+	result.defaultPrimaryPath = result.primaryPath
+	result.defaultEvidence = result.evidence
+	result.primaryPath = path
+	result.evidence = evidence
+	result.classificationScope = "world"
+	return result
+end
+
 --- Punto de entrada publico - una sola clasificacion real por fullType y
 --- epoca (§8.1), resultado compartido por referencia, nunca copiado.
 ---@param fullType string|nil
@@ -281,7 +351,7 @@ function GlobalStorageSiK.NativeClassifier.classify(fullType)
 		metrics.cacheHits = metrics.cacheHits + 1
 		return cached
 	end
-	local result = computeClassification(fullType)
+	local result = applyWorldPath(fullType, computeClassification(fullType))
 	metrics.effectiveClassifications = metrics.effectiveClassifications + 1
 	classificationCache[fullType] = result
 	return result
@@ -301,8 +371,8 @@ function GlobalStorageSiK.NativeClassifier.getMetrics()
 end
 
 --- SOLO DIAGNOSTICO (GS_NativeAudit.lua) - a diferencia de classify(), que
---- se detiene en el PRIMER bloque que reclama el fullType (asi decide la
---- precedencia real, ver comentario de mas abajo), esto prueba TODOS los
+--- aplica prioridad de evidencia y puede detenerse en identidad exacta,
+--- esto prueba TODOS los
 --- bloques y devuelve la ruta que cada uno habria propuesto - permite
 --- detectar "colisiones de precedencia" (p.ej. un objeto que Materiales
 --- reclama pero que Combate tambien habria clasificado como arma) sin

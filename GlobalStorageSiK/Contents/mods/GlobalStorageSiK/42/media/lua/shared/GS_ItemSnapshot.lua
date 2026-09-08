@@ -179,9 +179,15 @@ end
 
 local function boolState(item, methodName)
 	local method = item and item[methodName]
-	if not method then return false end
+	if not method then return nil end
 	local ok, value = pcall(function() return method(item) end)
-	return ok and value == true
+	if not ok or type(value) ~= "boolean" then return nil end
+	return value
+end
+
+local function booleanSignature(value)
+	if value == nil then return "?" end
+	return value and "1" or "0"
 end
 
 local function scalarState(item, methodName)
@@ -215,6 +221,20 @@ local function encodeStateList(values)
 	return values and table.concat(values, "\30") or ""
 end
 
+-- Food.getTex compares age directly, unlike isRotten (which exempts fertilized
+-- food). Capture only its discrete selector; never load textures on the server.
+local function foodIconVariant(item, state)
+	if state.burnt == true then return "burnt" end
+	if state.burnt == nil then return nil end
+	local age, threshold = scalarState(item, "getAge"), scalarState(item, "getOffAgeMax")
+	if type(age) ~= "number" or type(threshold) ~= "number"
+		or age ~= age or threshold ~= threshold
+		or math.abs(age) == math.huge or math.abs(threshold) == math.huge then return nil end
+	if age >= threshold then return "rotten" end
+	if state.cooked == nil then return nil end
+	return state.cooked and "cooked" or "base"
+end
+
 -- Estado discreto que hace que dos raciones de comida dejen de ser
 -- intercambiables. No incluye la edad cruda: cambia continuamente y partiría
 -- el índice en una fila por unidad aun cuando vanilla las presenta en el mismo
@@ -222,15 +242,14 @@ end
 -- cocinado, quemado, congelado o podrido) forman parte de la identidad.
 local function foodState(item)
 	if not item then return nil, nil end
-	local isFood = boolState(item, "isFood") or boolState(item, "IsFood")
+	local isFood = false
 	if instanceof then
 		local ok, value = pcall(function() return instanceof(item, "Food") end)
 		isFood = ok and value == true
+	else
+		isFood = boolState(item, "isFood") == true or boolState(item, "IsFood") == true
 	end
-	if not isFood and item.getAge then
-		local ok, age = pcall(function() return item:getAge() end)
-		isFood = ok and type(age) == "number"
-	end
+	-- InventoryItem age is not evidence of Food; absent state stays unknown.
 	if not isFood then return nil, nil end
 	local extraItems = collectionState(item, "getExtraItems")
 	local spices = collectionState(item, "getSpices")
@@ -253,12 +272,13 @@ local function foodState(item)
 		uses = uses,
 		customName = customName,
 	}
+	state.iconVariant = foodIconVariant(item, state)
 	local signature = string.format(
-		"food:fresh=%d;cooked=%d;burnt=%d;frozen=%d;rotten=%d;uses=%s;extra=%s;spices=%s;name=%s",
-		state.fresh and 1 or 0, state.cooked and 1 or 0, state.burnt and 1 or 0,
-		state.frozen and 1 or 0, state.rotten and 1 or 0,
+		"food:fresh=%s;cooked=%s;burnt=%s;frozen=%s;rotten=%s;uses=%s;extra=%s;spices=%s;name=%s;icon=%s",
+		booleanSignature(state.fresh), booleanSignature(state.cooked), booleanSignature(state.burnt),
+		booleanSignature(state.frozen), booleanSignature(state.rotten),
 		tostring(uses or ""), encodeStateList(extraItems), encodeStateList(spices),
-		tostring(customName or ""))
+		tostring(customName or ""), tostring(state.iconVariant or "?"))
 	return signature, state
 end
 
@@ -428,7 +448,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 		and GlobalStorageSiK.FluidTaxonomy.inspect(item) or nil
 	local dynamicPath, dynamicSignature = fluid and fluid.path or nil, fluid and fluid.signature or nil
 	if mediaIndex ~= nil then
-		dynamicPath = GlobalStorageSiK.RecordedMedia.nativePath(mediaIndex, mediaCodes) or dynamicPath
+		dynamicPath = GlobalStorageSiK.RecordedMedia.nativePathFromItem(item) or dynamicPath
 	end
 	local dynamicStateKey = fluid and fluid.stateKey or nil
 	local dynamicPercent = fluid and fluid.fillPercent or nil

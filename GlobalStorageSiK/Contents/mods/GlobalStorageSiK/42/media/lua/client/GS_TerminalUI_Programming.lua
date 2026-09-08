@@ -35,7 +35,7 @@ end
 
 local function playerFor(terminal)
 	if terminal and terminal.player then return terminal.player end
-	return GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or nil
+	return GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(terminal and terminal.playerNum or 0) or nil
 end
 
 local function countBlankDisksNearby(player)
@@ -51,29 +51,41 @@ local function countBlankDisksNearby(player)
 	return total
 end
 
-local function inventoryCount(player, fullType)
-	if not player or not player.getInventory or not fullType then return 0 end
-	local inventory = player:getInventory()
-	if not inventory or not inventory.getItemCount then return 0 end
-	local ok, count = pcall(function() return inventory:getItemCount(fullType) end)
-	return ok and math.max(0, tonumber(count) or 0) or 0
+local function integer(value)
+	return type(value) == "number" and value == value and value ~= math.huge
+		and value ~= -math.huge and value == math.floor(value)
 end
 
-local function readerResource(terminal, player)
-	local state = terminal and terminal.terminalState or {}
-	local installed = GlobalStorageSiK.Addons and GlobalStorageSiK.Addons.isInstalled
-		and GlobalStorageSiK.Addons.isInstalled(state.networkId, state.terminalAnchor, "Reader") == true
-	local inInventory = inventoryCount(player, GlobalStorageSiK.Config.ITEM_TERMINAL_READER) > 0
-	local availability = installed and "installed" or (inInventory and "inventory" or "unavailable")
-	local labelKey = availability == "installed" and "IGUI_GS_ProgrammingReaderInstalled"
-		or (availability == "inventory" and "IGUI_GS_ProgrammingReaderInventory"
-			or "IGUI_GS_ProgrammingReaderUnavailable")
+local function captureTerminal(terminal)
+	local state = terminal and terminal.terminalState
+	local anchor = type(state) == "table" and state.terminalAnchor
+	if type(state) ~= "table" or type(state.networkId) ~= "string"
+		or state.networkId == "" or #state.networkId > 192 or type(anchor) ~= "table"
+		or not integer(anchor.x) or not integer(anchor.y) or not integer(anchor.z)
+		or type(state.installedAddons) ~= "table"
+		or (state.installedAddons.Reader ~= true and type(state.installedAddons.Reader) ~= "table") then
+		return nil
+	end
+	return { networkId = state.networkId, terminalAnchor = { x = anchor.x, y = anchor.y, z = anchor.z } }
+end
+
+local function sameTerminal(terminal, captured)
+	local current = captureTerminal(terminal)
+	return current ~= nil and captured ~= nil and current.networkId == captured.networkId
+		and current.terminalAnchor.x == captured.terminalAnchor.x
+		and current.terminalAnchor.y == captured.terminalAnchor.y
+		and current.terminalAnchor.z == captured.terminalAnchor.z
+end
+
+local function readerResource(terminal)
+	local installed = captureTerminal(terminal) ~= nil
 	return {
 		text = GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.Config.ITEM_TERMINAL_READER)
-			.. " " .. MIDDLE_DOT .. " " .. T(labelKey),
+			.. " " .. MIDDLE_DOT .. " " .. T(installed and "IGUI_GS_ProgrammingReaderInstalled"
+				or "IGUI_GS_ProgrammingReaderUnavailable"),
 		icon = "media/textures/Item_GS_TerminalReader.png",
-		state = availability == "unavailable" and "missing" or "success",
-		availability = availability,
+		state = installed and "success" or "missing",
+		availability = installed and "installed" or "unavailable",
 	}
 end
 
@@ -86,6 +98,7 @@ end
 
 function Programming.context(terminal)
 	local player = playerFor(terminal)
+	local captured = captureTerminal(terminal)
 	local blankCount = countBlankDisksNearby(player)
 	local reader = readerResource(terminal, player)
 	local canProgram = reader.availability ~= "unavailable"
@@ -96,7 +109,7 @@ function Programming.context(terminal)
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
 		local known, hasDisk = programReadiness(player, id)
 		local ready = canProgram and known and hasDisk
-		local recording = Programming.recordingProgramId == id
+		local recording = terminal and terminal._gsRecordingProgramId == id
 		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
 		local title = T(def.menuTextKey or id)
 		-- menuTextKey already contains the complete localized action (for
@@ -148,13 +161,26 @@ function Programming.context(terminal)
 			["programming.run"] = function(envelope)
 				local payload = envelope and (envelope.payload or envelope) or {}
 				if type(payload) ~= "table" or type(payload.programId) ~= "string"
-					or Programming.recordingProgramId then return false end
+					or not sameTerminal(terminal, captured) or terminal._gsRecordingProgramId
+					or playerFor(terminal) ~= player then return false end
+				local known, disk = programReadiness(player, payload.programId)
+				if not known or not disk then return false end
+				local token = {}
+				local function release()
+					if terminal._gsRecordingToken == token then
+						terminal._gsRecordingToken, terminal._gsRecordingProgramId = nil, nil
+					end
+				end
 				local action = GS_ProgramDiskAction:new(player, payload.programId, {
-					onStart = function() Programming.recordingProgramId = payload.programId end,
-					onStop = function() Programming.recordingProgramId = nil end,
-					onPerform = function() Programming.recordingProgramId = nil end,
-				})
-				Programming.recordingProgramId = payload.programId
+					isAvailable = function()
+						return sameTerminal(terminal, captured) and playerFor(terminal) == player
+							and terminal._gsRecordingToken == token
+					end,
+					onStop = release,
+					onPerform = release,
+				}, captured)
+				terminal._gsRecordingToken = token
+				terminal._gsRecordingProgramId = payload.programId
 				ISTimedActionQueue.add(action)
 				return true
 			end,
@@ -163,7 +189,7 @@ function Programming.context(terminal)
 end
 
 local function isVisible(terminal)
-	return terminal ~= nil and terminal.terminalState ~= nil
+	return captureTerminal(terminal) ~= nil
 end
 
 GlobalStorageSiK.TerminalExtensions.registerDefinition("programming", {

@@ -12,7 +12,40 @@ require "GS_Sandbox"
 require "GS_OperationPacing"
 require "GS_UI_Feedback"
 
-GlobalStorageSiK.TransferQueue = {}
+local Queue = {}
+GlobalStorageSiK.TransferQueue = Queue
+local queues = {}
+local tickInstalled = false
+local serial = 0
+
+local function playerNumber(value)
+    local number = value
+    if value ~= nil and type(value) ~= "number" then
+        if type(value) ~= "table" and type(value) ~= "userdata" then return nil end
+        if not value.getPlayerNum then return nil end
+        number = value:getPlayerNum()
+    end
+    number = number == nil and 0 or tonumber(number)
+    if not number or number ~= math.floor(number) or number < 0 or number > 3 then return nil end
+    return number
+end
+
+local function nextId(playerNum)
+    serial = serial + 1
+    return "deposit-" .. tostring(playerNum) .. "-" .. tostring(getTimestampMs and getTimestampMs() or 0) .. "-" .. tostring(serial)
+end
+
+local function ensureTickInstalled()
+    if tickInstalled or not Events or not Events.OnTick then return end
+    tickInstalled = true
+    Events.OnTick.Add(Queue.onTick)
+end
+
+local function createQueue(playerNum)
+local Q = {}
+local function currentPlayer()
+    return GlobalStorageSiK.NetClient.getPlayer(playerNum)
+end
 
 -- Red de seguridad (reportada 2026-08-16, "el log de item not found no
 -- puede estar en bucle sin fallar de forma informada o terminar de algun
@@ -31,14 +64,12 @@ GlobalStorageSiK.TransferQueue = {}
 local MIN_MAX_BATCHES = 200
 local pendingJob = nil
 local nextRunMs = 0
-local tickInstalled = false
 local batchCount = 0
-local queueSerial = 0
 local inFlight = false
 local responseDeadlineMs = 0
 local RESPONSE_TIMEOUT_MS = 10000
 local MAX_TIMEOUT_RETRIES = 3
-local MAX_QUEUED_JOBS = 256
+local MAX_QUEUED_JOBS = 64
 local queuedJobs = {}
 local operation = nil
 
@@ -59,7 +90,7 @@ local function showProgress(force)
 	local now = nowMs()
 	if not force and now - (operation.lastProgressMs or 0) < 1000 then return end
 	operation.lastProgressMs = now
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
+	local player = pendingJob and pendingJob.player
 	if not player then return end
 	local moved = (operation.totalMoved or 0) + (pendingJob and pendingJob.totalMoved or 0)
 	local text = GlobalStorageSiK.I18n.text("IGUI_GS_DepositPending")
@@ -68,10 +99,8 @@ local function showProgress(force)
 	else
 		text = text .. " " .. tostring(moved)
 	end
-	pcall(function()
-		GlobalStorageSiK.UIFeedback.halo(player, text, 200, 220, 200, 220,
-			{ channel = "deposit-progress", dedupeKey = text, throttleMs = 1000 })
-	end)
+    GlobalStorageSiK.UIFeedback.updateOperation(playerNum, operation.id, text,
+        moved, operation.totalExpected or 0)
 end
 
 ---@param job table
@@ -82,31 +111,66 @@ local function expectedUnits(job)
 		return math.max(0, math.floor(tonumber(job.expectedUnits) or 0))
 	end
 	if job.type == "depositIds" then return #(job.itemIds or {}) end
+	if job.type == "physical" then return #(job.physicalItems or {}) end
 	if job.type == "partial" then return math.max(0, math.floor(tonumber(job.count) or 0)) end
 	return 0
 end
 
-local function ensureTickInstalled()
-	if tickInstalled or not Events or not Events.OnTick then return end
-	tickInstalled = true
-	Events.OnTick.Add(GlobalStorageSiK.TransferQueue.onTick)
-end
 
 ---@return boolean
-function GlobalStorageSiK.TransferQueue.isActive()
+function Q.isActive()
 	return pendingJob ~= nil or #queuedJobs > 0
 end
 
 local function activeNetworkId()
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-	return ui and ui.terminalState and ui.terminalState.networkId
-		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+    local terminal = GlobalStorageSiK.TerminalUI
+    local ui = terminal and terminal.getInstanceForPlayer and terminal.getInstanceForPlayer(playerNum)
+    local client = GlobalStorageSiK.Client
+    local state = ui and ui.terminalState or client and client.terminalStateByPlayer
+        and client.terminalStateByPlayer[playerNum]
+    return state and state.networkId
+        or (playerNum == 0 and client and client.activeNetworkId) or nil
+end
+
+local function playerValid(job)
+    return job and job.player and currentPlayer() == job.player
+        and (not job.player.isDead or not job.player:isDead())
+end
+
+local function finishOperation()
+    local finished = operation
+    operation = nil
+    if not finished then return end
+    GlobalStorageSiK.UIFeedback.finishOperation(playerNum, finished.id)
+    if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.finishManagedTransfer then
+        GlobalStorageSiK.TerminalSync.finishManagedTransfer("deposit", finished.searchQuery,
+            finished.lastRevision, playerNum, finished.id)
+    end
+end
+
+local function startOperation(job)
+    if not playerValid(job) then return false end
+    local sync = GlobalStorageSiK.TerminalSync
+    if sync and sync.beginManagedTransfer
+        and not sync.beginManagedTransfer("deposit", job.networkId, job.searchQuery, playerNum, job.gestureId) then return false end
+    if not GlobalStorageSiK.UIFeedback.beginOperation(job.player, job.gestureId, job.networkId, "deposit") then
+        if sync and sync.finishManagedTransfer then
+            sync.finishManagedTransfer("deposit", job.searchQuery, nil, playerNum, job.gestureId)
+        end
+        return false
+    end
+    operation = { id = job.gestureId, networkId = job.networkId, searchQuery = job.searchQuery,
+        jobsTotal = 1, jobsDone = 0, totalBatches = 0, totalMoved = 0,
+        totalSkipped = 0, totalMissing = 0, totalFailed = 0, totalInspected = 0,
+        totalExpected = expectedUnits(job), lastProgressMs = 0, startedMs = nowMs(),
+        pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "deposit" }) }
+    return true
 end
 
 ---@param job table
 local function initialiseJob(job)
-	queueSerial = queueSerial + 1
-	job.queueId = tostring(getTimestampMs and getTimestampMs() or 0) .. "-" .. tostring(queueSerial)
+	job.queueId = nextId(playerNum)
+	job.gestureId = job.queueId
 	job.totalMoved = 0
 	job.totalSkipped = 0
 	job.totalMissing = 0
@@ -120,6 +184,7 @@ end
 ---@param job table
 ---@param firstRequestInFlight boolean
 local function activateJob(job, firstRequestInFlight)
+	if not startOperation(job) then return false end
 	pendingJob = job
 	batchCount = 0
 	inFlight = firstRequestInFlight == true
@@ -131,52 +196,75 @@ local function activateJob(job, firstRequestInFlight)
 		nextRunMs = (getTimestampMs and getTimestampMs() or 0) + batchDelayMs()
 	end
 	ensureTickInstalled()
+	return true
 end
 
 ---@param job table
 ---@return string|nil queueId
 ---@return boolean|nil sendNow
 ---@return string|nil networkId
-function GlobalStorageSiK.TransferQueue.arm(job)
-	local supported = job and (job.type == "depositIds" or job.type == "container" or job.type == "partial")
+function Q.arm(input, player)
+    if type(input) ~= "table" then return nil end
+    local job = {}
+    for _, key in ipairs({ "type", "networkId", "origin", "operationId", "preferredNodeId",
+        "referenceItemId", "expectedUnits", "count", "searchQuery" }) do job[key] = input[key] end
+    job.player = player
+    if not playerValid(job) then return nil end
+    if input.itemIds ~= nil then
+        if type(input.itemIds) ~= "table" or #input.itemIds == 0 or #input.itemIds > 4096 then return nil end
+        job.itemIds = {}
+        local seen = {}
+        for i = 1, #input.itemIds do
+            local id = input.itemIds[i]
+            if type(id) ~= "number" or id ~= id or id == math.huge or id == -math.huge
+                or id ~= math.floor(id) then return nil end
+            if not seen[id] then job.itemIds[#job.itemIds + 1] = id; seen[id] = true end
+        end
+    end
+	if job.type == "physical" then
+		if type(input.physicalItems) ~= "table" or #input.physicalItems < 1 or #input.physicalItems > 4096 then return nil end
+		local retained = pendingJob and pendingJob.physicalItems and #pendingJob.physicalItems or 0
+		for i = 1, #queuedJobs do retained = retained + #(queuedJobs[i].physicalItems or {}) end
+		if retained + #input.physicalItems > 4096 then return nil end
+		job.physicalItems, job.physicalIndex = {}, 1
+		local seen = {}
+		for i = 1, #input.physicalItems do
+			local entry = input.physicalItems[i]
+			local id = type(entry) == "table" and entry.itemId or nil
+			if type(id) ~= "number" or id ~= id or id < 0 or id == math.huge
+				or id ~= math.floor(id) or seen[id] then return nil end
+			if entry.kind ~= "container" and entry.kind ~= "floor" then return nil end
+			if entry.kind == "floor" and (type(entry.sourceKey) ~= "string" or #entry.sourceKey > 48
+				or string.sub(entry.sourceKey, 1, 6) ~= "floor:" or type(entry.fullType) ~= "string"
+				or entry.fullType == "" or #entry.fullType > 160) then return nil end
+			seen[id] = true
+			job.physicalItems[i] = { kind = entry.kind, itemId = id,
+				sourceKey = entry.kind == "floor" and entry.sourceKey or nil,
+				fullType = entry.kind == "floor" and entry.fullType or nil }
+		end
+	end
+	local supported = job and (job.type == "depositIds" or job.type == "container" or job.type == "partial" or job.type == "physical")
 	if not supported or #queuedJobs + (pendingJob and 1 or 0) >= MAX_QUEUED_JOBS then
 		return nil
 	end
 	job.networkId = job.networkId or activeNetworkId()
+    if type(job.networkId) ~= "string" or #job.networkId == 0 or #job.networkId > 192 then return nil end
+    if job.type == "depositIds" and not job.itemIds then return nil end
+    for _, key in ipairs({ "expectedUnits", "count", "referenceItemId" }) do
+        local n = job[key]
+        if n ~= nil and (type(n) ~= "number" or n ~= n or n == math.huge or n == -math.huge
+            or n ~= math.floor(n)) then return nil end
+    end
+    if job.type ~= "depositIds" and job.type ~= "physical" and job.referenceItemId == nil then return nil end
+    if job.type == "partial" and (not job.count or job.count < 1 or job.count > 4096) then return nil end
+    if job.expectedUnits and (job.expectedUnits < 0 or job.expectedUnits > 4096) then return nil end
 	if operation and operation.networkId and job.networkId
 		and operation.networkId ~= job.networkId then
 		GlobalStorageSiK.Log.warn("TransferQueue", "queue rejected across networks",
 			"active=" .. tostring(operation.networkId) .. " requested=" .. tostring(job.networkId))
 		return nil
 	end
-	if not operation then
-		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.beginManagedTransfer
-			and not GlobalStorageSiK.TerminalSync.beginManagedTransfer("deposit", job.networkId, job.searchQuery) then
-			return nil
-		end
-		local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "deposit" })
-		operation = {
-			networkId = job.networkId,
-			searchQuery = job.searchQuery,
-			jobsTotal = 0,
-			jobsDone = 0,
-			totalBatches = 0,
-			totalMoved = 0,
-			totalSkipped = 0,
-			totalMissing = 0,
-			totalFailed = 0,
-			totalInspected = 0,
-			totalExpected = 0,
-			lastProgressMs = 0,
-			startedMs = nowMs(),
-			pacing = pacing,
-		}
-		GlobalStorageSiK.Log.info("TransferQueue", "operation started",
-			GlobalStorageSiK.OperationPacing.describe(pacing))
-	end
 	initialiseJob(job)
-	operation.jobsTotal = operation.jobsTotal + 1
-	operation.totalExpected = operation.totalExpected + expectedUnits(job)
 	if pendingJob then
 		table.insert(queuedJobs, job)
 		showProgress(false)
@@ -184,13 +272,14 @@ function GlobalStorageSiK.TransferQueue.arm(job)
 	end
 	-- El caller envía el primer request inmediatamente. Desde este instante la
 	-- vigilancia ya está armada para que una respuesta perdida no deje residuos.
-	activateJob(job, true)
+	if not activateJob(job, job.type ~= "physical") then return nil end
 	showProgress(true)
-	return job.queueId, true, job.networkId
+	return job.queueId, job.type ~= "physical", job.networkId
 end
 
 ---@param job table
 local function scheduleRetry(job)
+	job.queueId = nextId(playerNum)
 	pendingJob = job
 	batchCount = batchCount + 1
 	nextRunMs = (getTimestampMs and getTimestampMs() or 0) + batchDelayMs()
@@ -203,23 +292,34 @@ local function dispatchJob(job)
 	if not job or not GlobalStorageSiK.NetClient or not GlobalStorageSiK.NetClient.sendCommand then
 		return false
 	end
-	if job.type == "depositIds" then
+	if job.type == "physical" then
+		local entry = job.physicalItems[job.physicalIndex]
+		if not entry then return false end
+		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
+			mode = entry.kind == "floor" and "floor" or nil,
+			sourceKey = entry.sourceKey, fullType = entry.fullType, itemIds = { entry.itemId },
+			origin = "player_queue", queueId = job.queueId, depositId = job.gestureId,
+			networkId = job.networkId,
+		}, job.player)
+	elseif job.type == "depositIds" then
 		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			itemIds = job.itemIds or {},
 			origin = job.origin or "player_queue",
 			operationId = job.operationId,
 			preferredNodeId = job.preferredNodeId,
 			queueId = job.queueId,
+			depositId = job.gestureId,
 			networkId = job.networkId,
-		})
+		}, job.player)
 	elseif job.type == "container" then
 		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			mode = "container",
 			referenceItemId = job.referenceItemId,
 			origin = "player_queue",
 			queueId = job.queueId,
+			depositId = job.gestureId,
 			networkId = job.networkId,
-		})
+		}, job.player)
 	elseif job.type == "partial" then
 		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			mode = "partial",
@@ -227,46 +327,48 @@ local function dispatchJob(job)
 			count = job.count,
 			origin = "player_queue",
 			queueId = job.queueId,
+			depositId = job.gestureId,
 			networkId = job.networkId,
-		})
+		}, job.player)
 	end
 	return false
 end
 
 --- Limpia la cola de transferencias en curso (p. ej. al perder acceso).
-function GlobalStorageSiK.TransferQueue.clear()
-	local cancelledOperation = operation
-	pendingJob = nil
-	queuedJobs = {}
-	operation = nil
-	nextRunMs = 0
-	inFlight = false
-	responseDeadlineMs = 0
-	if tickInstalled and Events and Events.OnTick then
-		Events.OnTick.Remove(GlobalStorageSiK.TransferQueue.onTick)
-		tickInstalled = false
-	end
-	if cancelledOperation and GlobalStorageSiK.TerminalSync
-		and GlobalStorageSiK.TerminalSync.finishManagedTransfer then
-		GlobalStorageSiK.TerminalSync.finishManagedTransfer(
-			"deposit", cancelledOperation.searchQuery, cancelledOperation.lastRevision)
-	end
+function Q.clear(reason, feedbackHandled)
+    local player = pendingJob and pendingJob.player
+    pendingJob = nil
+    queuedJobs = {}
+    nextRunMs = 0
+    inFlight = false
+    responseDeadlineMs = 0
+    finishOperation()
+    if reason and player and not feedbackHandled then
+        GlobalStorageSiK.UIFeedback.halo(player, GlobalStorageSiK.I18n.text("IGUI_GS_DepositFailGeneric"),
+            255, 180, 100, 2500, { tone = "warning", channel = "deposit", dedupeKey = reason })
+    end
 end
 
-function GlobalStorageSiK.TransferQueue.onTick()
+function Q.isResponseExpected(args)
+    return type(args) == "table" and pendingJob ~= nil and inFlight
+        and args.queueId == pendingJob.queueId and playerValid(pendingJob)
+end
+
+function Q.onTick()
 	if not pendingJob then
 		return
 	end
+	if not playerValid(pendingJob) then Q.clear("player_unavailable"); return end
 	local now = getTimestampMs and getTimestampMs() or 0
 	if inFlight then
 		if now < responseDeadlineMs then return end
-		if pendingJob.type == "partial" then
+		if pendingJob.type == "partial" or pendingJob.type == "physical" then
 			-- Un depósito parcial puede conservar el mismo itemId con un count
 			-- reducido. Reenviarlo a ciegas movería otra porción, así que ante una
 			-- respuesta perdida se termina sin reintento (misma regla que retiro).
-			GlobalStorageSiK.Log.error("TransferQueue", "partial response timeout",
+			GlobalStorageSiK.Log.error("TransferQueue", "non-replayable response timeout",
 				"queueId=" .. tostring(pendingJob.queueId))
-			GlobalStorageSiK.TransferQueue.clear()
+			Q.clear("transfer_failed")
 			return
 		end
 		pendingJob.timeoutRetries = (pendingJob.timeoutRetries or 0) + 1
@@ -274,7 +376,7 @@ function GlobalStorageSiK.TransferQueue.onTick()
 			GlobalStorageSiK.Log.error("TransferQueue", "response timeout",
 				"queueId=" .. tostring(pendingJob.queueId)
 					.. " retries=" .. tostring(MAX_TIMEOUT_RETRIES))
-			GlobalStorageSiK.TransferQueue.clear()
+			Q.clear("transfer_failed")
 			return
 		end
 		-- Los depósitos por ID son idempotentes en servidor: un ID ya movido no
@@ -293,27 +395,56 @@ function GlobalStorageSiK.TransferQueue.onTick()
 	if sent == false and pendingJob then
 		GlobalStorageSiK.Log.error("TransferQueue", "dispatch failed",
 			"queueId=" .. tostring(pendingJob.queueId) .. " type=" .. tostring(pendingJob.type))
-		GlobalStorageSiK.TransferQueue.clear()
+		Q.clear("transfer_failed")
 	end
+end
+
+-- A continuation can only contain unprocessed IDs from this gesture. Copy it
+-- before the caller shares the response with other UI consumers.
+local function copyRemaining(job, ids)
+    if type(ids) ~= "table" or #ids == 0 or #ids > 4096 then return nil end
+    local allowed, seen, result = {}, {}, {}
+    if job.itemIds then
+        for i = 1, #job.itemIds do allowed[job.itemIds[i]] = true end
+    end
+    for i = 1, #ids do
+        local id = ids[i]
+        if type(id) ~= "number" or id ~= id or id == math.huge or id == -math.huge
+            or id ~= math.floor(id) or seen[id] or (job.itemIds and not allowed[id]) then return nil end
+        seen[id] = true; result[#result + 1] = id
+    end
+    return result
 end
 
 --- Procesa respuesta del servidor; devuelve true si continúa en segundo plano.
 ---@param args table|nil
 ---@return boolean continuing
-function GlobalStorageSiK.TransferQueue.onActionResult(args)
-	if not pendingJob or not args then
+function Q.onActionResult(args)
+	if not Q.isResponseExpected(args) then
 		return false
 	end
 
 	if args.queueId and args.queueId == pendingJob.queueId and not (args.deposit or args.bulk) then
-		GlobalStorageSiK.TransferQueue.clear()
+		Q.clear("transfer_failed")
 		return false
 	end
 	local summary = args.deposit or args.bulk
-	if not summary then
-		return false
-	end
-	if args.queueId ~= pendingJob.queueId then
+    if type(summary) ~= "table" then Q.clear("invalid_response"); return false end
+    for _, key in ipairs({ "moved", "skipped", "failed", "missing", "processed" }) do
+        local value = summary[key]
+        if value ~= nil and (type(value) ~= "number" or value ~= value or value < 0
+            or value == math.huge or value ~= math.floor(value)) then
+            Q.clear("invalid_response"); return false
+        end
+    end
+    local remaining
+    if summary.reason == "limit" then
+        remaining = copyRemaining(pendingJob, summary.remainingIds)
+        if not remaining or (summary.processed or 0) <= 0 or pendingJob.type == "partial" then
+            Q.clear("invalid_response"); return false
+        end
+    end
+    if args.queueId ~= pendingJob.queueId then
 		return false
 	end
 	inFlight = false
@@ -336,6 +467,28 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 	if summary.failureReason and not pendingJob.failureReason then
 		pendingJob.failureReason = summary.failureReason
 	end
+	if pendingJob.type == "physical" then
+		local entry = pendingJob.physicalItems[pendingJob.physicalIndex]
+		local ids = summary.itemIds
+		if args.ok ~= true or summary.reconcile == true or summary.moved ~= 1
+			or (summary.failed or 0) > 0 or (summary.skipped or 0) > 0
+			or (entry.kind == "floor" and (type(ids) ~= "table" or #ids ~= 1 or ids[1] ~= entry.itemId)) then
+			args.ok = false
+			args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_TransferWarning")
+			args.transfer = args.transfer or {}
+			args.transfer.reason = summary.reason or "transfer_failed"
+			args.transfer.reconcile = summary.reconcile == true
+			-- GS_Client owns ACK feedback; avoid a second generic halo here.
+			Q.clear(args.transfer.reason, true)
+			return false
+		end
+		pendingJob.physicalIndex = pendingJob.physicalIndex + 1
+		if pendingJob.physicalIndex <= #pendingJob.physicalItems then
+			scheduleRetry(pendingJob)
+			showProgress(false)
+			return true
+		end
+	end
 
 	if summary.reason == "limit" and (summary.processed or 0) > 0
 		and summary.remainingIds and #summary.remainingIds > 0 then
@@ -348,7 +501,7 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 				"queueId=" .. tostring(pendingJob.queueId)
 					.. " previous=" .. tostring(pendingJob.lastRemainingCount)
 					.. " remaining=" .. tostring(remainingCount))
-			GlobalStorageSiK.TransferQueue.clear()
+			Q.clear("transfer_failed")
 			return false
 		end
 		pendingJob.lastRemainingCount = remainingCount
@@ -361,13 +514,13 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 				"batches=" .. tostring(pendingJob.maxBatches or MIN_MAX_BATCHES)
 					.. " moved=" .. tostring(summary.moved)
 					.. " type=" .. tostring(pendingJob.type))
-			GlobalStorageSiK.TransferQueue.clear()
+			Q.clear("transfer_failed")
 			return false
 		end
 		if (pendingJob.type == "depositIds" or pendingJob.type == "container")
 			and summary.remainingIds then
 			pendingJob.type = "depositIds"
-			pendingJob.itemIds = summary.remainingIds
+			pendingJob.itemIds = remaining
 		end
 		scheduleRetry(pendingJob)
 		showProgress(false)
@@ -393,7 +546,8 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 			"queueId=" .. tostring(completedJob.queueId)
 				.. " moved=" .. tostring(completedJob.totalMoved or 0)
 				.. " queued=" .. tostring(#queuedJobs))
-		activateJob(table.remove(queuedJobs, 1), false)
+		finishOperation()
+		if not activateJob(table.remove(queuedJobs, 1), false) then Q.clear("transfer_failed"); return false end
 		showProgress(false)
 		return true
 	end
@@ -424,6 +578,64 @@ function GlobalStorageSiK.TransferQueue.onActionResult(args)
 		args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_DepositSummary",
 			tostring(summary.moved), tostring(summary.skipped), tostring(summary.failed or 0))
 	end
-	GlobalStorageSiK.TransferQueue.clear()
+	Q.clear()
 	return false
 end
+
+return Q
+end
+
+function Queue.arm(job, playerArg)
+    local num = playerNumber(playerArg)
+    if num == nil then return nil end
+    local player = GlobalStorageSiK.NetClient.getPlayer(num)
+    if playerArg ~= nil and type(playerArg) ~= "number" and player ~= playerArg then return nil end
+    if not queues[num] then queues[num] = createQueue(num) end
+    return queues[num].arm(job, player)
+end
+
+function Queue.isActive(playerArg)
+    if playerArg == nil then
+        for num = 0, 3 do if queues[num] and queues[num].isActive() then return true end end
+        return false
+    end
+    local num = playerNumber(playerArg)
+    return num ~= nil and queues[num] ~= nil and queues[num].isActive() or false
+end
+
+local function uninstallIdleTick()
+    if tickInstalled and not Queue.isActive() then
+        Events.OnTick.Remove(Queue.onTick)
+        tickInstalled = false
+    end
+end
+
+function Queue.clear(playerArg)
+    if playerArg == nil then
+        for num = 0, 3 do if queues[num] then queues[num].clear() end end
+    else
+        local num = playerNumber(playerArg)
+        if num ~= nil and queues[num] then queues[num].clear() end
+    end
+    uninstallIdleTick()
+end
+
+function Queue.isResponseExpected(args)
+    if type(args) ~= "table" then return false end
+    local num = playerNumber(args.playerNum)
+    return num ~= nil and queues[num] ~= nil and queues[num].isResponseExpected(args) or false
+end
+
+function Queue.onActionResult(args)
+    if not Queue.isResponseExpected(args) then return false end
+    local continuing = queues[playerNumber(args.playerNum)].onActionResult(args)
+    uninstallIdleTick()
+    return continuing
+end
+
+function Queue.onTick()
+    for num = 0, 3 do if queues[num] then queues[num].onTick() end end
+    uninstallIdleTick()
+end
+
+return Queue

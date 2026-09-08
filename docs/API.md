@@ -213,6 +213,16 @@ when relevant. `narrowInputs` returns a disposable/restore handle. Consumers
 must close sessions and dispose temporary handles on every completion,
 cancellation, reconnect, or UI close.
 
+While terminal access is provisionally revoked or being revalidated, `begin`,
+`startOperation`, `claimRecipeInputs` and `claimItem` return `ERR_SESSION` before
+starting work or moving items. This applies to local SP calls as well as MP.
+Completion, abort and return paths remain available for already accepted work;
+an outstanding response does not grant a new session.
+Consumers must consume a rejected `ERR_SESSION` attempt while their remote
+session is active; calling the original vanilla start as a fallback would bypass
+the access gate with network inputs still attached. Core supplies the common
+access feedback; the addon retains ownership of its action lifecycle.
+
 `Diagnostics.registerWorkSessionSink(addonId, callback)` is the optional
 client-side observer registration for session diagnostics. It is generation
 safe and disposable.

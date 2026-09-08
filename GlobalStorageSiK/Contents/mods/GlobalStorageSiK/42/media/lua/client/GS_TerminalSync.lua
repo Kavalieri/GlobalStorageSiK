@@ -8,7 +8,19 @@
 require "GS_NetClient"
 local UI = require "GS_UI_Framework"
 
-GlobalStorageSiK.TerminalSync = GlobalStorageSiK.TerminalSync or {}
+-- Revision, debounce and visual transfer ownership are local to each player.
+local function createPlayerSync(playerNum)
+local sync = {}
+local function currentUI()
+	local terminal = GlobalStorageSiK.TerminalUI
+	if terminal and terminal.getInstanceForPlayer then return terminal.getInstanceForPlayer(playerNum) end
+	return playerNum == 0 and terminal and terminal.instance or nil
+end
+local function activeNetworkId()
+	local client = GlobalStorageSiK.Client
+	local value = client and client.activeNetworkIdByPlayer and client.activeNetworkIdByPlayer[playerNum]
+	return value or (playerNum == 0 and client and client.activeNetworkId) or nil
+end
 
 local PULL_DEBOUNCE_TICKS = 4
 local _pullDueTick = 0
@@ -53,7 +65,7 @@ local function markRevision(networkId, revision)
 	touchRevisionNetwork(networkId)
 end
 
-function GlobalStorageSiK.TerminalSync.clearRevisionState(networkId)
+function sync.clearRevisionState(networkId)
 	if networkId then
 		_lastAppliedRevision[networkId] = nil
 		_requiredSnapshotRevision[networkId] = nil
@@ -68,14 +80,14 @@ function GlobalStorageSiK.TerminalSync.clearRevisionState(networkId)
 	_managedTransfer = nil
 	_pullDueTick = 0
 	if _tickInstalled and Events and Events.OnTick then
-		Events.OnTick.Remove(GlobalStorageSiK.TerminalSync.onTick)
+		Events.OnTick.Remove(sync.onTick)
 		_tickInstalled = false
 	end
 end
 
 ---@return string
 local function currentSearchQuery()
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	if ui and ui.getSearchQuery then
 		return ui:getSearchQuery() or ""
 	end
@@ -104,17 +116,19 @@ end
 ---@param networkId string|nil
 ---@param searchQuery string|nil
 ---@return boolean
-function GlobalStorageSiK.TerminalSync.beginManagedTransfer(owner, networkId, searchQuery)
+function sync.beginManagedTransfer(owner, networkId, searchQuery, operationId)
 	if _managedTransfer then
-		return _managedTransfer.owner == owner
+		return _managedTransfer.owner == owner and _managedTransfer.operationId == operationId
+			and _managedTransfer.networkId == networkId
 	end
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	local panel = ui and ui.itemsListPanel
 	if panel and panel.itemTable and panel.itemTable.getScrollOffset then
 		panel._itemsScrollOffset = panel.itemTable:getScrollOffset()
 	end
 	_managedTransfer = {
 		owner = owner,
+		operationId = operationId,
 		networkId = networkId,
 		searchQuery = searchQuery or currentSearchQuery(),
 		pendingState = nil,
@@ -132,13 +146,13 @@ end
 ---@param owner string
 ---@param searchQuery string|nil
 ---@param expectedRevision number|nil
-function GlobalStorageSiK.TerminalSync.finishManagedTransfer(owner, searchQuery, expectedRevision)
+function sync.finishManagedTransfer(owner, searchQuery, expectedRevision, operationId)
 	local managed = _managedTransfer
-	if not managed or managed.owner ~= owner then
+	if not managed or managed.owner ~= owner or managed.operationId ~= operationId then
 		return
 	end
 	_managedTransfer = nil
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	if ui then
 		ui._gsManagedTransferActive = nil
 	end
@@ -206,11 +220,11 @@ end
 --- Solicita al servidor un terminalState actualizado.
 ---@param searchQuery string|nil
 ---@return boolean
-function GlobalStorageSiK.TerminalSync.requestInventoryRefresh(searchQuery)
+function sync.requestInventoryRefresh(searchQuery)
 	if not GlobalStorageSiK.NetClient or not GlobalStorageSiK.NetClient.sendCommand then
 		return false
 	end
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	if not ui or not ui.getIsVisible or not ui:isVisible() then
 		return false
 	end
@@ -222,19 +236,19 @@ function GlobalStorageSiK.TerminalSync.requestInventoryRefresh(searchQuery)
 		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
 			ui.playerNum or 0, networkId)
 	end
-	return GlobalStorageSiK.NetClient.sendCommand("searchItems", payload)
+	return GlobalStorageSiK.NetClient.sendCommand("searchItems", payload, playerNum)
 end
 
 --- Programa pull de inventario (debounced).
 ---@param searchQuery string|nil
 ---@param expectedRevision number|nil
-function GlobalStorageSiK.TerminalSync.scheduleInventoryPull(searchQuery, expectedRevision)
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+function sync.scheduleInventoryPull(searchQuery, expectedRevision)
+	local ui = currentUI()
 	if not ui or not ui.getIsVisible or not ui:isVisible() then
 		return
 	end
 	local networkId = ui.terminalState and ui.terminalState.networkId
-		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+		or activeNetworkId()
 	if expectedRevision and networkId and getAppliedRevision(networkId) >= expectedRevision then
 		return
 	end
@@ -242,26 +256,26 @@ function GlobalStorageSiK.TerminalSync.scheduleInventoryPull(searchQuery, expect
 	ui._gsPendingInventorySearch = searchQuery or currentSearchQuery()
 	if not _tickInstalled and Events and Events.OnTick then
 		_tickInstalled = true
-		Events.OnTick.Add(GlobalStorageSiK.TerminalSync.onTick)
+		Events.OnTick.Add(sync.onTick)
 	end
 end
 
-function GlobalStorageSiK.TerminalSync.onTick()
+function sync.onTick()
 	_tickCounter = _tickCounter + 1
 	if _pullDueTick <= 0 or _tickCounter < _pullDueTick then
 		return
 	end
 	_pullDueTick = 0
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	local q = (ui and ui._gsPendingInventorySearch) or currentSearchQuery()
 	if ui then
 		ui._gsPendingInventorySearch = nil
 	end
-	GlobalStorageSiK.TerminalSync.requestInventoryRefresh(q)
+	sync.requestInventoryRefresh(q)
 	-- El debounce es one-shot. Mantener este OnTick instalado despues del pull
 	-- no aporta trabajo y deja un proceso latente por el resto de la sesion.
 	if _tickInstalled and _pullDueTick <= 0 and Events and Events.OnTick then
-		Events.OnTick.Remove(GlobalStorageSiK.TerminalSync.onTick)
+		Events.OnTick.Remove(sync.onTick)
 		_tickInstalled = false
 	end
 end
@@ -270,16 +284,16 @@ end
 ---@param networkId string|nil
 ---@param fullType string
 ---@param moved number
-function GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, fullType, moved)
+function sync.applyWithdrawDelta(networkId, fullType, moved)
 	if not fullType or not moved or moved <= 0 then
 		return
 	end
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = currentUI()
 	if not ui or not ui.terminalState or not ui.terminalState.items then
 		return
 	end
 	local stateNid = ui.terminalState.networkId
-		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+		or activeNetworkId()
 	if networkId and stateNid and networkId ~= stateNid then
 		return
 	end
@@ -293,7 +307,9 @@ function GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, fullType, m
 				items[i].count = nextCount
 			end
 			if GlobalStorageSiK.Client then
-				GlobalStorageSiK.Client.cachedTerminalState = ui.terminalState
+				GlobalStorageSiK.Client.cachedTerminalStateByPlayer = GlobalStorageSiK.Client.cachedTerminalStateByPlayer or {}
+				GlobalStorageSiK.Client.cachedTerminalStateByPlayer[playerNum] = ui.terminalState
+				if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = ui.terminalState end
 			end
 			if isManagedTransferNetwork(networkId) then
 				_managedTransfer.dirty = true
@@ -311,8 +327,8 @@ function GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, fullType, m
 end
 
 --- Fuerza refresco de la pestaña ítems si el terminal está visible.
-function GlobalStorageSiK.TerminalSync.refreshVisibleItemsTab()
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+function sync.refreshVisibleItemsTab()
+	local ui = currentUI()
 	if not ui or not ui.getIsVisible or not ui:isVisible() then
 		return
 	end
@@ -324,7 +340,7 @@ end
 ---@param state table|nil
 ---@param inventorySync boolean|nil estado ligero antes de fusionarlo con cache
 ---@return boolean deferVisibleRefresh
-function GlobalStorageSiK.TerminalSync.onTerminalState(state, inventorySync)
+function sync.onTerminalState(state, inventorySync)
 	if not state then
 		return false
 	end
@@ -335,7 +351,7 @@ function GlobalStorageSiK.TerminalSync.onTerminalState(state, inventorySync)
 		_managedTransfer.dirty = true
 		return true
 	end
-	local requiredRevision = networkId and _requiredSnapshotRevision[networkId] or 0
+	local requiredRevision = (networkId and _requiredSnapshotRevision[networkId]) or 0
 	-- Cinturon de seguridad ademas del fix de arriba (finishManagedTransfer ya
 	-- no deja este flag huerfano si no habia UI visible al terminar) - una
 	-- apertura EXPLICITA del terminal (F9/interaccion directa del jugador,
@@ -361,13 +377,13 @@ end
 
 --- Procesa actionResult de transferencias.
 ---@param args table|nil
-function GlobalStorageSiK.TerminalSync.onActionResult(args)
+function sync.onActionResult(args)
 	if not args or not args.transfer then
 		return
 	end
 	local transfer = args.transfer
 	local networkId = transfer.networkId
-		or (GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId)
+		or activeNetworkId()
 
 	-- El servidor manda terminalState (ya con la cantidad post-retiro) ANTES
 	-- que actionResult en el flujo de withdrawItem. Si ese terminalState ya
@@ -377,13 +393,75 @@ function GlobalStorageSiK.TerminalSync.onActionResult(args)
 	local alreadyApplied = networkId and transfer.inventoryRevision
 		and getAppliedRevision(networkId) >= transfer.inventoryRevision
 	if args.ok and transfer.op == "withdraw" and transfer.fullType and (transfer.moved or 0) > 0 and not alreadyApplied then
-		GlobalStorageSiK.TerminalSync.applyWithdrawDelta(networkId, transfer.fullType, transfer.moved)
+		sync.applyWithdrawDelta(networkId, transfer.fullType, transfer.moved)
 	end
 
 	if args.ok and (transfer.moved or 0) > 0 and transfer.deferInventoryPull ~= true then
-		GlobalStorageSiK.TerminalSync.scheduleInventoryPull(currentSearchQuery(), transfer.inventoryRevision)
+		sync.scheduleInventoryPull(currentSearchQuery(), transfer.inventoryRevision)
 	end
 
 	-- WithdrawClient posee la cola y la correlación de respuestas. TerminalSync
 	-- solo aplica el delta confirmado; nunca libera trabajos por su cuenta.
 end
+
+return sync
+end
+
+local players = {}
+local function forPlayer(playerNum)
+	playerNum = playerNum == nil and 0 or tonumber(playerNum)
+	if not playerNum or playerNum ~= math.floor(playerNum) or playerNum < 0 or playerNum > 3 then return nil end
+	if not players[playerNum] then players[playerNum] = createPlayerSync(playerNum) end
+	return players[playerNum]
+end
+
+local Sync = {}
+GlobalStorageSiK.TerminalSync = Sync
+function Sync.beginManagedTransfer(owner, networkId, searchQuery, playerNum, operationId)
+	local sync = forPlayer(playerNum)
+	return sync and sync.beginManagedTransfer(owner, networkId, searchQuery, operationId) or false
+end
+function Sync.finishManagedTransfer(owner, searchQuery, expectedRevision, playerNum, operationId)
+	local sync = forPlayer(playerNum)
+	if sync then return sync.finishManagedTransfer(owner, searchQuery, expectedRevision, operationId) end
+end
+function Sync.clearRevisionState(networkId, playerNum)
+	if playerNum ~= nil then
+		local sync = forPlayer(playerNum)
+		if sync then sync.clearRevisionState(networkId) end
+		return
+	end
+	for i = 0, 3 do
+		if players[i] then players[i].clearRevisionState(networkId) end
+	end
+end
+function Sync.requestInventoryRefresh(searchQuery, playerNum)
+	local sync = forPlayer(playerNum)
+	return sync and sync.requestInventoryRefresh(searchQuery) or false
+end
+function Sync.scheduleInventoryPull(searchQuery, expectedRevision, playerNum)
+	local sync = forPlayer(playerNum)
+	if sync then return sync.scheduleInventoryPull(searchQuery, expectedRevision) end
+end
+function Sync.applyWithdrawDelta(networkId, fullType, moved, playerNum)
+	local sync = forPlayer(playerNum)
+	if sync then return sync.applyWithdrawDelta(networkId, fullType, moved) end
+end
+function Sync.refreshVisibleItemsTab(playerNum)
+	local sync = forPlayer(playerNum)
+	if sync then return sync.refreshVisibleItemsTab() end
+end
+function Sync.onTerminalState(state, inventorySync)
+	if not state then return false end
+	local sync = forPlayer(state.playerNum)
+	return sync and sync.onTerminalState(state, inventorySync) or false
+end
+function Sync.onActionResult(args)
+	if not args then return end
+	local sync = forPlayer(args.playerNum)
+	if sync then return sync.onActionResult(args) end
+end
+function Sync.onTick()
+	for i = 0, 3 do if players[i] then players[i].onTick() end end
+end
+return Sync

@@ -8,8 +8,10 @@ require "GS_Config"
 require "GS_Debug"
 require "GS_NetTrace"
 require "GS_NetworkResolve"
+require "GS_FloorTargets"
 
 GlobalStorageSiK.NetClient = GlobalStorageSiK.NetClient or {}
+local floorSequences = {}
 
 --- Obtiene el jugador local en cliente MP/SP.
 ---@return IsoPlayer|nil
@@ -55,6 +57,30 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 		return false
 	end
 	args = args or {}
+	if command == "closeTerminal" and args.closeSeq == nil then
+		local client = GlobalStorageSiK.Client
+		local sequences = client and client.terminalOpenSeqByPlayer
+		args.closeSeq = sequences and sequences[player:getPlayerNum()] or nil
+	end
+	local accessGuard = GlobalStorageSiK.TerminalAccessGuard
+	if accessGuard and accessGuard.isTransitioning and accessGuard.isTransitioning(player) then
+		-- A provisional revocation blocks new network work, never cleanup of
+		-- an already accepted operation or the request needed to confirm access.
+		local cleanup = command == "closeTerminal" or command == "pingTerminalAccess"
+			or command == "cancelWithdrawSelection"
+			or (command == "depositItems" and (args.origin == "operation_abort_return"
+				or args.origin == "operation_complete_return" or args.origin == "operation_result_deposit"))
+		local independent = GlobalStorageSiK.NetworkResolve
+			and GlobalStorageSiK.NetworkResolve.isSessionExempt(command)
+		if not cleanup and not independent and string.sub(command, 1, 3) ~= "get" then
+			if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.I18n then
+				GlobalStorageSiK.UIFeedback.halo(player,
+					GlobalStorageSiK.I18n.text("IGUI_GS_AccessUnconfirmed"), nil, nil, nil, nil,
+					{tone="warning", channel="terminal-access", dedupeKey="access-unconfirmed"})
+			end
+			return false
+		end
+	end
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logClientSend then
 		GlobalStorageSiK.NetTrace.logClientSend(command, args)
 	end
@@ -76,6 +102,14 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 		elseif playerNum == 0 and GlobalStorageSiK.Client and GlobalStorageSiK.Client.activeNetworkId then
 			args.networkId = GlobalStorageSiK.Client.activeNetworkId
 		end
+	end
+	if (command == "withdrawItem" and GlobalStorageSiK.FloorTargets.isKey(args.targetKey))
+		or (command == "depositItems" and GlobalStorageSiK.FloorTargets.isKey(args.sourceKey)) then
+		-- Shared by every local queue; assign only when actually sending. A
+		-- failed/uncertain send consumes its number and must not be replayed.
+		local playerNum = player:getPlayerNum()
+		floorSequences[playerNum] = (floorSequences[playerNum] or 0) % 2147483647 + 1
+		args.floorSeq = floorSequences[playerNum]
 	end
 	local ok, err = pcall(sendClientCommand, player, GlobalStorageSiK.MOD_ID, command, args)
 	if not ok then

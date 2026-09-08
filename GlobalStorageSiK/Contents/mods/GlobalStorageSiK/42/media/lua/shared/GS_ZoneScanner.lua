@@ -18,9 +18,9 @@ GlobalStorageSiK.ZoneScanner = {}
 ---@return boolean anySquareLoaded true si al menos una baldosa de la zona estaba cargada
 ---@return table<string, boolean> excludedEntryIds cámaras de cocción encontradas
 function GlobalStorageSiK.ZoneScanner.scanZone(zone, maxContainers)
-	local state = GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
+	local state, reason = GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
 	if not state then
-		return {}, false, false, {}
+		return {}, false, false, {}, reason
 	end
 	while not GlobalStorageSiK.ZoneScanner.isIncrementalDone(state) do
 		GlobalStorageSiK.ZoneScanner.stepIncremental(state, 10000, 0)
@@ -113,16 +113,11 @@ end
 ---@param maxContainers number|nil
 ---@return table|nil state
 function GlobalStorageSiK.ZoneScanner.beginIncremental(zone, maxContainers)
-	if not zone or not zone.bounds then return nil end
+	if type(zone) ~= "table" then return nil, "invalid_bounds" end
+	local x1, x2, y1, y2, zMin, zMax = GlobalStorageSiK.ZoneBounds.normalize(zone.bounds)
+	if x1 == nil then return nil, "invalid_bounds" end
 	local cell = getCell and getCell() or nil
-	if not cell then return nil end
-	local b = zone.bounds
-	local x1 = math.min(b.x1 or b.x, b.x2 or b.x)
-	local x2 = math.max(b.x1 or b.x, b.x2 or b.x)
-	local y1 = math.min(b.y1 or b.y, b.y2 or b.y)
-	local y2 = math.max(b.y1 or b.y, b.y2 or b.y)
-	local zMin = b.z or b.zMin or 0
-	local zMax = b.zMax or zMin
+	if not cell then return nil, "no_cell" end
 	return {
 		zone = zone,
 		cell = cell,

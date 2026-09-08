@@ -141,6 +141,10 @@ function RemoteDetail.contextForProbe(probe)
 	return probe and probeContexts[probe] or nil
 end
 
+function RemoteDetail.unbindProbe(probe)
+	if probe then probeContexts[probe] = nil end
+end
+
 ---@return table|nil detail
 ---@return boolean loading
 function RemoteDetail.activate(owner, row, terminal)

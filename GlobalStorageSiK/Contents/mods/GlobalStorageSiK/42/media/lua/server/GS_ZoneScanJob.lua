@@ -121,7 +121,9 @@ local function progressStatus(job)
 		reason = job and job.reason or nil,
 		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
 		zonesDone = completed, zonesTotal = total,
-		progressDone = math.min(total, completed + fraction), progressTotal = total,
+		-- Publication may still fail or require a stale retry after the last zone.
+		-- Only the terminal COMPLETED result may be presented as 100 percent.
+		progressDone = math.min(total * 0.99, completed + fraction), progressTotal = math.max(1, total),
 		startedMs = job and job.startedMs or 0,
 		lastProgressMs = job and job.lastProgressMs or 0,
 		failedZones = job and job.totals and job.totals.failedZones or 0,
@@ -185,6 +187,8 @@ local function completeZone(job)
 end
 
 local function commitStaged(job)
+	-- A failed zone cannot certify or partially replace the network snapshot.
+	if (job.totals.failedZones or 0) > 0 then return false end
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(job.networkId)
 	if currentRevision ~= (job.startRevision or 0) then
 		job.totals._stagedDiscarded = true
@@ -259,7 +263,7 @@ local function finishJob(networkId, job)
 	job.totals._startContentSignature = job.startContentSignature
 	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error"
 		or state == "INVALIDATED_BY_MUTATION" and "snapshot_stale" or "complete")
-	if not job.totals._stagedDiscarded and GlobalStorageSiK.RegistryStore
+	if state == "COMPLETED" and GlobalStorageSiK.RegistryStore
 		and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
@@ -332,11 +336,11 @@ local function onTick()
 	local ok, err = pcall(function()
 		if job.zoneIndex > #job.zones then return end
 		if not job.zoneState then
-			job.zoneState = GlobalStorageSiK.ZoneScanner.beginIncremental(
+			local scanError
+			job.zoneState, scanError = GlobalStorageSiK.ZoneScanner.beginIncremental(
 				job.zones[job.zoneIndex], GlobalStorageSiK.Sandbox.getMaxContainersPerZone())
 			if not job.zoneState then
-				job.zoneIndex = job.zoneIndex + 1
-				return
+				error(scanError or "scan_unavailable")
 			end
 		end
 		if GlobalStorageSiK.ZoneScanner.stepIncremental(job.zoneState, MAX_UNITS_PER_STEP, MAX_STEP_MS) then
@@ -437,6 +441,14 @@ end
 ---@param searchQuery string|nil
 function GlobalStorageSiK.ZoneScanJob.addWatcher(player, networkId, searchQuery)
 	addWatcher(jobs[networkId], player, searchQuery)
+end
+
+--- Detach only this player's UI subscription; never cancel or restart the job.
+function GlobalStorageSiK.ZoneScanJob.removeWatcher(player, networkId)
+	local job = networkId and jobs[networkId]
+	if not job or not player or not player.getUsername then return end
+	local username = player:getUsername()
+	if username then job.watchers[username] = nil end
 end
 
 ---@param networkId string|nil

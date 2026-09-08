@@ -81,7 +81,9 @@ local function validateKnownNode(networkId, nodeId, player)
 	local node = registry.nodes and registry.nodes[nodeId] or nil
 	local zone = node and registry.zones and registry.zones[node.zoneId] or nil
 	if not node or not zone or zone.networkId ~= networkId then return nil, "invalid_node" end
-	if node.membership == "excluded" or node.enabled == false then return nil, "inactive_node" end
+	if node.membership == "excluded" or node.enabled == false or zone.enabled == false then
+		return nil, "inactive_node"
+	end
 	if node.offline == true then return nil, "offline_node" end
 	if player and not GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId) then
 		return nil, "forbidden_node"
@@ -130,8 +132,10 @@ end
 ---@param send function
 function DetailServer.handle(player, args, networkId, requireAccess, send)
 	args = args or {}
-	local requestId = type(args.requestId) == "string" and string.sub(args.requestId, 1, 96) or nil
-	local nodeId = type(args.nodeId) == "string" and string.sub(args.nodeId, 1, 160) or nil
+	local requestId = type(args.requestId) == "string"
+		and #args.requestId > 0 and #args.requestId <= 96 and args.requestId or nil
+	local nodeId = type(args.nodeId) == "string"
+		and #args.nodeId > 0 and #args.nodeId <= 160 and args.nodeId or nil
 	local itemId = tonumber(args.itemId)
 	local requestedRevision = tonumber(args.inventoryRevision)
 	local revision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
@@ -155,7 +159,8 @@ function DetailServer.handle(player, args, networkId, requireAccess, send)
 		payload.inventoryRevision = revision
 		send(player, "itemTooltipDetail", payload)
 	end
-	if not requestId or not nodeId or not itemId or itemId < 0 or itemId ~= math.floor(itemId) then
+	if not requestId or not nodeId or not itemId or itemId ~= itemId
+		or itemId < 0 or itemId > 2147483647 or itemId ~= math.floor(itemId) then
 		respond({ ok = false, reason = "invalid_request" })
 		return
 	end
@@ -176,17 +181,6 @@ function DetailServer.handle(player, args, networkId, requireAccess, send)
 		logMetrics(nodeReason, "miss", nowMs() - startedAt, 0)
 		return
 	end
-	local bucket = ensureBucket(networkId, revision)
-	local cacheKey = tostring(nodeId) .. "\31" .. tostring(itemId)
-	local cached = bucket.values[cacheKey]
-	if cached then
-		local payload = copyTable(cached)
-		payload.ok = true
-		payload.cache = "hit"
-		respond(payload)
-		logMetrics("ok", "hit", nowMs() - startedAt, 0)
-		return
-	end
 	local container, reason = resolveNodeContainer(node)
 	if not container then
 		respond({ ok = false, reason = reason })
@@ -197,6 +191,19 @@ function DetailServer.handle(player, args, networkId, requireAccess, send)
 	if not item then
 		respond({ ok = false, reason = "item_missing" })
 		logMetrics("item_missing", "miss", nowMs() - startedAt, inspected)
+		return
+	end
+	-- A revision can lag an external move. Revalidate this physical item even
+	-- on cache hits; only the expensive detail projection is reused.
+	local bucket = ensureBucket(networkId, revision)
+	local cacheKey = tostring(nodeId) .. "\31" .. tostring(itemId)
+	local cached = bucket.values[cacheKey]
+	if cached then
+		local payload = copyTable(cached)
+		payload.ok = true
+		payload.cache = "hit"
+		respond(payload)
+		logMetrics("ok", "hit", nowMs() - startedAt, inspected)
 		return
 	end
 	local detail = GlobalStorageSiK.ItemSnapshot.tooltipDetailFromItem(item)

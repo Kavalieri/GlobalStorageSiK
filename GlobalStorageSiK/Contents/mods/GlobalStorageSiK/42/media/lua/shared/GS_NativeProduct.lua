@@ -20,6 +20,9 @@ local PREFIX = "native:"
 -- La clasificación no depende del idioma: su cache escucha solo catalogEpoch.
 -- PresentationCache sí usa el helper común, que también atiende languageEpoch.
 local pathCache = {}
+if GlobalStorageSiK.CatalogManager.registerFullTypeCache then
+	GlobalStorageSiK.CatalogManager.registerFullTypeCache("native-product-path", pathCache)
+end
 local viewCache = GlobalStorageSiK.CatalogManager.createEpochCache()
 
 local metrics = {

@@ -553,7 +553,7 @@ function GS_NodeEditorUI:ensureForm()
 			self.priorityEntry:setText(tostring(value))
 			self:requestNodeUpdate({ priority = value })
 		end)
-	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_NodePriorityHint"))
+	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_NodePriorityHint"), { kind = "descriptive" })
 	local function priority(value)
 		self._editPriority = value
 		self.priorityEntry:setText(tostring(value))

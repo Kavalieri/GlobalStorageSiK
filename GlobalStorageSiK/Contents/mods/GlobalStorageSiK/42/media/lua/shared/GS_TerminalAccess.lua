@@ -768,6 +768,23 @@ local function evaluateAnchorDistance(player, anchor, proxRange, wirelessRange, 
 	return false, nil, "terminal_out_of_range"
 end
 
+--- Checks only geometry against the authoritative confirmation. Never consult
+--- registry/session/manifest or discover another terminal from this UI guard.
+function GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player, anchor, proximityRange, wirelessRange)
+	if not player or (player.isDead and player:isDead()) then return false, nil, "no_player" end
+	local function finite(value)
+		return type(value) == "number" and value == value
+			and value > -math.huge and value < math.huge
+	end
+	if type(anchor) ~= "table" or not finite(anchor.x) or not finite(anchor.y)
+		or not finite(anchor.z) or not finite(proximityRange) or proximityRange < 0
+		or not finite(wirelessRange) or wirelessRange < 0
+		or not finite(player:getX()) or not finite(player:getY()) or not finite(player:getZ()) then
+		return false, nil, "terminal_out_of_range"
+	end
+	return evaluateAnchorDistance(player, anchor, proximityRange, wirelessRange, nil, true)
+end
+
 --- Añade candidato si está más cerca que el actual.
 ---@param best table|nil
 ---@param bestDist number

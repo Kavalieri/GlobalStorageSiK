@@ -8,6 +8,7 @@
 require "GS_Config"
 require "GS_Sandbox"
 require "GS_RuleCoverage"
+require "GS_ZoneBounds"
 
 GlobalStorageSiK.Zones = {}
 
@@ -185,17 +186,13 @@ end
 ---@param z number
 ---@return boolean
 function GlobalStorageSiK.Zones.containsPoint(zone, x, y, z)
-	if not zone or not zone.bounds then
+	if type(zone) ~= "table" or type(x) ~= "number" or type(y) ~= "number" or type(z) ~= "number" then
 		return false
 	end
+	if x ~= x or y ~= y or z ~= z then return false end
 
-	local b = zone.bounds
-	local x1 = math.min(b.x1 or b.x, b.x2 or b.x)
-	local x2 = math.max(b.x1 or b.x, b.x2 or b.x)
-	local y1 = math.min(b.y1 or b.y, b.y2 or b.y)
-	local y2 = math.max(b.y1 or b.y, b.y2 or b.y)
-	local zMin = b.z or b.zMin or 0
-	local zMax = b.zMax or zMin
+	local x1, x2, y1, y2, zMin, zMax = GlobalStorageSiK.ZoneBounds.normalize(zone.bounds)
+	if x1 == nil then return false end
 
 	if z < zMin or z > zMax then
 		return false
@@ -212,14 +209,7 @@ end
 ---@param b table|nil
 ---@return number x1, number x2, number y1, number y2, number zMin, number zMax
 local function normalizedBounds(b)
-	b = b or {}
-	local x1 = math.min(b.x1 or b.x or 0, b.x2 or b.x or 0)
-	local x2 = math.max(b.x1 or b.x or 0, b.x2 or b.x or 0)
-	local y1 = math.min(b.y1 or b.y or 0, b.y2 or b.y or 0)
-	local y2 = math.max(b.y1 or b.y or 0, b.y2 or b.y or 0)
-	local zMin = b.z or b.zMin or 0
-	local zMax = b.zMax or zMin
-	return x1, x2, y1, y2, zMin, zMax
+	return GlobalStorageSiK.ZoneBounds.normalize(b)
 end
 
 --- Busca, entre las zonas YA registradas de una red, una cuyos limites
@@ -244,6 +234,7 @@ end
 function GlobalStorageSiK.Zones.findDuplicateZone(registry, networkId, bounds)
 	if not registry or not networkId or not bounds then return nil end
 	local x1, x2, y1, y2, zMin, zMax = normalizedBounds(bounds)
+	if x1 == nil then return nil end
 	for _, zone in pairs(registry.zones or {}) do
 		if zone.networkId == networkId then
 			local ex1, ex2, ey1, ey2, ezMin, ezMax = normalizedBounds(zone.bounds)

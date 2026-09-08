@@ -224,3 +224,41 @@ function GlobalStorageSiK.DiskProgramming.program(player, programId)
 	end
 	return true, nil
 end
+
+
+-- Terminal UI commands bind the installed peripheral to the exact captured
+-- network/anchor. Standalone disk recipes retain their original requirements.
+function GlobalStorageSiK.DiskProgramming.programAtTerminal(player, programId, context)
+	if not GlobalStorageSiK.isAuthoritative() or not player or type(context) ~= "table"
+		or type(context.networkId) ~= "string" or context.networkId == ""
+		or #context.networkId > 192 or type(context.terminalAnchor) ~= "table" then
+		return false, "terminal"
+	end
+	local anchor = context.terminalAnchor
+	for _, axis in ipairs({ "x", "y", "z" }) do
+		local value = anchor[axis]
+		if type(value) ~= "number" or value ~= value or value == math.huge
+			or value == -math.huge or value ~= math.floor(value) then return false, "terminal" end
+	end
+	local access = GlobalStorageSiK.TerminalAccess
+	local sessionAnchor = access.getSessionAnchor(player)
+	if access.getSessionNetworkId(player) ~= context.networkId or type(sessionAnchor) ~= "table"
+		or sessionAnchor.x ~= anchor.x or sessionAnchor.y ~= anchor.y or sessionAnchor.z ~= anchor.z
+		or not GlobalStorageSiK.Permissions.canAccess(player, context.networkId) then
+		return false, "terminal"
+	end
+	local registry = GlobalStorageSiK.Network.getRegistry()
+	local network = registry.networks and registry.networks[context.networkId]
+	local record = network and GlobalStorageSiK.TerminalRecord.findAt(network, anchor.x, anchor.y, anchor.z)
+	if not GlobalStorageSiK.TerminalRecord.isActive(record) then return false, "terminal" end
+	local installs = network.addonInstalls and network.addonInstalls[GlobalStorageSiK.Addons.anchorKey(anchor)]
+	if type(installs) ~= "table" or (installs.Reader ~= true and type(installs.Reader) ~= "table") then
+		return false, "reader"
+	end
+	local allowed, mode, hint = access.evaluate(player, context.networkId, anchor,
+		{ ignoreSession = true, strictDistance = true })
+	-- evaluate may fall back to another terminal; it cannot authorize this one.
+	if not allowed or (mode ~= "bypass" and (not hint or hint.x ~= anchor.x
+		or hint.y ~= anchor.y or hint.z ~= anchor.z)) then return false, "terminal" end
+	return GlobalStorageSiK.DiskProgramming.program(player, programId)
+end

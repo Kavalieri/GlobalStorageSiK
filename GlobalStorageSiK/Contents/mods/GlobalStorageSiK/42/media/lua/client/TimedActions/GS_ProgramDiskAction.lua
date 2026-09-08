@@ -20,9 +20,12 @@ local PROGRAM_DISK_TIME = 60
 
 ---@return boolean
 function GS_ProgramDiskAction:isValid()
-	if not self.character or not self.programId then
+	if not self.character or not self.programId
+		or (self.character.isDead and self.character:isDead()) then
 		return false
 	end
+	if self.terminalContext and (not self.callbacks or type(self.callbacks.isAvailable) ~= "function"
+		or not self.callbacks.isAvailable()) then return false end
 	return GlobalStorageSiK.DiskProgramming.knowsProgram(self.character, self.programId)
 		and GlobalStorageSiK.DiskProgramming.terminalInRange(self.character)
 end
@@ -60,9 +63,16 @@ function GS_ProgramDiskAction:stop()
 end
 
 function GS_ProgramDiskAction:perform()
+	if not self:isValid() then self:stop(); return end
 	self._performed = true
 	ISBaseTimedAction.perform(self)
-	GlobalStorageSiK.NetClient.sendCommand("programDisk", { programId = self.programId })
+	local payload = { programId = self.programId }
+	if self.terminalContext then
+		payload.networkId = self.terminalContext.networkId
+		payload.terminalAnchor = self.terminalContext.terminalAnchor
+	end
+	GlobalStorageSiK.NetClient.sendCommand(self.terminalContext and "programTerminalDisk" or "programDisk",
+		payload, self.character)
 	if self.callbacks and type(self.callbacks.onPerform) == "function" then
 		self.callbacks.onPerform(self)
 	end
@@ -71,11 +81,16 @@ end
 ---@param character IsoPlayer
 ---@param programId string
 ---@return GS_ProgramDiskAction
-function GS_ProgramDiskAction:new(character, programId, callbacks)
+function GS_ProgramDiskAction:new(character, programId, callbacks, terminalContext)
 	local o = ISBaseTimedAction.new(self, character)
 	o._performed = false
 	o.programId = programId
 	o.callbacks = callbacks
+	if terminalContext then
+		local anchor = terminalContext.terminalAnchor
+		o.terminalContext = { networkId = terminalContext.networkId,
+			terminalAnchor = { x = anchor.x, y = anchor.y, z = anchor.z } }
+	end
 	o.maxTime = PROGRAM_DISK_TIME
 	o.stopOnWalk = true
 	o.stopOnRun = true

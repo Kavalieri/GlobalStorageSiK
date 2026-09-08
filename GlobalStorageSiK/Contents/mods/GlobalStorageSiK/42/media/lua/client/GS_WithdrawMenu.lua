@@ -17,6 +17,8 @@ require "GS_I18n"
 require "GS_QuantityPrompt"
 
 require "GS_ContainerTargets"
+require "GS_FloorTargets"
+require "GS_UI_Feedback"
 
 require "GS_ContextMenuUi"
 
@@ -241,7 +243,7 @@ end
 ---@param onWithdraw fun(rowData: table, amount: number, targetKey: string|nil)|nil
 
 ---@param selectionRows table[]|nil
-function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows)
+function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, onWithdraw, selectionRows, onWithdrawBatch)
 
 	if not context or not rowData or not onWithdraw then
 
@@ -299,6 +301,24 @@ function GlobalStorageSiK.WithdrawMenu.addToContext(context, player, rowData, on
 
 		GlobalStorageSiK.WithdrawMenu.fillSubMenu(subMenu, player, rowData, onWithdraw, true)
 
+	end
+
+	-- Capture the physical square only when the gesture is invoked. A missing
+	-- floor target must never fall through to the default player inventory.
+	if not multi or type(onWithdrawBatch) == "function" then
+		subMenu:addOption(T(multi and "IGUI_GS_DropSelection" or "IGUI_GS_Drop"), player, function()
+			local targetKey = GlobalStorageSiK.FloorTargets.captureCurrent(player)
+			if not targetKey then
+				GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_WithdrawTargetUnavailable"),
+					255, 120, 120, 1800, { tone = "danger", channel = "withdraw" })
+				return
+			end
+			if multi then
+				onWithdrawBatch(selectionRows, 0, targetKey)
+			else
+				onWithdraw(rowData, 0, targetKey)
+			end
+		end)
 	end
 
 end

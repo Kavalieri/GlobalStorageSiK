@@ -3,24 +3,6 @@ return {
   ["actionAllowlist"] = {
     {
       ["events"] = {
-        "change"
-      },
-      ["id"] = "options.select-network"
-    },
-    {
-      ["events"] = {
-        "activate"
-      },
-      ["id"] = "options.use-network"
-    },
-    {
-      ["events"] = {
-        "activate"
-      },
-      ["id"] = "options.refresh-networks"
-    },
-    {
-      ["events"] = {
         "activate"
       },
       ["id"] = "options.open-terminal"
@@ -90,65 +72,11 @@ return {
   ["documentKind"] = "sik-ui-runtime-surface",
   ["frameworkRef"] = {
     ["id"] = "SiKUIFramework",
-    ["manifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    ["manifestSha256"] = "3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310",
     ["manifestVersion"] = "0.1.0-preview",
     ["namespace"] = "SiK.UI"
   },
   ["i18n"] = {
-    {
-      ["id"] = "options.state.network.title",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Red seleccionada"
-        }
-      }
-    },
-    {
-      ["id"] = "options.state.network.help",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Selecciona una red accesible para esta sesión. Usar red no inicia un reescaneo ni modifica la configuración compartida."
-        }
-      }
-    },
-    {
-      ["id"] = "options.state.network.current",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Red actual"
-        }
-      }
-    },
-    {
-      ["id"] = "options.state.network.selected",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Red seleccionada"
-        }
-      }
-    },
-    {
-      ["id"] = "options.state.network.use",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Usar seleccionada"
-        }
-      }
-    },
-    {
-      ["id"] = "options.state.network.refresh",
-      ["translations"] = {
-        {
-          ["locale"] = "es",
-          ["text"] = "Actualizar lista"
-        }
-      }
-    },
     {
       ["id"] = "options.state.operational.title",
       ["translations"] = {
@@ -433,7 +361,7 @@ return {
       ["translations"] = {
         {
           ["locale"] = "es",
-          ["text"] = "La propiedad se conserva mejor cuando existe otro administrador con acceso."
+          ["text"] = "Si mueres, la red queda vacante. Un miembro con acceso puede reclamarla."
         }
       }
     },
@@ -442,7 +370,7 @@ return {
       ["translations"] = {
         {
           ["locale"] = "es",
-          ["text"] = "Conviene mantener al menos otro administrador con acceso."
+          ["text"] = "Sin otros miembros: si mueres, esta red se quedará sin propietario."
         }
       }
     },
@@ -553,6 +481,33 @@ return {
           ["text"] = "Indica si la red detecta un suministro eléctrico utilizable."
         }
       }
+    },
+    {
+      ["id"] = "options.admin.succession.title",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Sucesión de la red"
+        }
+      }
+    },
+    {
+      ["id"] = "options.admin.succession.header-help",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "La sucesión conserva una vía de recuperación para la red si muere su propietario actual."
+        }
+      }
+    },
+    {
+      ["id"] = "options.admin.succession.no-backup-help",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "No hay otro miembro que pueda reclamar la red si fallece el propietario."
+        }
+      }
     }
   },
   ["product"] = {
@@ -580,13 +535,13 @@ return {
     }
   },
   ["provenance"] = {
-    ["frameworkManifestSha256"] = "0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad",
+    ["frameworkManifestSha256"] = "3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310",
     ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "fd4b9398aec56b11913478f0c35fdfb95ee6899cda64d624b164aa4ad3168abf",
+    ["surfaceSpecSha256"] = "a09871d13274e065f3dc0ffa8ff89287cb2fc21f3a8b41c67d3a5c2976fe9d89",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef",
-    ["visualSubtreeSha256"] = "8c250c9db8afec2ee5edd8a5544f6ebcb8d86654aa9e7298b505eb4cbc5c5455"
+    ["visualMasterSha256"] = "17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819",
+    ["visualSubtreeSha256"] = "814e85c0ad7b1cc8c5c909a2afa45e87a3763f5e442d5f44aeb12447ba7302a2"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -613,244 +568,6 @@ return {
     ["root"] = {
       ["actions"] = {},
       ["children"] = {
-        {
-          ["actions"] = {},
-          ["capabilities"] = {
-            {
-              ["id"] = "block.header",
-              ["props"] = {
-                {
-                  ["name"] = "info-visible",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = true
-                  }
-                }
-              }
-            }
-          },
-          ["children"] = {
-            {
-              ["actions"] = {
-                {
-                  ["actionId"] = "options.select-network",
-                  ["event"] = "change"
-                }
-              },
-              ["children"] = {},
-              ["id"] = "options-network-selector",
-              ["layout"] = {
-                ["base"] = {
-                  {
-                    ["name"] = "fill",
-                    ["value"] = {
-                      ["kind"] = "literal",
-                      ["value"] = true
-                    }
-                  }
-                },
-                ["mode"] = "row",
-                ["overrides"] = {}
-              },
-              ["options"] = {
-                {
-                  ["id"] = "available",
-                  ["labelRef"] = "options.state.network.selected",
-                  ["value"] = "available"
-                }
-              },
-              ["props"] = {
-                {
-                  ["name"] = "kind",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "combo"
-                  }
-                },
-                {
-                  ["name"] = "label",
-                  ["value"] = {
-                    ["kind"] = "i18n",
-                    ["ref"] = "options.state.network.selected"
-                  }
-                },
-                {
-                  ["name"] = "data",
-                  ["value"] = {
-                    ["kind"] = "data",
-                    ["path"] = "options.state.selectedNetwork"
-                  }
-                }
-              },
-              ["type"] = "control",
-              ["variant"] = "default"
-            },
-            {
-              ["actions"] = {},
-              ["children"] = {
-                {
-                  ["actions"] = {
-                    {
-                      ["actionId"] = "options.use-network",
-                      ["event"] = "activate"
-                    }
-                  },
-                  ["children"] = {},
-                  ["id"] = "options-network-use",
-                  ["layout"] = {
-                    ["base"] = {
-                      {
-                        ["name"] = "grow",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = 1
-                        }
-                      }
-                    },
-                    ["mode"] = "row",
-                    ["overrides"] = {}
-                  },
-                  ["props"] = {
-                    {
-                      ["name"] = "kind",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = "button"
-                      }
-                    },
-                    {
-                      ["name"] = "label",
-                      ["value"] = {
-                        ["kind"] = "i18n",
-                        ["ref"] = "options.state.network.use"
-                      }
-                    }
-                  },
-                  ["type"] = "control",
-                  ["variant"] = "default"
-                },
-                {
-                  ["actions"] = {
-                    {
-                      ["actionId"] = "options.refresh-networks",
-                      ["event"] = "activate"
-                    }
-                  },
-                  ["children"] = {},
-                  ["id"] = "options-network-refresh",
-                  ["layout"] = {
-                    ["base"] = {
-                      {
-                        ["name"] = "grow",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = 1
-                        }
-                      }
-                    },
-                    ["mode"] = "row",
-                    ["overrides"] = {}
-                  },
-                  ["props"] = {
-                    {
-                      ["name"] = "kind",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = "button"
-                      }
-                    },
-                    {
-                      ["name"] = "label",
-                      ["value"] = {
-                        ["kind"] = "i18n",
-                        ["ref"] = "options.state.network.refresh"
-                      }
-                    }
-                  },
-                  ["type"] = "control",
-                  ["variant"] = "default"
-                }
-              },
-              ["id"] = "options-network-actions",
-              ["layout"] = {
-                ["base"] = {
-                  {
-                    ["name"] = "fill",
-                    ["value"] = {
-                      ["kind"] = "literal",
-                      ["value"] = true
-                    }
-                  },
-                  {
-                    ["name"] = "gap",
-                    ["value"] = {
-                      ["kind"] = "token",
-                      ["ref"] = "spacing.8"
-                    }
-                  }
-                },
-                ["mode"] = "row",
-                ["overrides"] = {
-                  {
-                    ["bindings"] = {
-                      {
-                        ["name"] = "columns",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = 1
-                        }
-                      }
-                    },
-                    ["profileId"] = "compact"
-                  }
-                }
-              },
-              ["props"] = {
-                {
-                  ["name"] = "data",
-                  ["value"] = {
-                    ["kind"] = "data",
-                    ["path"] = "options.state.networkActions"
-                  }
-                }
-              },
-              ["type"] = "form",
-              ["variant"] = "equal-actions"
-            }
-          },
-          ["id"] = "options-network-block",
-          ["layout"] = {
-            ["base"] = {
-              {
-                ["name"] = "gap",
-                ["value"] = {
-                  ["kind"] = "token",
-                  ["ref"] = "spacing.8"
-                }
-              }
-            },
-            ["mode"] = "column",
-            ["overrides"] = {}
-          },
-          ["props"] = {
-            {
-              ["name"] = "title",
-              ["value"] = {
-                ["kind"] = "i18n",
-                ["ref"] = "options.state.network.title"
-              }
-            },
-            {
-              ["name"] = "help",
-              ["value"] = {
-                ["kind"] = "i18n",
-                ["ref"] = "options.state.network.help"
-              }
-            }
-          },
-          ["type"] = "block",
-          ["variant"] = "accent"
-        },
         {
           ["actions"] = {},
           ["capabilities"] = {
@@ -1647,92 +1364,208 @@ return {
             },
             {
               ["actions"] = {},
-              ["children"] = {},
-              ["id"] = "options-succession-hint",
+              ["capabilities"] = {
+                {
+                  ["id"] = "block.header",
+                  ["props"] = {
+                    {
+                      ["name"] = "info-visible",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = true
+                      }
+                    },
+                    {
+                      ["name"] = "leading-indicator",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.admin.successionIndicator"
+                      }
+                    }
+                  }
+                }
+              },
+              ["children"] = {
+                {
+                  ["actions"] = {},
+                  ["children"] = {},
+                  ["id"] = "options-succession-hint",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "fill",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = true
+                        }
+                      }
+                    },
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "feedback"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.admin.succession.help"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.admin.successionHint"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "subtle"
+                }
+              },
+              ["id"] = "options-succession-owner-block",
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "fill",
+                    ["name"] = "gap",
                     ["value"] = {
-                      ["kind"] = "literal",
-                      ["value"] = true
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
                     }
                   }
                 },
-                ["mode"] = "row",
+                ["mode"] = "column",
                 ["overrides"] = {}
               },
               ["props"] = {
                 {
-                  ["name"] = "kind",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "feedback"
-                  }
-                },
-                {
-                  ["name"] = "label",
+                  ["name"] = "title",
                   ["value"] = {
                     ["kind"] = "i18n",
-                    ["ref"] = "options.admin.succession.help"
+                    ["ref"] = "options.admin.succession.title"
                   }
                 },
                 {
-                  ["name"] = "data",
+                  ["name"] = "help",
                   ["value"] = {
-                    ["kind"] = "data",
-                    ["path"] = "options.admin.successionHint"
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.admin.succession.header-help"
                   }
                 }
               },
-              ["type"] = "control",
-              ["variant"] = "subtle",
+              ["type"] = "block",
+              ["variant"] = "default",
               ["visual"] = {
-                ["visibleWhen"] = "owner"
+                ["visibleWhen"] = "owner-with-backup"
               }
             },
             {
               ["actions"] = {},
-              ["children"] = {},
-              ["id"] = "options-backup-warning",
+              ["capabilities"] = {
+                {
+                  ["id"] = "block.header",
+                  ["props"] = {
+                    {
+                      ["name"] = "info-visible",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = true
+                      }
+                    },
+                    {
+                      ["name"] = "leading-indicator",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.admin.noBackupIndicator"
+                      }
+                    }
+                  }
+                }
+              },
+              ["children"] = {
+                {
+                  ["actions"] = {},
+                  ["children"] = {},
+                  ["id"] = "options-backup-warning",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "fill",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = true
+                        }
+                      }
+                    },
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "feedback"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.admin.succession.warning"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.admin.backupWarning"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "subtle"
+                }
+              },
+              ["id"] = "options-succession-no-backup-block",
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "fill",
+                    ["name"] = "gap",
                     ["value"] = {
-                      ["kind"] = "literal",
-                      ["value"] = true
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
                     }
                   }
                 },
-                ["mode"] = "row",
+                ["mode"] = "column",
                 ["overrides"] = {}
               },
               ["props"] = {
                 {
-                  ["name"] = "kind",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "status"
-                  }
-                },
-                {
-                  ["name"] = "label",
+                  ["name"] = "title",
                   ["value"] = {
                     ["kind"] = "i18n",
-                    ["ref"] = "options.admin.succession.warning"
+                    ["ref"] = "options.admin.succession.title"
                   }
                 },
                 {
-                  ["name"] = "data",
+                  ["name"] = "help",
                   ["value"] = {
-                    ["kind"] = "data",
-                    ["path"] = "options.admin.backupWarning"
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.admin.succession.no-backup-help"
                   }
                 }
               },
-              ["type"] = "control",
-              ["variant"] = "warning",
+              ["type"] = "block",
+              ["variant"] = "default",
               ["visual"] = {
                 ["visibleWhen"] = "owner-without-backup"
               }

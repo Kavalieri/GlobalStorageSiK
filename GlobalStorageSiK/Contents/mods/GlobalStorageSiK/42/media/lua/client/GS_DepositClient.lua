@@ -13,6 +13,7 @@ require "GS_DepositSources"
 require "GS_I18n"
 require "GS_PlayerUtils"
 require "GS_Debug"
+require "GS_TransferQueue"
 
 GlobalStorageSiK.DepositClient = {}
 
@@ -85,21 +86,58 @@ end
 --- Comprueba si los ítems pueden depositarse (no desde nodos de red).
 ---@param items InventoryItem[]
 ---@return boolean
-function GlobalStorageSiK.DepositClient.canDepositDraggedItems(items)
-	if not items or #items == 0 then
+function GlobalStorageSiK.DepositClient.canDepositDraggedItems(items, playerArg)
+	if not items or #items == 0 or #items > 4096 then
 		return false
 	end
 	for i = 1, #items do
 		local item = items[i]
 		local container = item and item.getContainer and item:getContainer() or nil
-		if not container then
+		local world = item and item.getWorldItem and item:getWorldItem() or nil
+		if world then
+			local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+			if world:getItem() ~= item or not GlobalStorageSiK.FloorTargets.canAccessSquare(player, world:getSquare()) then return false end
+		elseif not container or (container.getType and container:getType() == "floor") then
 			return false
 		end
-		if GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
+		if container and GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
 			return false
 		end
 	end
 	return true
+end
+
+-- Capture the entire gesture before arming a queue. Mixed floor/container
+-- selections occupy one bounded job; no Java item/square is retained there.
+function GlobalStorageSiK.DepositClient.sendDraggedItems(items, playerArg, opts)
+	if not GlobalStorageSiK.DepositClient.canDepositDraggedItems(items, playerArg) or #items > 4096 then return false end
+	local physical, seen, hasFloor = {}, {}, false
+	for i = 1, #items do
+		local item = items[i]
+		local id = GlobalStorageSiK.Deposit.getItemId(item)
+		if type(id) ~= "number" or id ~= id or id < 0 or id == math.huge or id ~= math.floor(id) then return false end
+		if not seen[id] then
+			seen[id] = true
+			local world = item.getWorldItem and item:getWorldItem() or nil
+			local entry = { kind = "container", itemId = id }
+			if world then
+				entry.kind, entry.sourceKey, entry.fullType = "floor",
+					GlobalStorageSiK.FloorTargets.squareKey(world:getSquare()), item:getFullType()
+				if not entry.sourceKey then return false end
+				hasFloor = true
+			end
+			physical[#physical + 1] = entry
+		end
+	end
+	if not hasFloor then
+		return GlobalStorageSiK.DepositClient.sendDepositItems(
+			GlobalStorageSiK.DepositClient.collectItemIds(items), playerArg, opts)
+	end
+	opts = opts or {}
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	local queueId = GlobalStorageSiK.TransferQueue.arm({ type = "physical", physicalItems = physical,
+		networkId = opts.networkId, searchQuery = opts.searchQuery }, player)
+	return queueId ~= nil
 end
 
 --- Solicita depósito de ítems por ID (validación en servidor).
@@ -116,8 +154,9 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 	-- flujo normal; el job posterior queda correlacionado por TransferQueue.
 	GlobalStorageSiK.Debug.log("Deposit", "sendDepositItems", "count=" .. tostring(#itemIds))
 	opts = opts or {}
-	local player = GlobalStorageSiK.PlayerUtils and GlobalStorageSiK.PlayerUtils.resolve(playerArg)
-		or GlobalStorageSiK.NetClient.getPlayer()
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+    if not player or not player.getPlayerNum then return false end
+    local playerNum = player:getPlayerNum()
 	local queueId, sendNow, networkId = nil, true, nil
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.arm then
 		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({
@@ -127,7 +166,7 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 			origin = opts.origin,
 			operationId = opts.operationId,
 			preferredNodeId = opts.preferredNodeId,
-		})
+		}, player)
 		if not queueId then return false end
 	end
 	if sendNow == false then return true end
@@ -137,10 +176,11 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 		operationId = opts.operationId,
 		preferredNodeId = opts.preferredNodeId,
 		queueId = queueId,
+		depositId = queueId,
 		networkId = networkId,
-	})
+	}, player)
 	if not sent and GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
-		GlobalStorageSiK.TransferQueue.clear()
+		GlobalStorageSiK.TransferQueue.clear(playerNum)
 	end
 	return sent
 end
@@ -187,48 +227,22 @@ end
 ---@param referenceItem InventoryItem|nil
 ---@return boolean
 function GlobalStorageSiK.DepositClient.sendDepositContainer(playerArg, referenceItem)
-	local refId = GlobalStorageSiK.Deposit.getItemId(referenceItem)
-	if not refId then
-		return false
-	end
-	local sourceContainer = referenceItem.getContainer and referenceItem:getContainer() or nil
-	local sourceItems = sourceContainer and sourceContainer.getItems and sourceContainer:getItems() or nil
-	local expectedUnits = sourceItems and sourceItems:size() or 0
-	local queueId, sendNow, networkId = nil, true, nil
-	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.arm then
-		queueId, sendNow, networkId = GlobalStorageSiK.TransferQueue.arm({
-			type = "container",
-			referenceItemId = refId,
-			expectedUnits = expectedUnits,
-		})
-		if not queueId then return false end
-	end
-	if sendNow == false then return true end
-	local sent = GlobalStorageSiK.NetClient.sendCommand("depositItems", {
-		mode = "container",
-		referenceItemId = refId,
-		origin = "player",
-		queueId = queueId,
-		networkId = networkId,
-	})
-	if not sent and GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
-		GlobalStorageSiK.TransferQueue.clear()
-	end
-	return sent
+    local source = referenceItem and referenceItem.getContainer and referenceItem:getContainer()
+    local items = source and source.getItems and source:getItems()
+    if not items then return false end
+    -- Capture the physical items at the gesture, not a live container expansion
+    -- on a later tick. Items added afterwards belong to a subsequent gesture.
+    local captured = {}
+    for i = 0, items:size() - 1 do captured[#captured + 1] = items:get(i) end
+    local ids = GlobalStorageSiK.DepositClient.collectItemIds(captured)
+    return GlobalStorageSiK.DepositClient.sendDepositItems(ids, playerArg)
 end
 
 --- Deposita ítems ya resueltos (arrastre).
 ---@param items InventoryItem[]
 ---@return boolean
-function GlobalStorageSiK.DepositClient.depositItemList(items)
-	if not GlobalStorageSiK.DepositClient.canDepositDraggedItems(items) then
-		return false
-	end
-	local ids = GlobalStorageSiK.DepositClient.collectItemIds(items)
-	if #ids == 0 then
-		return false
-	end
-	return GlobalStorageSiK.DepositClient.sendDepositItems(ids)
+function GlobalStorageSiK.DepositClient.depositItemList(items, playerArg)
+	return GlobalStorageSiK.DepositClient.sendDraggedItems(items, playerArg)
 end
 
 --- Limpia estado de arrastre tras depósito (sin re-disparar onMouseUp del inventario).

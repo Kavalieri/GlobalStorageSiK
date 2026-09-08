@@ -325,8 +325,12 @@ local function compactParentRows(detailRows)
 		table.sort(parent.nativePaths)
 		parent.locationCount = #parent.locations
 		local variantSearchParts = {}
+		local foodIconVariant, foodIconsAgree = nil, true
 		for i = 1, #parent.variantSummary do
 			local summary = parent.variantSummary[i]
+			local icon = summary.foodState and summary.foodState.iconVariant
+			if i == 1 then foodIconVariant = icon
+			elseif icon ~= foodIconVariant then foodIconsAgree = false end
 			variantSearchParts[#variantSearchParts + 1] = tostring(summary.key or "")
 			if summary.displayName then variantSearchParts[#variantSearchParts + 1] = summary.displayName end
 			if summary.mediaTitle then variantSearchParts[#variantSearchParts + 1] = summary.mediaTitle end
@@ -334,6 +338,9 @@ local function compactParentRows(detailRows)
 			if summary.nativePath then variantSearchParts[#variantSearchParts + 1] = summary.nativePath end
 		end
 		parent.variantSearchText = table.concat(variantSearchParts, " ")
+		-- A collapsed group may project a food icon only when every variant
+		-- agrees. Compute once with the index, never traverse variants in render.
+		parent.foodIconVariant = foodIconsAgree and foodIconVariant or nil
                 if parent._detailKinds.recorded_media and parent.mediaTitle then
                         parent.displayName = parent.mediaTitle
 		end
@@ -675,7 +682,7 @@ end
 -- de un escaneo fisico, y permite una comparacion exacta sin colisiones.
 local CONTENT_FIELDS = {
 	"fullType", "worldSprite", "count", "mediaIndex", "mediaTitle", "mediaCodes",
-	"dynamicSignature", "dynamicStateKey", "dynamicPercent", "fluidState", "foodState",
+	"dynamicSignature", "dynamicStateKey", "dynamicPercent", "fluidState", "foodState", "foodIconVariant",
 	"shapeFamily", "productFamilyKey", "shapeKey", "conditionSignature", "condition",
 	"conditionMax", "variantKey", "totalWeight", "totalFluidAmount", "totalFluidCapacity",
 	"itemIds", "unitDetails",

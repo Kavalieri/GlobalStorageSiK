@@ -256,7 +256,7 @@ function GlobalStorageSiK.NetworkReadAction.request(rowData, player, networkId, 
 	}
 	return GlobalStorageSiK.WithdrawClient.sendWithdraw(
 		rowData, 1, "player:main", searchQuery, {
-			networkId = networkId,
+			networkId = networkId, playerNum = loan.playerNum,
 			returnItemIds = true,
 			onComplete = function(ok, result)
 				local ids = result and result.itemIds or {}

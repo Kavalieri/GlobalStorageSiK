@@ -96,7 +96,7 @@ function Inventory.mount(parent, editor, node, options)
 	end
 	function view.controller:onWithdrawRow(row, amount, targetKey)
 		return GlobalStorageSiK.WithdrawClient.sendWithdraw(row, amount, targetKey, "", {
-			networkId = view.networkId,
+			networkId = view.networkId, playerNum = view.playerNum,
 			onComplete = function(ok, result) view:afterWithdraw(ok, result) end,
 		})
 	end
@@ -114,7 +114,7 @@ function Inventory.mount(parent, editor, node, options)
 	view.withdraw = UI.Controls.button(panel, { text = T("IGUI_GS_WithdrawContainerAll"),
 			onClick = function()
 			GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(view.rows, 0, nil, "", {
-				networkId = view.networkId,
+				networkId = view.networkId, playerNum = view.playerNum,
 				onComplete = function(ok, result) view:afterWithdraw(ok, result) end,
 			})
 		end })

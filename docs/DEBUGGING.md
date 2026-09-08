@@ -34,12 +34,30 @@ Las ejecuciones diagnósticas se aíslan bajo `Lua/SiKDiagnostics/GlobalStorageS
 taxonomy/audit-<runId>.log
 taxonomy/unclassified-<runId>.log
 taxonomy/excluded-internal-<runId>.log
+taxonomy/census-<runId>.log
 taxonomy/corpus-<runId>.log
 permissions/permissions-<runId>.log
 session.json
 ```
 
 `session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators` únicamente si necesitas el eco acotado en el cliente.
+
+El censo `taxonomy/census-<runId>.log` es un TSV de diagnóstico autoritativo,
+generado únicamente al solicitar la auditoría. Su esquema 2 conserva las nueve
+columnas originales y añade módulo de script, categoría/tipo originales, tags
+ordenados y estado de lectura, ruta calculada, ruta efectiva y estado de la
+corrección mundial. Son 25 columnas; los lectores que comparen la cabecera
+completa deben aceptar este esquema. `originModId` vacío con `originStatus=unknown`
+significa que no hay un origen demostrado: el módulo de script no es un ModID.
+`scriptTagsStatus` distingue lectura completa, ausente, truncada o fallida;
+el límite es 128 tags de hasta 256 bytes cada uno.
+
+Los tipos de mods ausentes con una corrección guardada aparecen como
+`override_source_missing`, sin aumentar los contadores del catálogo cargado.
+`review_default_changed` señala una diferencia respecto a la ruta calculada
+que se guardó al aplicar la corrección. El archivo permanece en el proceso
+autoritativo y no incluye autor, motivo privado ni historial de la corrección.
+No requiere activar categorías sandbox adicionales.
 
 ### Adaptador de diagnóstico de SiK UI
 
@@ -60,7 +78,10 @@ Al investigar composición interna, activa en la página propia del framework
 `Diagnóstico de composición y ciclo de vida` /
 `Composition and lifecycle diagnostics`. Activa además en Global Storage
 `Modo depuración (debug)` / `Debug mode` y `>> Integración con SiK UI` /
-`>> SiK UI integration` solo si necesitas hechos del consumidor. Añade una
+`>> SiK UI integration` si necesitas su canal de registro: incluye hechos del
+consumidor y eventos del framework enviados al logger de Global Storage.
+Ese canal se activa con los dos interruptores del Core; no depende del
+interruptor independiente del framework. Añade una
 categoría específica únicamente para esa superficie; no actives todo el árbol.
 
 ### Glosario de opciones del Core
@@ -78,7 +99,7 @@ categoría específica únicamente para esa superficie; no actives todo el árbo
 | `DebugCatRouter` | `>> Router` / `>> Router` | Resultado resumido de selección de destino. |
 | `DebugCatAddons` | `>> Instalación/desinstalación de addons` / `>> Addon install/uninstall` | Catálogo por addon con ID/ModID, registro, disponibilidad, causa y montaje; además, consumo/devolución de la unidad durante instalación o retirada. |
 | `DebugCatRuleMigration` | `>> Migración de reglas legacy` / `>> Legacy rule migration` | Clasifica reglas persistidas como nativas, categorías fuente explícitas, vanilla, alias GS, externas retiradas o residuo técnico; conserva hasta tres muestras acotadas de `rules` o `categories`. |
-| `DebugCatSiKUI` | `>> Integración con SiK UI` / `>> SiK UI integration` | Hechos de integración del producto con el framework. Incluye tiempos acotados `shell_visible`, `state_refresh`, `tab_activate` y `refreshItemsTab_done`; no registra una línea por frame. Para montaje, geometría, árbol y solapes internos se usa el interruptor propio de SiK UI Framework. |
+| `DebugCatSiKUI` | `>> Integración con SiK UI` / `>> SiK UI integration` | Hechos de integración y eventos del framework enviados al logger del Core. Incluye tiempos acotados `shell_visible`, `state_refresh`, `tab_activate` y `refreshItemsTab_done`; no registra una línea por frame. Activa el canal registrado en `Diagnostics.registerSink`; el framework mantiene también su interruptor independiente. |
 | `DebugCatRecordedMediaRuntime` | `>> DIAGNÓSTICO: identidad de medios grabados` / `>> DIAGNOSTIC: recorded-media identity` | Resumen acotado de filas VHS, títulos exactos/no resueltos, L3 Con enseñanza/Ocio y hasta cinco `mediaIndex` de muestra. |
 | `DebugCatSiKUITabs` | `>> SiK UI: pestañas y extensiones` / `>> SiK UI: tabs & extensions` | Registro/reutilización de panel, visibilidad y clic de pestaña. |
 | `DebugCatTabIcons` | `>> DIAGNÓSTICO: iconos de pestañas` / `>> DIAGNOSTIC: tab icons` | Ruta del asset, resolución de textura, tamaño nativo y tamaño final del slot; solo cambia con la geometría del rail. |
@@ -298,6 +319,22 @@ Opciones mínimas: `Modo depuración (debug)` / `Debug mode` y `Recetas y crafte
 Prueba el lector con tres distribuciones: todos los requisitos en el inventario principal, todos en contenedores físicos cercanos y una mezcla entre inventario, mochila equipada y contenedor. El modal y el servidor deben coincidir; debe aparecer una única salida, consumirse cada pieza de su origen real y conservarse soldador y destornillador. Repite retirando una pieza durante la barra: debe fallar con `reason=materials`, no crear salida y no consumir las demás. El evento esperado es `[SRV] [GlobalStorageSiK:INFO:Acquire] reader result | ok=true reason=success` o el motivo resumido del fallo. Repite al menos el caso mixto con el PC (`pc result`) y un disquete en blanco cercano (`program disk result`). Guarda `console.txt` del cliente y del servidor; en SP la marca será `[SP]` y no habrá relé.
 
 ## Reglas de emisión
+
+### Ayudas corregidas en 1.5.1-dev1
+
+- `No exigir alcance de red` / `Skip network reach requirement` modifica el
+  fallback global del alcance de contenedores durante el escaneo de zonas.
+  Cada red puede sustituirlo; no cambia la distancia de enlace terminal-red.
+- `>> Comprobación de lectura` / `>> Literature read check` registra la
+  caché/sonda de recetas aprendidas y las rutas de literatura de Almacén:
+  título de instancia, páginas, estado de red y nombre cliente. No se limita
+  a una sonda aislada. Requiere `Modo depuración (debug)` / `Debug mode`.
+- `>> Migración de reglas antiguas` / `>> Legacy rule migration` conserva
+  su categoría independiente y registra la migración recuperable, muestras
+  acotadas y la segunda pasada idempotente. Requiere el modo de depuración.
+
+Conservar `console.txt` del cliente y del dedicado; en SP las líneas propias
+usan `[SP]`. Mantener apagadas las categorías no necesarias para cada caso.
 
 - Agrupa en una línea los campos pequeños del mismo evento.
 - Divide payloads extensos o listas grandes en cabecera + bloques acotados.

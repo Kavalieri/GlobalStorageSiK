@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;fd4b9398aec56b11913478f0c35fdfb95ee6899cda64d624b164aa4ad3168abf&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;a09871d13274e065f3dc0ffa8ff89287cb2fc21f3a8b41c67d3a5c2976fe9d89&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;8c250c9db8afec2ee5edd8a5544f6ebcb8d86654aa9e7298b505eb4cbc5c5455&quot;
+  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;814e85c0ad7b1cc8c5c909a2afa45e87a3763f5e442d5f44aeb12447ba7302a2&quot;
 }">
   <title>tab-options</title>
   <style>:root {
@@ -909,6 +909,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   font: 11px/1.45 var(--sik-font);
   text-align: left;
 }
+.sik-tooltip--scrollable { position: relative; left: 0; top: 0; width: 240px; height: 100px; display: block; pointer-events: auto; overscroll-behavior: contain; }
 .sik-floating-tooltip { position: fixed !important; z-index: 200 !important; display: block !important; pointer-events: none; box-shadow: 0 8px 22px #000c; }
 .sik-floating-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-floating-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
@@ -1170,13 +1171,6 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
             <div class="sik-surface-panel sik-surface-panel--fill">
               <div class="sik-block-viewport">
                 <div class="sik-stack">
-                  <div class="sik-block" data-options-block="network">
-                    <div class="sik-block-header" data-help="Selecciona una red accesible para esta sesión. Usar red no inicia un reescaneo ni modifica la configuración compartida.">Red seleccionada</div>
-                    <div class="sik-block-body">
-                      <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-selected="sik-test-network" type="button">SiK Test Network</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="sik-test-network">SiK Test Network</div></div></div>
-                      <div class="sik-control-row sik-control-row--equal sik-control-row--wrap"><button class="sik-button" type="button">Usar red</button><button class="sik-button" type="button">Actualizar lista</button></div>
-                    </div>
-                  </div>
                   <div class="sik-block" data-options-block="summary">
                     <div class="sik-block-header" data-help="Resume el suministro eléctrico y el alcance configurado de la red seleccionada.">Resumen</div>
                     <div class="sik-block sik-options-information-card">
@@ -1221,7 +1215,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                       <div class="sik-table-row is-interactive"><span>Almacén</span><span>306, 176, 0</span><span>Secundario</span><span class="sik-capacity-value is-warning">En inventario / suspendido</span></div>
                     </div>
                   </div>
-                  <div class="sik-block" data-options-block="members">
+                  <div class="sik-block" data-options-block="members" data-state-group data-state="owner">
+                    <button data-state-option="owner" type="button" hidden></button>
+                    <button data-state-option="owner-without-backup" type="button" hidden></button>
                     <div class="sik-block-header" data-help="Muestra rol y última conexión. Pulsa una fila para gestionar rol, zonas permitidas, propiedad o retirada de acceso.">Miembros</div>
                     <div class="sik-block-body">
                       <div class="sik-table" data-sik-table>
@@ -1234,8 +1230,14 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                         <div class="sik-table-row is-interactive"><span class="sik-role-admin">Admin</span><span>Sarini</span><span class="sik-state-offline">Hace 2 d</span></div>
                         <div class="sik-table-row is-interactive"><span>Miembro</span><span>Rook</span><span class="sik-state-offline">Hace 6 h</span></div>
                       </div>
-                      <div class="sik-feedback sik-feedback--alert-row" data-visible-when="owner"><span class="sik-alert sik-alert--field" data-symbol-state="warning" aria-hidden="true"></span><span>Si mueres, la red queda vacante y debe reclamarse explícitamente; tu propia cuenta tiene prioridad para recuperarla.</span></div>
-                      <div class="sik-feedback sik-feedback--alert-row is-warning" data-visible-when="owner-without-backup" hidden><span class="sik-alert sik-alert--field" data-symbol-state="warning" aria-hidden="true"></span><span>Sin otros miembros: si mueres, esta red se quedará sin propietario.</span></div>
+                      <div class="sik-block sik-member-successor-alert" data-state-view="owner">
+                        <div class="sik-block-header" data-help="La sucesión conserva una vía de recuperación para la red si muere su propietario actual."><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Si mueres, la red queda vacante. Un sucesor con acceso podrá reclamarla; tu propia cuenta conserva prioridad para recuperar el acceso.</span></button>Sucesión de la red</div>
+                        <div class="sik-block-copy">Si mueres, la red queda vacante. Un miembro con acceso puede reclamarla.</div>
+                      </div>
+                      <div class="sik-block sik-member-successor-alert" data-state-view="owner-without-backup" hidden>
+                        <div class="sik-block-header" data-help="No hay otro miembro que pueda reclamar la red si fallece el propietario."><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Sin otros miembros: si mueres, esta red se quedará sin propietario hasta que una identidad autorizada pueda recuperarla.</span></button>Sucesión de la red</div>
+                        <div class="sik-block-copy">Sin otros miembros: si mueres, esta red se quedará sin propietario.</div>
+                      </div>
                       <button class="sik-button sik-button--full" data-visible-when="can-claim-as-admin" type="button" hidden>Reclamar propiedad</button>
                       <div class="sik-action-section" data-visible-when="admin-or-owner">
                         <div class="sik-subheading">Añadir acceso</div>
@@ -1800,6 +1802,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(refreshOverflow);
     document.querySelectorAll(".sik-block-viewport, .sik-scroll-region").forEach((viewport) => observer.observe(viewport));
+  }
+})();
+
+/* Product state fixture; uses the existing rail interaction and shared components. */
+(() => {
+  const reader = new URLSearchParams(location.search).get('reader') || 'installed';
+  const installed = reader === 'installed';
+  document.documentElement.dataset.reader = reader;
+  const tab = document.querySelector('[data-tab="programming"]');
+  const panel = document.querySelector('[data-panel="programming"]');
+  if (!installed) {
+    if (tab.classList.contains('is-active')) document.querySelector('[data-tab="warehouse"]').click();
+    tab.hidden = true;
+    panel.hidden = true;
+    panel.inert = true;
+    const slot = document.querySelector('[data-addon-id="Reader"]');
+    slot.dataset.addonState = 'not-installed';
+    slot.classList.remove('is-active');
+    const label = slot.querySelector('[data-addon-part="stateLabel"]');
+    label.textContent = 'No instalado aquí';
+    label.classList.remove('is-installed');
+    const tooltip = slot.querySelector('.sik-tooltip em');
+    tooltip.textContent = 'Instala la disquetera en este terminal para abrir Programación.';
   }
 })();
 </script>

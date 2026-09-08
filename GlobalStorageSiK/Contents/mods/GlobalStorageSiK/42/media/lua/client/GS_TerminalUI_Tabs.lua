@@ -493,7 +493,27 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 
 	local nextMode = mode or "full"
 	local previousMode = terminal.accessMode
+	-- A safety probe may confirm an unchanged denial. Keep the existing
+	-- controls/focus and let the blocked panel compare its semantic state;
+	-- only a real transition needs activation and forced reconstruction.
+	if previousMode == "blocked" and nextMode == "blocked"
+		and terminal.activeTabKey == "blocked" and terminal.lastBlockedSignature ~= nil
+		and GlobalStorageSiK.TerminalBlockedPanel then
+		if blockedState then terminal.blockedState = blockedState end
+		GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(terminal, false)
+		if terminal.syncHeaderChrome then terminal:syncHeaderChrome() end
+		return
+	end
 	terminal.accessMode = nextMode
+	if nextMode == "blocked" then
+		local state = terminal.terminalState
+		if state then
+			state.scanActive, state.scanStatus, state.reconcilePending = nil, nil, nil
+			state.redistributeActive, state.redistributeProgress = nil, nil
+			state.headerTransient = nil
+		end
+		terminal._blockedHeaderTitleKey = nil
+	end
 	if terminal.syncHeaderChrome then terminal:syncHeaderChrome() end
 	if previousMode == nextMode and nextMode == "full" then
 		GlobalStorageSiK.TerminalTabs.syncBlockedFrame(terminal)
@@ -566,6 +586,7 @@ function GlobalStorageSiK.TerminalTabs.applyAccessMode(terminal, mode, blockedSt
 		end
 
 	end
+	if terminal.syncHeaderChrome then terminal:syncHeaderChrome() end
 
 end
 

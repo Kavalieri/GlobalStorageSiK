@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;ddb1402e141d1a5d6748828dc9c411948063f518e0a30a7816219475fb7d8338&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;f35930374bb5fc876c948b0501215d080a1ca61e0a81747aefb7e06e3236f189&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;13cda2937e033d43b44568de0f0a2e86fb3e83831593db2e3cecfba8c8f59ac6&quot;
+  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;ad39b8c492c1950a2ce66922e31a5a2710eb54e5a4373e35524e1769d08ed00a&quot;
 }">
   <title>tab-red</title>
   <style>:root {
@@ -909,6 +909,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   font: 11px/1.45 var(--sik-font);
   text-align: left;
 }
+.sik-tooltip--scrollable { position: relative; left: 0; top: 0; width: 240px; height: 100px; display: block; pointer-events: auto; overscroll-behavior: contain; }
 .sik-floating-tooltip { position: fixed !important; z-index: 200 !important; display: block !important; pointer-events: none; box-shadow: 0 8px 22px #000c; }
 .sik-floating-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-floating-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
@@ -1193,7 +1194,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
             </div>
             <div class="sik-block">
                   <div class="sik-block-header" data-help="Control administrativo de recuperación. Revisa todas las zonas para detectar contenedores nuevos, sustituidos, ausentes o modificados.">Reescaneo de toda la red</div>
-                  <div class="sik-field-group"><div class="sik-feedback sik-feedback--alert-row"><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Actualizando inventario"><span class="sik-tooltip">El reescaneo conserva la última captura válida hasta recibir la revisión nueva.</span></button><span>Actualizando inventario · última captura válida hace 18 s</span></div><button class="sik-button sik-button--full" type="button">Reescanear toda la red</button></div>
+                  <div class="sik-field-group"><div class="sik-feedback sik-feedback--alert-row"><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Escaneando inventario"><span class="sik-tooltip">Actualizando inventario. Última captura válida hace 18 s; el detalle permanece disponible aquí.</span></button><span>Escaneando 44%</span><span class="sik-progress" data-progress-percent="44" aria-label="Escaneando 44 por ciento"><span></span></span></div><button class="sik-button sik-button--full" type="button">Reescanear toda la red</button></div>
             </div>
           </section>
 <script>(() => {
@@ -1741,6 +1742,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(refreshOverflow);
     document.querySelectorAll(".sik-block-viewport, .sik-scroll-region").forEach((viewport) => observer.observe(viewport));
+  }
+})();
+
+/* Product state fixture; uses the existing rail interaction and shared components. */
+(() => {
+  const reader = new URLSearchParams(location.search).get('reader') || 'installed';
+  const installed = reader === 'installed';
+  document.documentElement.dataset.reader = reader;
+  const tab = document.querySelector('[data-tab="programming"]');
+  const panel = document.querySelector('[data-panel="programming"]');
+  if (!installed) {
+    if (tab.classList.contains('is-active')) document.querySelector('[data-tab="warehouse"]').click();
+    tab.hidden = true;
+    panel.hidden = true;
+    panel.inert = true;
+    const slot = document.querySelector('[data-addon-id="Reader"]');
+    slot.dataset.addonState = 'not-installed';
+    slot.classList.remove('is-active');
+    const label = slot.querySelector('[data-addon-part="stateLabel"]');
+    label.textContent = 'No instalado aquí';
+    label.classList.remove('is-installed');
+    const tooltip = slot.querySelector('.sik-tooltip em');
+    tooltip.textContent = 'Instala la disquetera en este terminal para abrir Programación.';
   }
 })();
 </script>

@@ -30,7 +30,7 @@ local CARD_GAP = 12
 local CONTENT_PAD = 10
 local CONTROL_METRICS = UI.Controls.metrics("standard")
 local CRAFT_BTN_H = CONTROL_METRICS.buttonHeight
-local REFRESH_TICKS = 8
+local scheduleRefresh
 -- Declaración adelantada: la función real se define más abajo (junto al
 -- resto de la lógica del lector), pero stateSignature (justo debajo)
 -- necesita poder llamarla. Un "local function" normal no sirve aquí porque
@@ -100,22 +100,27 @@ local function reasonNeedsReaderStatus(reason)
 	return not READER_STATUS_EXCLUDED_REASONS[reason]
 end
 
-local function stateSignature(state)
+local function stateSignature(state, player)
 	if not state then
 		return ""
 	end
 	local rs = {}
 	if reasonNeedsReaderStatus(state.reason) then
-		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
 		rs = installReaderStatus and installReaderStatus(player) or {}
 	end
 	return table.concat({
 		tostring(state.reason),
 		tostring(state.proximityRange),
+		tostring(state.wirelessRange),
+		tostring(state.networkId),
 		tostring(rs.hasReader),
 		tostring(rs.hasDisk),
 		tostring(rs.computerState),
+		tostring(rs.allReady),
 		tostring(state.canClaimOwnership),
+		tostring(state.claimTier),
+		tostring(state.canRecoverRole),
+		tostring(state.recoverableRole),
 	}, "|")
 end
 
@@ -128,6 +133,7 @@ local function buildClientBlockedState(ui, player)
 		return ui.blockedState or {}
 	end
 	local prev = ui.blockedState or {}
+	state.playerNum = ui.playerNum or 0
 	state.reason = prev.reason
 	state.proximityRange = prev.proximityRange or state.proximityRange
 	state.wirelessRange = prev.wirelessRange or state.wirelessRange
@@ -282,7 +288,7 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 	-- "locked" ya resuelve eso con un tooltip explicito en vez de necesitar
 	-- el clic para avisar - se pinta bloqueado de verdad mientras falte algo,
 	-- y se refresca solo cuando cambia el estado real (stateSignature/
-	-- applyRefreshIfNeeded, cada REFRESH_TICKS), igual de "tiempo real" que
+	-- applyRefreshIfNeeded, tras un evento relevante), igual de "tiempo real" que
 	-- el resto de indicadores de esta misma tarjeta.
 	local btn = UI.Controls.button(primaryActions.panel, {
 		x = 0, y = 0, w = installBtnW, h = CRAFT_BTN_H,
@@ -309,7 +315,7 @@ local function buildInstallReaderCard(scroll, terminal, y, cardW)
 		else
 			msg = T("IGUI_GS_InstallReaderComputerNoneShort")
 		end
-		UI.Controls.setTooltip(btn, msg)
+		UI.Controls.setTooltip(btn, msg, { kind = "descriptive" })
 	end
 	card.panel.installBtn = btn
 	primaryActions:add(btn, { width = installBtnW, height = CRAFT_BTN_H })
@@ -551,9 +557,10 @@ end
 
 local function buildUnifiedBlockedCard(scroll, terminal, y, cardW)
         local state = terminal.blockedState or {}
-        local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+        local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(terminal.playerNum or 0) or getPlayer()
         local status = reasonNeedsReaderStatus(state.reason) and installReaderStatus(player) or nil
         local titleKey, messageKey, nestedTitleKey, mode = resolveBlockedPresentation(state, status)
+        terminal._blockedHeaderTitleKey = titleKey
         local gap = CONTROL_METRICS.controlGap
         local outer = createStaticBlock(scroll, y, cardW, 1000, T(titleKey), T(messageKey))
         local outerBody, outerContent = blockChildArea(outer)
@@ -649,7 +656,7 @@ local function buildUnifiedBlockedCard(scroll, terminal, y, cardW)
                                 if current.allReady then GlobalStorageSiK.InstallTerminalReader.begin(p, current.target) end
                         end, not status.allReady)
                 if not status.allReady then
-                        UI.Controls.setTooltip(installButton, T("IGUI_GS_InstallReaderMissingItems"))
+                        UI.Controls.setTooltip(installButton, T("IGUI_GS_InstallReaderMissingItems"), { kind = "descriptive" })
                 end
                 rowY = rowY + installButton.height
         end
@@ -714,19 +721,24 @@ function GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(terminal, fo
 	-- rebuildContent destruye y recrea TODOS los widgets (botones incluidos).
 	-- Si eso ocurre entre el mousedown y el mouseup de un boton de este panel
 	-- (el estado puede cambiar y disparar un rebuild en cualquier momento:
-	-- cada 8 ticks o al vuelo con OnContainerUpdate/OnReadLiterature), el
+	-- al vuelo con OnContainerUpdate/OnReadLiterature), el
 	-- widget que capturo la pulsacion deja de existir antes de que llegue el
 	-- mouseup y el clic se pierde sin ningun error visible - exactamente
 	-- "Instalar aqui/Conseguir PC/Mostrar cobertura no reaccionan al clic".
 	-- Se difiere el rebuild hasta soltar el raton (refreshPending ya hace que
 	-- el propio onTick lo reintente en cuanto pueda).
 	if not force and isMouseButtonDown and isMouseButtonDown(0) then
-		terminal.refreshPending = true
+		scheduleRefresh(terminal)
 		return
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getPlayer()
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(terminal.playerNum or 0)
+	if not player or player:getPlayerNum() ~= (terminal.playerNum or 0) then
+		terminal.refreshPending = false
+		return
+	end
 	local state = buildClientBlockedState(terminal, player)
-	local sig = stateSignature(state)
+	local sig = stateSignature(state, player)
+	terminal.refreshPending = false
 	if not force and sig == (terminal.lastBlockedSignature or "") then
 		return
 	end
@@ -737,6 +749,7 @@ function GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(terminal, fo
 		terminal:calculateLayout()
 	end
 	GlobalStorageSiK.TerminalBlockedPanel.rebuildContent(terminal)
+	if terminal.syncHeaderChrome then terminal:syncHeaderChrome() end
 end
 
 ---@param terminal GS_TerminalUI
@@ -747,15 +760,26 @@ function GlobalStorageSiK.TerminalBlockedPanel.refresh(terminal, blockedState)
 	end
 	if blockedState then
 		terminal.blockedState = blockedState
-		terminal.lastBlockedSignature = stateSignature(blockedState)
 	end
 	GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(terminal, true)
 end
 
-function GlobalStorageSiK.TerminalBlockedPanel.onLiveStateEvent()
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-	if ui and ui:getIsVisible() and ui.accessMode == "blocked" then
-		GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(ui, false)
+function GlobalStorageSiK.TerminalBlockedPanel.onLiveStateEvent(source)
+	local api = GlobalStorageSiK.TerminalUI
+	local sourcePlayerNum
+	if source and GlobalStorageSiK.NetClient then
+		for n=0,3 do
+			local player = GlobalStorageSiK.NetClient.getPlayer(n)
+			if player == source and player:getPlayerNum() == n then sourcePlayerNum = n; break end
+		end
+	end
+	-- Vanilla also emits OnContainerUpdate() without an object (OnBreak,
+	-- moveables, vehicle doors). Unknown origin must invalidate visible views;
+	-- it cannot safely be attributed to the default player.
+	for n=0,3 do
+		local ui = api and api.getInstanceForPlayer and api.getInstanceForPlayer(n)
+		if (sourcePlayerNum == nil or sourcePlayerNum == n)
+			and ui and ui:isVisible() and ui.accessMode == "blocked" then scheduleRefresh(ui) end
 	end
 end
 
@@ -773,13 +797,38 @@ local function installRecipeLearnHooks(hook)
 end
 
 function GlobalStorageSiK.TerminalBlockedPanel.onTick()
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
-	if not ui or not ui:getIsVisible() or ui.accessMode ~= "blocked" then
-		return
+	local panel = GlobalStorageSiK.TerminalBlockedPanel
+	local api = GlobalStorageSiK.TerminalUI
+	local pending = false
+	for n=0,3 do
+		local ui = api and api.getInstanceForPlayer and api.getInstanceForPlayer(n)
+		if ui and ui.refreshPending then
+			if ui:isVisible() and ui.accessMode == "blocked" then
+				panel.applyRefreshIfNeeded(ui, false)
+				pending = pending or ui.refreshPending == true
+			else ui.refreshPending = false end
+		end
 	end
-	ui.blockedRefreshTick = (ui.blockedRefreshTick or 0) + 1
-	if ui.refreshPending or (ui.blockedRefreshTick % REFRESH_TICKS == 0) then
-		GlobalStorageSiK.TerminalBlockedPanel.applyRefreshIfNeeded(ui, false)
+	if not pending and panel._refreshTickInstalled and Events and Events.OnTick then
+		Events.OnTick.Remove(panel.onTick)
+		panel._refreshTickInstalled = false
+	end
+end
+
+scheduleRefresh = function(terminal)
+	terminal.refreshPending = true
+	local panel = GlobalStorageSiK.TerminalBlockedPanel
+	if not panel._refreshTickInstalled and Events and Events.OnTick then
+		panel._refreshTickInstalled = true
+		Events.OnTick.Add(panel.onTick)
+	end
+end
+
+-- Movement is reported by the access guard; inventory/recipe changes use the
+-- existing event hooks. There is no periodic proximity or inventory rescan.
+function GlobalStorageSiK.TerminalBlockedPanel.invalidate(terminal)
+	if terminal and terminal.accessMode == "blocked" and terminal:isVisible() then
+		scheduleRefresh(terminal)
 	end
 end
 
@@ -796,7 +845,4 @@ function GlobalStorageSiK.TerminalBlockedPanel.ensureEvents()
 		Events.OnReadLiterature.Add(hook)
 	end
 	installRecipeLearnHooks(hook)
-	if Events and Events.OnTick then
-		Events.OnTick.Add(GlobalStorageSiK.TerminalBlockedPanel.onTick)
-	end
 end

@@ -30,6 +30,7 @@ require "GS_ItemNetworkTooltip"
 require "GS_NetworkReadAction"
 require "GS_NetClient"
 require "GS_RemoteItemDetail"
+local LocalItemTooltip = require "GS_LocalItemTooltip"
 require "GS_UIDebug"
 
 GlobalStorageSiK.TerminalItems = {}
@@ -109,6 +110,12 @@ function GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
 	if not tooltip then return end
 	if row._gsTooltipHandle then row._gsTooltipHandle:hide()
 	else UI.Tooltip.hide(tooltip) end
+	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.unbindProbe then
+		GlobalStorageSiK.RemoteItemDetail.unbindProbe(tooltip.item)
+	end
+	tooltip._gsItemKey, tooltip._gsRemoteRow = nil, nil
+	row._gsLocalTooltip = nil
+	tooltip:setItem(nil)
 end
 
 function GlobalStorageSiK.TerminalItems.disposeRowTooltip(row)
@@ -158,6 +165,7 @@ function GlobalStorageSiK.TerminalItems.showRowTooltip(row)
 	if not tooltip then return false end
 	if not row._gsTooltipHandle or row._gsTooltipHandle.disposed then
 		row._gsTooltipHandle = UI.Tooltip.attach(row, {
+			kind = "object",
 			variant = "transient",
 			playerNum = row.terminal and row.terminal.playerNum or 0,
 			channel = "warehouse-item",
@@ -631,6 +639,30 @@ end
 GlobalStorageSiK.TerminalItems.prepareRecordedMediaRows = localizeRecordedMediaRows
 GlobalStorageSiK.TerminalItems.displayNameForRow = displayNameForRow
 
+local function foodIconVariantForRow(row)
+	local variant = row.foodState and row.foodState.iconVariant or row.foodIconVariant
+	if variant == "base" or variant == "cooked" or variant == "rotten" or variant == "burnt" then
+		return variant
+	end
+	return nil
+end
+
+-- This ephemeral probe is for getTex only, not a hydrated tooltip instance.
+-- Set every participating field so script defaults cannot override the selector.
+local function applyFoodIconVariant(probe, variant)
+	if not variant then return true end
+	local ok = pcall(function()
+		if not instanceof or not instanceof(probe, "Food") then error("not a Food probe") end
+		probe:setBurnt(variant == "burnt")
+		probe:setCooked(variant == "cooked")
+		local threshold = probe:getOffAgeMax()
+		if type(threshold) ~= "number" or threshold ~= threshold
+			or math.abs(threshold) == math.huge then error("invalid food icon threshold") end
+		probe:setAge(variant == "rotten" and threshold or math.min(0, threshold - 1))
+	end)
+	return ok
+end
+
 --- Textura de inventario resuelta como vanilla (`InventoryItem:getTex()`).
 --- El resultado se cachea porque la lista virtual puede redibujar la misma
 --- fila muchas veces. ScriptItem y sprite del mundo son solo fallbacks.
@@ -640,14 +672,16 @@ local function itemTexture(row)
 	if not row or not row.fullType then
 		return nil
 	end
+	local variant = foodIconVariantForRow(row)
 	local cacheKey = tostring(row.fullType) .. "\31" .. tostring(row.worldSprite or "")
+		.. "\31" .. tostring(variant or "")
 	local cached = ITEM_TEXTURE_CACHE[cacheKey]
 	if cached ~= nil then
 		return cached or nil
 	end
 
 	local probe = itemProbe(row)
-	if probe and probe.getTex then
+	if probe and probe.getTex and applyFoodIconVariant(probe, variant) then
 		local ok, tex = pcall(function() return probe:getTex() end)
 		if ok and tex then
 			ITEM_TEXTURE_CACHE[cacheKey] = tex
@@ -1059,6 +1093,9 @@ end
 -- directa, zone tiene su propia invalidacion por referencia de nodos).
 local sortKeyValueCache = GlobalStorageSiK.CatalogManager
 	and GlobalStorageSiK.CatalogManager.createEpochCache() or {}
+if GlobalStorageSiK.CatalogManager and GlobalStorageSiK.CatalogManager.registerFullTypeCache then
+	GlobalStorageSiK.CatalogManager.registerFullTypeCache("terminal-item-sort", sortKeyValueCache, 1)
+end
 local function sortRowCacheKey(row)
 	return tostring(row.fullType or "") .. "\1" .. tostring(row.worldSprite or "")
 		.. "\1" .. tostring(row.displayName or "") .. "\1" .. tostring(row.category or "")
@@ -1515,8 +1552,9 @@ local function openItemContextMenu(listPanel, terminal, data)
 	if not terminal or not data then
 		return
 	end
-	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer() or getSpecificPlayer(0)
-	local playerNum = 0
+	local playerNum = terminal.playerNum or 0
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(playerNum)
+		or getSpecificPlayer(playerNum)
 	if player and player.getPlayerNum then
 		playerNum = player:getPlayerNum()
 	end
@@ -1566,7 +1604,20 @@ local function openItemContextMenu(listPanel, terminal, data)
 		if data.aggregateAllowed ~= false or (data.itemIds and #data.itemIds > 0) then
 			GlobalStorageSiK.WithdrawMenu.addToContext(cm, player, data, function(rowData, amount, targetKey)
 				withdrawFromRowData(terminal, rowData, amount, targetKey)
-			end, getSelectedRows(listPanel))
+			end, getSelectedRows(listPanel), function(rows, amount, targetKey)
+				GlobalStorageSiK.WithdrawClient.sendWithdrawBatch(rows, amount, targetKey,
+					terminal.getSearchQuery and terminal:getSearchQuery() or "", {
+						playerNum = playerNum,
+						networkId = terminal.terminalState and terminal.terminalState.networkId,
+						onComplete = function(ok, result)
+							if type(terminal.onWithdrawCompleted) == "function" then
+								terminal:onWithdrawCompleted(ok, result)
+							else
+								GlobalStorageSiK.TerminalItems.onWithdrawCompleted(listPanel, terminal, ok, result)
+							end
+						end,
+					})
+			end)
 		end
 
 		-- "Localizar objeto" (dev26 ronda 4quinquies, ver Documentacion/
@@ -1651,20 +1702,12 @@ function GlobalStorageSiK.TerminalItems.describeRow(data, listPanel, terminal, z
 		hasChildren = data and data.expandable == true, expanded = expanded,
 	}
 	local name = displayNameForRow(data)
-	local foodLabel = GlobalStorageSiK.I18n.foodStateLabel(data)
-	if foodLabel ~= "" then name = name .. "  [" .. foodLabel .. "]" end
-	if data._gsRowKind == "child" and data.detailKind == "condition"
-		and data.condition and data.conditionMax then
-		name = name .. "  [" .. tostring(data.condition) .. "/" .. tostring(data.conditionMax) .. "]"
-	elseif data._gsRowKind == "child" and data.detailKind == "fluid" then
-		local quantity = (require "GS_RemoteTooltipPresentation").fluidQuantity(data, false)
-		if quantity then name = name .. "  [" .. quantity .. "]" end
-	end
 	local projection = presentationProjection(data)
 	local muted = UI.Theme.tokens().textMuted
 	local pal = { textMuted = { muted.r, muted.g, muted.b } }
-	local player = terminal and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-		or getSpecificPlayer(0)
+	local playerNum = terminal and terminal.playerNum or 0
+	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(playerNum)
+		or getSpecificPlayer(playerNum)
 	return {
 		identity = rowIdentity(data), data = data, hierarchy = hierarchy,
 		texture = itemTexture(data), name = name,
@@ -1674,7 +1717,8 @@ function GlobalStorageSiK.TerminalItems.describeRow(data, listPanel, terminal, z
 		zone = zoneLabel or resolveZoneLabel(terminal, data) or T("IGUI_GS_PunctuationEmDash"),
 		count = tostring(data.count or 0), depth = data._gsDepth or 0,
 		rowKind = data._gsRowKind, expanded = expanded,
-		literatureRead = isLiteratureReadSafe(player, data), stale = data._gsStale == true,
+		literatureRead = GlobalStorageSiK.RecordedMedia.hasBeenConsumed(player, data)
+			or isLiteratureReadSafe(player, data), stale = data._gsStale == true,
 		iconSize = ICON_SIZE, iconGap = 8,
 	}
 end
@@ -1763,8 +1807,9 @@ local function updateRemoteMediaTitle(row, detail, listPanel, terminal)
 		or not pointerInsideRow(row) then return end
 	if tostring(detail and detail.itemId) ~= tostring(row.itemData.itemId) then return end
 	local mediaTitle = detail and (detail.mediaTitle or detail.displayName) or nil
-	if not isGenericRecordedMediaTitle(mediaTitle, row.itemData) then
-		local mediaIndex = tonumber(row.itemData.mediaIndex or detail.mediaIndex)
+	local mediaIndex = tonumber(row.itemData.mediaIndex or (detail and detail.mediaIndex))
+	if mediaIndex and mediaIndex >= 0 and mediaIndex <= 32767
+		and not isGenericRecordedMediaTitle(mediaTitle, row.itemData) then
 		local function applyToRows(rows)
 			for i = 1, #(rows or {}) do
 				local candidate = rows[i]
@@ -1829,25 +1874,32 @@ local function afterRenderFrameworkRow(context, listPanel, terminal)
 	local hovering = pointerInsideRow(row)
 	if not data._gsStale and hovering and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 		local tooltipKey = rowIdentity(data) or (tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or ""))
+		if row._gsLocalTooltip and not LocalItemTooltip.isCurrent(row._gsLocalTooltip, data, terminal) then
+			GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
+		end
 		if not row._gsTooltip or row._gsTooltip._gsItemKey ~= tooltipKey then
 			GlobalStorageSiK.RemoteItemDetail.deactivate(row)
-			local probe = itemProbe(data)
+			row._gsLocalTooltip = LocalItemTooltip.resolve(data, terminal)
+			local probe = row._gsLocalTooltip and row._gsLocalTooltip.item or itemProbe(data)
 			if probe then
 				if row._gsTooltip then row._gsTooltip:setItem(probe) else
 					row._gsTooltip = ISToolTipInv:new(probe)
 					row._gsTooltip:initialise()
 					row._gsTooltip:setOwner(row)
-					local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer()
-						or getSpecificPlayer(0)
-					row._gsTooltip:setCharacter(player)
 					GlobalStorageSiK.TerminalItems.makePassiveTooltip(row._gsTooltip)
 				end
+				local playerNum = terminal and terminal.playerNum or 0
+				local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(playerNum)
+					or getSpecificPlayer(playerNum)
+				row._gsTooltip:setCharacter(player)
 				row._gsTooltip._gsItemKey = tooltipKey
 				local detail, loading = nil, false
-				if data._gsRowKind == "child" then
+				if data._gsRowKind == "child" and not row._gsLocalTooltip then
 					detail, loading = GlobalStorageSiK.RemoteItemDetail.activate(row, data, terminal)
 				end
-				GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, data, detail, loading)
+				if not row._gsLocalTooltip then
+					GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, data, detail, loading)
+				end
 			end
 		end
 		if row._gsTooltip then
@@ -1922,10 +1974,7 @@ local function itemRowAdapter(listPanel, terminal)
 		end,
 		onDoubleClick = function(context)
 			local data = context.item
-			if data._gsStale then return true end
-			if data.aggregateAllowed == false and not data.itemIds then
-				return context.component:toggleExpanded(context.key) ~= nil
-			end
+			if not data or data._gsStale then return true end
 			withdrawRowWithActiveTarget(terminal, data, 1)
 			return true
 		end,

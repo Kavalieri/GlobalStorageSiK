@@ -2,19 +2,16 @@
 	GlobalStorageSiK - Destinos de inventario (cliente)
 	Autor: SiK
 	Fecha: 2025-06-24
-	Descripción: Resuelve contenedor activo, bajo ratón o elegido en menú contextual.
+	Descripción: Destino propio seleccionado y destinos explícitos de arrastre.
 ]]
 
 require "GS_DepositSources"
-require "GS_I18n"
 require "GS_UIDebug"
+require "GS_FloorTargets"
 
-require "ISUI/ISContextMenu"
 
 GlobalStorageSiK.ContainerTargets = {}
 
-local T = GlobalStorageSiK.I18n.text
-local sessionTargets = {}
 
 --- Obtiene contenedor mostrado por un panel de inventario.
 ---@param pane ISInventoryPane|nil
@@ -109,6 +106,23 @@ local function findInventoryPaneAt(x, y, element)
 		return element
 	end
 	return nil
+end
+
+-- Vanilla ISInventoryPane checks every UI root before treating a drop as world.
+-- Unknown UI state is occupied, never permission to drop behind a window.
+function GlobalStorageSiK.ContainerTargets.isMouseOverAnyUI()
+	local ok, occupied = pcall(function()
+		if not UIManager or not UIManager.getUI or not getMouseX or not getMouseY then return true end
+		local roots = UIManager.getUI()
+		if not roots or not roots.size or not roots.get then return true end
+		local x, y = getMouseX(), getMouseY()
+		for i = 0, roots:size() - 1 do
+			local element = roots:get(i)
+			if not element or not element.isPointOver or element:isPointOver(x, y) then return true end
+		end
+		return false
+	end)
+	return not ok or occupied ~= false
 end
 
 --- Panel de inventario bajo el ratón.
@@ -225,6 +239,9 @@ function GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container)
 	if GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
 		return false
 	end
+	if container.getType and container:getType() == "floor" then
+		return GlobalStorageSiK.FloorTargets.captureCurrent(player) ~= nil
+	end
 	return GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container)
 end
 
@@ -239,83 +256,12 @@ function GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
 	if not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
 		return nil
 	end
+	if container.getType and container:getType() == "floor" then
+		-- Vanilla floor panes aggregate nearby wrappers and have no square of
+		-- their own. Capture the player's current physical square once.
+		return GlobalStorageSiK.FloorTargets.captureCurrent(player)
+	end
 	return GlobalStorageSiK.DepositSources.buildContainerKey(player, container)
-end
-
---- Panel de inventario activo o enfocado en la UI vanilla.
----@param player IsoPlayer
----@return ISInventoryPane|nil
-function GlobalStorageSiK.ContainerTargets.findActivePane(player)
-	if not player then
-		return nil
-	end
-	local playerNum = player.getPlayerNum and player:getPlayerNum() or 0
-
-	local page = nil
-	if getPlayerInventory then
-		local ok, result = pcall(getPlayerInventory, playerNum)
-		if ok then
-			page = result
-		end
-	end
-	if not page and ISInventoryPage and ISInventoryPage.players then
-		page = ISInventoryPage.players[playerNum]
-	end
-	if not page then
-		return nil
-	end
-
-	local candidates = {}
-	if page.lootPane then
-		table.insert(candidates, page.lootPane)
-	end
-	if page.inventoryPane then
-		table.insert(candidates, page.inventoryPane)
-	end
-	if page.backpacks then
-		for i = 1, #page.backpacks do
-			table.insert(candidates, page.backpacks[i])
-		end
-	end
-	if page.paneList and page.paneList.size then
-		for i = 0, page.paneList:size() - 1 do
-			table.insert(candidates, page.paneList:get(i))
-		end
-	end
-
-	for i = 1, #candidates do
-		local pane = candidates[i]
-		if pane and pane.isMouseOver and pane:isMouseOver() then
-			return pane
-		end
-	end
-	for i = 1, #candidates do
-		local pane = candidates[i]
-		if pane and pane.isVisible and pane:isVisible() and pane.isPointOver and pane:isPointOver(getMouseX(), getMouseY()) then
-			return pane
-		end
-	end
-	if page.lootPane and page.lootPane.isVisible and page.lootPane:isVisible() then
-		return page.lootPane
-	end
-	return page.inventoryPane
-end
-
---- Reinicia destino elegido en el menú actual.
----@param player IsoPlayer|nil
-function GlobalStorageSiK.ContainerTargets.clearSessionTarget(player)
-	if player then
-		sessionTargets[player] = nil
-	end
-end
-
---- Guarda destino elegido en el menú contextual.
----@param player IsoPlayer|nil
----@param targetKey string|nil nil = automático
-function GlobalStorageSiK.ContainerTargets.setSessionTarget(player, targetKey)
-	if player then
-		sessionTargets[player] = targetKey
-	end
 end
 
 --- Lista destinos de extracción accesibles (principal + mochilas).
@@ -341,55 +287,25 @@ function GlobalStorageSiK.ContainerTargets.listWithdrawDestinations(player)
 	return list
 end
 
---- Resuelve clave de destino para extracción (sesión → panel activo → principal).
+--- Captura exclusivamente el inventario propio seleccionado en vanilla.
+--- No consulta ratón, botín ni preferencias de una sesión anterior.
 ---@param player IsoPlayer|nil
----@return string|nil
+---@return string|nil targetKey
+---@return string|nil reason
 function GlobalStorageSiK.ContainerTargets.resolveWithdrawTarget(player)
-	if not player then
-		return "player:main"
+	if not player or not player.getPlayerNum or not getPlayerInventory then
+		return nil, "target_unavailable"
 	end
-
-	if sessionTargets[player] and sessionTargets[player] ~= "" then
-		return sessionTargets[player]
+	local playerNum = player:getPlayerNum()
+	local ok, page = pcall(getPlayerInventory, playerNum)
+	local container = ok and page and page.inventoryPane and page.inventoryPane.inventory or nil
+	if not container then return nil, "target_unavailable" end
+	if not GlobalStorageSiK.DepositSources.isPlayerContainer(player, container) then
+		return nil, "invalid_target"
 	end
-
-	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse(nil, player, playerNum)
-	if not pane then
-		pane = GlobalStorageSiK.ContainerTargets.findActivePane(player)
+	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
+	if not key or (key ~= "player:main" and string.sub(key, 1, 4) ~= "bag:") then
+		return nil, "invalid_target"
 	end
-	if pane then
-		local container = GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
-		local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
-		if key then
-			return key
-		end
-	end
-
-	return "player:main"
-end
-
---- Añade submenú para elegir destino de extracción.
----@param parentMenu ISContextMenu
----@param player IsoPlayer|nil
-function GlobalStorageSiK.ContainerTargets.addDestinationSubMenu(parentMenu, player)
-	if not parentMenu or not player then
-		return
-	end
-
-	local root = parentMenu:addOption(T("IGUI_GS_WithdrawDest"))
-	local sub = ISContextMenu:getNew(parentMenu)
-	parentMenu:addSubMenu(root, sub)
-
-	sub:addOption(T("IGUI_GS_WithdrawDestAuto"), player, function()
-		GlobalStorageSiK.ContainerTargets.setSessionTarget(player, nil)
-	end)
-
-	local destinations = GlobalStorageSiK.ContainerTargets.listWithdrawDestinations(player)
-	for i = 1, #destinations do
-		local entry = destinations[i]
-		sub:addOption(entry.label, player, function()
-			GlobalStorageSiK.ContainerTargets.setSessionTarget(player, entry.key)
-		end)
-	end
+	return key, nil
 end

@@ -7,11 +7,15 @@ GlobalStorageSiK = GlobalStorageSiK or {}
 GlobalStorageSiK.RecordedMedia = GlobalStorageSiK.RecordedMedia or {}
 
 local RecordedMedia = GlobalStorageSiK.RecordedMedia
+local completionCatalogue
+local completionData = {}
+local completionDataCount = 0
 
 local function normalizedIndex(value)
 	local index = tonumber(value)
-	if index == nil or index < 0 or index > 32767 then return nil end
-	return math.floor(index)
+	if index == nil or index ~= index or index < 0 or index > 32767
+		or index ~= math.floor(index) then return nil end
+	return index
 end
 
 local function scriptMediaCategory(fullType)
@@ -35,8 +39,9 @@ end
 local function mediaFromList(list, wanted)
 	if not list or not list.size or not list.get then return nil end
 	local okSize, size = pcall(function() return list:size() end)
-	if not okSize or type(size) ~= "number" then return nil end
-	for i = 0, math.max(0, math.floor(size) - 1) do
+	if not okSize or type(size) ~= "number" or size ~= size or size < 0
+		or size > 2147483647 or size ~= math.floor(size) then return nil end
+	for i = 0, size - 1 do
 		local okData, data = pcall(function() return list:get(i) end)
 		if okData and data and mediaIndex(data) == wanted then return data end
 	end
@@ -72,8 +77,9 @@ function RecordedMedia.dataFromIndex(value, fullType)
 	local okCategories, categories = pcall(function() return catalogue:getCategories() end)
 	if not okCategories or not categories or not categories.size or not categories.get then return nil end
 	local okSize, size = pcall(function() return categories:size() end)
-	if not okSize or type(size) ~= "number" then return nil end
-	for i = 0, math.max(0, math.floor(size) - 1) do
+	if not okSize or type(size) ~= "number" or size ~= size or size < 0
+		or size > 2147483647 or size ~= math.floor(size) then return nil end
+	for i = 0, size - 1 do
 		local okCategory, fallbackCategory = pcall(function() return categories:get(i) end)
 		if okCategory and fallbackCategory and tostring(fallbackCategory) ~= tostring(category or "") then
 			local okList, list = pcall(function()
@@ -95,6 +101,35 @@ function RecordedMedia.titleFromIndex(value, fullType)
 	local ok, title = pcall(function() return data:getTranslatedItemDisplayName() end)
 	if not ok or type(title) ~= "string" or title == "" then return nil end
 	return title
+end
+
+--- The same combined seen/heard predicate used by vanilla inventory rows.
+--- Cache immutable catalogue identities only; player knowledge remains live.
+function RecordedMedia.hasBeenConsumed(player, row)
+	if not player or type(row) ~= "table" then return false end
+	local index = tonumber(row.mediaIndex)
+	if not index or index ~= index or index < 0 or index > 32767
+		or index ~= math.floor(index) or not scriptMediaCategory(row.fullType) then return false end
+	local ok, consumed = pcall(function()
+		local radio = getZomboidRadio and getZomboidRadio()
+		local catalogue = radio and radio.getRecordedMedia and radio:getRecordedMedia()
+		if not catalogue or not catalogue.hasListenedToAll then return false end
+		if completionCatalogue ~= catalogue then
+			completionCatalogue, completionData, completionDataCount = catalogue, {}, 0
+		end
+		local key = row.fullType .. ":" .. tostring(index)
+		local data = completionData[key]
+		if not data then
+			data = RecordedMedia.dataFromIndex(index, row.fullType)
+			if not data then return false end
+			if completionDataCount >= 256 then completionData, completionDataCount = {}, 0 end
+			completionData[key] = data
+			completionDataCount = completionDataCount + 1
+		end
+		if not data.getLineCount or data:getLineCount() <= 0 then return false end
+		return catalogue:hasListenedToAll(player, data) == true
+	end)
+	return ok and consumed == true
 end
 
 RecordedMedia.SKILL_CODE_TO_PERK_KEY = {
@@ -129,15 +164,66 @@ function RecordedMedia.perkKeysFromCodes(codes)
 	return result
 end
 
+--- Recipe effects use the same literal RCP= protocol as ISRadioInteractions.
+--- Preserve case, spaces and namespaces; knowledge of the player is unrelated.
+function RecordedMedia.recipeIdsFromCodes(codes)
+	if type(codes) ~= "table" then return nil end
+	local result, seen = {}, {}
+	for i = 1, math.min(#codes, 64) do
+		for segment in tostring(codes[i]):gmatch("[^,]+") do
+			local recipe = segment:match("^RCP=(.+)$")
+			if recipe and not seen[recipe] then
+				seen[recipe] = true
+				result[#result + 1] = recipe
+			end
+		end
+	end
+	return result
+end
+
+--- Classify the exact recording, never infer leisure from a truncated payload.
+--- Positive evidence may return early; a negative requires every line to resolve.
+function RecordedMedia.teachesFromData(data)
+	if not data or not data.getLineCount or not data.getLine then return nil end
+	local okCount, count = pcall(function() return data:getLineCount() end)
+	if not okCount or type(count) ~= "number" or count ~= count
+		or count < 0 or count > 4096 or count ~= math.floor(count) then return nil end
+	for i = 0, count - 1 do
+		local okLine, line = pcall(function() return data:getLine(i) end)
+		if not okLine or not line or not line.getCodes then return nil end
+		local okCodes, code = pcall(function() return line:getCodes() end)
+		if not okCodes then return nil end
+		local codes = { tostring(code or "") }
+		local perks = RecordedMedia.perkKeysFromCodes(codes)
+		local recipes = RecordedMedia.recipeIdsFromCodes(codes)
+		if #perks > 0 or #recipes > 0 then return true end
+	end
+	return false
+end
+
+function RecordedMedia.nativePathFromItem(item)
+	if not item or not item.getMediaData then return nil end
+	local ok, data = pcall(function() return item:getMediaData() end)
+	if not ok then return nil end
+	local teaches = RecordedMedia.teachesFromData(data)
+	if teaches == nil then return nil end
+	return {
+		l1 = "knowledge_media", l2 = "recorded_media",
+		l3 = teaches and "with_learning" or "leisure",
+	}
+end
+
 ---@param mediaIndex number|nil
 ---@param codes string[]|nil
 ---@return table|nil
 function RecordedMedia.nativePath(mediaIndex, codes)
 	if tonumber(mediaIndex) == nil or type(codes) ~= "table" then return nil end
 	local perkKeys = RecordedMedia.perkKeysFromCodes(codes)
+	local recipeIds = RecordedMedia.recipeIdsFromCodes(codes)
+	local teaches = (perkKeys and #perkKeys > 0) or (recipeIds and #recipeIds > 0)
 	return {
 		l1 = "knowledge_media",
 		l2 = "recorded_media",
-		l3 = perkKeys and #perkKeys > 0 and "with_learning" or "leisure",
+		l3 = teaches and "with_learning" or "leisure",
 	}
 end

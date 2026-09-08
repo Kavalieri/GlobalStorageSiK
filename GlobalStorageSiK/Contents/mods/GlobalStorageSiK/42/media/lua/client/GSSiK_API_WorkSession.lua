@@ -29,6 +29,19 @@ local function internal()
 	return GlobalStorageSiK and GlobalStorageSiK.CraftSession or nil
 end
 
+-- New work observes the same provisional access state in SP and MP.
+-- Completion, abort and returns deliberately do not pass through this gate.
+local function accessTransitionPending(player)
+	local guard = GlobalStorageSiK and GlobalStorageSiK.TerminalAccessGuard
+	if not (guard and guard.isTransitioning and guard.isTransitioning(player) == true) then return false end
+	if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.I18n then
+		GlobalStorageSiK.UIFeedback.halo(player,
+			GlobalStorageSiK.I18n.text("IGUI_GS_AccessUnconfirmed"), nil, nil, nil, nil,
+			{tone="warning", channel="terminal-access", dedupeKey="access-unconfirmed"})
+	end
+	return true
+end
+
 local function validId(value, limit)
 	return type(value) == "string" and value ~= "" and #value <= (limit or 96)
 end
@@ -164,6 +177,10 @@ function Public.begin(options)
 	if not current or type(current.begin) ~= "function" then
 		return false, ERR_UNAVAILABLE
 	end
+	if accessTransitionPending(options.player) then
+		openFailures[options.addonId] = "terminal_out_of_range"
+		return false, ERR_SESSION
+	end
 	local request = {}
 	for key, value in pairs(options) do request[key] = value end
 	request.terminalAnchor = anchor
@@ -281,6 +298,7 @@ function Public.startOperation(options)
 		return false, ERR_SESSION, nil
 	end
 	if active.playerNum ~= currentPlayerNum then return false, ERR_OWNER, nil end
+	if accessTransitionPending(options.player) then return false, ERR_SESSION, nil end
 	local operationId = current.newOperationId(options.addonId)
 	if not validId(operationId, 160) then return false, ERR_REQUEST, nil end
 	local operation = {
@@ -317,6 +335,7 @@ function Public.claimRecipeInputs(operationId, player, logic, items, batchCount)
 	local current = internal()
 	local operation, code = ownedOperation(operationId, player)
 	if not operation then return false, code, nil end
+	if accessTransitionPending(player) then return false, ERR_SESSION, nil end
 	if logic == nil or items == nil then return false, ERR_SCHEMA, nil end
 	if not current or type(current.claimRecipeItems) ~= "function" then
 		return false, ERR_UNAVAILABLE, nil
@@ -337,6 +356,7 @@ function Public.claimItem(operationId, player, item, container)
 	local current = internal()
 	local operation, code = ownedOperation(operationId, player)
 	if not operation then return false, code, false end
+	if accessTransitionPending(player) then return false, ERR_SESSION, false end
 	if item == nil or container == nil then return false, ERR_SCHEMA, false end
 	if not current or type(current.claimNetworkItem) ~= "function"
 		or type(current.isNetworkContainer) ~= "function" then

@@ -39,7 +39,7 @@ GlobalStorageSiK.CatalogManager = GlobalStorageSiK.CatalogManager or {}
 -- Equipamiento, decision de producto de sistemas para DEV27).
 -- DEV32.3: nuevas hojas estables y anclas exactas de Materiales/Herramientas.
 -- El bump separa las cachés/fingerprints previos de las rutas L3 nuevas.
-local CLASSIFIER_SCHEMA = "8"
+local CLASSIFIER_SCHEMA = "9"
 
 local state = {
 	catalogEpoch = 0,
@@ -134,6 +134,64 @@ end
 -- COMPLETO cada vez que el epoch cambia de verdad. Mas simple y mas seguro
 -- que perseguir cada positivo suelto por el codebase.
 local epochListeners = {}
+
+-- Selective invalidation is separate from script/language epochs. Each owner
+-- declares where fullType lives in its key (0 = exact key, 1+ = \1 field).
+local fullTypeCaches = {}
+local fullTypeCacheCount = 0
+function GlobalStorageSiK.CatalogManager.registerFullTypeCache(owner, cache, field)
+	if type(owner) ~= "string" or owner == "" or #owner > 80 or type(cache) ~= "table" then return false end
+	field = field or 0
+	if type(field) ~= "number" or field ~= math.floor(field) or field < 0 or field > 4 then return false end
+	if not fullTypeCaches[owner] then
+		if fullTypeCacheCount >= 64 then return false end
+		fullTypeCacheCount = fullTypeCacheCount + 1
+	end
+	fullTypeCaches[owner] = { cache = cache, field = field }
+	return true
+end
+
+local function cacheFullType(key, field)
+	if type(key) ~= "string" then return nil end
+	if field == 0 then return key end
+	local first = 1
+	for i = 1, field - 1 do
+		local delimiter = string.find(key, "\1", first, true)
+		if not delimiter then return nil end
+		first = delimiter + 1
+	end
+	local last = string.find(key, "\1", first, true)
+	return string.sub(key, first, last and last - 1 or #key)
+end
+
+function GlobalStorageSiK.CatalogManager.invalidateFullTypes(fullTypes)
+	if type(fullTypes) ~= "table" or #fullTypes > 4096 then return false, "invalid_types" end
+	local selected, ordered = {}, {}
+	for i = 1, #fullTypes do
+		local fullType = fullTypes[i]
+		if type(fullType) ~= "string" or #fullType > 160 or not fullType:match("^[^%.%s%c]+%.[^%s%c]+$") then
+			return false, "invalid_type"
+		end
+		if not selected[fullType] then
+			selected[fullType] = true
+			ordered[#ordered + 1] = fullType
+		end
+	end
+	if #ordered == 0 then return true end
+	for _, binding in pairs(fullTypeCaches) do
+		if binding.field == 0 then
+			for i = 1, #ordered do binding.cache[ordered[i]] = nil end
+		else
+			local remove = {}
+			for key in pairs(binding.cache) do
+				local fullType = cacheFullType(key, binding.field)
+				if fullType and selected[fullType] then remove[#remove + 1] = key end
+			end
+			for i = 1, #remove do binding.cache[remove[i]] = nil end
+		end
+	end
+	return true
+end
 
 --- Se llama SIEMPRE que catalogEpoch cambia de verdad (nunca en un
 --- markReady sin bumpEpoch). El callback recibe el nuevo epoch; cualquier

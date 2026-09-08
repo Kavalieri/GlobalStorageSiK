@@ -1812,7 +1812,12 @@ local function collectFactionCharacterRecords(requestingPlayer, onlineCharacters
 		local entry = onlineCharacters[i]
 		local key = entry and normalizeName(entry.username) or ""
 		if key ~= "" then
-			onlineByUsername[key] = entry
+			local previous = onlineByUsername[key]
+			local id = tostring(entry.characterId or entry.id or "")
+			if previous == nil then onlineByUsername[key] = entry
+			elseif previous == false or tostring(previous.characterId or previous.id or "") ~= id then
+				onlineByUsername[key] = false
+			end
 		end
 	end
 	local usernames = GlobalStorageSiK.Permissions.getFactionUsernames(requestingPlayer)
@@ -1828,7 +1833,7 @@ local function collectFactionCharacterRecords(requestingPlayer, onlineCharacters
 			username = username,
 			factionUsername = username,
 			source = "faction",
-			online = online ~= nil,
+			online = online ~= nil and online ~= false,
 		}
 	end
 	table.sort(result, function(a, b)
@@ -1841,6 +1846,62 @@ local function collectFactionCharacterRecords(requestingPlayer, onlineCharacters
 	return result
 end
 
+-- R151-003: la cuenta es una correlacion secundaria, nunca el nombre visible.
+-- No persistir esta proyeccion ni usarla para migrar permisos entre vidas.
+local function projectionId(entry)
+	if not entry then return "" end
+	local id = tostring(entry.characterId or "")
+	return id ~= "" and id or tostring(entry.id or "")
+end
+
+local function projectionAccount(entry)
+	if not entry then return "" end
+	local username = normalizeName(entry.username)
+	local faction = normalizeName(entry.factionUsername)
+	if username ~= "" and faction ~= "" and username ~= faction then return "" end
+	return username ~= "" and username or faction
+end
+
+local function buildProjectionIdentity(memberEntries, onlineCharacters, factionMembers)
+	local index = { members = {}, legacyAccounts = {}, accounts = {}, records = {} }
+	local function remember(entry, isMember)
+		if not entry then return end
+		local id, account = projectionId(entry), projectionAccount(entry)
+		if isMember and id ~= "" then index.members[id] = true end
+		-- El historial muerto conserva su UUID, pero no representa la vida actual
+		-- de la cuenta. Una nueva vida no hereda ni pierde acceso por correlacion.
+		if entry.role == GlobalStorageSiK.Permissions.ROLE_DEAD then return end
+		if id ~= "" then
+			index.records[id] = entry
+			if account ~= "" then
+				local known = index.accounts[account]
+				if known == nil then index.accounts[account] = id
+				elseif known ~= id then index.accounts[account] = false end
+			end
+		elseif isMember and account ~= "" then
+			index.legacyAccounts[account] = true
+		end
+	end
+	for i = 1, #(memberEntries or {}) do remember(memberEntries[i], true) end
+	for i = 1, #(factionMembers or {}) do remember(factionMembers[i], false) end
+	-- La ficha online aporta el nombre exacto mas reciente, sin cambiar el UUID.
+	for i = 1, #(onlineCharacters or {}) do remember(onlineCharacters[i], false) end
+	return index
+end
+
+local function projectionIsMember(index, entry)
+	local id, account = projectionId(entry), projectionAccount(entry)
+	if id ~= "" then
+		if index.members[id] then return true end
+		return account ~= "" and index.legacyAccounts[account] == true
+			and index.accounts[account] == id
+	end
+	if account == "" then return false end
+	if index.legacyAccounts[account] then return true end
+	local resolvedId = index.accounts[account]
+	return resolvedId ~= nil and resolvedId ~= false and index.members[resolvedId] == true
+end
+
 --- Construye el único roster seleccionable que consume la UI. Facción tiene
 --- precedencia de procedencia, pero conserva el UUID y nombre exactos de la
 --- entrada online. Solo un UUID repetido se deduplica; homónimos con UUID
@@ -1850,82 +1911,48 @@ end
 ---@param factionMembers table[]|nil
 ---@return table[]
 function GlobalStorageSiK.Permissions.buildPickerCandidates(memberEntries, onlineCharacters, factionMembers)
-	local memberIds = {}
-	local legacyKeys = {}
-	for i = 1, #(memberEntries or {}) do
-		local member = memberEntries[i]
-		local id = tostring(member and (member.characterId or member.id) or "")
-		if id ~= "" then
-			memberIds[id] = true
-		else
-			local nameKey = normalizeName(member and (member.characterName or member.name))
-			local usernameKey = normalizeName(member and member.username)
-			if nameKey ~= "" then legacyKeys[nameKey] = true end
-			if usernameKey ~= "" then legacyKeys[usernameKey] = true end
-		end
-	end
-
-	local result = {}
-	local seenIds = {}
-	local seenOffline = {}
+	local identity = buildProjectionIdentity(memberEntries, onlineCharacters, factionMembers)
+	local result, seenIds, seenOffline = {}, {}, {}
 	local function addCandidate(entry, source)
-		if not entry then return end
-		local id = tostring(entry.characterId or entry.id or "")
-		local username = displayText(entry.factionUsername or entry.username)
-		local characterName = displayText(entry.characterName or entry.name)
-		if characterName == "" then characterName = username end
-		if id ~= "" then
-			if memberIds[id] or seenIds[id] then return end
-			-- BUG REAL (reportado 2026-08-18, capturado en screenshot: "Omar
-			-- Icon" seguia en el desplegable "Añadir acceso" pese a ya ser
-			-- miembro): un permiso legacy (concedido por NOMBRE, antes del
-			-- cambio a UUID) solo puebla legacyKeys, nunca memberIds - y esta
-			-- rama (candidato CON UUID real, el caso normal de un jugador
-			-- online) solo miraba memberIds, sin cruzar nunca contra
-			-- legacyKeys. Resultado: cualquier miembro legado seguia
-			-- ofreciendose para "añadir" en cuanto aparecia online con su
-			-- UUID real, aunque ya tuviera acceso via el nombre. Se cruza
-			-- tambien por nombre/usuario normalizado, igual que ya hacia la
-			-- rama "sin UUID" de abajo para candidatos offline.
-			local nameKey = normalizeName(characterName)
-			local usernameKey = normalizeName(username)
-			if (nameKey ~= "" and legacyKeys[nameKey]) or (usernameKey ~= "" and legacyKeys[usernameKey]) then
-				return
+		if not entry or projectionIsMember(identity, entry) then return end
+		local id, account = projectionId(entry), projectionAccount(entry)
+		local resolved = entry
+		if id == "" then
+			-- Sin cuenta no hay endpoint offline seguro. Dos vidas conocidas de
+			-- la misma cuenta tampoco permiten escoger una por orden de llegada.
+			if account == "" or identity.accounts[account] == false then return end
+			local resolvedId = identity.accounts[account]
+			if resolvedId then
+				id, resolved = resolvedId, identity.records[resolvedId]
 			end
+		end
+		if id ~= "" then
+			if seenIds[id] then return end
 			seenIds[id] = true
 		else
-			local offlineKey = normalizeName(username)
-			if offlineKey == "" then offlineKey = normalizeName(characterName) end
-			if offlineKey == "" or legacyKeys[offlineKey] or seenOffline[offlineKey] then return end
-			seenOffline[offlineKey] = true
+			if seenOffline[account] then return end
+			seenOffline[account] = true
 		end
+		local username = displayText(resolved.username)
+		if username == "" then username = displayText(entry.factionUsername or entry.username) end
+		local characterName = displayText(resolved.characterName or resolved.name)
+		if characterName == "" then characterName = username end
 		result[#result + 1] = {
-			id = id,
-			characterId = id,
-			name = characterName,
-			characterName = characterName,
-			displayName = displayText(entry.displayName) ~= ""
-				and displayText(entry.displayName) or characterName,
-			username = username,
-			factionUsername = source == "faction" and username or "",
-			source = source,
-			online = entry.online == true or source == "online",
+			id = id, characterId = id, name = characterName, characterName = characterName,
+			displayName = displayText(resolved.displayName) ~= "" and displayText(resolved.displayName) or characterName,
+			username = username, factionUsername = source == "faction" and username or "",
+			source = source, online = resolved.online == true or source == "online",
 		}
 	end
-
-	-- Facción primero: una coincidencia faction+online conserva su UUID online
-	-- y no vuelve a aparecer en la sección Servidor.
 	for i = 1, #(factionMembers or {}) do addCandidate(factionMembers[i], "faction") end
 	for i = 1, #(onlineCharacters or {}) do addCandidate(onlineCharacters[i], "online") end
-
 	table.sort(result, function(a, b)
-		local aName = normalizeName(a.characterName or a.name)
-		local bName = normalizeName(b.characterName or b.name)
+		local aName, bName = normalizeName(a.characterName), normalizeName(b.characterName)
 		if aName ~= bName then return aName < bName end
-		local aId = tostring(a.characterId or a.username or "")
-		local bId = tostring(b.characterId or b.username or "")
+		local aId = a.characterId ~= "" and a.characterId or a.username
+		local bId = b.characterId ~= "" and b.characterId or b.username
 		if aId ~= bId then return aId < bId end
-		return tostring(a.source or "") < tostring(b.source or "")
+		return a.source < b.source
 	end)
 	return result
 end
@@ -1938,7 +1965,8 @@ end
 ---@return boolean ok
 ---@return string reason
 function GlobalStorageSiK.Permissions.validatePermissionProjection(
-	ownerCharacterId, memberEntries, pickerCandidates)
+	ownerCharacterId, memberEntries, pickerCandidates, onlineCharacters, factionMembers)
+	local identity = buildProjectionIdentity(memberEntries, onlineCharacters or pickerCandidates, factionMembers)
 	ownerCharacterId = tostring(ownerCharacterId or "")
 	local memberIds = {}
 	local ownerRows = 0
@@ -1967,11 +1995,17 @@ function GlobalStorageSiK.Permissions.validatePermissionProjection(
 	local candidateIds = {}
 	for i = 1, #(pickerCandidates or {}) do
 		local entry = pickerCandidates[i]
-		local id = tostring(entry and (entry.characterId or entry.id) or "")
+		local id, account = projectionId(entry), projectionAccount(entry)
+		if projectionIsMember(identity, entry) then return false, "candidate_is_member" end
 		if id ~= "" then
-			if memberIds[id] then return false, "candidate_is_member" end
 			if candidateIds[id] then return false, "duplicate_candidate_uuid" end
 			candidateIds[id] = true
+		else
+			if account == "" then return false, "candidate_missing_identity" end
+			if identity.accounts[account] == false then return false, "ambiguous_candidate_account" end
+			local offlineKey = "account:" .. account
+			if candidateIds[offlineKey] then return false, "duplicate_candidate_account" end
+			candidateIds[offlineKey] = true
 		end
 	end
 	return true, "ok"
@@ -2407,7 +2441,7 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 	local pickerCandidates = GlobalStorageSiK.Permissions.buildPickerCandidates(
 		memberEntries, onlineCharacters, factionMembers)
 	local projectionOk, projectionReason = GlobalStorageSiK.Permissions.validatePermissionProjection(
-		net.ownerCharacterId, memberEntries, pickerCandidates)
+		net.ownerCharacterId, memberEntries, pickerCandidates, onlineCharacters, factionMembers)
 
 	-- Diagnóstico acotado: solo imprime cuando cambia el roster lógico. Una
 	-- cuenta/nombre compartidos por UUID distintos son una posible rotación,
@@ -2522,6 +2556,7 @@ function GlobalStorageSiK.Permissions.serialize(networkId, requestingPlayer)
 		-- solo pinta el boton segun lo que se le diga.
 		canClaimAsAdmin = resolvedPlayer ~= nil
 			and GlobalStorageSiK.Permissions.canAdminClaimOwnership(resolvedPlayer, networkId) or false,
+		backupMemberCount = GlobalStorageSiK.Permissions.countBackupMembers(networkId),
 		memberEntries = memberEntries,
 		onlineCharacters = onlineCharacters,
 		factionMembers = factionMembers,

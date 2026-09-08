@@ -236,18 +236,6 @@ end
 local NET_FONT = UIFont.Small
 local LINE_PAD = 4
 
---- Trunca una linea al ancho disponible (reutiliza el helper ya usado en el
---- resto de la UI del mod si esta cargado; si no, la deja tal cual).
----@param text string
----@param maxW number
----@return string
-local function truncate(text, maxW)
-	if UI.Controls and UI.Controls.truncateText then
-		return UI.Controls.truncateText(text, maxW, NET_FONT)
-	end
-	return text
-end
-
 --- Interpretacion propia de la formacion de una cinta VHS. Los libros ya
 --- exponen sus campos SkillTrained/LvlSkillTrained en el tooltip vanilla y no
 --- se repiten aqui. Las cintas VHS no usan ese sistema: el item
@@ -272,36 +260,56 @@ end
 --- indice de TODO RecMedia en el primer hover y usa las mismas lineas reales
 --- que vanilla reproduce. getLine recibe int, no el short problematico de
 --- RecordedMedia.getMediaDataFromIndex.
-local function mediaSkillNames(item)
-	if not item or not item.getMediaData then return nil end
-	local okData, mediaData = pcall(function() return item:getMediaData() end)
-	if not okData or not mediaData or not mediaData.getLineCount or not mediaData.getLine then
+local function mediaTeachingNames(mediaData)
+	if not mediaData or not mediaData.getLineCount or not mediaData.getLine then
 		return nil
 	end
 	local okCount, count = pcall(function() return mediaData:getLineCount() end)
-	if not okCount or type(count) ~= "number" then return nil end
-	local allCodes = {}
-	for i = 0, math.max(0, math.floor(count) - 1) do
+	if not okCount or type(count) ~= "number" or count ~= count
+		or count < 0 or count > 4096 or count ~= math.floor(count) then return nil end
+	local teachingNames, seen, seenRecipes = {}, {}, {}
+	for i = 0, count - 1 do
 		local okLine, line = pcall(function() return mediaData:getLine(i) end)
-		local okCodes, lineCodes = false, nil
-		if okLine and line and line.getCodes then
-			okCodes, lineCodes = pcall(function() return line:getCodes() end)
+		if not okLine or not line or not line.getCodes then return nil end
+		local okCodes, lineCodes = pcall(function() return line:getCodes() end)
+		if not okCodes then return nil end
+		-- Parse each exact catalogue line, not a truncated network sample. The
+		-- shared parser's payload limit must not discard teaching after line 64.
+		local codes = { tostring(lineCodes or "") }
+		local perkKeys = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(codes)
+		for j = 1, #(perkKeys or {}) do
+			local key = perkKeys[j]
+			if not seen[key] then
+				seen[key] = true
+				teachingNames[#teachingNames + 1] = getText(key)
+			end
 		end
-		if okCodes and lineCodes then allCodes[#allCodes + 1] = tostring(lineCodes) end
+		local recipes = GlobalStorageSiK.RecordedMedia.recipeIdsFromCodes(codes)
+		for j = 1, #(recipes or {}) do
+			local recipe = recipes[j]
+			if not seenRecipes[recipe] then
+				seenRecipes[recipe] = true
+				-- Match vanilla's learning feedback, removing only its first dot
+				-- namespace. Colon-based recipe identifiers remain intact.
+				local dot = recipe:find(".", 1, true)
+				local displayId = dot and recipe:sub(dot + 1) or recipe
+				local okName, name = false, nil
+				if type(getRecipeDisplayName) == "function" then
+					okName, name = pcall(getRecipeDisplayName, displayId)
+				end
+				teachingNames[#teachingNames + 1] = okName and type(name) == "string"
+					and name ~= "" and name or recipe
+			end
+		end
 	end
-	local perkKeys = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(allCodes)
-	local skillNames = {}
-	for i = 1, #(perkKeys or {}) do skillNames[#skillNames + 1] = getText(perkKeys[i]) end
-	return skillNames
+	return teachingNames
 end
 
 --- Camino REAL para
 --- cintas VHS (y cualquier otro "medio grabado" que use el mismo sistema
---- vainilla de RecMedia, no solo items con "VHS" en el fullType). A peticion
---- explicita: si el item ES un medio grabado correlacionado pero no enseña
---- nada, se devuelve la linea "nada que aprender" en vez de no mostrar
---- nada - distingue "confirmado que no enseña" de "no hemos podido saber
---- que es este item".
+--- vainilla de RecMedia, no solo items con "VHS" en el fullType). El anexo
+--- depende del contenido didactico, nunca del conocimiento del personaje.
+--- Sin aprendizaje o sin MediaData exacta no se añade un bloque vacio.
 ---@param item table|nil InventoryItem
 ---@return string[]|nil
 local function getVHSTrainingLines(item)
@@ -312,13 +320,15 @@ local function getVHSTrainingLines(item)
 	if not okIdx or not idx or idx < 0 then
 		return nil
 	end
-	local skillNames = mediaSkillNames(item)
+	if not item.getMediaData then return nil end
+	local okData, mediaData = pcall(function() return item:getMediaData() end)
+	local skillNames = okData and mediaTeachingNames(mediaData) or nil
 	if not skillNames then
 		-- Sin MediaData exacta no se afirma nada sobre la cinta.
 		return nil
 	end
 	if #skillNames == 0 then
-		return { T("IGUI_GS_VHSSkillHeader"), T("IGUI_GS_VHSNothingToLearn") }
+		return nil
 	end
 	local lines = { T("IGUI_GS_VHSSkillHeader") }
 	for i = 1, #skillNames do
@@ -328,13 +338,10 @@ local function getVHSTrainingLines(item)
 end
 
 local function getRemoteVHSTrainingLines(detail)
-	if not detail or detail.mediaIndex == nil or type(detail.mediaCodes) ~= "table" then return nil end
-	local perkKeys = GlobalStorageSiK.RecordedMedia.perkKeysFromCodes(detail.mediaCodes)
-	local skillNames = {}
-	for i = 1, #(perkKeys or {}) do skillNames[#skillNames + 1] = getText(perkKeys[i]) end
-	if #skillNames == 0 then
-		return { T("IGUI_GS_VHSSkillHeader"), T("IGUI_GS_VHSNothingToLearn") }
-	end
+	if not detail or detail.mediaIndex == nil then return nil end
+	local mediaData = GlobalStorageSiK.RecordedMedia.dataFromIndex(detail.mediaIndex, detail.fullType)
+	local skillNames = mediaTeachingNames(mediaData)
+	if not skillNames or #skillNames == 0 then return nil end
 	local lines = { T("IGUI_GS_VHSSkillHeader") }
 	for i = 1, #skillNames do lines[#lines + 1] = skillNames[i] end
 	return lines
@@ -380,14 +387,12 @@ local function makeTooltipMouseTransparent(panel)
 	end
 end
 
-local function extensionMetrics(blocks, baseWidth)
+local function extensionMetrics(blocks, baseWidth, maxWidth)
         local textManager = getTextManager()
-        local lineHgt = textManager:getFontHeight(NET_FONT)
         -- ISToolTipInv puede conservar una anchura de medida de un proveedor
         -- anterior. El anexo no hereda nunca ese rectangulo: su contrato tiene
         -- un maximo propio y medido, para no convertir el tooltip en una pared.
         local width = math.min(MAX_EXT_WIDTH, math.max(0, tonumber(baseWidth) or 0))
-	local height = 0
 	for i = 1, #(blocks or {}) do
 		local lines = blocks[i].lines or {}
 		local maxTextW = 0
@@ -395,7 +400,14 @@ local function extensionMetrics(blocks, baseWidth)
 			maxTextW = math.max(maxTextW, textManager:MeasureStringX(NET_FONT, lines[j]))
 		end
 		width = math.max(width, math.min(MAX_EXT_WIDTH, maxTextW + 16))
-		height = height + (#lines * lineHgt) + LINE_PAD * 2 + 2
+	end
+	width = math.min(width, maxWidth or MAX_EXT_WIDTH)
+	local height = 0
+	for i = 1, #(blocks or {}) do
+		local section = UI.Tooltip.objectSection(blocks[i].lines, {
+			font = NET_FONT, paddingX = 8, paddingY = LINE_PAD,
+		})
+		height = height + UI.Tooltip.measureSection(section, width).height + 2
 	end
 	return width, height
 end
@@ -436,6 +448,18 @@ local function placeMeasuredTooltip(panel, item, width, totalHeight)
 	local anchorY = getMouseY and getMouseY() or panel:getY()
 	local x = axisPlacement(anchorX, width, viewport.x, right)
 	local y = axisPlacement(anchorY, totalHeight, viewport.y, bottom)
+	-- A clear corridor on either axis already excludes the cursor. A tall
+	-- wrapped tooltip may therefore use the full vertical viewport beside it
+	-- (and a wide tooltip the full horizontal viewport above/below it).
+	if x ~= nil and y == nil and totalHeight <= viewport.h then
+		y = bottom - totalHeight
+		if y > anchorY then y = anchorY end
+		if y < viewport.y then y = viewport.y end
+	elseif y ~= nil and x == nil and width <= viewport.w then
+		x = right - width
+		if x > anchorX then x = anchorX end
+		if x < viewport.x then x = viewport.x end
+	end
 	if x == nil or y == nil then return false end
 	panel:setX(x)
 	panel:setY(y)
@@ -449,24 +473,19 @@ end
 ---@param yOffset number|nil  extra por encima de tr.height (para apilar un segundo bloque distinto debajo del primero)
 ---@param colorRGB number[]|nil  {r,g,b} del texto (por defecto, el amarillo de red)
 ---@return number boxH  alto real dibujado, para poder apilar el siguiente bloque
-local function drawNetworkExtension(tr, lines, yOffset, colorRGB)
+local function drawNetworkExtension(tr, lines, yOffset, colorRGB, width)
 	colorRGB = colorRGB or { 0.9, 0.85, 0.4 }
-	local boxW = tr.width
+	local boxW = width or tr.width
 	local y = tr.height + 2 + (yOffset or 0)
-	local innerW = math.max(20, boxW - 16)
-	local fitted = {}
-	for i = 1, #lines do
-		fitted[i] = truncate(lines[i], innerW)
-	end
-	local measured = UI.Tooltip.renderSection(tr, {
-		lines = fitted,
+	local section = UI.Tooltip.objectSection(lines, {
 		lineColor = colorRGB,
 		backgroundColor = { r = 0.05, g = 0.05, b = 0.05, a = 0.85 },
 		borderColor = { r = 0.9, g = 0.9, b = 1, a = 0.6 },
 		paddingX = 8,
 		paddingY = LINE_PAD,
 		font = NET_FONT,
-	}, 0, y, boxW)
+	})
+	local measured = UI.Tooltip.renderSection(tr, section, 0, y, boxW)
 	return measured and measured.height or 0
 end
 
@@ -475,9 +494,8 @@ end
 --- la receta de ensamblaje ya esta oculta salvo que se active
 --- GlobalStorageSiK.EnableSolderingIronCraft en el sandbox, pero el item no
 --- explicaba por que en ningun sitio). SOLO se muestra cuando la opcion esta
---- DESACTIVADA (el caso por defecto) - si esta activada, el tooltip estatico
---- normal (Tooltip_GS_SolderingIron en Tooltip.json) ya es una descripcion
---- corta sin alusiones, no hace falta añadir nada mas.
+--- DESACTIVADA (el caso por defecto). Si esta activada, no se añade esta
+--- pista: el cuerpo vanilla ya presenta la herramienta y sus propiedades.
 --- Envuelto con Controls.wrapText para no
 --- depender de que la traduccion de cada idioma quepa en una sola linea del
 --- ancho fijo de drawNetworkExtension - mismo criterio que el resto de la UI
@@ -643,12 +661,9 @@ local function buildTooltipBlocks(item, rowContext)
 	-- rango, por lo que repetirlo en el anexo SiK añade ruido sin informacion.
 	-- La formacion de una cinta si es dato propio de su media concreta.
 	local mediaDetail = remote and remote.ok == true and remote or nil
-	if not mediaDetail and remoteIdentity and type(remoteIdentity.mediaCodes) == "table" then
-		mediaDetail = { mediaIndex = remoteIdentity.mediaIndex,
-			mediaCodes = remoteIdentity.mediaCodes }
-	end
-	-- La sonda vanilla es la autoridad. Los códigos recibidos son únicamente un
-	-- acelerador/fallback cuando RecMedia aún no puede materializar la instancia.
+	if not mediaDetail then mediaDetail = remoteIdentity end
+	-- Both paths resolve the exact MediaData. Partial snapshot codes never
+	-- substitute for the catalogue or assert that a tape has no teaching.
 	local skillLines = getVHSTrainingLines(mediaProbe)
 		or (mediaDetail and getRemoteVHSTrainingLines(mediaDetail) or nil)
 	if skillLines and #skillLines > 0 then
@@ -686,12 +701,6 @@ end
 renderCapturedTooltip = function(panel, context)
 	if withdrawDragActive() then return end
 	local blocks = RemotePresentation.blocks(context)
-	local identity = context.detail and context.detail.ok == true and context.detail or context.row
-	local native = identity and identity.nativePath and GlobalStorageSiK.NativeProduct
-		and GlobalStorageSiK.NativeProduct.getView(identity.nativePath)
-	if native and native.fullLabel and native.fullLabel ~= "" then
-		blocks[#blocks + 1] = { lines = { T("IGUI_GS_DetailCategory", native.fullLabel) }, color = { 0.9, 0.85, 0.4, 1 } }
-	end
 	local extra = buildTooltipBlocks(panel.item, context.row)
 	for i = 1, #extra do blocks[#blocks + 1] = extra[i] end
 	local viewport = UI.Viewport.resolve(playerNumForItem(panel.item))
@@ -700,7 +709,8 @@ renderCapturedTooltip = function(panel, context)
 	width = math.min(width, naturalWidth)
 	local height = 0
 	for i = 1, #blocks do
-		local block = blocks[i]
+		local block = UI.Tooltip.objectSection(blocks[i].lines, blocks[i])
+		blocks[i] = block
 		block.lineColor, block.font = block.color, NET_FONT
 		block.paddingX, block.paddingY = 8, LINE_PAD
 		height = height + UI.Tooltip.measureSection(block, width).height
@@ -868,15 +878,19 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 			if self.item and self.isVisible and self:isVisible() then
 				local blocks = buildTooltipBlocks(self.item, self._gsRemoteRow)
 				local baseH = self.height
-				local neededW, extensionH = extensionMetrics(blocks, self.width)
+				local viewport = UI.Viewport.resolve(playerNumForItem(self.item))
+				local neededW, extensionH = extensionMetrics(blocks, self.width,
+					math.max(1, viewport.w - TOOLTIP_GUTTER * 2))
+				-- The annex owns its width; never shrink the vanilla/third-party body.
+				local hostW = math.max(self.width, neededW)
 				-- Medir ANTES de fijar posicion. Si el rectangulo completo no cabe
 				-- sin ocupar el corredor del cursor, se conserva solo vanilla.
 				if #blocks > 0 and placeMeasuredTooltip(
-					self, self.item, neededW, baseH + extensionH) then
+					self, self.item, hostW, baseH + extensionH) then
 					local usedH = 0
 					for i = 1, #blocks do
 						usedH = usedH + drawNetworkExtension(
-							self, blocks[i].lines, usedH, blocks[i].color) + 2
+							self, blocks[i].lines, usedH, blocks[i].color, neededW) + 2
 					end
 				end
 			end

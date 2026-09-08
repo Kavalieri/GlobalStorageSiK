@@ -6,6 +6,8 @@
 require "GS_NetClient"
 require "GS_WithdrawClient"
 require "GS_ContainerTargets"
+require "GS_FloorTargets"
+require "GS_UI_Feedback"
 local UI = require "GS_UI_Framework"
 require "GS_I18n"
 
@@ -278,37 +280,23 @@ function GlobalStorageSiK.TerminalWithdrawDrag.cancel(reason)
 	return true
 end
 
-function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
+local function sendCapturedDrop(key)
 	if not activeDrag then return false end
-        local drag = activeDrag
-	local player = GlobalStorageSiK.NetClient.getPlayer(drag.playerNum)
-	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, drag.playerNum)
-	if not pane then
-		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=pane_nil")
-		clearDrag("pane=nil")
-		return false
-	end
-	local container = GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
-	if not container then
-		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=container_nil")
-		GlobalStorageSiK.ContainerTargets.debugDropTarget("container=nil")
-		clearDrag("container=nil")
-		return false
-	end
-	if not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
-		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=access_denied")
-		GlobalStorageSiK.ContainerTargets.debugDropTarget("accessDenied")
-		clearDrag("accessDenied")
-		return false
-	end
-	local key = GlobalStorageSiK.ContainerTargets.keyForContainer(player, container)
+	local drag = activeDrag
 	if not key then
+		local player = GlobalStorageSiK.NetClient.getPlayer(drag.playerNum)
+		if player then
+			GlobalStorageSiK.UIFeedback.halo(player, GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawTargetUnavailable"),
+				255, 120, 120, 1800, { tone = "danger", channel = "withdraw" })
+		end
 		GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop rejected=target_key_nil")
 		GlobalStorageSiK.ContainerTargets.debugDropTarget("key=nil")
 		clearDrag("key=nil")
 		return false
 	end
-	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local terminalApi = GlobalStorageSiK.TerminalUI
+	local terminal = terminalApi and terminalApi.getInstanceForPlayer
+		and terminalApi.getInstanceForPlayer(drag.playerNum)
 	local searchQuery = terminal and terminal.getSearchQuery and terminal:getSearchQuery() or ""
 	local rows = drag.payloadRows or { drag.rowData }
 	local sourcePanel = drag.sourceWidget and drag.sourceWidget.listPanel or nil
@@ -324,7 +312,8 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 			GlobalStorageSiK.TerminalItems.onWithdrawCompleted(sourcePanel, sourceController, ok, result)
 		end
 	end
-	local requestOptions = { onComplete = onComplete }
+	local requestOptions = { onComplete = onComplete, playerNum = drag.playerNum,
+		networkId = sourceController and sourceController.terminalState and sourceController.terminalState.networkId }
 	local sent
 	GlobalStorageSiK.Log.debug("ExactWithdraw", "drag.drop target=" .. tostring(key)
 		.. " amount=" .. tostring(drag.amount) .. " rows=" .. tostring(#rows))
@@ -347,6 +336,18 @@ function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
 	return sent
 end
 
+function GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
+	if not activeDrag then return false end
+	local player = GlobalStorageSiK.NetClient.getPlayer(activeDrag.playerNum)
+	pane = pane or GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, activeDrag.playerNum)
+	local container = pane and GlobalStorageSiK.ContainerTargets.getPaneContainer(pane)
+	if not container or not player or not GlobalStorageSiK.ContainerTargets.canReceiveWithdraw(player, container) then
+		clearDrag("accessDenied")
+		return false
+	end
+	return sendCapturedDrop(GlobalStorageSiK.ContainerTargets.keyForContainer(player, container))
+end
+
 function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 	if not activeDrag then return false end
 	if activeDrag.finishing then return false end
@@ -354,11 +355,12 @@ function GlobalStorageSiK.TerminalWithdrawDrag.finishAtPointer()
 	GlobalStorageSiK.Log.debug("WithdrawDrag", "dragDropAttempt")
 	local player = GlobalStorageSiK.NetClient.getPlayer(activeDrag.playerNum)
 	local pane = GlobalStorageSiK.ContainerTargets.findPaneAtMouse(true, player, activeDrag.playerNum)
-	if not pane then
-		clearDrag("pane=nil")
+	if pane then return GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane) end
+	if GlobalStorageSiK.ContainerTargets.isMouseOverAnyUI() then
+		clearDrag("ui_target")
 		return false
 	end
-	return GlobalStorageSiK.TerminalWithdrawDrag.tryDropOnPane(pane)
+	return sendCapturedDrop(GlobalStorageSiK.FloorTargets.captureCurrent(player))
 end
 
 -- Compatibilidad con el cargador anterior. Ya no instala OnTick ni monkey

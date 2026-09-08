@@ -56,11 +56,21 @@ local function rescanState(state)
 	end
 	local progress
 	if running then
+		local done = tonumber(scan.progressDone or scan.zonesDone)
+		local total = tonumber(scan.progressTotal or scan.zonesTotal)
+		local measured = done and total and done == done and total == total
+			and done > -math.huge and done < math.huge and total > 0 and total < math.huge
+		local value = measured and math.max(0, math.min(0.99, done / total)) or 0
+		local label = text("IGUI_GS_ScanRunningShort")
+		if measured then label = label .. " " .. tostring(math.floor(value * 100)) .. "%" end
 		progress = {
-			text = state.snapshotAgeMs ~= nil
+			text = label,
+			tooltip = state.snapshotAgeMs ~= nil
 				and text("IGUI_GS_ScanUpdatingAge", math.floor(math.max(0, tonumber(state.snapshotAgeMs) or 0) / 1000))
 				or text("IGUI_GS_ScanRunning"),
 			severity = "warning", tone = "text", glow = false,
+			progress = { value = value, mode = measured and "determinate" or "indeterminate",
+				status = "warning", tone = "warning" },
 		}
 	end
 	return running, feedback, progress

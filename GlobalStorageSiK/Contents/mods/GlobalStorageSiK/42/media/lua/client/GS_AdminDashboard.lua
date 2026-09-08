@@ -34,6 +34,8 @@ require "GS_AdminDashboard_Corpus"
 
 local UI = require "GS_UI_Framework"
 local Confirmation = require "GS_Confirmation"
+local SupportLayout = require "GS_AdminDashboard_Layout"
+local TaxonomyView = require "GS_AdminDashboard_TaxonomyView"
 
 GlobalStorageSiK.AdminDashboard = GlobalStorageSiK.AdminDashboard or {}
 GlobalStorageSiK.AdminDashboard.instance = nil
@@ -57,13 +59,9 @@ local MIN_VISIBLE_ROWS = 3
 -- Columna "Conexion" de la lista de miembros - "Conectado" en verde para
 -- quien sigue en linea, "Desconectado hace X" para el resto. Medida con el
 -- peor caso ("99d") igual criterio que el resto de columnas del mod.
-local COL_SEEN_W = math.max(
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOnline")),
-	getTextManager():MeasureStringX(UIFont.Small, GlobalStorageSiK.I18n.text("IGUI_GS_AdminOffline", "99d"))
-) + 14
 local ADMIN_MEMBER_TABLE_COLUMNS = {
-	{ key = "member", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 100, pad = 6 },
-	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = COL_SEEN_W, align = "right", pad = 4 },
+	{ key = "member", titleKey = "IGUI_GS_PermColMemberName", flex = 1, minWidth = 180, pad = 6 },
+	{ key = "connection", titleKey = "IGUI_GS_PermColConnection", width = 180, align = "right", pad = 4 },
 }
 -- El ScrollableRegion ya entrega el contentRect útil; la tabla no reserva una
 -- segunda vez el scrollbar a la derecha.
@@ -524,58 +522,20 @@ local ADMIN_REFLOW_DEBOUNCE_MS = 100
 --- centro cada vez que se suelta el asa de redimensionado.
 function GS_AdminDashboardUI:rebuildAfterResize()
 	UI.Window.reflow(self)
-	local textW = math.max(240, self.width - PAD * 2)
-	local tabW = math.floor((textW - 8) / 2)
-	if self.staffTabNetworkBtn then self.staffTabNetworkBtn:setWidth(tabW) end
-	if self.staffTabTaxonomyBtn then self.staffTabTaxonomyBtn:setX(PAD + tabW + 8); self.staffTabTaxonomyBtn:setWidth(tabW) end
-	if self.networkCombo then self.networkCombo:setWidth(textW) end
-	self:refreshInfoLines()
-	local halfW = math.floor(textW / 2) - 4
-	if self.reloadBtn then self.reloadBtn:setWidth(halfW) end
-	if self.historyBtn then self.historyBtn:setX(PAD + halfW + 8); self.historyBtn:setWidth(halfW) end
-	local staffMinW = 0
-	for i = 1, #(self.staffActionButtons or {}) do
-		UI.Controls.fitButtonToContent(self.staffActionButtons[i])
-		staffMinW = math.max(staffMinW, self.staffActionButtons[i]:getWidth())
+	local content = UI.Window.chromeRects(self).content
+	local textW = math.max(1, content.w)
+	local rootY = content.y + BTN_H + LINE_GAP + 4
+	local rootH = math.max(1, content.h - BTN_H - LINE_GAP - 4)
+	if self.staffTabs then self.staffTabs:reflow({ x = content.x, y = content.y, w = textW, h = BTN_H }) end
+	if self.networkTabRoot then
+		self.networkTabRoot:setX(content.x); self.networkTabRoot:setY(rootY)
+		self.networkTabRoot:setWidth(textW); self.networkTabRoot:setHeight(rootH)
 	end
-	-- El numero de filas forma parte de la geometria creada por buildStaticFrame.
-	-- Conservarlo durante resize evita que cambiar 2->1 columnas desplace solo X
-	-- y deje los botones solapados con el contenido posterior.
-	local staffColumns = self._staffActionColumns or 2
-	for i = 1, #(self.staffActionButtons or {}) do
-		local button = self.staffActionButtons[i]
-		local column = staffColumns == 2 and ((i - 1) % 2) or 0
-		button:setX(PAD + column * (halfW + 8))
-		button:setWidth(staffColumns == 2 and halfW or textW)
+	if self.taxonomyTabRoot then
+		self.taxonomyTabRoot:setX(content.x); self.taxonomyTabRoot:setY(rootY)
+		self.taxonomyTabRoot:setWidth(textW); self.taxonomyTabRoot:setHeight(rootH)
 	end
-	if self.addMemberBtn then UI.Controls.fitButtonToContent(self.addMemberBtn) end
-	local addBtnW = self.addMemberBtn and math.min(textW, math.max(90, self.addMemberBtn:getWidth())) or 90
-	if self.addMemberCombo then self.addMemberCombo:setWidth(math.max(100, textW - addBtnW - 8)) end
-	if self.addMemberBtn then
-		self.addMemberBtn:setX(PAD + textW - addBtnW)
-		self.addMemberBtn:setWidth(addBtnW)
-	end
-
-	local hintLines = UI.Controls.wrapText(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
-	local hintPool = self.dashboardHintLabels or {}
-	local hintH = math.max(1, #hintPool) * (FONT_HGT_SMALL + 2) + ROW_GAP
-	local memberTop = self.memberScrollTopY or (self.memberScroll and self.memberScroll:getY()) or 200
-	local memberH = math.max(3 * (ROW_H + ROW_GAP), self.height - memberTop - BTN_H - hintH - PAD - ROW_GAP)
-	if self.memberScroll then
-		UI.Scroll.resize(self.memberScroll, textW, memberH)
-	end
-	local actionsY = memberTop + memberH + ROW_GAP
-	if self.releaseBtn then self.releaseBtn:setY(actionsY); self.releaseBtn:setWidth(halfW) end
-	if self.deleteBtn then self.deleteBtn:setX(PAD + halfW + 8); self.deleteBtn:setY(actionsY); self.deleteBtn:setWidth(halfW) end
-	local hintY = actionsY + BTN_H + ROW_GAP
-        for i = 1, #hintPool do
-                local label = hintPool[i]
-                label:setY(hintY)
-                label:setText(hintLines[i] or (i == #hintPool and table.concat(hintLines, " ") or ""))
-                label:setVisible((hintLines[i] or "") ~= "")
-		hintY = hintY + FONT_HGT_SMALL + 2
-	end
-	if self._members then self:refreshMemberPanel(self._members) end
+	SupportLayout.reflow(self)
 	self:layoutTaxonomyTab()
 	self:selectStaffTab(self._activeStaffTab or "network")
 end
@@ -584,35 +544,20 @@ end
 --- Es idempotente y se ejecuta siempre despues de que ambas secciones hayan
 --- sido pobladas, tanto en apertura como en cada reconstruccion por resize.
 function GS_AdminDashboardUI:layoutTaxonomyTab()
-	if not self._taxonomyTabY then return end
-	local textW = math.max(200, self.width - PAD * 2)
-	self._auditContentW = textW
-	self._corpusContentW = textW
-	if self.nativeAuditBtn then self.nativeAuditBtn:setWidth(textW) end
-	if self.nativeCorpusBtn then self.nativeCorpusBtn:setWidth(textW) end
-	if self.nativeAuditSummaryScroll then
-		self.nativeAuditSummaryScroll:setWidth(textW)
-	end
-	if self.nativeCorpusSummaryScroll then
-		self.nativeCorpusSummaryScroll:setWidth(textW)
-	end
-	local bottomY = self.height - PAD
-	local midY = self._taxonomyTabY + math.floor((bottomY - self._taxonomyTabY) / 2)
-	self._auditBottomLimit = midY - 4
-	self._corpusBottomLimit = bottomY
-	GlobalStorageSiK.AdminDashboardAudit.refreshSummary(self)
-	GlobalStorageSiK.AdminDashboardCorpus.refreshSummary(self)
+ TaxonomyView.reflow(self)
 end
 
 function GS_AdminDashboardUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	self:setAlwaysOnTop(true)
-	self.headerHeight = FONT_HGT_MEDIUM + PAD + LINE_GAP
+	self.headerHeight = 50
 	UI.Window.apply(self, {
-		profile = "staff", title = T("IGUI_GS_AdminDashboardTitle"),
+		title = T("IGUI_GS_AdminDashboardTitle"),
 		playerNum = self.playerNum or 0, x = self.x, y = self.y,
 		width = self.width, height = self.height,
-		minWidth = ADMIN_MIN_W, minHeight = ADMIN_MIN_H,
+		minWidth = 820, minHeight = 620,
+		maxWidth = UI.Window.safeRect(self.playerNum or 0).w,
+		maxHeight = UI.Window.safeRect(self.playerNum or 0).h, capWidth = 1, capHeight = 1,
 		headerHeight = self.headerHeight, padding = PAD, resizable = true,
 		focusPriority = UI.FocusStack.PRIORITY.STAFF,
 		onResize = function()
@@ -636,13 +581,12 @@ function GS_AdminDashboardUI:initialise()
 				self.memberTableBlock:dispose()
 				self.memberTableBlock = nil
 			end
-			if self.memberTableFrame then
-				self.memberTableFrame:dispose()
-				self.memberTableFrame = nil
-			end
+			SupportLayout.dispose(self)
+			TaxonomyView.dispose(self)
 		end,
         })
         self._relativeAgeBinding = UI.Lifecycle.bindVisibleRefresh(self, {
+                active = false,
                 intervalTicks = 15,
                 refresh = function() self:refreshRelativeAges() end,
         })
@@ -652,9 +596,10 @@ function GS_AdminDashboardUI:initialise()
 end
 
 --- Mantiene vivo el texto relativo de las dos suites mientras la ventana
---- permanece abierta. Solo reconstruye el bloque cuyo texto cambia y como
+--- muestra Taxonomia. Solo reconstruye el bloque cuyo texto cambia y como
 --- maximo una vez por segundo; no envia ninguna peticion de red.
 function GS_AdminDashboardUI:refreshRelativeAges()
+        if self._activeStaffTab ~= "taxonomy" or not self:getIsVisible() then return end
         local nowMs = getTimestampMs and tonumber(getTimestampMs()) or 0
 	if nowMs <= 0 then return end
 	if self._lastTaxonomyAgeRefreshMs and (nowMs - self._lastTaxonomyAgeRefreshMs) < 1000 then return end
@@ -766,7 +711,7 @@ function GS_AdminDashboardUI:refreshOnlinePlayersCombo()
 		self.addMemberBtn._sikUiLocked = not hasOptions
 		self.addMemberBtn:setEnable(hasOptions)
 		if not hasOptions then
-			UI.Controls.setTooltip(self.addMemberBtn, T("IGUI_GS_AdminNoPlayersOnline"))
+			UI.Controls.setTooltip(self.addMemberBtn, T("IGUI_GS_AdminNoPlayersOnline"), { kind = "descriptive" })
 		end
 	end
 end
@@ -782,40 +727,28 @@ end
 --- explicito de sistemas): permite mostrar/ocultar por pestaña sin
 --- reconstruir nada, self:selectStaffTab() solo alterna setVisible().
 ---@param widget ISUIElement
-local function trackNetworkTabWidget(self, widget)
-	self._networkTabWidgets[#self._networkTabWidgets + 1] = widget
-	self._networkBaseY = self._networkBaseY or {}
-	if widget and widget.getY then self._networkBaseY[widget] = widget:getY() end
-end
-
 --- Cambia la pestaña activa del panel de staff (Soporte de redes / Taxonomia)
 --- mostrando/ocultando los paneles ya construidos - NUNCA reconstruye la
 --- pestaña que deja de verse (pedido explicito de sistemas: "la pestaña no
 --- visible no debe reconstruirse en cada refresh de la visible").
 ---@param tabKey string "network"|"taxonomy"
 function GS_AdminDashboardUI:selectStaffTab(tabKey)
+	if tabKey ~= "network" and tabKey ~= "taxonomy" then return end
+	local changed = self._activeStaffTab ~= tabKey
 	self._activeStaffTab = tabKey
-	local showNetwork = tabKey ~= "taxonomy"
-	for i = 1, #(self._networkTabWidgets or {}) do
-		local w = self._networkTabWidgets[i]
-		if w and w.setVisible then w:setVisible(showNetwork) end
-	end
-	for i = 1, #(self._taxonomyTabWidgets or {}) do
-		local w = self._taxonomyTabWidgets[i]
-		if w and w.setVisible then w:setVisible(not showNetwork) end
-	end
-	if self.staffTabNetworkBtn then
-		self.staffTabNetworkBtn._sikUiActive = showNetwork
-	end
-	if self.staffTabTaxonomyBtn then
-		self.staffTabTaxonomyBtn._sikUiActive = not showNetwork
+	if self.staffTabs then self.staffTabs:setActive(tabKey, false) end
+	if self._relativeAgeBinding then self._relativeAgeBinding:setActive(tabKey == "taxonomy") end
+	if changed and tabKey == "taxonomy" then
+		self._lastTaxonomyAgeRefreshMs = nil
+		self:refreshRelativeAges()
 	end
 end
 
 function GS_AdminDashboardUI:buildStaticFrame()
-	local pad = PAD
-	local textW = self.width - pad * 2
-	local y = self.headerHeight + 4
+	local content = UI.Window.chromeRects(self).content
+	local pad = 0
+	local textW = content.w
+	local y = 0
 	self._networkTabWidgets = {}
 	self._networkBaseY = {}
 	self._taxonomyTabWidgets = {}
@@ -824,200 +757,30 @@ function GS_AdminDashboardUI:buildStaticFrame()
 	-- controlador pequeño y explicito, 2 botones que alternan visibilidad de
 	-- los widgets ya construidos (ver selectStaffTab arriba), nunca
 	-- reconstruyen ni destruyen nada.
-	local tabW = math.floor((textW - 8) / 2)
-	self.staffTabNetworkBtn = createButton(
-		pad, y, tabW, BTN_H, T("IGUI_GS_AdminTabNetwork"), function()
-			self:selectStaffTab("network")
-		end)
-	self:addChild(self.staffTabNetworkBtn)
-	self.staffTabTaxonomyBtn = createButton(
-		pad + tabW + 8, y, tabW, BTN_H, T("IGUI_GS_AdminTabTaxonomy"), function()
-			self:selectStaffTab("taxonomy")
-		end)
-	self:addChild(self.staffTabTaxonomyBtn)
-	y = y + BTN_H + LINE_GAP + 4
+	local rootY = content.y + BTN_H + LINE_GAP + 4
+	local rootH = math.max(1, content.h - BTN_H - LINE_GAP - 4)
+	self.networkTabRoot = UI.Controls.panel(self, { x = content.x, y = rootY, w = textW, h = rootH })
+	self.taxonomyTabRoot = UI.Controls.panel(self, { x = content.x, y = rootY, w = textW, h = rootH })
+	self.staffTabs = UI.Tabs.create({
+		parent = self, playerNum = self.playerNum, activeKey = self._activeStaffTab or "network",
+		bounds = { x = content.x, y = content.y, w = textW, h = BTN_H }, gap = 8,
+		items = {
+			{ key = "network", text = T("IGUI_GS_AdminTabNetwork"), content = self.networkTabRoot },
+			{ key = "taxonomy", text = T("IGUI_GS_AdminTabTaxonomy"), content = self.taxonomyTabRoot },
+		},
+		onActivate = function(context) self:selectStaffTab(context.value.key) end,
+	})
 	-- Ambas pestañas arrancan en la MISMA Y (justo debajo de la barra de
 	-- pestañas) - son una superposicion mostrar/ocultar, no un flujo
 	-- secuencial. Guardada aparte porque `y` sigue avanzando mas abajo con
 	-- el contenido propio de Soporte de redes.
-	local taxonomyTabY = y
+	local taxonomyTabY = 0
 	self._taxonomyTabY = taxonomyTabY
 
-        self.networkCombo = UI.Controls.combo(self, {
-                x = pad, y = y, w = textW, h = ENTRY_H,
-                onChange = function() self:onComboChanged() end,
-        })
-	trackNetworkTabWidget(self, self.networkCombo)
-	y = y + ENTRY_H + LINE_GAP + 2
-
-        self.infoLbls = {}
-        self._infoStartY = y
-        for i = 1, INFO_LINE_COUNT do
-                local lbl = UI.Controls.copyText(self, {
-                        x = pad, y = y, w = textW, text = "",
-                        tone = "text", font = UIFont.Small, lineGap = 2,
-                })
-                lbl:setVisible(false)
-                trackNetworkTabWidget(self, lbl)
-		self.infoLbls[i] = lbl
-	end
-	local infoLineH = FONT_HGT_SMALL + 2
-	y = y + INFO_BASE_LINES * infoLineH
-	self._infoBaseEndY = y
-	y = y + LINE_GAP + 4
-
-	local reloadW = math.floor(textW / 2) - 4
-	self.reloadBtn = createButton(
-		pad, y, reloadW, BTN_H, T("IGUI_GS_AdminReload"), function()
-			self:requestNetworkList()
-			if self._selectedNetworkId then self:requestMembers(self._selectedNetworkId) end
-		end)
-	self:addChild(self.reloadBtn)
-	trackNetworkTabWidget(self, self.reloadBtn)
-
-	self.historyBtn = createButton(
-		pad + reloadW + 8, y, reloadW, BTN_H, T("IGUI_GS_AdminHistoryButton"), function()
-			self:requestHistory()
-		end)
-	self:addChild(self.historyBtn)
-	trackNetworkTabWidget(self, self.historyBtn)
-	y = y + BTN_H + LINE_GAP
-
-	-- dev22 (pedido explicito de sistemas: "Auditar catalogo, trasladado
-	-- desde Soporte de redes... su unico hogar sera Taxonomia, no duplicar
-	-- el boton en ambas pestañas"): construccion completa de la pestaña
-	-- Taxonomia extraida a GS_AdminDashboard_Audit.lua (mismo motivo que la
-	-- extraccion de runNativeAudit a GS_NativeAuditServer.lua en dev14 - no
-	-- seguir haciendo crecer este fichero/buildStaticFrame).
-	-- dev24: la pestaña Taxonomia ahora reparte su alto disponible entre 2
-	-- suites INDEPENDIENTES (Auditar catalogo / Validar corpus, pedido
-	-- explicito de sistemas: "cada suite conserva estado, requestId, ultima
-	-- ejecucion y resumen propios") - mitad superior para auditoria, mitad
-	-- inferior para el corpus, cada una con su propio scroll.
-	local taxonomyBottomY = self.height - pad
-	local taxonomyMidY = taxonomyTabY + math.floor((taxonomyBottomY - taxonomyTabY) / 2)
-	GlobalStorageSiK.AdminDashboardAudit.build(self, pad, taxonomyTabY, textW, taxonomyMidY - 4)
-	GlobalStorageSiK.AdminDashboardCorpus.build(self, pad, taxonomyMidY + 4, textW, taxonomyBottomY)
+	GlobalStorageSiK.AdminDashboardAudit.build(self)
+	GlobalStorageSiK.AdminDashboardCorpus.build(self)
 	self:layoutTaxonomyTab()
-
-	-- Herramientas internas aportadas por los addons. El Dashboard solo pinta
-	-- el registro neutral; cada addon conserva la responsabilidad de abrir su
-	-- ruta vanilla y de decidir como se integra con una sesion de red activa.
-	local staffActions = GlobalStorageSiK.TerminalExtensions.getStaffActions()
-	self.staffActionButtons = {}
-	if #staffActions > 0 then
-		local toolsTitle = UI.Controls.sectionTitle(self, {
-			x = pad, y = y, w = textW, text = T("IGUI_GS_AdminInternalTests"),
-		})
-		trackNetworkTabWidget(self, toolsTitle)
-		y = y + FONT_HGT_SMALL + LINE_GAP
-
-		local actionGap = 8
-		local actionW = math.floor((textW - actionGap) / 2)
-		local actionMinW = 0
-		for i = 1, #staffActions do
-			local action = staffActions[i]
-			local actionBtn = createButton(
-				pad, y, textW, BTN_H, T(action.labelKey),
-				staffActionCallback(action, self))
-			UI.Controls.fitButtonToContent(actionBtn)
-			actionMinW = math.max(actionMinW, actionBtn:getWidth())
-			self:addChild(actionBtn)
-			trackNetworkTabWidget(self, actionBtn)
-			self.staffActionButtons[#self.staffActionButtons + 1] = actionBtn
-		end
-		local actionColumns = actionW >= actionMinW and 2 or 1
-		self._staffActionColumns = actionColumns
-		for i = 1, #self.staffActionButtons do
-			local column = actionColumns == 2 and ((i - 1) % 2) or 0
-			local row = math.floor((i - 1) / actionColumns)
-			self.staffActionButtons[i]:setX(pad + column * (actionW + actionGap))
-			self.staffActionButtons[i]:setY(y + row * (BTN_H + LINE_GAP))
-			self.staffActionButtons[i]:setWidth(actionColumns == 2 and actionW or textW)
-		end
-		local actionRows = math.ceil(#staffActions / actionColumns)
-		y = y + actionRows * (BTN_H + LINE_GAP) + 6
-	end
-
-	self.membersTitle = UI.Controls.sectionTitle(self, {
-		x = pad, y = y, text = T("IGUI_GS_AdminMembersTitle"),
-	})
-	trackNetworkTabWidget(self, self.membersTitle)
-	y = y + FONT_HGT_SMALL + LINE_GAP
-
-	-- Añadir miembro (pedido explicito 2026-08-22): desplegable de jugadores
-	-- CONECTADOS ahora mismo, sin facción - el staff gestiona cualquier red.
-	local addBtnW = 90
-        self.addMemberCombo = UI.Controls.combo(self, {
-                x = pad, y = y, w = textW, h = ENTRY_H,
-        })
-	trackNetworkTabWidget(self, self.addMemberCombo)
-	self.addMemberBtn = createButton(
-		pad + textW - addBtnW, y, addBtnW, ENTRY_H, T("IGUI_GS_AdminAddMember"), function()
-			self:onAddMember()
-		end)
-	self:addChild(self.addMemberBtn)
-	trackNetworkTabWidget(self, self.addMemberBtn)
-	UI.Controls.fitButtonToContent(self.addMemberBtn)
-	addBtnW = math.min(textW, math.max(90, self.addMemberBtn:getWidth()))
-	self.addMemberCombo:setWidth(math.max(100, textW - addBtnW - 8))
-	self.addMemberBtn:setX(pad + textW - addBtnW)
-	self.addMemberBtn:setWidth(addBtnW)
-	y = y + ENTRY_H + LINE_GAP + 6
-
-	-- Texto de longitud variable SIEMPRE con wrap real (regla del proyecto) -
-	-- antes era un ISLabel de una sola linea y se salia/cortaba por el borde
-	-- de la ventana (confirmado en pruebas reales).
-	local hintLines = UI.Controls.wrapText(T("IGUI_GS_AdminDashboardHint"), textW, UIFont.Small)
-	local actionsH = BTN_H + ROW_GAP
-	local hintH = (#hintLines * (FONT_HGT_SMALL + 2)) + ROW_GAP
-	local memberH = math.max(MIN_VISIBLE_ROWS * (ROW_H + ROW_GAP), self.height - y - actionsH - hintH - pad)
-	self.memberScroll = UI.Scroll.create(self, pad, y, textW, memberH)
-	UI.Scroll.setOnContentRectChanged(self.memberScroll, function()
-		if self._memberRelayout then return end
-		self._memberRelayout = true
-		self:refreshMemberPanel(self._members)
-		self._memberRelayout = false
-	end)
-	self.memberScrollTopY = y
-	trackNetworkTabWidget(self, self.memberScroll)
-	local actionsY = y + memberH + ROW_GAP
-
-	self.releaseBtn = createButton(
-		pad, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminReleaseOwnership"), function()
-			self:onReleaseOwnership()
-		end)
-	self:addChild(self.releaseBtn)
-	trackNetworkTabWidget(self, self.releaseBtn)
-
-	self.deleteBtn = createButton(
-		pad + reloadW + 8, actionsY, reloadW, BTN_H, T("IGUI_GS_AdminDeleteNetwork"), function()
-			self:onDeleteNetworkConfirm()
-		end, true)
-	self:addChild(self.deleteBtn)
-	trackNetworkTabWidget(self, self.deleteBtn)
-
-	local hintY = actionsY + BTN_H + ROW_GAP
-        self.dashboardHintLabels = {}
-        for _, line in ipairs(hintLines) do
-                local hintLbl = UI.Controls.copyText(self, {
-                        x = pad, y = hintY, w = textW, text = line,
-                        tone = "textMuted", font = UIFont.Small, lineGap = 2,
-                })
-                trackNetworkTabWidget(self, hintLbl)
-		self.dashboardHintLabels[#self.dashboardHintLabels + 1] = hintLbl
-		hintY = hintY + FONT_HGT_SMALL + 2
-	end
-
-	-- El bloque de abajo (acciones + hint) puede quedar mas bajo que la
-	-- altura fija de la ventana si el scroll de miembros se alargo para
-	-- garantizar MIN_VISIBLE_ROWS - crecer la ventana en vez de solapar.
-	local neededHeight = hintY + pad
-	if neededHeight > self.height then
-		self:setHeight(math.min(neededHeight, self.maximumHeight or neededHeight))
-	end
-
-	self:refreshInfoLines()
+	SupportLayout.build(self)
 	-- dev22: recuerda la pestaña activa SOLO durante la sesion de la ventana
 	-- (pedido explicito de sistemas, no hace falta persistirla) - por
 	-- defecto "network" en la apertura inicial, conservada tras un resize
@@ -1066,121 +829,31 @@ end
 --- longitud variable en un ISLabel de una sola linea) - antes esto vivia en
 --- filas de tabla truncadas y se solapaba visualmente entre redes.
 function GS_AdminDashboardUI:refreshInfoLines()
-	local net = self._selectedNetwork
-	local sourceLines = {}
-	if net then
-		sourceLines[#sourceLines + 1] = net.label .. "  [" .. net.networkId .. "]"
-		if net.vacant then
-			sourceLines[#sourceLines + 1] = T("IGUI_GS_AdminInfoVacant")
-		else
-			sourceLines[#sourceLines + 1] = T("IGUI_GS_AdminInfoOwner", net.owner or "?")
-		end
-		sourceLines[#sourceLines + 1] = T("IGUI_GS_AdminInfoAccount", (net.ownerAccountLogin ~= "" and net.ownerAccountLogin) or "?")
-		-- BUG REAL COSMETICO cerrado (2026-08-26, hallazgo de Desarrollo -
-		-- "N miembros" incluia fichas ROLE_DEAD conservadas a proposito, dando
-		-- la impresion de mas gente con acceso real de la que hay): separa
-		-- activos de historico en 2 numeros explicitos en vez de sumarlos.
-		local deadRecords = math.max(0, (net.memberCount or 0) - (net.activeMemberCount or net.memberCount or 0))
-		sourceLines[#sourceLines + 1] = T("IGUI_GS_AdminNetworkCounts",
-			net.activeMemberCount or net.memberCount or 0, deadRecords, net.terminalCount or 0)
-	end
-	local lines = {}
-	local textW = math.max(120, self.width - PAD * 2)
-	for i = 1, #sourceLines do
-		local wrapped = UI.Controls.wrapText(sourceLines[i], textW, UIFont.Small)
-		for j = 1, #wrapped do
-			if #lines < INFO_LINE_COUNT then lines[#lines + 1] = wrapped[j] end
-		end
-	end
-	local lineH = FONT_HGT_SMALL + 2
-	local visibleCount = math.max(1, #lines)
-	for i = 1, INFO_LINE_COUNT do
-		local label = self.infoLbls[i]
-		label:setY((self._infoStartY or label:getY()) + (i - 1) * lineH)
-                label:setText(lines[i] or "")
-		label:setVisible(lines[i] ~= nil)
-	end
-	local infoEndY = (self._infoStartY or 0) + visibleCount * lineH
-	local delta = infoEndY - (self._infoBaseEndY or infoEndY)
-	for i = 1, #(self._networkTabWidgets or {}) do
-		local widget = self._networkTabWidgets[i]
-		local baseY = self._networkBaseY and self._networkBaseY[widget]
-		if widget and baseY and baseY >= (self._infoBaseEndY or 0) then
-			widget:setY(baseY + delta)
-		end
-	end
-	if self.memberScroll then
-		self.memberScrollTopY = self.memberScroll:getY()
-		local hintH = math.max(1, #(self.dashboardHintLabels or {})) * (FONT_HGT_SMALL + 2) + ROW_GAP
-		local memberH = math.max(3 * (ROW_H + ROW_GAP),
-			self.height - self.memberScrollTopY - BTN_H - hintH - PAD - ROW_GAP)
-		UI.Scroll.resize(self.memberScroll,
-			math.max(120, self.width - PAD * 2), memberH)
-		local actionsY = self.memberScrollTopY + memberH + ROW_GAP
-		local textW = math.max(120, self.width - PAD * 2)
-		local halfW = math.floor((textW - 8) / 2)
-		if self.releaseBtn then self.releaseBtn:setY(actionsY); self.releaseBtn:setWidth(halfW) end
-		if self.deleteBtn then
-			self.deleteBtn:setX(PAD + halfW + 8)
-			self.deleteBtn:setY(actionsY)
-			self.deleteBtn:setWidth(halfW)
-		end
-		local hintY = actionsY + BTN_H + ROW_GAP
-		for i = 1, #(self.dashboardHintLabels or {}) do
-			self.dashboardHintLabels[i]:setY(hintY)
-			hintY = hintY + FONT_HGT_SMALL + 2
-		end
-	end
+	SupportLayout.reflow(self)
 end
 
 ---@param members table[]
 function GS_AdminDashboardUI:refreshMemberPanel(members)
 	self._members = members or {}
 	self:refreshOnlinePlayersCombo()
-	local scroll = self.memberScroll
-	if not scroll then return end
-	local w = UI.Scroll.contentWidth(scroll)
-	local tableHeight = math.max(ROW_H + TABLE_METRICS.headerHeight + 48, scroll.height or 0)
+	if not self.membersBlock or not self._memberTableRect then return end
 	if not self.memberTableBlock or self.memberTableBlock.disposed then
-		local dashboard = self
-		local frame, frameReason = UI.Block.create({
-			parent = UI.Scroll.childHost(scroll), x = 0, y = 0, w = w, h = tableHeight,
-			title = T("IGUI_GS_AdminMembersTitle"),
-			tooltip = T("IGUI_GS_AdminMembersTitle"),
-		})
-		if not frame then error("SiK.UI.Block.create(staff.members): " .. tostring(frameReason)) end
-		self.memberTableFrame = frame
-		local content = frame:getContentRect()
+		local dashboard, rect = self, self._memberTableRect
 		local tableInstance, reason = UI.Table.create({
-			parent = frame.childParent, embedded = true,
-			x = content.x, y = content.y, w = content.w,
-			h = content.h,
-			emptyText = T("IGUI_GS_AdminNoMembers"),
-			columns = ADMIN_MEMBER_TABLE_COLUMNS,
-			left = ADMIN_MEMBER_TABLE_OPTIONS.left,
-			right = ADMIN_MEMBER_TABLE_OPTIONS.right,
+			parent = self.membersBlock.childParent, embedded = true, directBlock = false,
+			x = rect.x, y = rect.y, w = rect.w, h = rect.h,
+			emptyText = T("IGUI_GS_AdminNoMembers"), columns = ADMIN_MEMBER_TABLE_COLUMNS,
 			onRowClick = function(context)
-				local member = context.item
-				if not member then return false end
-				GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, member)
+				if not context.item then return false end
+				GlobalStorageSiK.AdminDashboard.openMemberEditor(dashboard, context.item)
 				return true
 			end,
 		})
-		if not tableInstance then
-			frame:dispose()
-			self.memberTableFrame = nil
-			error("SiK.UI.Table.create(staff.members): " .. tostring(reason))
-		end
+		if not tableInstance then error("SiK.UI.Table.create(staff.members): " .. tostring(reason)) end
 		self.memberTableBlock = tableInstance
 	end
-	self.memberTableFrame:setBounds(0, 0, w, tableHeight)
-	local content = self.memberTableFrame:getContentRect()
-	self.memberTableBlock:layout({
-		x = content.x, y = content.y, w = content.w, h = content.h,
-		rows = self._members, preserveOffset = true,
-	})
-	UI.Scroll.setContentHeight(scroll, self.memberTableFrame.h)
-	UI.Scroll.ensureScrollBars(scroll)
+	self.memberTableBlock:setRows(self._members, true)
+	SupportLayout.reflow(self)
 end
 
 function GS_AdminDashboardUI:onSetMemberRole(characterId, role)
@@ -1359,9 +1032,11 @@ function GlobalStorageSiK.AdminDashboard.show()
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer() or nil
 	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	local safe = UI.Window.safeRect(playerNum)
 	local rect = UI.Window.resolveBounds({
-		profile = "staff", width = WINDOW_W, height = WINDOW_H,
-		playerNum = playerNum, minWidth = ADMIN_MIN_W, minHeight = ADMIN_MIN_H,
+		width = 1120, height = safe.h, playerNum = playerNum,
+		minWidth = 820, minHeight = 620,
+		maxWidth = safe.w, maxHeight = safe.h, capWidth = 1, capHeight = 1,
 	})
 	local ui = GS_AdminDashboardUI:new(rect.x, rect.y, rect.w, rect.h)
 	ui.playerNum = playerNum

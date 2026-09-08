@@ -18,6 +18,14 @@ GlobalStorageSiK.ReaderAcquireUI = {}
 GlobalStorageSiK.ReaderAcquireUI.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
+local onTick
+local tickInstalled = false
+local function setRefreshTick(enabled)
+	if not Events or not Events.OnTick or enabled == tickInstalled then return end
+	if enabled then Events.OnTick.Add(onTick)
+	else Events.OnTick.Remove(onTick) end
+	tickInstalled = enabled
+end
 local PAD = 14
 local BLOCK_GAP = 8
 local CONTROL_METRICS = UI.Controls.metrics("task")
@@ -103,6 +111,7 @@ function GS_ReaderAcquireUI:initialise()
 end
 
 function GS_ReaderAcquireUI:destroy()
+	setRefreshTick(false)
 	GlobalStorageSiK.ReaderAcquireUI.instance = nil
 	if self._sikWindowApplied and not self._sikDisposed then
 		UI.Modal.close(self, "destroy")
@@ -236,6 +245,7 @@ function GS_ReaderAcquireUI:refresh(force)
 	local sig = requirementsSignature(lines)
 	local host = self.contentHost or self
 	local widthChanged = self._layoutWidth ~= (host.width or 0)
+	self._refreshPending = false
 	if not force and not widthChanged and sig == self._lastSig then
 		return
 	end
@@ -262,24 +272,25 @@ function GlobalStorageSiK.ReaderAcquireUI.show(player, owner)
 	if owner then UI.Modal.presentChild(owner, ui)
 	else UI.Modal.show(ui) end
 	GlobalStorageSiK.ReaderAcquireUI.instance = ui
+	setRefreshTick(true)
 end
 
 local function onInventoryChanged()
-	if GlobalStorageSiK.ReaderAcquireUI.instance then
-		GlobalStorageSiK.ReaderAcquireUI.instance:refresh()
+	local ui = GlobalStorageSiK.ReaderAcquireUI.instance
+	if ui and ui.getIsVisible and ui:getIsVisible() then
+		ui._refreshPending = true
 	end
 end
 
 local function onRecipeLearned()
-	if GlobalStorageSiK.ReaderAcquireUI.instance then
-		GlobalStorageSiK.ReaderAcquireUI.instance:refresh()
-	end
+	onInventoryChanged()
 end
 
 local REFRESH_TICKS = 30
-local function onTick()
+onTick = function()
 	local ui = GlobalStorageSiK.ReaderAcquireUI.instance
 	if not ui or not ui.getIsVisible or not ui:getIsVisible() then
+		setRefreshTick(false)
 		return
 	end
 	ui._tick = (ui._tick or 0) + 1
@@ -298,8 +309,5 @@ if Events then
 		if ev and ev.Add then
 			ev.Add(onRecipeLearned)
 		end
-	end
-	if Events.OnTick then
-		Events.OnTick.Add(onTick)
 	end
 end

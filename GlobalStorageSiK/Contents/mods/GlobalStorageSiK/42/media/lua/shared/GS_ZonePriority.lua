@@ -13,16 +13,11 @@ GlobalStorageSiK.ZonePriority = {}
 ---@param zone table
 ---@return number
 function GlobalStorageSiK.ZonePriority.zoneArea(zone)
-	if not zone or not zone.bounds then
+	if type(zone) ~= "table" then
 		return math.huge
 	end
-	local b = zone.bounds
-	local x1 = math.min(b.x1 or b.x, b.x2 or b.x)
-	local x2 = math.max(b.x1 or b.x, b.x2 or b.x)
-	local y1 = math.min(b.y1 or b.y, b.y2 or b.y)
-	local y2 = math.max(b.y1 or b.y, b.y2 or b.y)
-	local zMin = b.z or b.zMin or 0
-	local zMax = b.zMax or zMin
+	local x1, x2, y1, y2, zMin, zMax = GlobalStorageSiK.ZoneBounds.normalize(zone.bounds)
+	if x1 == nil then return math.huge end
 	return (x2 - x1 + 1) * (y2 - y1 + 1) * (zMax - zMin + 1)
 end
 

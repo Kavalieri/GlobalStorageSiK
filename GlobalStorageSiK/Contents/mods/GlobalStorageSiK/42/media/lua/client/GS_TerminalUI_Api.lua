@@ -20,6 +20,8 @@ GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or
 local DEFER_REFRESH_ITEM_COUNT = 150
 local TERMINAL_GEOMETRY_KEY = "terminal-shell"
 local TERMINAL_GEOMETRY_VERSION = 2
+local OPEN_TIMEOUT_MS = 10000
+local pendingOpenDeadlines = {}
 
 function GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
 	return GlobalStorageSiK.TerminalUI.instances[tonumber(playerNum) or 0]
@@ -94,6 +96,7 @@ local function buildBlockedPayload(player, reason)
 	if player and GlobalStorageSiK.TerminalRecipes then
 		local ok, enriched = pcall(GlobalStorageSiK.TerminalRecipes.serializeForClient, player)
 		if ok and enriched then
+			enriched.playerNum = payload.playerNum
 			enriched.reason = reason or enriched.reason
 			enriched.proximityRange = payload.proximityRange
 			enriched.wirelessRange = payload.wirelessRange
@@ -364,19 +367,62 @@ local function nextOpenSequence(player)
 	if seq > 2147483647 then seq = 1 end
 	GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] = seq
 	GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] = true
+	local now = getTimestampMs and getTimestampMs() or 0
+	pendingOpenDeadlines[playerNum] = {seq=seq, started=now, deadline=now + OPEN_TIMEOUT_MS, player=player}
+	local guard = GlobalStorageSiK.TerminalAccessGuard
+	if guard and guard.ensure then guard.ensure() end
 	-- Compatibilidad temporal con consumidores del terminal físico que todavía
 	-- consultan los escalares históricos. La correlación autoritativa usa siempre
 	-- el mapa por playerNum y nunca deja que otro jugador local pise esta solicitud.
-	GlobalStorageSiK.Client.terminalOpenSeq = seq
-	GlobalStorageSiK.Client.pendingTerminalOpen = true
+	if playerNum == 0 then
+		GlobalStorageSiK.Client.terminalOpenSeq = seq
+		GlobalStorageSiK.Client.pendingTerminalOpen = true
+	end
 	return playerNum, seq
 end
 
 local function clearPendingOpen(playerNum, seq)
 	local pending = GlobalStorageSiK.Client.pendingTerminalOpenByPlayer or {}
 	local sequences = GlobalStorageSiK.Client.terminalOpenSeqByPlayer or {}
-	if seq == nil or sequences[playerNum] == seq then pending[playerNum] = nil end
-	GlobalStorageSiK.Client.pendingTerminalOpen = false
+	if seq == nil or sequences[playerNum] == seq then
+		pending[playerNum] = nil
+		pendingOpenDeadlines[playerNum] = nil
+		if playerNum == 0 then GlobalStorageSiK.Client.pendingTerminalOpen = false end
+	end
+end
+
+-- Recovery is a new opening intent, so a delayed close cannot cancel it.
+function GlobalStorageSiK.TerminalUI.beginAccessRecovery(player)
+	local _, sequence = nextOpenSequence(player)
+	return sequence
+end
+
+local function sendPhysicalOpen(player, hint, networkId, enrich)
+	local client = GlobalStorageSiK.Client
+	local transport = GlobalStorageSiK.NetClient
+	if not client or not transport or not transport.sendCommand then return nil end
+	local playerNum, openSeq = nextOpenSequence(player)
+	local payload = {openSeq=openSeq, terminalHint=hint, networkId=networkId}
+	if enrich then
+		payload = GlobalStorageSiK.TerminalAccess.enrichCommandPayload(player, payload, networkId)
+	end
+	if client.addInventoryCatalogToken then
+		payload = client.addInventoryCatalogToken(payload, playerNum, networkId)
+	end
+	if not transport.sendCommand("openTerminal", payload, player) then
+		clearPendingOpen(playerNum, openSeq)
+		return nil
+	end
+	return openSeq
+end
+
+function GlobalStorageSiK.TerminalUI.cancelPendingOpen(playerArg)
+	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
+	if not player or not GlobalStorageSiK.Client then return end
+	local playerNum, cancelledSeq = nextOpenSequence(player)
+	clearPendingOpen(playerNum, cancelledSeq)
+	local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests
+	if requests then requests[playerNum] = nil end
 end
 
 function GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(requestId, playerArg)
@@ -385,8 +431,19 @@ function GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(requestId, playerA
 	local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
 	local pending = requests[playerNum]
 	if pending and (requestId == nil or requestId == pending.requestId) then
-		requests[playerNum] = nil
-		clearPendingOpen(playerNum, pending.requestId)
+		local sequences = GlobalStorageSiK.Client.terminalOpenSeqByPlayer or {}
+		if sequences[playerNum] == pending.requestId then
+			local inFlight = GlobalStorageSiK.Client.pendingTerminalOpenByPlayer
+				and GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] == true
+			GlobalStorageSiK.TerminalUI.cancelPendingOpen(player)
+			local transport = GlobalStorageSiK.NetClient
+			if inFlight and transport and transport.sendCommand then
+				transport.sendCommand("closeTerminal", {targetOpenSeq=pending.requestId}, player)
+			end
+		else
+			-- Cancelling an older tablet request must not cancel a newer physical open.
+			requests[playerNum] = nil
+		end
 	end
 end
 
@@ -404,6 +461,47 @@ function GlobalStorageSiK.TerminalUI.onRemoteOpenResult(payload, accepted)
 		if not ok then GlobalStorageSiK.Log.error("TerminalUI", "remote open callback", tostring(err)) end
 	end
 	return true
+end
+
+-- Called by the existing access watcher only while a view or request exists.
+-- Fence before callbacks: a late ACK must never reopen an expired request.
+function GlobalStorageSiK.TerminalUI.expirePendingOpens(now)
+	local client = GlobalStorageSiK.Client
+	if not client then pendingOpenDeadlines = {}; return false end
+	local pending = client.pendingTerminalOpenByPlayer or {}
+	local sequences = client.terminalOpenSeqByPlayer or {}
+	for n=0,3 do
+		local entry = pendingOpenDeadlines[n]
+		if entry then
+			if not pending[n] or sequences[n] ~= entry.seq then
+				pendingOpenDeadlines[n] = nil
+			else
+				if now < entry.started then
+					entry.started, entry.deadline = now, now + OPEN_TIMEOUT_MS
+				end
+				if now >= entry.deadline then
+					local seq = entry.seq + 1
+					if seq > 2147483647 then seq = 1 end
+					sequences[n] = seq
+					if n == 0 then client.terminalOpenSeq = seq end
+					clearPendingOpen(n, seq)
+					local transport = GlobalStorageSiK.NetClient
+					if transport and transport.sendCommand then
+						transport.sendCommand("closeTerminal", {targetOpenSeq=entry.seq}, entry.player)
+					end
+					local handled = GlobalStorageSiK.TerminalUI.onRemoteOpenResult(
+						{playerNum=n, openSeq=entry.seq, reason="open_timeout"}, false)
+					if not handled and GlobalStorageSiK.UIFeedback and GlobalStorageSiK.I18n then
+						GlobalStorageSiK.UIFeedback.halo(entry.player,
+							GlobalStorageSiK.I18n.text("IGUI_GS_AccessUnconfirmed"), nil, nil, nil, nil,
+							{tone="warning", channel="terminal-access"})
+					end
+				end
+			end
+		end
+	end
+	for n=0,3 do if pendingOpenDeadlines[n] then return true end end
+	return false
 end
 
 --- Apertura remota explicita. No envia coordenadas ni cambia primero la sesion:
@@ -462,23 +560,7 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 	end
 
 	if GlobalStorageSiK.TerminalAccess.trustServerForOpen() then
-		if GlobalStorageSiK.Client then
-			GlobalStorageSiK.Client.pendingTerminalOpen = true
-			GlobalStorageSiK.Client.terminalOpenSeq = (GlobalStorageSiK.Client.terminalOpenSeq or 0) + 1
-		end
-		if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-			local payload = {
-				openSeq = GlobalStorageSiK.Client and GlobalStorageSiK.Client.terminalOpenSeq or nil,
-				terminalHint = hint,
-				networkId = openNetworkId,
-			}
-			if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
-				payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
-					player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
-			end
-			GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
-		end
-		return
+		return sendPhysicalOpen(player, hint, openNetworkId, false)
 	end
 
 	if not GlobalStorageSiK.TerminalAccess.evaluateClientOpen then
@@ -502,9 +584,11 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 	end
 	if not accessOk then
 		if GlobalStorageSiK.Client then
-			GlobalStorageSiK.Client.pendingTerminalOpen = false
+			clearPendingOpen(player:getPlayerNum())
 		end
-		GlobalStorageSiK.TerminalUI.showBlocked(accessReason)
+		local blocked = buildBlockedPayload(player, accessReason)
+		blocked.networkId = openNetworkId
+		GlobalStorageSiK.TerminalUI.showBlocked(blocked)
 		return
 	end
 
@@ -521,20 +605,5 @@ function GlobalStorageSiK.TerminalUI.requestOpenAt(playerArg, terminalObj)
 		end
 	end
 
-	if GlobalStorageSiK.Client then
-		GlobalStorageSiK.Client.pendingTerminalOpen = true
-		GlobalStorageSiK.Client.terminalOpenSeq = (GlobalStorageSiK.Client.terminalOpenSeq or 0) + 1
-	end
-	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
-		local payload = GlobalStorageSiK.TerminalAccess.enrichCommandPayload(player, {
-			openSeq = GlobalStorageSiK.Client and GlobalStorageSiK.Client.terminalOpenSeq or nil,
-			networkId = openNetworkId,
-			terminalHint = hint or terminal,
-		}, openNetworkId)
-		if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
-			payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload,
-				player and player.getPlayerNum and player:getPlayerNum() or 0, openNetworkId)
-		end
-		GlobalStorageSiK.NetClient.sendCommand("openTerminal", payload)
-	end
+	return sendPhysicalOpen(player, hint or terminal, openNetworkId, true)
 end

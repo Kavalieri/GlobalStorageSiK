@@ -164,7 +164,7 @@ local function operationLabel(key, done, total, asPercent)
 	return label .. " " .. tostring(math.floor(done)) .. "/" .. tostring(math.floor(total))
 end
 
-local function buildHeaderSpec(state)
+local function buildHeaderSpec(state, activeOperation)
 	state = state or {}
 	local networkTitle = state.networkName
 	if type(networkTitle) ~= "string" or networkTitle == "" then
@@ -177,9 +177,12 @@ local function buildHeaderSpec(state)
 	local statusLabel, statusTone = resolveConnectionPresentation(state)
 	local operation = false
 	local transient = state.headerTransient
-	if type(transient) == "table" then
+	if activeOperation then
+		operation = activeOperation
+	elseif type(transient) == "table" then
 		operation = {
 			label = transient.label or transient.text or "",
+			showProgress = false,
 			value = transient.value or 1, mode = transient.mode or "determinate",
 			status = transient.status or transient.tone or "warning",
 			tone = transient.tone or transient.status or "warning",
@@ -190,7 +193,7 @@ local function buildHeaderSpec(state)
 		operation = {
 			label = operationLabel("IGUI_GS_RedistributeRunning",
 				progress.checked, progress.total, true), value = value, mode = mode,
-			status = "warning", tone = "warning",
+			status = "warning", tone = "warning", showProgress = true,
 		}
 	elseif state.scanActive == true or state.reconcilePending == true
 		or (state.scanStatus and (state.scanStatus.state == "RUNNING"
@@ -200,11 +203,9 @@ local function buildHeaderSpec(state)
 		local total = scan.progressTotal or scan.zonesTotal
 		local value, mode = operationProgress(done, total)
 		operation = {
-			label = state.snapshotAgeMs and T("IGUI_GS_ScanUpdatingAge",
-				tostring(math.floor(math.max(0, tonumber(state.snapshotAgeMs) or 0) / 1000)))
-				or operationLabel("IGUI_GS_ScanRunningShort", done, total, true),
+			label = operationLabel("IGUI_GS_ScanRunningShort", done, total, true),
 			value = value, mode = mode,
-			status = "warning", tone = "warning",
+			status = "warning", tone = "warning", showProgress = true,
 		}
 	end
 	return {
@@ -260,8 +261,16 @@ function GS_TerminalUI:syncHeaderChrome()
 		and getTimestampMs() >= transient.expiresMs then
 		self.terminalState.headerTransient = nil
 	end
-	local spec = buildHeaderSpec(self.terminalState)
+	local activeOperation = GlobalStorageSiK.UIFeedback.operationFor(self.playerNum,
+		self.terminalState and self.terminalState.networkId)
+	local spec = buildHeaderSpec(self.terminalState, activeOperation)
 	spec.variant = self.accessMode == "blocked" and "blocked" or "default"
+	if self.accessMode == "blocked" then
+		-- Use the body's already resolved presentation; no scan/read to paint a header.
+		spec.contextName = nil
+		spec.operation = false
+		spec.status = { text = T(self._blockedHeaderTitleKey or "IGUI_GS_BlockedNoTerminalTitle"), tone = "danger" }
+	end
 	self:setHeader(spec)
 	if self.setVersions then self:setVersions(resolveRuntimeVersionText()) end
 end
@@ -921,6 +930,9 @@ function GS_TerminalUI:cleanupTerminalSession()
 	end
 	local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer(self.playerNum)
+	if GlobalStorageSiK.TerminalUI.cancelPendingOpen then
+		GlobalStorageSiK.TerminalUI.cancelPendingOpen(self.playerNum)
+	end
 	-- El servidor mantiene una lista explicita de clientes que estan mirando
 	-- cada terminal para no difundirles indices completos solo por tener acceso
 	-- a la red. Notificar el cierre antes de borrar la sesion local.
@@ -932,8 +944,11 @@ function GS_TerminalUI:cleanupTerminalSession()
 	if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 	end
+	if GlobalStorageSiK.TerminalAccessGuard and GlobalStorageSiK.TerminalAccessGuard.clear then
+		GlobalStorageSiK.TerminalAccessGuard.clear(self.playerNum)
+	end
 	if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
-		GlobalStorageSiK.WithdrawClient.cancelAll()
+		GlobalStorageSiK.WithdrawClient.cancelAll("terminal_closed", self.playerNum)
 	end
 	if GlobalStorageSiK.TerminalWithdrawDrag and GlobalStorageSiK.TerminalWithdrawDrag.cancel then
 		GlobalStorageSiK.TerminalWithdrawDrag.cancel()
@@ -945,7 +960,7 @@ function GS_TerminalUI:cleanupTerminalSession()
 		GlobalStorageSiK.Client.clearTransientCaches(self.playerNum)
 	end
 	if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
-		GlobalStorageSiK.TransferQueue.clear()
+		GlobalStorageSiK.TransferQueue.clear(self.playerNum)
 	end
 	self._capacityHaloShown = nil
 	if GlobalStorageSiK.TerminalUI.removeInstanceForPlayer then
@@ -1072,7 +1087,7 @@ function GS_TerminalUI:setRedistributeState(running, message, status, progress)
 		self.autoSortBtn:setEnabled(not self._autoSortRunning and allowed)
 		UI.Controls.setTooltip(self.autoSortBtn, allowed
 				and T("IGUI_GS_RedistributeHint")
-				or T("IGUI_GS_RedistributeAdminOnly"))
+				or T("IGUI_GS_RedistributeAdminOnly"), { kind = "descriptive" })
 	end
 	self:syncHeaderChrome()
 	if stateChanged and self.activeTabKey == "network" and GlobalStorageSiK.TerminalNetwork then
@@ -1411,7 +1426,8 @@ function GS_TerminalUI:onWithdrawRow(row, amount, targetKey)
 		row,
 		amount or 1,
 		targetKey,
-		self:getSearchQuery()
+		self:getSearchQuery(),
+		{ playerNum = self.playerNum, networkId = self.terminalState and self.terminalState.networkId }
 	)
 end
 

@@ -73,9 +73,46 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- mismo contrato, nunca una lista de casos distinta.
 -- DEV32.4.3: v13 alinea mochilas equipables sin BodyLocation con la señal
 -- estructural CanBeEquipped de B42. No reutilizar v12 con otro contenido.
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "13"
+-- 1.5.1-dev1: v14 adds canonical identities and structural weapon parts from B42.
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "14"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
+	{ caseId = "structural_red_dot", fullType = "Base.RedDot", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "weapon_part",
+		minConfidence = 100, expectedSource = "script_item_type_weapon_part", expectFacets = { weaponPart = true },
+		note = "B42 base:weaponpart confirms identity independently of the item name." },
+	{ caseId = "canonical_electric_wire", fullType = "Base.ElectricWire", block = "electronics_power", presence = "required",
+		expectedL1 = "electronics_power", expectedL2 = "component", expectedL3 = false,
+		minConfidence = 90, expectedSource = "canonical_fulltype_override",
+		note = "B42 electrical component; metal composition does not make it raw material." },
+	{ caseId = "canonical_electronics_scrap", fullType = "Base.ElectronicsScrap", block = "electronics_power", presence = "required",
+		expectedL1 = "electronics_power", expectedL2 = "component", expectedL3 = false,
+		minConfidence = 90, expectedSource = "canonical_fulltype_override",
+		note = "B42 electronic component; distinct from ScrapMetal." },
+	{ caseId = "canonical_3030_box", fullType = "Base.3030Box", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic box." },
+	{ caseId = "canonical_3030_carton", fullType = "Base.3030Carton", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic carton." },
+	{ caseId = "canonical_308_box", fullType = "Base.308Box", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic box." },
+	{ caseId = "canonical_308_carton", fullType = "Base.308Carton", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic carton." },
+	{ caseId = "canonical_556_box", fullType = "Base.556Box", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic box." },
+	{ caseId = "canonical_556_carton", fullType = "Base.556Carton", block = "combat", presence = "required",
+		expectedL1 = "combat", expectedL2 = "firearm", expectedL3 = "ammunition",
+		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
+		note = "B42 packaged ammunition, not a generic carton." },
 
 	-- 1. Objetos propios de Global Storage - inventario COMPLETO de los 44
 	-- ScriptItem reales del mapa exacto propio (dev25, confianza 90, sin

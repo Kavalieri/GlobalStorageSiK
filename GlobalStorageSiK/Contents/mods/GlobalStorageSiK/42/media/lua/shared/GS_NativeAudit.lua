@@ -19,6 +19,7 @@ require "GS_NativeTaxonomyRegistry"
 require "GS_NativeClassifier"
 require "GSSiK_API"
 require "GS_NativeClassifierUtils"
+require "GS_NativeAuditMetadata"
 
 GlobalStorageSiK.NativeAudit = GlobalStorageSiK.NativeAudit or {}
 
@@ -125,10 +126,10 @@ end
 ---@param evidence table|nil
 ---@param reason string|nil
 ---@param si table|nil
-local function addCensusRecord(report, fullType, outcome, path, evidence, reason, si)
+local function addCensusRecord(report, fullType, outcome, path, evidence, reason, si, result)
 	local primary = evidence and evidence.primary
 	path = path or {}
-	report.censusInventory[#report.censusInventory + 1] = {
+	local row = {
 		fullType = fullType,
 		outcome = outcome,
 		l1 = path.l1 or "",
@@ -139,6 +140,11 @@ local function addCensusRecord(report, fullType, outcome, path, evidence, reason
 		reason = reason or "",
 		bodyLocation = GlobalStorageSiK.NativeClassifierUtils.bodyLocation(si),
 	}
+	local metadata = GlobalStorageSiK.NativeAuditMetadata.collect(si)
+	for key, value in pairs(metadata) do row[key] = value end
+	local store = GlobalStorageSiK.NativeWorldOverrides.getAuthoritativeStore()
+	GlobalStorageSiK.NativeAuditMetadata.decorate(row, si, result, store and store.entries[fullType])
+	report.censusInventory[#report.censusInventory + 1] = row
 end
 
 --- Ejecuta la auditoria completa. Debe llamarse explicitamente (comando de
@@ -334,7 +340,7 @@ function GlobalStorageSiK.NativeAudit.run()
 			elseif result.pending then
 				report.pending = report.pending + 1
 				addSample(report.samples.pending, fullType)
-				addCensusRecord(report, fullType, "pending", result.primaryPath, result.evidence, "catalog_pending", si)
+				addCensusRecord(report, fullType, "pending", result.primaryPath, result.evidence, "catalog_pending", si, result)
 			elseif result.classifierError then
 				-- BUG REAL cerrado (2026-08-27, hallazgo del equipo de
 				-- sistemas): antes una excepcion real dentro de un bloque
@@ -347,7 +353,7 @@ function GlobalStorageSiK.NativeAudit.run()
 				addSample(report.samples.classifierErrors,
 					fullType .. (reasons and (" -> " .. table.concat(reasons, " | ")) or ""))
 				addCensusRecord(report, fullType, "classifier_error", result.primaryPath, result.evidence,
-					"classifier_error", si)
+					"classifier_error", si, result)
 			else
 				local path = result.primaryPath or {}
 				local l1, l2, l3 = path.l1, path.l2, path.l3
@@ -418,7 +424,7 @@ function GlobalStorageSiK.NativeAudit.run()
 							reason = exclusionReason,
 							bodyLocation = GlobalStorageSiK.NativeClassifierUtils.bodyLocationLower(si),
 						}
-						addCensusRecord(report, fullType, "excluded_internal", path, result.evidence, exclusionReason, si)
+						addCensusRecord(report, fullType, "excluded_internal", path, result.evidence, exclusionReason, si, result)
 					else
 						report.unclassified = report.unclassified + 1
 						addSample(report.samples.unclassified, fullType)
@@ -453,7 +459,7 @@ function GlobalStorageSiK.NativeAudit.run()
 						ammoType = ammoTypeRaw and tostring(ammoTypeRaw) or "",
 						tokens = table.concat(nameTokens2, " "),
 						}
-						addCensusRecord(report, fullType, "unclassified", path, result.evidence, "no_native_rule", si)
+						addCensusRecord(report, fullType, "unclassified", path, result.evidence, "no_native_rule", si, result)
 					end
 				else
 					report.classified = report.classified + 1
@@ -484,7 +490,7 @@ function GlobalStorageSiK.NativeAudit.run()
 				end
 				if not (l1 == "other" and l2 == "unclassified_modded") then
 					addCensusRecord(report, fullType, pathOk and "classified" or "invalid_path", path,
-						result.evidence, pathOk and nil or "taxonomy_registry_rejected", si)
+						result.evidence, pathOk and nil or "taxonomy_registry_rejected", si, result)
 				end
 			end
 		end
@@ -492,6 +498,19 @@ function GlobalStorageSiK.NativeAudit.run()
 	report.reconciledTotal = report.classified + report.unclassified + report.excludedInternal
 		+ report.pending + report.classifierErrors
 	report.reconciliationDelta = report.totalTypes - report.reconciledTotal
+	-- Missing source mods must remain visible as diagnostic rows. They are not
+	-- ScriptItems and do not change the catalog coverage/reconciliation totals.
+	local worldStore = GlobalStorageSiK.NativeWorldOverrides.getAuthoritativeStore()
+	if worldStore then
+		local inspected = 0
+		for fullType in pairs(worldStore.entries) do
+			inspected = inspected + 1
+			if inspected > GlobalStorageSiK.NativeWorldOverrides.MAX_ENTRIES then break end
+			if GlobalStorageSiK.NativeWorldOverrides.validFullType(fullType) and not catalogFullTypes[fullType] then
+				addCensusRecord(report, fullType, "override_source_missing", nil, nil, "source_missing", nil)
+			end
+		end
+	end
 	table.sort(report.excludedInternalInventory, function(a, b) return a.fullType < b.fullType end)
 	table.sort(report.censusInventory, function(a, b) return a.fullType < b.fullType end)
 	-- Diff de mapeos exactos del grupo 14 (pedido explicito): compara la
@@ -821,13 +840,21 @@ function GlobalStorageSiK.NativeAudit.writeCensusTsv(report)
 	if not ok or not writer then return false, "getFileWriter_failed" end
 	local rowsWritten = 0
 	local okWrite, errMsg = pcall(function()
-		writer:write("fullType\toutcome\tl1\tl2\tl3\tsource\tconfidence\treason\tbodyLocation\r\n")
+		writer:write("fullType\toutcome\tl1\tl2\tl3\tsource\tconfidence\treason\tbodyLocation"
+			.. "\tcensusSchemaVersion\tscriptModule\toriginModId\toriginStatus\tsourceDisplayCategory\tscriptType"
+			.. "\tscriptTags\tscriptTagsStatus\tworldOverrideStatus\tdefaultL1\tdefaultL2\tdefaultL3"
+			.. "\tchoiceL1\tchoiceL2\tchoiceL3\toverrideNativePath\r\n")
 		for i = 1, #inventory do
 			local row = inventory[i]
 			writer:write(table.concat({
 				tsvCell(row.fullType), tsvCell(row.outcome), tsvCell(row.l1),
 				tsvCell(row.l2), tsvCell(row.l3), tsvCell(row.source),
 				tsvCell(row.confidence), tsvCell(row.reason), tsvCell(row.bodyLocation),
+				tsvCell(row.censusSchemaVersion or 2), tsvCell(row.scriptModule), tsvCell(row.originModId),
+				tsvCell(row.originStatus), tsvCell(row.sourceDisplayCategory), tsvCell(row.scriptType),
+				tsvCell(row.scriptTags), tsvCell(row.scriptTagsStatus), tsvCell(row.worldOverrideStatus),
+				tsvCell(row.defaultL1), tsvCell(row.defaultL2), tsvCell(row.defaultL3),
+				tsvCell(row.choiceL1), tsvCell(row.choiceL2), tsvCell(row.choiceL3), tsvCell(row.overrideNativePath),
 			}, "\t") .. "\r\n")
 			rowsWritten = rowsWritten + 1
 		end

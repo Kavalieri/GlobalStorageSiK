@@ -182,16 +182,15 @@ function GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
 	if not terminal or not tabKey then
 		return nil
 	end
-	local existing = terminal.extraTabs and terminal.extraTabs[tabKey]
-	if existing and existing.panel then
-		GlobalStorageSiK.Log.debug("SiKUITabs", "ensureTab reuse", "tabKey=" .. tostring(tabKey))
-		return existing.panel
-	end
 	local def = GlobalStorageSiK.TerminalExtensions._definitions[tabKey]
-	if not def then
-		GlobalStorageSiK.Log.debug("SiKUITabs", "ensureTab sin definicion registrada", "tabKey=" .. tostring(tabKey))
-		return nil
-	end
+	if not def then return nil end
+	if type(def.isVisible) == "function" then
+		local ok, visible = pcall(def.isVisible, terminal)
+		if not ok or visible ~= true then return nil end
+	elseif def.enabledStateKey and (not terminal.terminalState
+		or terminal.terminalState[def.enabledStateKey] ~= true) then return nil end
+	local existing = terminal.extraTabs and terminal.extraTabs[tabKey]
+	if existing and existing.panel and existing.host then return existing.panel end
 	GlobalStorageSiK.Log.debug("SiKUITabs", "ensureTab build (primera vez para este terminal)", "tabKey=" .. tostring(tabKey))
 	-- The navigation destination is the real parent. It must exist and have
 	-- completed its own layout before any product widget is constructed.
@@ -213,7 +212,7 @@ function GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
 			"tabKey=" .. tostring(tabKey))
 		return nil
 	end
-	local panel = UI.Controls.panel(parent, {
+	local panel = existing and existing.panel or UI.Controls.panel(parent, {
 		x = 0, y = 0, w = parent.width, h = parent.height, drawBackground = false,
 		backgroundColor = { r = 0, g = 0, b = 0, a = 0 },
 		borderColor = { r = 0, g = 0, b = 0, a = 0 },
@@ -271,12 +270,20 @@ function GlobalStorageSiK.TerminalExtensions.setTabVisible(terminal, tabKey, vis
 	if not terminal or not terminal.navigationContainer then
 		return false
 	end
-	if visible then
-		GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey)
+	if visible and not GlobalStorageSiK.TerminalExtensions.ensureTab(terminal, tabKey) then
+		visible = false
 	end
 	local entry = terminal.extraTabs and terminal.extraTabs[tabKey]
 	if not entry then
 		return false
+	end
+	if not visible and entry.host then
+		entry.host:dispose()
+		entry.host = nil
+		entry.panel._sikSurfaceHost = nil
+		entry.panel:setVisible(false)
+		local def = GlobalStorageSiK.TerminalExtensions._definitions[tabKey]
+		if def and def.panelField then terminal[def.panelField] = nil end
 	end
 	GlobalStorageSiK.Log.debug("SiKUITabs", "setTabVisible", "tabKey=" .. tostring(tabKey) .. " visible=" .. tostring(visible))
 	GlobalStorageSiK.TerminalTabs.setDynamicVisible(terminal, visible, {

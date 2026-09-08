@@ -63,6 +63,14 @@ GlobalStorageSiK.AddonManageUI = {}
 GlobalStorageSiK.AddonManageUI.instance = nil
 
 local T = GlobalStorageSiK.I18n.text
+local onTick
+local tickInstalled = false
+local function setRefreshTick(enabled)
+	if not Events or not Events.OnTick or enabled == tickInstalled then return end
+	if enabled then Events.OnTick.Add(onTick)
+	else Events.OnTick.Remove(onTick) end
+	tickInstalled = enabled
+end
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
@@ -242,6 +250,7 @@ function GS_AddonManageUI:initialise()
 end
 
 function GS_AddonManageUI:destroy()
+	setRefreshTick(false)
 	if self.contentScroll then
 		if self.contentScroll._sikScrollInstance and self.contentScroll._sikScrollInstance.dispose then
 			self.contentScroll._sikScrollInstance:dispose()
@@ -401,7 +410,7 @@ local function createAddonActionButton(self, parent, width, def, isInstalled, ca
 			self:destroy()
 	end })
 	if locked then
-		UI.Controls.setTooltip(actionBtn, T("IGUI_GS_CraftMissing"))
+		UI.Controls.setTooltip(actionBtn, T("IGUI_GS_CraftMissing"), { kind = "descriptive" })
 	end
 	self._actionBtn = actionBtn
 	return actionBtn
@@ -714,9 +723,11 @@ function GS_AddonManageUI:refresh(force)
 	end
 	local def = addonDefinition(self.addonId)
 	if not def then
+		self._refreshPending = false
 		return
 	end
 	local sig = statusSignature(self.player, def, self.networkId, self.anchor, self.installed)
+	self._refreshPending = false
 	if not force and sig == self._lastSig then
 		return
 	end
@@ -757,18 +768,18 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	ui:initialise()
 	UI.Modal.presentChild(owner or terminal, ui)
 	GlobalStorageSiK.AddonManageUI.instance = ui
+	setRefreshTick(true)
 end
 
 local function onInventoryChanged()
-	if GlobalStorageSiK.AddonManageUI.instance then
-		GlobalStorageSiK.AddonManageUI.instance:refresh()
+	local ui = GlobalStorageSiK.AddonManageUI.instance
+	if ui and ui.getIsVisible and ui:getIsVisible() then
+		ui._refreshPending = true
 	end
 end
 
 local function onRecipeLearned()
-	if GlobalStorageSiK.AddonManageUI.instance then
-		GlobalStorageSiK.AddonManageUI.instance:refresh()
-	end
+	onInventoryChanged()
 end
 
 -- BUG REAL cerrado (2026-08-27): el mecanismo de "ventana bloqueada hasta
@@ -782,9 +793,10 @@ end
 -- correlacionar ni desbloquearse por timeout.
 
 local REFRESH_TICKS = 30
-local function onTick()
+onTick = function()
 	local ui = GlobalStorageSiK.AddonManageUI.instance
 	if not ui or not ui.getIsVisible or not ui:getIsVisible() then
+		setRefreshTick(false)
 		return
 	end
 	ui._tick = (ui._tick or 0) + 1
@@ -803,8 +815,5 @@ if Events then
 		if ev and ev.Add then
 			ev.Add(onRecipeLearned)
 		end
-	end
-	if Events.OnTick then
-		Events.OnTick.Add(onTick)
 	end
 end

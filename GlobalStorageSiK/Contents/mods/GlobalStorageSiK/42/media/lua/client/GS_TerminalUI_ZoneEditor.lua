@@ -303,7 +303,7 @@ function GS_ZoneEditorUI:ensureForm()
 		local value = tonumber(self.priorityEntry:getText())
 		if value then self:applyPriority(value) end
 	end)
-	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_ZonePriorityHint"))
+	UI.Controls.setTooltip(self.priorityEntry, T("IGUI_GS_ZonePriorityHint"), { kind = "descriptive" })
 	self.priorityPresetHighBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetHigh"), function() self:applyPriority(10) end)
 	self.priorityPresetNormalBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetNormal"), function() self:applyPriority(50) end)
 	self.priorityPresetLowBtn = button(identityColumn, T("IGUI_GS_NodePriorityPresetLow"), function() self:applyPriority(90) end)

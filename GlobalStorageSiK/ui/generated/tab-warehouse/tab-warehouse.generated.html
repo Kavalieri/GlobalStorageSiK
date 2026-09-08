@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
   &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;1f30e7f89fa1e6ddbc504c23af11ea09b440f7a6270935ebae05d1aa4605e376&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;10a00fd95f58cec3894d34903e5f2fb8188717154d4a9b614c708bf13f354018&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;c24833957e26b083bb87adef8608cde8e50dff16e6cfc03f5123feb73b6dabef&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;aedf9e0c9768ab039794e3a25eda32d178b37e4a4d59b86098ac5c95ca36481e&quot;
+  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;4ce9d822c7928492131721dc6b99699d0dfe92f48c7d262d6cb9e34890c60acd&quot;
 }">
   <title>tab-warehouse</title>
   <style>:root {
@@ -909,6 +909,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   font: 11px/1.45 var(--sik-font);
   text-align: left;
 }
+.sik-tooltip--scrollable { position: relative; left: 0; top: 0; width: 240px; height: 100px; display: block; pointer-events: auto; overscroll-behavior: contain; }
 .sik-floating-tooltip { position: fixed !important; z-index: 200 !important; display: block !important; pointer-events: none; box-shadow: 0 8px 22px #000c; }
 .sik-floating-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-floating-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
@@ -1198,12 +1199,12 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                   <div class="sik-table-row is-child" data-group-child="crisps"><span><i class="sik-item-swatch is-bbq"></i>Patatas fritas - Barbacoa</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Garaje</span><span>4</span></div>
                   <div class="sik-table-row is-child" data-group-child="crisps"><span><i class="sik-item-swatch is-vinegar"></i>Patatas fritas - Sal y vinagre</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Cocina</span><span>3</span></div>
                   <div class="sik-table-row is-group" data-expand-group="pepper" aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span>Pimiento · estados mixtos</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Varias zonas</span><span>2</span></div>
-                  <div class="sik-table-row is-child" data-group-child="pepper"><span>Pimiento <span class="sik-unit-tag">Fresco</span></span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
-                  <div class="sik-table-row is-child" data-group-child="pepper"><span>Pimiento <span class="sik-unit-tag">Podrido</span></span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Garaje</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Instancia exacta; el estado alimentario se consulta en el icono y tooltip vanilla."><span>Pimiento</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Instancia exacta; el estado alimentario se consulta en el icono y tooltip vanilla."><span>Pimiento</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Garaje</span><span>1</span></div>
 
                   <div class="sik-table-row is-group" data-families="vehicles containers" data-expand-group="fuel" data-row-help="3 bidones. Se separan por contenido y llenado porque no son intercambiables al retirar una unidad." aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina</span><span class="sik-category-path is-neutral">Varias categorías</span><span>Garaje</span><span>3</span></div>
-                  <div class="sik-table-row is-child" data-group-child="fuel" data-row-help="Unidad exacta: 8 / 10 L de gasolina (80%), ubicada en Garaje. Al transferir esta fila se solicita este itemId concreto."><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina <span class="sik-unit-tag">8 / 10 L · 80%</span></span><span class="sik-category-path is-fuel">Vehículos › Consumibles › Combustible</span><span>Garaje</span><span>1</span></div>
-                  <div class="sik-table-row is-child" data-group-child="fuel"><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina <span class="sik-unit-tag">3.5 / 10 L · 35%</span></span><span class="sik-category-path is-fuel">Vehículos › Consumibles › Combustible</span><span>Garaje</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="fuel" data-row-help="Instancia exacta: 8 / 10 L de gasolina (80%), ubicada en Garaje. El icono y tooltip vanilla muestran su estado."><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina</span><span class="sik-category-path is-fuel">Vehículos › Consumibles › Combustible</span><span>Garaje</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="fuel" data-row-help="Instancia exacta: 3.5 / 10 L de gasolina (35%), ubicada en Garaje. El icono y tooltip vanilla muestran su estado."><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina</span><span class="sik-category-path is-fuel">Vehículos › Consumibles › Combustible</span><span>Garaje</span><span>1</span></div>
                   <div class="sik-table-row is-child" data-group-child="fuel"><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón vacío</span><span class="sik-category-path is-container">Contenedores › Líquidos › Vacío</span><span>Garaje</span><span>1</span></div>
 
                   <div class="sik-table-row is-group" data-expand-group="vhs-woodcraft-ep3" data-row-help="Dos cintas realmente iguales de Woodcraft Ep. 3. El grupo conserva el título vanilla exacto y suma sus ubicaciones." aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span><i class="sik-item-swatch is-vhs"></i>Woodcraft Ep. 3</span><span class="sik-category-path is-knowledge">Conocimiento y medios › Medios grabados</span><span>Varias zonas</span><span>2</span></div>
@@ -1770,6 +1771,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(refreshOverflow);
     document.querySelectorAll(".sik-block-viewport, .sik-scroll-region").forEach((viewport) => observer.observe(viewport));
+  }
+})();
+
+/* Product state fixture; uses the existing rail interaction and shared components. */
+(() => {
+  const reader = new URLSearchParams(location.search).get('reader') || 'installed';
+  const installed = reader === 'installed';
+  document.documentElement.dataset.reader = reader;
+  const tab = document.querySelector('[data-tab="programming"]');
+  const panel = document.querySelector('[data-panel="programming"]');
+  if (!installed) {
+    if (tab.classList.contains('is-active')) document.querySelector('[data-tab="warehouse"]').click();
+    tab.hidden = true;
+    panel.hidden = true;
+    panel.inert = true;
+    const slot = document.querySelector('[data-addon-id="Reader"]');
+    slot.dataset.addonState = 'not-installed';
+    slot.classList.remove('is-active');
+    const label = slot.querySelector('[data-addon-part="stateLabel"]');
+    label.textContent = 'No instalado aquí';
+    label.classList.remove('is-installed');
+    const tooltip = slot.querySelector('.sik-tooltip em');
+    tooltip.textContent = 'Instala la disquetera en este terminal para abrir Programación.';
   }
 })();
 </script>

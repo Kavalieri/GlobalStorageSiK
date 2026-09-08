@@ -38,6 +38,9 @@ local function onObjectAboutToBeRemoved(object)
 	-- "suspendida" al recoger el terminal en partidas de un jugador.
 	if GlobalStorageSiK.isAuthoritative() and GlobalStorageSiK.TerminalRegistry then
 		GlobalStorageSiK.TerminalRegistry.suspendTerminalAt(nid, x, y, z)
+		if GlobalStorageSiK.TerminalPlace._onAccessChanged then
+			GlobalStorageSiK.TerminalPlace._onAccessChanged(nid)
+		end
 	elseif not GlobalStorageSiK.isAuthoritative() and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		local payload = { x = x, y = y, z = z }
 		if nid then
