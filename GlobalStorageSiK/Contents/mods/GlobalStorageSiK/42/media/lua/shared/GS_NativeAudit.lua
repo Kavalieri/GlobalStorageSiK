@@ -490,7 +490,7 @@ function GlobalStorageSiK.NativeAudit.run()
 				end
 				if not (l1 == "other" and l2 == "unclassified_modded") then
 					addCensusRecord(report, fullType, pathOk and "classified" or "invalid_path", path,
-						result.evidence, pathOk and nil or "taxonomy_registry_rejected", si, result)
+						result.evidence, not pathOk and "taxonomy_registry_rejected" or nil, si, result)
 				end
 			end
 		end

@@ -1,4 +1,5 @@
 -- Curated original ScriptItem keys only. Never translated text or fuzzy names.
+require "GS_NativeSourceCategory"
 GlobalStorageSiK.NativeSourceCategoryBridge = GlobalStorageSiK.NativeSourceCategoryBridge or {}
 local RULES = {
     Electronics = { l1 = 'electronics_power', id = 'electronics' },
@@ -7,9 +8,8 @@ local RULES = {
 }
 local counts = { electronics = 0, ammo = 0, weapon_part = 0 }
 function GlobalStorageSiK.NativeSourceCategoryBridge.resolve(fullType, scriptItem)
-    if not scriptItem or not scriptItem.getDisplayCategory then return nil end
-    local ok, category = pcall(function() return scriptItem:getDisplayCategory() end)
-    if not ok or type(category) ~= 'string' then return nil end
+    local category = GlobalStorageSiK.NativeSourceCategory.get(scriptItem)
+    if type(category) ~= 'string' then return nil end
     local rule = RULES[category]
     if not rule then return nil end
     return { l1 = rule.l1 }, {}, {}, {

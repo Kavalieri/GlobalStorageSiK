@@ -14,7 +14,7 @@ function Metadata.collect(si)
 	local row = {
 		censusSchemaVersion = 2, scriptModule = rawText(si, "getModuleName"),
 		originModId = "", originStatus = "unknown",
-		sourceDisplayCategory = rawText(si, "getDisplayCategory"),
+		sourceDisplayCategory = GlobalStorageSiK.NativeSourceCategory.get(si) or "",
 		scriptType = rawText(si, "getItemType"), scriptTags = "", scriptTagsStatus = "unavailable",
 	}
 	local tags = safeCall(function() return si and si.getTags and si:getTags() end)

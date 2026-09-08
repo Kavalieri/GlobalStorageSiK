@@ -15,6 +15,7 @@ require "GS_Sandbox"
 require "GS_Log"
 local RemotePresentation = require "GS_RemoteTooltipPresentation"
 local UI = require "GS_UI_Framework"
+local ObjectTooltipOverflow = require "GS_ObjectTooltipOverflow"
 
 GlobalStorageSiK.ItemNetworkTooltip = {}
 
@@ -715,7 +716,24 @@ renderCapturedTooltip = function(panel, context)
 		block.paddingX, block.paddingY = 8, LINE_PAD
 		height = height + UI.Tooltip.measureSection(block, width).height
 	end
-	if not placeMeasuredTooltip(panel, panel.item, width, height) then return end
+	local overflowFallback = false
+	if not placeMeasuredTooltip(panel, panel.item, width, height) then
+		if ObjectTooltipOverflow.show(panel, blocks, width, playerNumForItem(panel.item)) then
+			panel:setHeight(0)
+			return
+		end
+		-- A failed/closed transient must never blank the captured summary.
+		overflowFallback = true
+		-- Keep its first bounded section visible without inventing native state.
+		local first = blocks[1]
+		if first then
+			local lines = { first.lines and first.lines[1] or "" }
+			blocks = { UI.Tooltip.objectSection(lines, { font = NET_FONT, paddingX = 8, paddingY = LINE_PAD }) }
+			height = UI.Tooltip.measureSection(blocks[1], width).height
+			placeMeasuredTooltip(panel, panel.item, width, height)
+		end
+	end
+	if not overflowFallback then ObjectTooltipOverflow.release(panel) end
 	panel:setHeight(height)
 	UI.Tooltip.renderFrame(panel, 0, 0, width, height, {
 		backgroundColor = panel.backgroundColor, borderColor = panel.borderColor,
@@ -815,6 +833,7 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 	local wrapper, wrapperBody
 	wrapper = function(self, ...)
 		if withdrawDragActive() then
+			ObjectTooltipOverflow.release(self)
 			if self.setVisible then self:setVisible(false) end
 			return
 		end
@@ -834,6 +853,8 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 		return result
 	end
 	wrapperBody = function(self, ...)
+		if self._gsObjectOverflow and (self._gsObjectOverflow.item ~= self.item
+			or not self:isVisible()) then ObjectTooltipOverflow.release(self) end
 		local remoteContext = remoteContextFor(self.item)
 		if remoteContext then return renderCapturedTooltip(self, remoteContext) end
 		if sharedRenderDepth > MAX_SHARED_RENDER_DEPTH then
@@ -887,11 +908,16 @@ function GlobalStorageSiK.ItemNetworkTooltip.installHooks()
 				-- sin ocupar el corredor del cursor, se conserva solo vanilla.
 				if #blocks > 0 and placeMeasuredTooltip(
 					self, self.item, hostW, baseH + extensionH) then
+					ObjectTooltipOverflow.release(self)
 					local usedH = 0
 					for i = 1, #blocks do
 						usedH = usedH + drawNetworkExtension(
 							self, blocks[i].lines, usedH, blocks[i].color, neededW) + 2
 					end
+				elseif #blocks > 0 then
+					ObjectTooltipOverflow.show(self, blocks, neededW, playerNumForItem(self.item))
+				else
+					ObjectTooltipOverflow.release(self)
 				end
 			end
 		end)

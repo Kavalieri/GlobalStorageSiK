@@ -14,6 +14,7 @@ require "GS_CatalogManager"
 require "GS_I18n"
 require "GS_NativeProduct"
 require "GS_FluidTaxonomy"
+require "GS_NativeSourceCategory"
 
 GlobalStorageSiK.DisplayCategoryPublisher = GlobalStorageSiK.DisplayCategoryPublisher or {}
 
@@ -165,6 +166,9 @@ local function publishScriptItem(scriptItem)
 		state.unchanged = state.unchanged + 1
 		return false
 	end
+	-- Retain the real script/third-party input before replacing it with our
+	-- output. The following epoch must not classify from GSSiK_* keys.
+	GlobalStorageSiK.NativeSourceCategory.capture(fullType, current)
 	local ok = pcall(function() scriptItem:DoParam("DisplayCategory", key) end)
 	if ok then
 		state.published = state.published + 1

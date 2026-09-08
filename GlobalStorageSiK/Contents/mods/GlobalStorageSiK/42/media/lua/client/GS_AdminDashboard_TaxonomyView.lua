@@ -1,6 +1,7 @@
 -- Compact Staff taxonomy composition; audit/corpus retain independent requests.
 require "GS_I18n"
 local UI = require "GS_UI_Framework"
+local WorldView = require "GS_AdminDashboard_WorldTaxonomy"
 local View = {}
 local T = GlobalStorageSiK.I18n.text
 local GAP = 8
@@ -90,6 +91,10 @@ function View.build(ui, kind)
 		summary = UI.Controls.status(parent, { wrap = true, framed = true, text = "", tone = "text", w = 200 }),
 	}
 	View.refresh(ui, kind)
+	if not ui.worldTaxonomyView then
+		WorldView.build(ui, UI.Scroll.childHost(ui.taxonomyScroll), function() View.reflow(ui) end)
+		View.reflow(ui)
+	end
 end
 
 function View.refresh(ui, kind)
@@ -129,13 +134,19 @@ function View.reflow(ui)
 				y = y + height + GAP
 			end
 		end
+		if ui.worldTaxonomyView then y = y + WorldView.layout(ui.worldTaxonomyView, width, y) + GAP end
 		UI.Scroll.setContentHeight(ui.taxonomyScroll, math.max(0, y - GAP))
 		if UI.Scroll.contentWidth(ui.taxonomyScroll) == width then break end
 	end
 	ui._taxonomyLayoutActive = nil
 end
 
+function View.refreshWorld(ui)
+	WorldView.refresh(ui.worldTaxonomyView)
+end
+
 function View.dispose(ui)
+	if ui.worldTaxonomyView then ui.worldTaxonomyView.frame:dispose(); ui.worldTaxonomyView = nil end
 	for _, kind in ipairs({ "audit", "corpus" }) do
 		local view = ui.taxonomyViews and ui.taxonomyViews[kind]
 		if view then view.frame:dispose() end

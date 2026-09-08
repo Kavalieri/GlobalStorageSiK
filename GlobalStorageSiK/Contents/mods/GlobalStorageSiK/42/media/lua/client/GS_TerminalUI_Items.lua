@@ -31,6 +31,7 @@ require "GS_NetworkReadAction"
 require "GS_NetClient"
 require "GS_RemoteItemDetail"
 local LocalItemTooltip = require "GS_LocalItemTooltip"
+local ObjectTooltipOverflow = require "GS_ObjectTooltipOverflow"
 require "GS_UIDebug"
 
 GlobalStorageSiK.TerminalItems = {}
@@ -108,6 +109,7 @@ function GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
 	end
 	local tooltip = row._gsTooltip
 	if not tooltip then return end
+	ObjectTooltipOverflow.release(tooltip)
 	if row._gsTooltipHandle then row._gsTooltipHandle:hide()
 	else UI.Tooltip.hide(tooltip) end
 	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.unbindProbe then
@@ -1871,7 +1873,7 @@ end
 local function afterRenderFrameworkRow(context, listPanel, terminal)
 	local row, data = context.row, context.item
 	if not data then return end
-	local hovering = pointerInsideRow(row)
+	local hovering = pointerInsideRow(row) or ObjectTooltipOverflow.isRetained(row._gsTooltip)
 	if not data._gsStale and hovering and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 		local tooltipKey = rowIdentity(data) or (tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or ""))
 		if row._gsLocalTooltip and not LocalItemTooltip.isCurrent(row._gsLocalTooltip, data, terminal) then

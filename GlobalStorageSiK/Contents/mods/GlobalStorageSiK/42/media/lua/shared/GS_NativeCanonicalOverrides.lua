@@ -3,6 +3,10 @@
 GlobalStorageSiK.NativeCanonicalOverrides = GlobalStorageSiK.NativeCanonicalOverrides or {}
 
 local ENTRIES = {
+    -- A cleaning implement remains discoverable as such even though vanilla
+    -- also permits striking with it. Exact product policy, not a name heuristic.
+    ['Base.Mop'] = { 'home_leisure_collection', 'cleaning', 'tool',
+        'cleaning_implement', 'B42:weapon.txt:Mop:CleanStains' },
     ['Base.ElectricWire'] = { 'electronics_power', 'component', false,
         'electrical_component', 'B42:normal.txt:ElectricWire' },
     ['Base.ElectronicsScrap'] = { 'electronics_power', 'component', false,
@@ -27,6 +31,7 @@ function GlobalStorageSiK.NativeCanonicalOverrides.resolve(fullType, scriptItem)
     if not entry then return nil end
     local facets = {}
     if entry[4] == 'packaged_ammunition' then facets.ammo = true end
+    if entry[4] == 'cleaning_implement' then facets.weaponCapability = true end
     return { l1 = entry[1], l2 = entry[2], l3 = entry[3] or nil }, facets, {}, {
         primary = {
             source = 'canonical_fulltype_override', kind = 'exact',

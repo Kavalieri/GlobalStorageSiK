@@ -55,6 +55,7 @@ end
 function Sync.reset()
 	stopRetry()
 	Projection.clear()
+	if GlobalStorageSiK.NativeWorldEditor then GlobalStorageSiK.NativeWorldEditor.reset() end
 	lastError = nil
 	-- Keep sequence monotonic: a late page from the previous world cannot match.
 end
@@ -85,6 +86,10 @@ function Sync.getStatus()
 end
 
 function Sync.onCommand(command, args)
+	if command == "taxonomyOverrideResult" then
+		if GlobalStorageSiK.NativeWorldEditor then GlobalStorageSiK.NativeWorldEditor.onResult(args) end
+		return true
+	end
 	if command == "identityHelloAck" then
 		Sync.request(false)
 		return false -- Existing identity handler still owns its ACK.

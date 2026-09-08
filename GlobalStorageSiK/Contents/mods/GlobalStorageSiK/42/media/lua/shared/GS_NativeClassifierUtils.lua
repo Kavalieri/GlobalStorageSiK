@@ -10,6 +10,7 @@
 	repetir la misma proteccion pcall en cada fichero.
 ]]
 
+require "GS_NativeSourceCategory"
 GlobalStorageSiK.NativeClassifierUtils = GlobalStorageSiK.NativeClassifierUtils or {}
 
 local JEWELRY_LOCATION_BUCKET = {
@@ -173,8 +174,7 @@ end
 ---@param si table|nil
 ---@return string
 function GlobalStorageSiK.NativeClassifierUtils.displayCategoryLower(si)
-	if not si or not si.getDisplayCategory then return "" end
-	local category = safeCall(function() return si:getDisplayCategory() end)
+	local category = GlobalStorageSiK.NativeSourceCategory.get(si)
 	return category and string.lower(tostring(category)) or ""
 end
 

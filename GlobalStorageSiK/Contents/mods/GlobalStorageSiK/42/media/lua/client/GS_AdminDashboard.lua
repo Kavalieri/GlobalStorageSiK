@@ -600,6 +600,7 @@ end
 --- maximo una vez por segundo; no envia ninguna peticion de red.
 function GS_AdminDashboardUI:refreshRelativeAges()
         if self._activeStaffTab ~= "taxonomy" or not self:getIsVisible() then return end
+	TaxonomyView.refreshWorld(self)
         local nowMs = getTimestampMs and tonumber(getTimestampMs()) or 0
 	if nowMs <= 0 then return end
 	if self._lastTaxonomyAgeRefreshMs and (nowMs - self._lastTaxonomyAgeRefreshMs) < 1000 then return end
