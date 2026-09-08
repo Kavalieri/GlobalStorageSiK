@@ -1,9 +1,51 @@
 # Changelog
 
+## 1.5.1 - 2026-09-08
+
+### Global Storage SiK
+
+#### Added
+
+- Ground and external-container transfers with drag, drop and selection actions, capacity checks and explicit results.
+- World taxonomy editor with permission checks, revision control and server acknowledgement.
+- Scrollable item annexes and recipe learning details for recordings.
+
+#### Improved
+
+- On-demand refreshes while preserving terminal detection and access monitoring.
+- Exact local-instance tooltips and summaries for unloaded remote items.
+- Taxonomy and corpus diagnostics with persistent reports per session.
+
+#### Fixed
+
+- Single-item double-click withdrawals and captured destinations when accessible bags are unequipped or dropped.
+- Backpack, seed, container, fluid and prop classification; preservation of original inventory categories.
+- Food states, permissions, persisted zones and reader-dependent programming.
+- Staff resizing and tab visibility, pagination, scan headers and deposit progress.
+- Missing translation keys and text corrections across ten languages.
+
+### Craft 1.5.1
+
+- Strengthened access checks during network crafting.
+- Corrected missing translation keys and text across ten languages.
+- Aligned the displayed version with the installed addon.
+
+### Builder 1.5.1
+
+- Strengthened access checks during network building.
+- Corrected missing translation keys and text across ten languages.
+- Aligned the displayed version with the installed addon.
+
+### Tablet 1.5.1
+
+- Harmonized tablet translations and option terminology across ten languages.
+
 ## 1.5.0 — 2026-09-06
 
 ### Global Storage SiK
 
+- Exposes the public `GSSiK.API` for access, addon installation and shared work sessions.
+- Separates product rules and addon actions from the standalone `SiK.UI` framework.
 - Introduces the standalone SiK UI dependency and a coherent, resizable shell
   across storage, network, options, administration, addons and editors.
 - Adds exact expandable item details and transfers for fluids, media and
@@ -24,8 +66,7 @@ dedicated/client paths are implemented.
   SiK UI contracts while preserving claimed-instance returns.
 
 Dependencies: `SiKUIFramework` and `GlobalStorageSiK`. Vanilla and Neat
-Crafting paths are supported; Project Cook remains an optional runtime-tested
-integration.
+Crafting paths are supported; Project Cook integration is optional and depends on the installed environment.
 
 ### Builder 1.5.0
 

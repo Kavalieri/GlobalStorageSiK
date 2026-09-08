@@ -12,7 +12,7 @@ GSSiK_Addon_Craft.Sandbox = {}
 --- (modversion=) en cada release, mismo criterio ya usado en Core con
 --- GS_Config.MOD_VERSION (ver CLAUDE.md raiz, regla 7bis: mod.info es la
 --- unica fuente de verdad de version, esto es solo un espejo para la UI).
-GSSiK_Addon_Craft.VERSION = "1.5.1-dev1.1"
+GSSiK_Addon_Craft.VERSION = "1.5.1"
 
 --- Peso loot periférico instalable (Craft).
 ---@return number
