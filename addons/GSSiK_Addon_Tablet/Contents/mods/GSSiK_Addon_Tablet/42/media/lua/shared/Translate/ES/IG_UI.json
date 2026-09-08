@@ -35,5 +35,13 @@
 	"IGUI_GSSiK_RemoteError": "No se pudo obtener la lista de redes. Inténtalo de nuevo.",
 	"IGUI_GSSiK_RemoteCancel": "Cancelar",
 	"IGUI_GSSiK_RemoteOpen": "Abrir red",
-	"IGUI_GSSiK_RemoteRetry": "Reintentar"
+	"IGUI_GSSiK_RemoteRetry": "Reintentar",
+	"IGUI_GSSiK_UseAccessTablet": "Abrir terminal remoto (acceso)",
+	"IGUI_GSSiK_UseCraftTablet": "Abrir terminal remoto (acceso + pestaña Crafteo)",
+	"IGUI_GSSiK_UseBuilderTablet": "Abrir terminal remoto (acceso + pestaña Construcción)",
+	"IGUI_GSSiK_UseMasterTablet": "Abrir terminal remoto (acceso + Crafteo + Construcción)",
+	"IGUI_GSSiK_AccessTabletName": "Tableta GS",
+	"IGUI_GSSiK_CraftTabletName": "Tableta Crafteo GS",
+	"IGUI_GSSiK_BuilderTabletName": "Tableta Constructor GS",
+	"IGUI_GSSiK_MasterTabletName": "Tableta Maestra GS"
 }

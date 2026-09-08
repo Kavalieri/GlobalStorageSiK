@@ -35,5 +35,13 @@
 	"IGUI_GSSiK_RemoteError": "The network list could not be obtained. Try again.",
 	"IGUI_GSSiK_RemoteCancel": "Cancel",
 	"IGUI_GSSiK_RemoteOpen": "Open network",
-	"IGUI_GSSiK_RemoteRetry": "Try again"
+	"IGUI_GSSiK_RemoteRetry": "Try again",
+	"IGUI_GSSiK_UseAccessTablet": "Open remote terminal (access)",
+	"IGUI_GSSiK_UseCraftTablet": "Open remote terminal (access + Craft tab)",
+	"IGUI_GSSiK_UseBuilderTablet": "Open remote terminal (access + Build tab)",
+	"IGUI_GSSiK_UseMasterTablet": "Open remote terminal (access + Craft + Build)",
+	"IGUI_GSSiK_AccessTabletName": "GS Tablet",
+	"IGUI_GSSiK_CraftTabletName": "GS Craft Tablet",
+	"IGUI_GSSiK_BuilderTabletName": "GS Builder Tablet",
+	"IGUI_GSSiK_MasterTabletName": "GS Master Tablet"
 }
