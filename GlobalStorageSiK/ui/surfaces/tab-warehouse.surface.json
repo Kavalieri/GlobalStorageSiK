@@ -101,9 +101,7 @@
           "props": [
             { "name": "data", "value": { "kind": "data", "path": "warehouse.search" } }
           ],
-          "actions": [
-            { "event": "submit", "actionId": "warehouse.search" }
-          ],
+          "actions": [],
           "children": [
             {
               "id": "warehouse-search-field",
@@ -111,28 +109,13 @@
               "variant": "default",
               "layout": { "mode": "row", "base": [{ "name": "grow", "value": { "kind": "literal", "value": 1 } }], "overrides": [] },
               "props": [
-                { "name": "kind", "value": { "kind": "literal", "value": "field" } },
+                { "name": "kind", "value": { "kind": "literal", "value": "search" } },
                 { "name": "label", "value": { "kind": "i18n", "ref": "warehouse.search.label" } },
                 { "name": "data", "value": { "kind": "state", "path": "warehouse.search.query" } }
               ],
               "actions": [
                 { "event": "change", "actionId": "warehouse.search-change" },
                 { "event": "submit", "actionId": "warehouse.search" }
-              ],
-              "children": []
-            },
-            {
-              "id": "warehouse-search-button",
-              "type": "control",
-              "variant": "field-action",
-              "layout": { "mode": "row", "base": [], "overrides": [] },
-              "props": [
-                { "name": "kind", "value": { "kind": "literal", "value": "icon-button" } },
-                { "name": "label", "value": { "kind": "i18n", "ref": "warehouse.search.action" } },
-                { "name": "icon-key", "value": { "kind": "literal", "value": "sik.search.18" } }
-              ],
-              "actions": [
-                { "event": "activate", "actionId": "warehouse.search" }
               ],
               "children": []
             }

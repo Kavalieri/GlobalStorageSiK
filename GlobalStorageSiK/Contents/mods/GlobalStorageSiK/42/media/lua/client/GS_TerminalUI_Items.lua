@@ -2240,7 +2240,7 @@ local function bindWarehouseAliases(panel, terminal)
 	terminal.itemsListPanel = panel
 	terminal.searchEntry = nodes["warehouse-search-field"]
 	terminal.searchBox = terminal.searchEntry
-	terminal.searchBtn = nodes["warehouse-search-button"]
+	terminal.searchBtn = nil
 	terminal.mainCategoryFilterCombo = nodes["warehouse-family-filter"]
 	terminal.subCategoryFilterCombo = nodes["warehouse-group-filter"]
 	terminal.leafCategoryFilterCombo = nodes["warehouse-detail-filter"]

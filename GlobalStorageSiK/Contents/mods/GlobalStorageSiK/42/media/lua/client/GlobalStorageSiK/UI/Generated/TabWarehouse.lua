@@ -350,7 +350,7 @@ return {
     ["frameworkManifestSha256"] = "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
     ["generatorSha256"] = "b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "cc125820a5b6736b6892300340bdfa09349d7136f999d553430ac831d2be036b",
+    ["surfaceSpecSha256"] = "96c97da3a0afd7e7cab4a67bb94cb52b511bb8aff2a0695c95f03667e9773946",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
     ["visualMasterSha256"] = "7a630582d6dc0f8f1b32cb0c3dd585c72324fb3eeb87c501b1da5fa3d4613bb0",
     ["visualSubtreeSha256"] = "3fec3f554d178211ec9c77ef1f0b7779635cdc81686c9152f25409de8413ac79"
@@ -443,12 +443,7 @@ return {
           ["variant"] = "capacity"
         },
         {
-          ["actions"] = {
-            {
-              ["actionId"] = "warehouse.search",
-              ["event"] = "submit"
-            }
-          },
+          ["actions"] = {},
           ["children"] = {
             {
               ["actions"] = {
@@ -481,7 +476,7 @@ return {
                   ["name"] = "kind",
                   ["value"] = {
                     ["kind"] = "literal",
-                    ["value"] = "field"
+                    ["value"] = "search"
                   }
                 },
                 {
@@ -501,46 +496,6 @@ return {
               },
               ["type"] = "control",
               ["variant"] = "default"
-            },
-            {
-              ["actions"] = {
-                {
-                  ["actionId"] = "warehouse.search",
-                  ["event"] = "activate"
-                }
-              },
-              ["children"] = {},
-              ["id"] = "warehouse-search-button",
-              ["layout"] = {
-                ["base"] = {},
-                ["mode"] = "row",
-                ["overrides"] = {}
-              },
-              ["props"] = {
-                {
-                  ["name"] = "kind",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "icon-button"
-                  }
-                },
-                {
-                  ["name"] = "label",
-                  ["value"] = {
-                    ["kind"] = "i18n",
-                    ["ref"] = "warehouse.search.action"
-                  }
-                },
-                {
-                  ["name"] = "icon-key",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "sik.search.18"
-                  }
-                }
-              },
-              ["type"] = "control",
-              ["variant"] = "field-action"
             }
           },
           ["id"] = "warehouse-search-form",
