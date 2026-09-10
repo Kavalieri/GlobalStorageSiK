@@ -36,6 +36,18 @@ require "GS_UIDebug"
 
 GlobalStorageSiK.TerminalItems = {}
 
+local function terminalForPlayer(playerNum)
+	local terminal = GlobalStorageSiK.TerminalUI
+	if terminal and terminal.getInstanceForPlayer then
+		return terminal.getInstanceForPlayer(tonumber(playerNum) or 0)
+	end
+	local instance = terminal and terminal.instance
+	if instance and (tonumber(instance.playerNum) or 0) == (tonumber(playerNum) or 0) then
+		return instance
+	end
+	return nil
+end
+
 local function detailPagesByRowKey()
 	local client = GlobalStorageSiK.Client
 	return client and client.itemDetailsCache or nil
@@ -82,7 +94,7 @@ end
 
 function GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted)
 	if not args or not args.rowKey or accepted ~= true then return end
-	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local terminal = terminalForPlayer(args.playerNum)
 	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
 		local panel = terminal.itemsListPanel
 		panel._detailPending = panel._detailPending or {}
@@ -118,6 +130,11 @@ function GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
 	tooltip._gsItemKey, tooltip._gsRemoteRow = nil, nil
 	row._gsLocalTooltip = nil
 	tooltip:setItem(nil)
+	local listPanel = row.listPanel
+	if listPanel and listPanel._gsItemTooltipOwner == row then
+		listPanel._gsItemTooltipOwner = nil
+		row._gsTooltip = nil
+	end
 end
 
 function GlobalStorageSiK.TerminalItems.disposeRowTooltip(row)
@@ -234,18 +251,17 @@ function GlobalStorageSiK.TerminalItems.onInteractionFinished(panel)
 		terminal.itemsListPanel) or false
 end
 
-function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId)
-	local terminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId, playerNum)
+	local terminal = terminalForPlayer(playerNum)
 	local panel = terminal and terminal.itemsListPanel or nil
 	if not panel then return end
 	local activeNetwork = terminal.terminalState and terminal.terminalState.networkId
 	if networkId and activeNetwork and networkId ~= activeNetwork then return end
-	-- Una pagina de detalle contiene itemIds fisicos ligados a una revision. No
-	-- puede conservarse ni pintarse tras una mutacion: aunque el pager estuviera
-	-- deshabilitado, sus filas seguian teniendo drag/click y reutilizaban IDs ya
-	-- retirados. Invalida la presentacion y el fallback global de forma atomica.
+	-- Invalidate actionable detail only. The separate visual copies remain
+	-- inert until a matching detail page replaces them; getDetails never sees
+	-- those copies. Keep the requested page stable across inventory revisions.
 	panel._detailPages, panel._detailPending = nil, {}
-	panel._detailPageByKey = {}
+	for i = 1, #(panel._lastItems or {}) do panel._lastItems[i]._gsStale = true end
 	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
@@ -263,12 +279,18 @@ end
 -- retiran inmediatamente filas exactas que ya no son seguras para interactuar.
 function GlobalStorageSiK.TerminalItems.onWithdrawCompleted(panel, terminal, ok, result)
 	if not panel then return end
-	panel._detailPages, panel._detailPending = nil, {}
-	panel._detailPageByKey = {}
-	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	local revision = result and tonumber(result.inventoryRevision)
-	if revision and terminal and terminal.terminalState then
-		terminal.terminalState.inventoryRevision = revision
+	local state = terminal and terminal.terminalState
+	-- An ACK is not a catalog. Never attach its revision to older items, nor
+	-- discard a fresh detail response when the catalog arrived before the ACK.
+	if ok == true and revision and state
+		and (not result.networkId or result.networkId == state.networkId)
+		and revision > (tonumber(state._gsAppliedCatalogRevision or state.inventoryRevision) or -1) then
+		panel._withdrawExpectedRevision = math.max(panel._withdrawExpectedRevision or 0, revision)
+		panel._withdrawExpectedNetwork = state.networkId
+		panel._detailPages, panel._detailPending = nil, {}
+		for i = 1, #(panel._lastItems or {}) do panel._lastItems[i]._gsStale = true end
+		if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
 	end
 	GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
 	if terminal and terminal.refreshItemsTab then terminal:refreshItemsTab() end
@@ -297,8 +319,15 @@ local function pointerInsideRow(row)
 	return mx >= x and my >= y and mx < x + w and my < y + h
 end
 
+local function selectionRows(panel)
+	if panel and panel._gsProjectedSelection and panel.itemTable then
+		return panel.itemTable:getVisibleDataRows()
+	end
+	return panel and panel._lastItems
+end
+
 local function findItemIndex(panel, key)
-	local items = panel and panel._lastItems
+	local items = selectionRows(panel)
 	if not items or not key then
 		return nil
 	end
@@ -321,7 +350,7 @@ local function getSelectedRows(panel)
 	for i = 1, #items do
 		local row = items[i]
 		local key = rowIdentity(row)
-		if key and row.fullType and panel._selectedKeys[key] then
+		if key and row.fullType and not row._gsStale and panel._selectedKeys[key] then
 			out[#out + 1] = row
 		end
 	end
@@ -336,6 +365,7 @@ local function selectSingleRow(panel, fullType, index)
 		return
 	end
 	panel._selectedKeys = { [fullType] = true }
+	panel._selectionAnchorKey = fullType
 	panel._selectionAnchor = index or findItemIndex(panel, fullType) or 1
 end
 
@@ -350,6 +380,7 @@ local function toggleRowSelection(panel, fullType)
 		panel._selectedKeys[fullType] = nil
 	else
 		panel._selectedKeys[fullType] = true
+		panel._selectionAnchorKey = fullType
 		panel._selectionAnchor = findItemIndex(panel, fullType) or panel._selectionAnchor
 	end
 end
@@ -357,18 +388,22 @@ end
 ---@param panel ISPanel
 ---@param toIndex number
 local function selectRangeTo(panel, toIndex)
-	local items = panel._lastItems
+	local items = selectionRows(panel)
 	if not items or #items == 0 then
 		return
 	end
 	local anchor = panel._selectionAnchor or toIndex
+	if panel._gsProjectedSelection then
+		-- A collapsed/off-page anchor must not expand an invisible range.
+		anchor = findItemIndex(panel, panel._selectionAnchorKey) or toIndex
+	end
 	local lo = math.max(1, math.min(anchor, toIndex))
 	local hi = math.min(#items, math.max(anchor, toIndex))
 	panel._selectedKeys = panel._selectedKeys or {}
 	for i = lo, hi do
 		local row = items[i]
 		local key = rowIdentity(row)
-		if key and row.fullType then
+		if key and row.fullType and not row._gsStale then
 			panel._selectedKeys[key] = true
 		end
 	end
@@ -1176,8 +1211,29 @@ local function buildDisplayRows(panel, terminal, parents)
 	local out = {}
 	local revision = terminal and terminal.terminalState and terminal.terminalState.inventoryRevision or 0
 	local networkId = terminal and terminal.terminalState and terminal.terminalState.networkId or nil
+	local scope = terminal and terminal.terminalState and terminal.terminalState.catalogScope
+	local appliedRevision = terminal and terminal.terminalState
+		and terminal.terminalState._gsAppliedCatalogRevision or revision
+	if panel._detailVisualNetwork ~= networkId or panel._detailVisualScope ~= scope then
+		panel._detailVisualPages = nil
+		panel._detailVisualNetwork, panel._detailVisualScope = networkId, scope
+	end
+	if panel._withdrawExpectedNetwork ~= networkId
+		or (tonumber(appliedRevision) or -1)
+			>= (panel._withdrawExpectedRevision or 0) then
+		panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork = nil, nil
+	end
+	local catalogPending = panel._withdrawExpectedRevision ~= nil
+	local previousVisual = panel._detailVisualPages or {}
+	local nextVisual = {}
 	for i = 1, #parents do
 		local parent = parents[i]
+		if catalogPending then
+			local copy = {}
+			for field, value in pairs(parent) do copy[field] = value end
+			parent = copy
+		end
+		parent._gsStale = catalogPending
 		local key = rowIdentity(parent)
 		liveParents[key] = true
 		-- Every aggregate is a hierarchy root, including aggregates with one
@@ -1194,13 +1250,14 @@ local function buildDisplayRows(panel, terminal, parents)
 			local stale = not detailPage or detailPage.page ~= wantedPage
 				or detailPage.networkId ~= networkId
 				or tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
-			if stale and not panel._detailPending[key] then
+			if stale and not catalogPending and not panel._detailPending[key] then
 				panel._detailPending[key] = true
 				GlobalStorageSiK.TerminalItems.requestDetails(terminal, parent, wantedPage)
 			end
 			local displayable = detailPage and detailPage.page == wantedPage
 				and detailPage.networkId == networkId
 				and tonumber(detailPage.inventoryRevision or -1) == tonumber(revision)
+				and not catalogPending
 			if displayable then
 				panel._detailRendered = panel._detailRendered or {}
 				local renderedKey = tostring(key) .. "\31" .. tostring(wantedPage) .. "\31" .. tostring(revision)
@@ -1209,7 +1266,8 @@ local function buildDisplayRows(panel, terminal, parents)
 					panel._detailRendered[renderedKey] = true
 					GlobalStorageSiK.UIDebug.log("TerminalItems", "detailsRendered %s", tostring(key))
 				end
-				local pageStale = tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
+				local visual = { page = wantedPage, items = {} }
+				nextVisual[key] = visual
 				for j = 1, #(detailPage.items or {}) do
 					local child = detailPage.items[j]
 					-- Las unidades llegan bajo demanda: no pasan por la localización
@@ -1224,9 +1282,21 @@ local function buildDisplayRows(panel, terminal, parents)
 					child._gsRowKind = "child"
 					child._gsDepth = 1
 					child.parentRowKey = key
-					child._gsStale = pageStale
+					child._gsStale = false
 					child.locations = child.locations or (child.nodeId and { { nodeId = child.nodeId, count = child.count or 1 } } or nil)
 					out[#out + 1] = child
+					-- Presentation-only copies never enter getDetails or transfer
+					-- caches. Retaining them cannot authorize an old physical ID.
+					local copy = {}
+					for field, value in pairs(child) do copy[field] = value end
+					copy._gsStale = true
+					visual.items[#visual.items + 1] = copy
+				end
+			else
+				local visual = previousVisual[key]
+				if visual and visual.page == wantedPage then
+					nextVisual[key] = visual
+					for j = 1, #visual.items do out[#out + 1] = visual.items[j] end
 				end
 			end
 		end
@@ -1236,6 +1306,7 @@ local function buildDisplayRows(panel, terminal, parents)
 		if liveParents[key] then expandedKeys[key] = true end
 	end
 	panel._expandedKeys = expandedKeys
+	panel._detailVisualPages = nextVisual
 	return out
 end
 
@@ -1574,9 +1645,9 @@ local function openItemContextMenu(listPanel, terminal, data)
 	local ok, err = pcall(function()
 		local cm = ISContextMenu.get(playerNum, getMouseX(), getMouseY())
 		addNetworkItemExamine(cm, player, data.fullType)
-		GlobalStorageSiK.NetworkReadAction.addToContext(cm, player, data, terminal)
 		local providerRows = getSelectedRows(listPanel)
 		if #providerRows == 0 then providerRows = { data } end
+		GlobalStorageSiK.NetworkReadAction.addToContext(cm, player, data, terminal, providerRows)
 		if GlobalStorageSiK.ItemActions and GlobalStorageSiK.ItemActions.addProviderOptions then
 			GlobalStorageSiK.ItemActions.addProviderOptions(cm, player, providerRows, {
 				source = "warehouse",
@@ -1884,12 +1955,23 @@ local function afterRenderFrameworkRow(context, listPanel, terminal)
 			row._gsLocalTooltip = LocalItemTooltip.resolve(data, terminal)
 			local probe = row._gsLocalTooltip and row._gsLocalTooltip.item or itemProbe(data)
 			if probe then
-				if row._gsTooltip then row._gsTooltip:setItem(probe) else
-					row._gsTooltip = ISToolTipInv:new(probe)
-					row._gsTooltip:initialise()
-					row._gsTooltip:setOwner(row)
-					GlobalStorageSiK.TerminalItems.makePassiveTooltip(row._gsTooltip)
+				local previousOwner = listPanel._gsItemTooltipOwner
+				if previousOwner and previousOwner ~= row then
+					GlobalStorageSiK.TerminalItems.hideRowTooltip(previousOwner)
 				end
+				-- Vanilla inventory panes retain one tooltip, not one Java-backed
+				-- tooltip per recycled row. Only its current owner holds a row link.
+				local tooltip = listPanel._gsItemTooltip
+				if not tooltip then
+					tooltip = ISToolTipInv:new(probe)
+					tooltip:initialise()
+					GlobalStorageSiK.TerminalItems.makePassiveTooltip(tooltip)
+					listPanel._gsItemTooltip = tooltip
+				end
+				row._gsTooltip = tooltip
+				listPanel._gsItemTooltipOwner = row
+				tooltip:setItem(probe)
+				tooltip:setOwner(row)
 				local playerNum = terminal and terminal.playerNum or 0
 				local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(playerNum)
 					or getSpecificPlayer(playerNum)
@@ -1916,6 +1998,18 @@ local function afterRenderFrameworkRow(context, listPanel, terminal)
 	end
 end
 
+-- Internal bridge for the public ItemPresentation facade. It deliberately uses
+-- the same renderer, remote-detail owner and cleanup as warehouse rows.
+function GlobalStorageSiK.TerminalItems.presentExternalTooltip(row, data, panel, terminal)
+	row.itemData, row.listPanel, row.terminal = data, panel, terminal
+	row.onRemoteItemDetail = function(target, detail)
+		if target._gsTooltip and target.itemData == data then
+			GlobalStorageSiK.RemoteItemDetail.bindProbe(target._gsTooltip.item, data, detail, false)
+		end
+	end
+	afterRenderFrameworkRow({ row = row, item = data }, panel, terminal)
+end
+
 local function itemRowAdapter(listPanel, terminal)
 	return {
 		update = function(context) updateFrameworkRow(context, listPanel, terminal) end,
@@ -1931,6 +2025,7 @@ local function itemRowAdapter(listPanel, terminal)
 		end,
 		onMouseMove = function(context)
 			local row, data, event = context.row, context.item, context.event
+			if data._gsStale then row._gsDragPending = false; return true end
 			if GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 				GlobalStorageSiK.TerminalWithdrawDrag.moveToPointer()
 				return true
@@ -1992,6 +2087,12 @@ local function itemRowAdapter(listPanel, terminal)
 			return true
 		end,
 	}
+end
+
+-- Internal bridge used by the public InventoryView facade; gestures stay here.
+function GlobalStorageSiK.TerminalItems.createExternalRowAdapter(panel, controller)
+	panel._gsProjectedSelection = true
+	return itemRowAdapter(panel, controller)
 end
 
 local function splitDisplayRows(rows)
@@ -2144,6 +2245,12 @@ end
 
 local function releaseWarehouse(panel, terminal)
 	if not panel then return false end
+	if panel._gsItemTooltipOwner then
+		GlobalStorageSiK.TerminalItems.hideRowTooltip(panel._gsItemTooltipOwner)
+	end
+	panel._gsItemTooltip, panel._gsItemTooltipOwner = nil, nil
+	panel._detailVisualPages, panel._detailVisualNetwork, panel._detailVisualScope = nil, nil, nil
+	panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork = nil, nil
 	local released = false
 	if GlobalStorageSiK.TerminalDrop and GlobalStorageSiK.TerminalDrop.disposePanel then
 		GlobalStorageSiK.TerminalDrop.disposePanel(panel, terminal)

@@ -10,6 +10,7 @@ require "GS_Sandbox"
 require "GS_I18n"
 require "GS_Log"
 require "GS_UI_Feedback"
+require "GS_UI_PalettePreference"
 require "GS_Index"
 require "GS_Libs"
 require "GS_BulkFilters"
@@ -342,6 +343,7 @@ local function createTabPanel(terminal)
 		backgroundColor = TAB_BG,
 		borderColor = { r = 0, g = 0, b = 0, a = 0 },
 		controlId = "terminalTabHost",
+		theme = terminal._sikThemeContext,
 	})
 	panel.clipChildren = true
 	panel:setScrollWithParent(false)
@@ -356,6 +358,7 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 	local palettePlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer(playerNum)
 		or (playerNum == 0 and getPlayer and getPlayer() or nil)
+	if palettePlayer then GlobalStorageSiK.UIPalette.load(palettePlayer) end
 	local o = UI.Window.newInstance(self, x, y, width, height)
 	o.moveWithMouse = false
 	playerNum = palettePlayer and palettePlayer.getPlayerNum and palettePlayer:getPlayerNum() or playerNum
@@ -366,7 +369,9 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 		x = x, y = y, w = width, h = height,
 	})
 	local tokens = UI.Metrics.tokens()
-	local theme = UI.Theme.tokens()
+	local themeContext = UI.Theme.context(nil, nil, playerNum)
+	local theme = UI.Theme.tokens(themeContext)
+	o._sikThemeContext = themeContext
 	o.playerNum = playerNum
 	o._sikWindowProfile = "terminal"
 	o.padding = 14
@@ -455,6 +460,7 @@ function GS_TerminalUI:initialise()
 		x = self.x, y = self.y, w = self.width, h = self.height,
 		playerNum = self.playerNum or 0,
 		profile = "terminal",
+		theme = self._sikThemeContext, cascadeOnOverlap = true,
 		minWidth = self.minimumWidth, minHeight = self.minimumHeight,
 		maxWidth = self.maximumWidth, maxHeight = self.maximumHeight,
 		capWidth = 1, capHeight = 1,

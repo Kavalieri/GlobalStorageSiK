@@ -4,14 +4,14 @@
   "schemaVersion": 1,
   "frameworkRef": {
     "id": "SiKUIFramework",
-    "manifestSha256": "3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310"
+    "manifestSha256": "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74"
   },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819",
+    "masterSha256": "15f8cc6b74186e79047077857756f3b72c5703c7d1c7a2813e2e9c6d37ddcba5",
     "selector": "[data-surface-id=\"tab-options\"]",
     "canonicalizer": "sik-ui-dom-v2",
-    "subtreeSha256": "814e85c0ad7b1cc8c5c909a2afa45e87a3763f5e442d5f44aeb12447ba7302a2",
+    "subtreeSha256": "91d66e21001561186b1a7e19d59ab06f50f225903dd1225f51d2e4d3ae36bb23",
     "validation": "HTML_VALIDATED_BY_KAVA"
   },
   "product": {
@@ -907,17 +907,17 @@
               "children": []
             },
             {
-              "id": "options-succession-owner-block",
-              "type": "block",
-              "variant": "default",
+              "id": "options-succession-hint",
+              "type": "control",
+              "variant": "subtle",
               "layout": {
-                "mode": "column",
+                "mode": "row",
                 "base": [
                   {
-                    "name": "gap",
+                    "name": "fill",
                     "value": {
-                      "kind": "token",
-                      "ref": "spacing.8"
+                      "kind": "literal",
+                      "value": true
                     }
                   }
                 ],
@@ -925,17 +925,24 @@
               },
               "props": [
                 {
-                  "name": "title",
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alert-row"
+                  }
+                },
+                {
+                  "name": "label",
                   "value": {
                     "kind": "i18n",
                     "ref": "options.admin.succession.title"
                   }
                 },
                 {
-                  "name": "help",
+                  "name": "data",
                   "value": {
-                    "kind": "i18n",
-                    "ref": "options.admin.succession.header-help"
+                    "kind": "data",
+                    "path": "options.admin.successionHint"
                   }
                 }
               ],
@@ -943,85 +950,20 @@
                 "visibleWhen": "owner-with-backup"
               },
               "actions": [],
-              "capabilities": [
-                {
-                  "id": "block.header",
-                  "props": [
-                    {
-                      "name": "info-visible",
-                      "value": {
-                        "kind": "literal",
-                        "value": true
-                      }
-                    },
-                    {
-                      "name": "leading-indicator",
-                      "value": {
-                        "kind": "data",
-                        "path": "options.admin.successionIndicator"
-                      }
-                    }
-                  ]
-                }
-              ],
-              "children": [
-                {
-                  "id": "options-succession-hint",
-                  "type": "control",
-                  "variant": "subtle",
-                  "layout": {
-                    "mode": "row",
-                    "base": [
-                      {
-                        "name": "fill",
-                        "value": {
-                          "kind": "literal",
-                          "value": true
-                        }
-                      }
-                    ],
-                    "overrides": []
-                  },
-                  "props": [
-                    {
-                      "name": "kind",
-                      "value": {
-                        "kind": "literal",
-                        "value": "feedback"
-                      }
-                    },
-                    {
-                      "name": "label",
-                      "value": {
-                        "kind": "i18n",
-                        "ref": "options.admin.succession.help"
-                      }
-                    },
-                    {
-                      "name": "data",
-                      "value": {
-                        "kind": "data",
-                        "path": "options.admin.successionHint"
-                      }
-                    }
-                  ],
-                  "actions": [],
-                  "children": []
-                }
-              ]
+              "children": []
             },
             {
-              "id": "options-succession-no-backup-block",
-              "type": "block",
-              "variant": "default",
+              "id": "options-backup-warning",
+              "type": "control",
+              "variant": "subtle",
               "layout": {
-                "mode": "column",
+                "mode": "row",
                 "base": [
                   {
-                    "name": "gap",
+                    "name": "fill",
                     "value": {
-                      "kind": "token",
-                      "ref": "spacing.8"
+                      "kind": "literal",
+                      "value": true
                     }
                   }
                 ],
@@ -1029,17 +971,24 @@
               },
               "props": [
                 {
-                  "name": "title",
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "alert-row"
+                  }
+                },
+                {
+                  "name": "label",
                   "value": {
                     "kind": "i18n",
                     "ref": "options.admin.succession.title"
                   }
                 },
                 {
-                  "name": "help",
+                  "name": "data",
                   "value": {
-                    "kind": "i18n",
-                    "ref": "options.admin.succession.no-backup-help"
+                    "kind": "data",
+                    "path": "options.admin.backupWarning"
                   }
                 }
               ],
@@ -1047,72 +996,7 @@
                 "visibleWhen": "owner-without-backup"
               },
               "actions": [],
-              "capabilities": [
-                {
-                  "id": "block.header",
-                  "props": [
-                    {
-                      "name": "info-visible",
-                      "value": {
-                        "kind": "literal",
-                        "value": true
-                      }
-                    },
-                    {
-                      "name": "leading-indicator",
-                      "value": {
-                        "kind": "data",
-                        "path": "options.admin.noBackupIndicator"
-                      }
-                    }
-                  ]
-                }
-              ],
-              "children": [
-                {
-                  "id": "options-backup-warning",
-                  "type": "control",
-                  "variant": "subtle",
-                  "layout": {
-                    "mode": "row",
-                    "base": [
-                      {
-                        "name": "fill",
-                        "value": {
-                          "kind": "literal",
-                          "value": true
-                        }
-                      }
-                    ],
-                    "overrides": []
-                  },
-                  "props": [
-                    {
-                      "name": "kind",
-                      "value": {
-                        "kind": "literal",
-                        "value": "feedback"
-                      }
-                    },
-                    {
-                      "name": "label",
-                      "value": {
-                        "kind": "i18n",
-                        "ref": "options.admin.succession.warning"
-                      }
-                    },
-                    {
-                      "name": "data",
-                      "value": {
-                        "kind": "data",
-                        "path": "options.admin.backupWarning"
-                      }
-                    }
-                  ],
-                  "actions": [],
-                  "children": []
-                }
-              ]
+              "children": []
             },
             {
               "id": "options-claim-ownership",
@@ -1266,22 +1150,16 @@
                       "kind": "token",
                       "ref": "spacing.8"
                     }
+                  },
+                  {
+                    "name": "stack-below",
+                    "value": {
+                      "kind": "literal",
+                      "value": 560
+                    }
                   }
                 ],
-                "overrides": [
-                  {
-                    "profileId": "compact",
-                    "bindings": [
-                      {
-                        "name": "columns",
-                        "value": {
-                          "kind": "literal",
-                          "value": 1
-                        }
-                      }
-                    ]
-                  }
-                ]
+                "overrides": []
               },
               "props": [
                 {
@@ -1380,6 +1258,13 @@
                         "kind": "i18n",
                         "ref": "options.admin.access.add"
                       }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.admin.accessActions"
+                      }
                     }
                   ],
                   "actions": [
@@ -1391,22 +1276,75 @@
                   "children": []
                 }
               ]
+            }
+          ]
+        },
+        {
+          "id": "options-world-taxonomy-block",
+          "type": "block",
+          "variant": "default",
+          "layout": {
+            "mode": "column",
+            "base": [
+              {
+                "name": "span",
+                "value": {
+                  "kind": "literal",
+                  "value": 2
+                }
+              },
+              {
+                "name": "gap",
+                "value": {
+                  "kind": "token",
+                  "ref": "spacing.8"
+                }
+              }
+            ],
+            "overrides": []
+          },
+          "props": [
+            {
+              "name": "title",
+              "value": {
+                "kind": "i18n",
+                "ref": "options.taxonomy.title"
+              }
             },
             {
-              "id": "options-access-warning",
+              "name": "help",
+              "value": {
+                "kind": "i18n",
+                "ref": "options.taxonomy.help"
+              }
+            }
+          ],
+          "actions": [],
+          "visual": {
+            "visibleWhen": "singleplayer"
+          },
+          "capabilities": [
+            {
+              "id": "block.header",
+              "props": [
+                {
+                  "name": "info-visible",
+                  "value": {
+                    "kind": "literal",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "children": [
+            {
+              "id": "options-taxonomy-type-label",
               "type": "control",
-              "variant": "warning",
+              "variant": "default",
               "layout": {
                 "mode": "row",
-                "base": [
-                  {
-                    "name": "fill",
-                    "value": {
-                      "kind": "literal",
-                      "value": true
-                    }
-                  }
-                ],
+                "base": [],
                 "overrides": []
               },
               "props": [
@@ -1421,13 +1359,537 @@
                   "name": "label",
                   "value": {
                     "kind": "i18n",
-                    "ref": "options.admin.access.empty"
+                    "ref": "options.taxonomy.type"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.labelStyle"
                   }
                 }
               ],
-              "visual": {
-                "visibleWhen": "add-without-selection"
+              "actions": [],
+              "children": []
+            },
+            {
+              "id": "options-taxonomy-lookup-row",
+              "type": "container",
+              "variant": "fill",
+              "layout": {
+                "mode": "row",
+                "base": [
+                  {
+                    "name": "gap",
+                    "value": {
+                      "kind": "token",
+                      "ref": "spacing.8"
+                    }
+                  },
+                  {
+                    "name": "padding",
+                    "value": {
+                      "kind": "literal",
+                      "value": 0
+                    }
+                  }
+                ],
+                "overrides": []
               },
+              "props": [],
+              "actions": [],
+              "children": [
+                {
+                  "id": "options-taxonomy-type",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [
+                      {
+                        "name": "grow",
+                        "value": {
+                          "kind": "literal",
+                          "value": 1
+                        }
+                      }
+                    ],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "field"
+                      }
+                    },
+                    {
+                      "name": "label",
+                      "value": {
+                        "kind": "i18n",
+                        "ref": "options.taxonomy.type"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.fullType"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "change",
+                      "actionId": "options.taxonomy.type"
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "id": "options-taxonomy-consult",
+                  "type": "control",
+                  "variant": "field-action",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "button"
+                      }
+                    },
+                    {
+                      "name": "label",
+                      "value": {
+                        "kind": "i18n",
+                        "ref": "options.taxonomy.consult"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.consult"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "activate",
+                      "actionId": "options.taxonomy.consult"
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "options-taxonomy-current",
+              "type": "control",
+              "variant": "default",
+              "layout": {
+                "mode": "row",
+                "base": [],
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "status"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.current"
+                  }
+                }
+              ],
+              "actions": [],
+              "children": []
+            },
+            {
+              "id": "options-taxonomy-choice-label",
+              "type": "control",
+              "variant": "default",
+              "layout": {
+                "mode": "row",
+                "base": [],
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "status"
+                  }
+                },
+                {
+                  "name": "label",
+                  "value": {
+                    "kind": "i18n",
+                    "ref": "options.taxonomy.choice"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.labelStyle"
+                  }
+                }
+              ],
+              "actions": [],
+              "children": []
+            },
+            {
+              "id": "options-taxonomy-choices",
+              "type": "container",
+              "variant": "fill",
+              "layout": {
+                "mode": "row",
+                "base": [
+                  {
+                    "name": "gap",
+                    "value": {
+                      "kind": "token",
+                      "ref": "spacing.8"
+                    }
+                  },
+                  {
+                    "name": "padding",
+                    "value": {
+                      "kind": "literal",
+                      "value": 0
+                    }
+                  }
+                ],
+                "overrides": []
+              },
+              "props": [],
+              "actions": [],
+              "children": [
+                {
+                  "id": "options-taxonomy-choice1",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "combo"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.choice1"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "change",
+                      "actionId": "options.taxonomy.choice1"
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "id": "options-taxonomy-choice2",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "combo"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.choice2"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "change",
+                      "actionId": "options.taxonomy.choice2"
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "id": "options-taxonomy-choice3",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "combo"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.choice3"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "change",
+                      "actionId": "options.taxonomy.choice3"
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "options-taxonomy-reason-label",
+              "type": "control",
+              "variant": "default",
+              "layout": {
+                "mode": "row",
+                "base": [],
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "status"
+                  }
+                },
+                {
+                  "name": "label",
+                  "value": {
+                    "kind": "i18n",
+                    "ref": "options.taxonomy.reason"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.labelStyle"
+                  }
+                }
+              ],
+              "actions": [],
+              "children": []
+            },
+            {
+              "id": "options-taxonomy-reason",
+              "type": "control",
+              "variant": "default",
+              "layout": {
+                "mode": "row",
+                "base": [],
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "field"
+                  }
+                },
+                {
+                  "name": "label",
+                  "value": {
+                    "kind": "i18n",
+                    "ref": "options.taxonomy.reason"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.reason"
+                  }
+                }
+              ],
+              "actions": [
+                {
+                  "event": "change",
+                  "actionId": "options.taxonomy.reason"
+                }
+              ],
+              "children": []
+            },
+            {
+              "id": "options-taxonomy-actions",
+              "type": "container",
+              "variant": "fill",
+              "layout": {
+                "mode": "row",
+                "base": [
+                  {
+                    "name": "gap",
+                    "value": {
+                      "kind": "token",
+                      "ref": "spacing.8"
+                    }
+                  },
+                  {
+                    "name": "padding",
+                    "value": {
+                      "kind": "literal",
+                      "value": 0
+                    }
+                  }
+                ],
+                "overrides": []
+              },
+              "props": [],
+              "actions": [],
+              "children": [
+                {
+                  "id": "options-taxonomy-apply",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "button"
+                      }
+                    },
+                    {
+                      "name": "label",
+                      "value": {
+                        "kind": "i18n",
+                        "ref": "options.taxonomy.apply"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.apply"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "activate",
+                      "actionId": "options.taxonomy.apply"
+                    }
+                  ],
+                  "children": []
+                },
+                {
+                  "id": "options-taxonomy-restore",
+                  "type": "control",
+                  "variant": "default",
+                  "layout": {
+                    "mode": "row",
+                    "base": [],
+                    "overrides": []
+                  },
+                  "props": [
+                    {
+                      "name": "kind",
+                      "value": {
+                        "kind": "literal",
+                        "value": "button"
+                      }
+                    },
+                    {
+                      "name": "label",
+                      "value": {
+                        "kind": "i18n",
+                        "ref": "options.taxonomy.restore"
+                      }
+                    },
+                    {
+                      "name": "data",
+                      "value": {
+                        "kind": "data",
+                        "path": "options.taxonomy.restore"
+                      }
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "event": "activate",
+                      "actionId": "options.taxonomy.restore"
+                    }
+                  ],
+                  "children": []
+                }
+              ]
+            },
+            {
+              "id": "options-taxonomy-feedback",
+              "type": "control",
+              "variant": "default",
+              "layout": {
+                "mode": "row",
+                "base": [],
+                "overrides": []
+              },
+              "props": [
+                {
+                  "name": "kind",
+                  "value": {
+                    "kind": "literal",
+                    "value": "status"
+                  }
+                },
+                {
+                  "name": "data",
+                  "value": {
+                    "kind": "data",
+                    "path": "options.taxonomy.feedback"
+                  }
+                }
+              ],
               "actions": [],
               "children": []
             }
@@ -2003,6 +2465,78 @@
           "text": "No hay otro miembro que pueda reclamar la red si fallece el propietario."
         }
       ]
+    },
+    {
+      "id": "options.taxonomy.title",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Correcciones de este mundo"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.help",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Corrige la clasificación de los objetos en toda esta partida, independientemente de la red. Restaurar recupera la clasificación automática. El motivo se conserva en el registro privado."
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.type",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Tipo de objeto"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.choice",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Nueva clasificación"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.reason",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Motivo"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.consult",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Consultar"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.apply",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Aplicar corrección"
+        }
+      ]
+    },
+    {
+      "id": "options.taxonomy.restore",
+      "translations": [
+        {
+          "locale": "es",
+          "text": "Restaurar automática"
+        }
+      ]
     }
   ],
   "actionAllowlist": [
@@ -2039,6 +2573,54 @@
     },
     {
       "id": "options.change-palette",
+      "events": [
+        "activate"
+      ]
+    },
+    {
+      "id": "options.taxonomy.type",
+      "events": [
+        "change"
+      ]
+    },
+    {
+      "id": "options.taxonomy.reason",
+      "events": [
+        "change"
+      ]
+    },
+    {
+      "id": "options.taxonomy.choice1",
+      "events": [
+        "change"
+      ]
+    },
+    {
+      "id": "options.taxonomy.choice2",
+      "events": [
+        "change"
+      ]
+    },
+    {
+      "id": "options.taxonomy.choice3",
+      "events": [
+        "change"
+      ]
+    },
+    {
+      "id": "options.taxonomy.consult",
+      "events": [
+        "activate"
+      ]
+    },
+    {
+      "id": "options.taxonomy.apply",
+      "events": [
+        "activate"
+      ]
+    },
+    {
+      "id": "options.taxonomy.restore",
       "events": [
         "activate"
       ]
@@ -2214,6 +2796,83 @@
           "type": "any",
           "nullable": true
         }
+      },
+      {
+        "path": "options.taxonomy.labelStyle",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.fullType",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.reason",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.current",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.feedback",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.consult",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.apply",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.restore",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.choice1",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.choice2",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "path": "options.taxonomy.choice3",
+        "schema": {
+          "type": "any",
+          "nullable": true
+        }
       }
     ],
     "state": [
@@ -2277,6 +2936,70 @@
         "event": "activate",
         "payload": {
           "type": "any"
+        }
+      },
+      {
+        "actionId": "options.taxonomy.type",
+        "event": "change",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.reason",
+        "event": "change",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.choice1",
+        "event": "change",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.choice2",
+        "event": "change",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.choice3",
+        "event": "change",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.consult",
+        "event": "activate",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.apply",
+        "event": "activate",
+        "payload": {
+          "type": "any",
+          "nullable": true
+        }
+      },
+      {
+        "actionId": "options.taxonomy.restore",
+        "event": "activate",
+        "payload": {
+          "type": "any",
+          "nullable": true
         }
       }
     ]

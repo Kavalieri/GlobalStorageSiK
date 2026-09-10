@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
-  &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74&quot;,
+  &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;fa9e9b89d80ded71e1dd3049deb307f0943687082ff22f3cfd219d45d66f53a0&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;13fc7031a7d18c5ebaff33e5c2fc2554824cf4dcc6a80ff9a8c4e4da28b4c88b&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
+  &quot;visualMasterSha256&quot;: &quot;4c7de7d07baf52992f1c29b45cffc44a8ff46f734c397995c1f5af346edb2f3a&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;d2559bde0f7b77b09420cd927ad4f6aaf133a73bf6bdac3857b04eed22e8e587&quot;
 }">
   <title>tab-programming</title>
@@ -517,6 +517,9 @@ button:disabled { cursor: default; }
 .sik-control-row--equal > .sik-button { flex: 1 1 0; min-width: 0; }
 .sik-control-row--wrap { flex-wrap: wrap; }
 .sik-control-row--equal.sik-control-row--wrap > .sik-button { flex: 1 1 180px; }
+.sik-control-row--responsive { flex-wrap: wrap; }
+.sik-control-row--responsive > .sik-combo-wrap { flex: 1 1 220px; }
+.sik-control-row--responsive > .sik-button { flex: 0 0 auto; }
 .sik-combo-wrap { position: relative; min-width: 0; flex: 1 1 0; }
 .sik-combo-wrap .sik-combo-list { position: absolute; z-index: 25; left: 0; right: 0; top: 100%; }
 .sik-status-grid,
@@ -1128,6 +1131,11 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   .sik-action-status { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 }
 
+@container sik-ui-tab-panel (max-width: 560px) {
+  .sik-control-row--responsive > .sik-combo-wrap,
+  .sik-control-row--responsive > .sik-button { flex-basis: 100%; width: 100%; }
+}
+
 @media (max-width: 560px) {
   .review-grid { grid-template-columns: 1fr; }
   .review-state-gallery { grid-template-columns: 1fr; }
@@ -1139,7 +1147,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     /* La shell canónica no consume los perfiles históricos del tablero: el header siempre abarca rail y contenido. */
     :root[data-profile] .sik-terminal-shell { --sik-pref-h:900px; --sik-max-h:1600px; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
     .sik-shell-body { display:grid; grid-template-columns:var(--sik-shell-rail-width) minmax(0,1fr); gap:var(--sik-shell-rail-content-gap); min-height:0; overflow:hidden; }
-    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; container-name:sik-ui-tab-panel; container-type:inline-size; }
     .sik-shell-body > .sik-shell-main > .sik-content-host { display:flex; width:100%; height:100%; min-height:0; padding:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main > .sik-content-host > [data-panel] { flex:1 1 auto; min-width:0; min-height:0; }
     .sik-rail { width:var(--sik-shell-rail-width); }

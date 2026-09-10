@@ -249,7 +249,10 @@ function sync.scheduleInventoryPull(searchQuery, expectedRevision)
 	end
 	local networkId = ui.terminalState and ui.terminalState.networkId
 		or activeNetworkId()
-	if expectedRevision and networkId and getAppliedRevision(networkId) >= expectedRevision then
+	local catalogRevision = ui.terminalState and
+		(ui.terminalState._gsAppliedCatalogRevision or ui.terminalState.inventoryRevision)
+	if expectedRevision and networkId and ui.terminalState and type(ui.terminalState.items) == "table"
+		and (tonumber(catalogRevision) or -1) >= expectedRevision then
 		return
 	end
 	_pullDueTick = _tickCounter + PULL_DEBOUNCE_TICKS
@@ -300,6 +303,9 @@ function sync.applyWithdrawDelta(networkId, fullType, moved)
 	local items = ui.terminalState.items
 	for i = #items, 1, -1 do
 		if items[i].fullType == fullType then
+			-- A family root can combine several fullTypes. A fullType delta
+			-- cannot identify that root or its children; await the real catalog.
+			if items[i].rowKey or items[i].mixedVariants then return end
 			local nextCount = (items[i].count or 0) - moved
 			if nextCount <= 0 then
 				table.remove(items, i)
@@ -390,9 +396,13 @@ function sync.onActionResult(args)
 	-- se aplico (revision ya marcada como vista), el estado cacheado ya
 	-- refleja el retiro y NO hay que restar de nuevo aqui, o se resta dos
 	-- veces (bug reportado: quedan 15 reales pero el almacen muestra 14).
-	local alreadyApplied = networkId and transfer.inventoryRevision
-		and getAppliedRevision(networkId) >= transfer.inventoryRevision
-	if args.ok and transfer.op == "withdraw" and transfer.fullType and (transfer.moved or 0) > 0 and not alreadyApplied then
+	local ui = currentUI()
+	local state = ui and ui.terminalState
+	local alreadyApplied = state and state.networkId == networkId
+		and type(state.items) == "table" and transfer.inventoryRevision
+		and (tonumber(state._gsAppliedCatalogRevision or state.inventoryRevision) or -1) >= transfer.inventoryRevision
+	local exact = transfer.selectionMode == "exact_group" or transfer.selectionMode == "exact_ids"
+	if args.ok and transfer.op == "withdraw" and not exact and transfer.fullType and (transfer.moved or 0) > 0 and not alreadyApplied then
 		sync.applyWithdrawDelta(networkId, transfer.fullType, transfer.moved)
 	end
 

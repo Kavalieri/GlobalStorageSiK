@@ -322,6 +322,7 @@ local function dispatchCurrent()
 		pacingFinal = not current.all and (current.remaining or 0) <= requested,
 		networkId = current.networkId,
 		returnItemIds = current.returnItemIds == true,
+		readLoanId = current.readLoanId,
 	})
 	if not sent and current and current.requestId == expectedRequestId then
 		GlobalStorageSiK.Log.error("WithdrawClient", "send failed",
@@ -516,6 +517,7 @@ local function enqueueWithdraw(rowData, amount, targetKey, searchQuery, opts)
 		searchQuery = searchQuery,
 		networkId = op.networkId or networkId,
 		returnItemIds = opts and opts.returnItemIds == true,
+		readLoanId = opts and opts.readLoanId,
 		onComplete = opts and opts.onComplete or nil,
 		expectedCount = requested,
 	})

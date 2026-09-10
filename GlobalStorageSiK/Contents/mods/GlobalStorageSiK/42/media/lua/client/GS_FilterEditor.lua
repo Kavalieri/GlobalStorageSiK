@@ -18,7 +18,6 @@ GlobalStorageSiK.FilterEditor.instance = nil
 local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local CONTROL_METRICS = UI.Controls.metrics("compact")
-local PALETTE = UI.Theme.palette()
 local ENTRY_H = CONTROL_METRICS.inputHeight
 local BTN_H = CONTROL_METRICS.buttonHeight
 local RESULT_ROW_H = FONT_HGT_SMALL + 6
@@ -28,11 +27,7 @@ local BLOCK_GAP = 8
 --- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua
 --- y GS_TerminalUI_ZoneEditor.lua) - se usa en el borde superior del modal
 --- para reforzar visualmente que operador se esta configurando.
-local RULE_OP_COLOR = {
-	OR  = PALETTE.ruleOr,
-	AND = PALETTE.ruleAnd,
-	NOT = PALETTE.ruleNot,
-}
+local RULE_OP_TONE = { OR = "info", AND = "warning", NOT = "danger" }
 
 local function addCopy(parent, x, y, width, text, tone, theme)
 	local control = UI.Controls.copyText(parent, {
@@ -154,11 +149,15 @@ function GS_FilterEditorUI:initialise()
 	self.filterType = self.filterType or "category"
 	self.selectedItem = nil
         UI.Modal.apply(self, {
-                kind = "task", profile = "editor", resizable = false,
+                kind = "task", profile = "editor", resizable = true,
+                onReflow = function()
+                        if self._filterLayoutReady then self:reflowContent() end
+                end,
                 title = T("IGUI_GS_FilterEditorTitle") .. " - "
                         .. T("IGUI_GS_FilterEditorOperatorLabel", self.operator),
                 onClose = function() GlobalStorageSiK.FilterEditor.instance = nil end,
         })
+        self._filterLayoutReady = true
         self:buildLayout()
 end
 
@@ -229,11 +228,12 @@ function GS_FilterEditorUI:buildLayout()
 	clearContent(self)
 
 	local host, content = layoutHost(self)
-	local operatorColor = RULE_OP_COLOR[self.operator] or RULE_OP_COLOR.OR
+	local operatorTone = RULE_OP_TONE[self.operator] or RULE_OP_TONE.OR
+	self._filterLayoutWidth = content.w
 	local filterBlock = own(self, UI.Block.create({
 		parent = host, x = 0, y = 0, w = content.w,
 		title = T("IGUI_GS_FilterPathTitle"),
-		tooltip = T("IGUI_GS_FilterPathTitle"), accent = operatorColor,
+		tooltip = T("IGUI_GS_EditorRulesHint"), accentTone = operatorTone,
 		playerNum = self.playerNum,
 	}))
 	self.filterBlock = filterBlock
@@ -285,8 +285,23 @@ function GS_FilterEditorUI:buildLayout()
 	actionColumn:block(self.addBtn, BTN_H)
 	actionColumn:finish()
 
+	local contentHeight = actions.y + actions.h
+	if not self._initialLayoutFitted then
+		self._initialLayoutFitted = true
+		UI.Modal.fitContent(self, contentHeight, { center = true })
+	elseif self.contentBlock then
+		self.contentBlock:setContentHeight(contentHeight)
+	end
 	self._layoutBusy = false
-	UI.Modal.fitContent(self, actions.y + actions.h, { center = true })
+	self:reflowContent()
+end
+
+--- Width changes rebuild only the active local form; draft values survive.
+--- Height changes update the shared viewport without shrinking the user window.
+function GS_FilterEditorUI:reflowContent()
+	if self._layoutBusy then return end
+	local _, content = layoutHost(self)
+	if content.w ~= self._filterLayoutWidth then self:buildLayout() end
 end
 
 --- Categoria > Subcategoria > Sub-subcategoria en cascada VERTICAL (a
@@ -391,9 +406,7 @@ end
 
 function GS_FilterEditorUI:buildTagFields(column)
 	local draft = (self._drafts and self._drafts.tag) or {}
-	local hint = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterTagHint"), "textMuted", {
-		textMuted = { r = 0.5, g = 0.54, b = 0.58, a = 1 },
-	})
+	local hint = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterTagHint"), "textMuted")
 	column:label(hint, hint.height)
 	self.tagEntry = addField(column.parent, 0, 0, column.width)
 	self.tagEntry:setText(draft.value or "")
@@ -415,9 +428,7 @@ function GS_FilterEditorUI:buildItemFields(column)
 
 	if self.selectedItem then
 		local selected = addCopy(column.parent, 0, 0, column.width,
-			T("IGUI_GS_FilterItemSelected", self.selectedItem.name), "success", {
-				success = { r = 0.5, g = 0.78, b = 0.5, a = 1 },
-			})
+			T("IGUI_GS_FilterItemSelected", self.selectedItem.name), "success")
 		column:label(selected, selected.height)
 	end
 
@@ -475,7 +486,10 @@ function GS_FilterEditorUI:refreshItemResults(initial)
 		self.actionsBlock:setBounds(self.actionsBlock.x,
 			self.filterBlock.y + self.filterBlock.h + BLOCK_GAP,
 			self.actionsBlock.w, self.actionsBlock.h)
-		UI.Modal.fitContent(self, self.actionsBlock.y + self.actionsBlock.h, { center = true })
+		if self.contentBlock then
+			self.contentBlock:setContentHeight(self.actionsBlock.y + self.actionsBlock.h)
+		end
+		self:reflowContent()
 	end
 	return ry
 end
@@ -605,9 +619,11 @@ function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded, parentMod
 	-- personalizada - Operador: NOT" - se salia del modal de 460px, tapado
 	-- por el boton de cerrar). Solo el ANCHO se comparte con
 	-- resolveEditorWindowSize(); el alto sigue calculandose del contenido
-	-- real como siempre, este modal no es una ventana redimensionable.
+	-- real al abrir; despues se conserva el tamano elegido por el jugador.
 	local panelW = UI.Window.resolveBounds({ profile = "editor" }).w
 	local ui = GS_FilterEditorUI:new(0, 0, panelW, 200)
+	ui.playerNum = parentModal and parentModal.playerNum or 0
+	ui._sikModalOwner = parentModal
 	ui.target = target
 	ui.operator = operator or "OR"
 	ui.onAdded = onAdded

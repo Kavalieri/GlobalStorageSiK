@@ -282,10 +282,10 @@ end
 ---@param result table NativeClassificationResult real
 ---@return boolean pass
 ---@return string[] reasons lista de motivos de fallo (vacia si pass)
----@return string kind "classification"|"evidence"|"facetAttribute"|"" - primer motivo de fallo relevante para las metricas agregadas
+---@return table failures causas presentes; un caso puede fallar en varias dimensiones
 local function evaluateCase(case, result)
 	local reasons = {}
-	local kind = ""
+	local failures = {}
 	local path = (result and result.primaryPath) or {}
 
 	if case.expectAbstain then
@@ -293,21 +293,21 @@ local function evaluateCase(case, result)
 		if not isAbstain then
 			reasons[#reasons + 1] = "se esperaba abstencion (other/unclassified_modded), obtenido "
 				.. tostring(path.l1) .. "/" .. tostring(path.l2) .. "/" .. tostring(path.l3)
-			kind = "classification"
+			failures.classification = true
 		end
 	else
 		local expectedL3 = getExpectedL3(case)
 		if path.l1 ~= case.expectedL1 then
 			reasons[#reasons + 1] = "L1 esperado=" .. tostring(case.expectedL1) .. " obtenido=" .. tostring(path.l1)
-			kind = "classification"
+			failures.classification = true
 		end
 		if case.expectedL2 ~= nil and path.l2 ~= case.expectedL2 then
 			reasons[#reasons + 1] = "L2 esperado=" .. tostring(case.expectedL2) .. " obtenido=" .. tostring(path.l2)
-			kind = "classification"
+			failures.classification = true
 		end
 		if case.expectedL3 ~= nil and path.l3 ~= expectedL3 then
 			reasons[#reasons + 1] = "L3 esperado=" .. tostring(expectedL3) .. " obtenido=" .. tostring(path.l3)
-			kind = "classification"
+			failures.classification = true
 		end
 	end
 
@@ -316,14 +316,14 @@ local function evaluateCase(case, result)
 		local confidence = (primaryEv and primaryEv.confidence) or 0
 		if confidence < case.minConfidence then
 			reasons[#reasons + 1] = "confianza=" .. tostring(confidence) .. " < minima=" .. tostring(case.minConfidence)
-			if kind == "" then kind = "evidence" end
+			failures.evidence = true
 		end
 	end
 	if case.expectedSource then
 		local source = primaryEv and primaryEv.source
 		if source ~= case.expectedSource then
 			reasons[#reasons + 1] = "source esperado=" .. tostring(case.expectedSource) .. " obtenido=" .. tostring(source)
-			if kind == "" then kind = "evidence" end
+			failures.evidence = true
 		end
 	end
 
@@ -332,7 +332,7 @@ local function evaluateCase(case, result)
 			local actual = result and result.facets and result.facets[facetKey]
 			if actual ~= facetValue then
 				reasons[#reasons + 1] = "facet " .. tostring(facetKey) .. " esperado=" .. tostring(facetValue) .. " obtenido=" .. tostring(actual)
-				if kind == "" then kind = "facetAttribute" end
+				failures.facetAttribute = true
 			end
 		end
 	end
@@ -341,12 +341,12 @@ local function evaluateCase(case, result)
 			local actual = result and result.attributes and result.attributes[attrKey]
 			if tostring(actual) ~= tostring(attrValue) then
 				reasons[#reasons + 1] = "attribute " .. tostring(attrKey) .. " esperado=" .. tostring(attrValue) .. " obtenido=" .. tostring(actual)
-				if kind == "" then kind = "facetAttribute" end
+				failures.facetAttribute = true
 			end
 		end
 	end
 
-	return #reasons == 0, reasons, kind
+	return #reasons == 0, reasons, failures
 end
 
 --- Ejecuta una expectativa de corpus sobre la superficie correcta. El
@@ -707,11 +707,9 @@ function GlobalStorageSiK.NativeCorpus.run()
 		classificationFailures = 0,   -- falso positivo (se esperaba abstencion) o falso negativo (se esperaba clasificar)
 		evidenceFailures = 0,         -- confianza/source por debajo/distinto de lo esperado
 		facetAttributeFailures = 0,
-		-- dev24.1 (observacion no bloqueante de sistemas: "failed=1 con
-		-- clasificacion/evidencia/facet a cero es coherente pero conviene
-		-- que se vea claramente requiredMissingFailures=1, para que la suma
-		-- de causas sea inmediatamente comprensible"): contador propio,
-		-- SUMA junto a los otros 3 para dar failedCases - nunca solapado.
+		-- Un required ausente sigue siendo un fallo propio. Las tres causas
+		-- anteriores pueden solaparse: no sumarlas para obtener failedCases.
+		-- PROD 1.5.1 ocultaba facetas incorrectas cuando tambien fallaba la ruta.
 		requiredMissingFailures = 0,
 		byBlock = {},   -- block -> { applicable=, absent=, skipped=, passed=, failed= }
 		divergences = {},   -- detalle SOLO para el fichero server-side, nunca enviado por red
@@ -847,7 +845,7 @@ function GlobalStorageSiK.NativeCorpus.run()
 				end
 			end
 
-			local pass, reasons, kind = evaluateCase(case, result)
+			local pass, reasons, failures = evaluateCase(case, result)
 			-- dev27 (§5, matriz cruzada de colisiones pedida por sistemas):
 			-- acumula por pareja (bloque ganador real del corpus / bloque
 			-- alternativo declarado en collisionWith) - reviewedCount = casos
@@ -877,11 +875,13 @@ function GlobalStorageSiK.NativeCorpus.run()
 				report.failedCases = report.failedCases + 1
 				blockStats.failed = blockStats.failed + 1
 				blockStats.criticalFailures = blockStats.criticalFailures + 1
-				if kind == "classification" then
+				if failures.classification then
 					report.classificationFailures = report.classificationFailures + 1
-				elseif kind == "evidence" then
+				end
+				if failures.evidence then
 					report.evidenceFailures = report.evidenceFailures + 1
-				elseif kind == "facetAttribute" then
+				end
+				if failures.facetAttribute then
 					report.facetAttributeFailures = report.facetAttributeFailures + 1
 				end
 				report.divergences[#report.divergences + 1] =
@@ -1001,7 +1001,7 @@ function GlobalStorageSiK.NativeCorpus.writeReportToFile(report)
 		writer:write("fallos por tipo: clasificacion=" .. fmt(report.classificationFailures)
 			.. " evidencia=" .. fmt(report.evidenceFailures)
 			.. " facet/attribute=" .. fmt(report.facetAttributeFailures)
-			.. " ausenciaObligatoria=" .. fmt(report.requiredMissingFailures) .. "\r\n")
+			.. " ausenciaObligatoria=" .. fmt(report.requiredMissingFailures) .. " (causas no excluyentes)\r\n")
 		writer:write("--- Resumen por bloque ---\r\n")
 		for block, stats in pairs(report.byBlock or {}) do
 			writer:write("  " .. tostring(block) .. ": aplicables=" .. fmt(stats.applicable)

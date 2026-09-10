@@ -17,12 +17,10 @@ GlobalStorageSiK.RuleSanitizer = GlobalStorageSiK.RuleSanitizer or {}
 local function cloneRule(rule)
 	local condition = {}
 	for key, value in pairs((rule and rule.condition) or {}) do condition[key] = value end
-	return {
-		op = rule and rule.op or "OR",
-		condition = condition,
-		legacySource = rule and rule.legacySource or nil,
-		legacyRuleIndex = rule and rule.legacyRuleIndex or nil,
-	}
+	local copy = {}
+	for key, value in pairs(rule or {}) do copy[key] = value end
+	copy.op, copy.condition = copy.op or "OR", condition
+	return copy
 end
 
 local function asciiDimension(value)
@@ -101,7 +99,7 @@ end
 function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 	local report = { before = 0, after = 0, rulesBefore = 0, rulesAfter = 0,
 		categoriesBefore = 0, categoriesAfter = 0, quarantined = 0,
-		unknownPreserved = 0, deprecatedExternal = 0, changed = false, rulesChanged = false,
+		unknownPreserved = 0, deprecatedExternal = 0, orphanedNative = 0, changed = false, rulesChanged = false,
 		categoriesChanged = false, samples = {} }
 	if type(owner) ~= "table" then return report end
 	local sourceRules = type(owner.rules) == "table" and owner.rules or {}
@@ -148,6 +146,7 @@ function GlobalStorageSiK.RuleSanitizer.sanitizeOwner(owner, context)
 						report.rulesChanged = true
 					end
 					if status == "DEPRECATED_EXTERNAL" then report.deprecatedExternal = report.deprecatedExternal + 1 end
+					if status == "ORPHANED_NATIVE" then report.orphanedNative = report.orphanedNative + 1 end
 				end
 				active[#active + 1] = copy
 				if copy.condition.type == "category"

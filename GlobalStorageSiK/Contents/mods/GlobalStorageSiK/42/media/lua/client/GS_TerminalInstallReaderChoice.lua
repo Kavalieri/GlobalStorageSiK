@@ -35,7 +35,7 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local CONTROL_METRICS = UI.Controls.metrics("task")
 local PAD = 14
 local LINE_GAP = 4
-local PANEL_W = 480
+local WINDOW_PROFILE = "task-requirements"
 local SECTION_GAP = 16
 local NETWORK_INFO_LINE_COUNT = 8
 
@@ -102,7 +102,7 @@ end
 
 local function refreshRecoverySelection(panel)
 	local row = selectedRecoveryRow(panel)
-	local lines = row and recoverySummaryLines(row, panel.width - PAD * 2) or {}
+	local lines = row and recoverySummaryLines(row, panel._layoutTextWidth or panel.width - PAD * 2) or {}
 	for i = 1, #(panel.networkInfoLbls or {}) do
 		local lbl = panel.networkInfoLbls[i]
 		lbl:setText(lines[i] or "")
@@ -120,8 +120,8 @@ end
 
 ---@param rows table[]
 ---@return number
-local function measurePanelHeight(rows)
-	local textW = PANEL_W - PAD * 2
+local function measurePanelHeight(rows, width)
+	local textW = math.max(1, (tonumber(width) or 1) - PAD * 2)
 	local introLines = UI.Controls.wrapText(
 		T("IGUI_GS_InstallReaderIntro", GlobalStorageSiK.Sandbox.getTerminalNetworkRange()),
 		textW, UIFont.Small)
@@ -158,8 +158,9 @@ function GS_TerminalInstallReaderChoice:initialise()
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	self:setAlwaysOnTop(true)
 	UI.Modal.apply(self, {
-		kind = "task", padding = PAD, playerNum = self.playerNum,
-		width = self.width, height = self.height, resizable = false,
+		kind = "task", profile = WINDOW_PROFILE, padding = PAD, playerNum = self.playerNum,
+		width = self.width, height = self.height, resizable = true,
+		onReflow = function() self:reflowContent() end,
 		title = T("IGUI_GS_InstallReaderTitle"),
 		onClose = function()
 			GlobalStorageSiK.TerminalInstallReaderChoice.instance = nil
@@ -292,6 +293,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	local rect = { x = 0, y = 0, w = host.width or 0, h = host.height or 0 }
 	local y = rect.y
 	local textW = rect.w
+	self._layoutTextWidth = textW
 	local x = rect.x
 
 	local linkRange = GlobalStorageSiK.Sandbox.getTerminalNetworkRange()
@@ -300,6 +302,7 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 		text = T("IGUI_GS_InstallReaderIntro", linkRange),
 		tone = "textMuted", lineGap = LINE_GAP, playerNum = self.playerNum,
 	})
+	self.intro = intro
 	y = y + intro.height
 	y = y + 6
 
@@ -348,13 +351,67 @@ function GS_TerminalInstallReaderChoice:buildLayout()
 	})
 	y = y + FONT_HGT_SMALL + pad
 
-	UI.Modal.fitContent(self, y, {
-		contentBottom = true, bottomPadding = 0, center = true,
-	})
+	if not self._initialLayoutFitted then
+		UI.Modal.fitContent(self, y, { contentBottom = true, bottomPadding = 0, center = true })
+		self._initialLayoutFitted = true
+	elseif self.contentBlock and self.contentBlock.setContentHeight then
+		self.contentBlock:setContentHeight(y)
+		self:reflow()
+	end
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "TerminalInstallReaderChoice")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "TerminalInstallReaderChoice")
 	end
+end
+
+--- Resize existing controls only. The server list and unfinished name remain
+--- intact while Window drives this from its lightweight reflow callback.
+function GS_TerminalInstallReaderChoice:reflowContent()
+	local host = self.contentHost or self
+	if not host or not self.intro or not self.newTitle or not self.sepLine then return end
+	local x, y, textW = 0, 0, math.max(1, host.width or 0)
+	self._layoutTextWidth = textW
+	self.intro:setX(x); self.intro:setY(y); self.intro:reflow(textW)
+	y = y + self.intro.height + 6
+	self.newTitle:setX(x); self.newTitle:setY(y); self.newTitle:reflow(textW)
+	y = y + self.newTitle.height + 4
+	local createW = self.createBtn and self.createBtn.width or 0
+	if self.createBtn then self.createBtn:setX(x + textW - createW); self.createBtn:setY(y) end
+	if self.nameEntry then
+		self.nameEntry:setX(x); self.nameEntry:setY(y)
+		self.nameEntry:setWidth(math.max(1, textW - createW - 6))
+	end
+	y = y + CONTROL_METRICS.inputHeight + SECTION_GAP
+	self.sepLine:setX(x); self.sepLine:setY(y); self.sepLine:setWidth(textW)
+	y = y + 1 + SECTION_GAP
+	if self.linkTitle then
+		self.linkTitle:setX(x); self.linkTitle:setY(y); self.linkTitle:reflow(textW)
+		y = y + self.linkTitle.height + 6
+	end
+	if self.noNetworksLbls then
+		for _, label in ipairs(self.noNetworksLbls) do
+			label:setX(x); label:setY(y); label:reflow(textW)
+			y = y + label.height
+		end
+		y = y + 4
+	elseif self.networkCombo then
+		self.networkCombo:setX(x); self.networkCombo:setY(y); self.networkCombo:setWidth(textW)
+		y = y + CONTROL_METRICS.inputHeight + 6
+		refreshRecoverySelection(self)
+		for _, label in ipairs(self.networkInfoLbls or {}) do
+			label:setX(x); label:setY(y); label:setWidth(textW)
+			y = y + FONT_HGT_SMALL + LINE_GAP
+		end
+		if self.networkActionBtn then
+			self.networkActionBtn:setX(x); self.networkActionBtn:setY(y); self.networkActionBtn:setWidth(textW)
+			y = y + CONTROL_METRICS.buttonHeight + 6
+		end
+	end
+	y = y + 6
+	if self.statusLabel then self.statusLabel:setX(x); self.statusLabel:setY(y); self.statusLabel:setWidth(textW) end
+	y = y + FONT_HGT_SMALL
+	if self.contentBlock and self.contentBlock.setContentHeight then self.contentBlock:setContentHeight(y) end
+	return y
 end
 
 --- Reconstruye solo el bloque "Red existente" al llegar datos del servidor
@@ -393,7 +450,10 @@ function GS_TerminalInstallReaderChoice:rebuildLinkSection()
 		self.statusLabel:setY(y)
 	end
 	y = y + FONT_HGT_SMALL + pad
-	UI.Modal.fitContent(self, y, { contentBottom = true, bottomPadding = 0 })
+	if self.contentBlock and self.contentBlock.setContentHeight then
+		self.contentBlock:setContentHeight(y)
+		self:reflow()
+	end
 end
 
 --- Abre el diálogo. `target` = { x, y, z, object } del ordenador ya detectado.
@@ -410,10 +470,12 @@ function GlobalStorageSiK.TerminalInstallReaderChoice.show(player, target)
 	if GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		GlobalStorageSiK.NetClient.sendCommand("getRecoveryNetworks", {})
 	end
-	local panelH = measurePanelHeight(networkRows())
-	local ui = GS_TerminalInstallReaderChoice:new(0, 0, PANEL_W, panelH)
+	local playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+	local bounds = UI.Window.resolveBounds({ profile = WINDOW_PROFILE, playerNum = playerNum })
+	local panelH = measurePanelHeight(networkRows(), bounds.w)
+	local ui = GS_TerminalInstallReaderChoice:new(bounds.x, bounds.y, bounds.w, panelH)
 	ui.player = player
-	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+	ui.playerNum = playerNum
 	ui.target = target
 	ui:initialise()
 	UI.Modal.show(ui)

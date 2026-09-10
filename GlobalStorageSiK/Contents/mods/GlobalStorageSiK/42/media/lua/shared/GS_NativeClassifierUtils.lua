@@ -189,8 +189,13 @@ end
 ---@param si table|nil
 ---@return string hueco CanBeEquipped estructural, normalizado, o vacío
 function GlobalStorageSiK.NativeClassifierUtils.canBeEquippedLower(si)
-	if not si or not si.getCanBeEquipped then return "" end
-	local slot = safeCall(function() return si:getCanBeEquipped() end)
+	if not si then return "" end
+	-- B42 ScriptItem exposes the public field; the InventoryItem getter is
+	-- not present on that class. Keep the getter fallback for compatible sources.
+	local slot = safeCall(function() return si.canBeEquipped end)
+	if slot == nil and si.getCanBeEquipped then
+		slot = safeCall(function() return si:getCanBeEquipped() end)
+	end
 	return slot and string.lower(tostring(slot)) or ""
 end
 

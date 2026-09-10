@@ -103,6 +103,16 @@ function Terminal.current()
 	return current and current.instance or nil
 end
 
+function Terminal.activate(terminal, tabKey)
+	if not terminal or not validId(tabKey, 48) or type(terminal.activateTab) ~= "function" then
+		return false, ERR_SCHEMA
+	end
+	local current = extensions()
+	if not current or not current.ensureTab(terminal, tabKey) then return false, ERR_UNAVAILABLE end
+	terminal:activateTab(tabKey)
+	return true, OK
+end
+
 function Terminal.player(terminal)
 	local utils = GlobalStorageSiK and GlobalStorageSiK.PlayerUtils or nil
 	local playerNum = terminal and tonumber(terminal.playerNum) or 0

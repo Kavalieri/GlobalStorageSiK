@@ -6,7 +6,7 @@
 	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables": "   >> 诊断：选项表格",
 	"Sandbox_GlobalStorageSiK_DebugCatOptionsTables_tooltip": "需要启用调试模式。记录终端和成员行数，以及创建、刷新和调整大小后的区块与表格矩形。",
 	"Sandbox_GlobalStorageSiK": "GSSiK：访问与网络",
-	"Sandbox_GlobalStorageSiK_Items": "GSSiK：物品与存储",
+	"Sandbox_GlobalStorageSiK_Items": "GSSiK：物品与存入",
 	"Sandbox_GlobalStorageSiK_Craft": "GSSiK：制作需求",
 	"Sandbox_GlobalStorageSiK_Loot": "GSSiK：掉落权重",
 	"Sandbox_GlobalStorageSiK_Debug": "GSSiK：调试日志",

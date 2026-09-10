@@ -75,7 +75,7 @@ local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local PAD = 14
 local CONTROL_METRICS = UI.Controls.metrics("task")
-local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
+local WINDOW_PROFILE = "task-requirements"
 
 GS_AddonManageUI = UI.Window.derive("GS_AddonManageUI")
 
@@ -239,7 +239,8 @@ function GS_AddonManageUI:initialise()
 	self.headerHeight = FONT_HGT_MEDIUM + PAD + 4
 	local def = addonDefinition(self.addonId)
 	UI.Modal.apply(self, {
-		kind = "task", padding = PAD, contentMode = "dock",
+		kind = "task", profile = WINDOW_PROFILE, padding = PAD, contentMode = "dock", resizable = true,
+		onResize = function() self:onResize() end,
 		title = def and T(def.titleKey or "IGUI_GS_AddonUnknown") or "",
 		onClose = function()
 			GlobalStorageSiK.AddonManageUI.instance = nil
@@ -264,8 +265,33 @@ function GS_AddonManageUI:onResize()
 	if not self.contentScroll or self._reflowing or self._buildingLayout then return end
 	self._reflowing = true
 	UI.Scroll.resize(self.contentScroll, self.contentHost.width, self.contentHost.height)
-	self:buildLayout()
+	self:reflowContent()
 	self._reflowing = false
+end
+
+--- Resize the retained presentation only. buildLayout() remains the data
+--- path and may inspect inventory; pointer-driven resize must not call it.
+function GS_AddonManageUI:reflowContent()
+	local blocks = self._layoutBlocks
+	if not self.contentScroll or not blocks or not blocks.manage then return end
+	local width = math.max(0, UI.Scroll.contentWidth(self.contentScroll) or 0)
+	blocks.manage:setBounds(0, 0, width, blocks.manage.h)
+	local y = blocks.manage.h + 8
+	if blocks.recipe then
+		blocks.recipe:setBounds(0, y, width, blocks.recipe.h)
+		y = y + blocks.recipe.h + 8
+	end
+	for _, widget in ipairs(blocks.customChildren or {}) do
+		local panel = widget.panel or widget
+		local block = panel and panel._sikUiBlock
+		if block then block:setBounds(block.x, block.y, width, block.h)
+		elseif widget.reflow then widget:reflow(width, panel and panel.height)
+		elseif panel and panel.reflow then panel:reflow(width, panel.height)
+		elseif panel and panel.setWidth then panel:setWidth(width) end
+	end
+	if blocks.customHeight then y = y + blocks.customHeight end
+	UI.Scroll.setContentHeight(self.contentScroll, y)
+	return y
 end
 
 function GS_AddonManageUI:onKeyRelease(key)
@@ -444,6 +470,7 @@ function GS_AddonManageUI:buildLayoutPass()
 	local host = UI.Scroll.childHost(self.contentScroll)
 	local textW = host.width or 0
 	local y = 0
+	self._layoutBlocks = {}
 	local modActive = addonIsActive(def.id)
 	-- BUG REAL encontrado (reportado: "aparece como instalado en la bahia
 	-- pero la ventana dice Instalar en vez de Desinstalar"): esto llamaba a
@@ -466,7 +493,8 @@ function GS_AddonManageUI:buildLayoutPass()
 	local manageBlock = assert(UI.Block.create({ parent = host, x = 0, y = y,
 		w = textW, h = 0, title = title, tooltip = T(def.descKey or "IGUI_GS_AddonDescGeneric"),
 		variant = "section", playerNum = self.playerNum }))
-	local manageColumn = manageBlock:beginColumn()
+	local manageColumn = manageBlock:beginColumn({ retain = true })
+	self._layoutBlocks.manage = manageBlock
 	local manageRect = manageBlock:getContentRect()
 	local manageW = manageRect.w
 	if modActive and not isInstalled then
@@ -619,7 +647,10 @@ function GS_AddonManageUI:buildLayoutPass()
 		end
 		local requirements = UI.Requirements.create({ parent = manageBlock.childParent,
 			w = manageW, groups = groups, playerNum = self.playerNum })
-		manageColumn:block(requirements.panel, requirements.height)
+		manageColumn:block(requirements.panel, function(width)
+			requirements:reflow(width)
+			return requirements.height
+		end)
 		local action = createAddonActionButton(self, manageBlock.childParent, manageW, def, false, canInstall, canUninstall)
 		manageColumn:label(action, action.height)
 	end
@@ -636,11 +667,15 @@ function GS_AddonManageUI:buildLayoutPass()
 				w = textW, h = 0, title = T("IGUI_GS_ModuleFabricationTitle"),
 				tooltip = recipe.manualDisplay, variant = "section",
 				playerNum = self.playerNum }))
-			local recipeColumn = recipeBlock:beginColumn()
+			local recipeColumn = recipeBlock:beginColumn({ retain = true })
+			self._layoutBlocks.recipe = recipeBlock
 			local recipeRect = recipeBlock:getContentRect()
 			local requirements = GlobalStorageSiK.TerminalRecipeCards.createRequirements(
 				recipeBlock.childParent, recipe, recipeRect.w, self.playerNum)
-			recipeColumn:block(requirements.panel, requirements.height)
+			recipeColumn:block(requirements.panel, function(width)
+				requirements:reflow(width)
+				return requirements.height
+			end)
 			local action = UI.Controls.button(recipeBlock.childParent, {
 				x = 0, y = 0, w = recipeRect.w, text = T("IGUI_GS_ModuleFabricateAction", recipe.outputDisplay),
 				enabled = recipe.canCraft == true, locked = recipe.canCraft ~= true,
@@ -661,28 +696,31 @@ function GS_AddonManageUI:buildLayoutPass()
 	-- adicional una vez instalado - se mantiene aqui para no perder esa
 	-- capacidad al mover el resto del panel a esta ventana.
 	if def.onRenderPanel and modActive and isInstalled then
+		local customStart = y
+		local existingChildren = {}
+		UI.Scroll.forEachChild(self.contentScroll, function(child) existingChildren[child] = true end)
 		local state = self.terminal and self.terminal.terminalState
 		local ok, nextY = pcall(def.onRenderPanel, host, self.terminal, state, 0, y, textW)
 		if ok and type(nextY) == "number" then
 			y = nextY
 		end
+		self._layoutBlocks.customHeight = math.max(0, y - customStart)
+		self._layoutBlocks.customChildren = {}
+		UI.Scroll.forEachChild(self.contentScroll, function(child)
+			if not existingChildren[child] then
+				self._layoutBlocks.customChildren[#self._layoutBlocks.customChildren + 1] = child
+			end
+		end)
 	end
+	self._layoutBlocks.contentHeight = y
 
 	self._lastSig = statusSignature(self.player, def, self.networkId, self.anchor, self.installed)
-	local previousX = self:getX()
-	local previousY = self:getY()
-	local wasPositioned = self._positioned == true
-	UI.Modal.fitContent(self, y, {
+	if not self._initialLayoutFitted then
 		-- y ya apunta al final del contenido, pero el modal necesita conservar
 		-- tambien su margen inferior real. Sin esta reserva el clamp de Window
 		-- podia dejar el boton de accion unos pixeles fuera del padre.
-		contentBottom = false, bottomPadding = 0,
-	})
-	if wasPositioned then
-		self:setX(previousX)
-		self:setY(previousY)
-	else
-		self._positioned = true
+		UI.Modal.fitContent(self, y, { contentBottom = false, bottomPadding = 0 })
+		self._initialLayoutFitted = true
 	end
 	UI.Scroll.resize(self.contentScroll, self.contentHost.width, self.contentHost.height)
 	UI.Scroll.setContentHeight(self.contentScroll, y)
@@ -757,7 +795,7 @@ function GlobalStorageSiK.AddonManageUI.show(addonId, networkId, anchor, termina
 	-- self.isOwner ya no existe (bug real cerrado, ver comentario en
 	-- createAddonActionButton mas arriba) - el boton de instalar/desinstalar
 	-- ya no depende de una lectura de permisos calculada en el cliente.
-	local ui = GS_AddonManageUI:new(0, 0, PANEL_W, 200)
+	local ui = GS_AddonManageUI:new(0, 0, 1, 200)
 	ui.player = player
 	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	ui.addonId = addonId

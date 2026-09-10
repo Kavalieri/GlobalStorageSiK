@@ -41,7 +41,11 @@ end
 -- invalidates affected network projections only after a successful mutation.
 function Server.change(player, args, requireStaff)
 	if not GlobalStorageSiK.isAuthoritative() then return false, "not_authoritative" end
-	if type(requireStaff) ~= "function" or not requireStaff(player, "changeTaxonomyOverride", nil) then
+	-- Singleplayer owns the whole save and has no Staff role by default.
+	-- Hosted/dedicated MP still requires server Staff, never a network role:
+	-- this store changes the classification of the entire world.
+	local singleplayer = player ~= nil and not (isClient and isClient()) and not (isServer and isServer())
+	if not singleplayer and (type(requireStaff) ~= "function" or not requireStaff(player, "changeTaxonomyOverride", nil)) then
 		return false, "no_permission"
 	end
 	if type(args) ~= "table" or not World.validFullType(args.fullType)

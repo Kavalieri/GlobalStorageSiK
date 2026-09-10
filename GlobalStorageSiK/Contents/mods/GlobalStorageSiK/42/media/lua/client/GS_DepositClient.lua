@@ -136,7 +136,7 @@ function GlobalStorageSiK.DepositClient.sendDraggedItems(items, playerArg, opts)
 	opts = opts or {}
 	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
 	local queueId = GlobalStorageSiK.TransferQueue.arm({ type = "physical", physicalItems = physical,
-		networkId = opts.networkId, searchQuery = opts.searchQuery }, player)
+		networkId = opts.networkId, searchQuery = opts.searchQuery, onComplete = opts.onComplete }, player)
 	return queueId ~= nil
 end
 
@@ -166,6 +166,7 @@ function GlobalStorageSiK.DepositClient.sendDepositItems(itemIds, playerArg, opt
 			origin = opts.origin,
 			operationId = opts.operationId,
 			preferredNodeId = opts.preferredNodeId,
+			onComplete = opts.onComplete,
 		}, player)
 		if not queueId then return false end
 	end

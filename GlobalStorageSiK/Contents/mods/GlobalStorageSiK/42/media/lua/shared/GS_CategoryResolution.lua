@@ -344,13 +344,21 @@ function Resolution.legacyAliasNativePath(value)
 end
 
 ---@param condition table|nil
----@return string NATIVE|VANILLA|SOURCE_CATEGORY|LEGACY_GS_ALIAS|DEPRECATED_EXTERNAL|TECHNICAL_RESIDUE
+---@return string NATIVE|ORPHANED_NATIVE|VANILLA|SOURCE_CATEGORY|LEGACY_GS_ALIAS|DEPRECATED_EXTERNAL|TECHNICAL_RESIDUE
 function Resolution.classifyStoredRule(condition)
 	condition = type(condition) == "table" and condition or {}
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(condition.nativePath or condition.value)
 	if nativePath then return "NATIVE" end
 	local value = type(condition.value) == "string" and condition.value or ""
-	if Resolution.isTechnicalResidue(condition.nativePath or value) then return "TECHNICAL_RESIDUE" end
+	-- Preserve the existing repair of unambiguous legacy dimensions (including
+	-- nativePath="F", value="Food"); these are not disappeared native paths.
+	local activeValue = condition.nativePath or value
+	if type(activeValue) == "string" and (activeValue:match("^%s*[BFW]%s*$")
+		or activeValue:match("::%s*[BFW]%s*$")) then return "TECHNICAL_RESIDUE" end
+	-- A persisted native identity never falls back to its old display category
+	-- when a mod/path disappears. Preserve it for explicit review.
+	if condition.nativePath ~= nil or value:sub(1, 7) == "native:" then return "ORPHANED_NATIVE" end
+	if Resolution.isTechnicalResidue(value) then return "TECHNICAL_RESIDUE" end
 	if value:match("^gs_[a-z0-9_]+$") then return "LEGACY_GS_ALIAS" end
 	if Resolution.isVanillaKey(value) then return "VANILLA" end
 	if condition.categorySource == "SOURCE_CATEGORY" and isSafeSourceCategory(value) then

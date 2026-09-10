@@ -13,6 +13,7 @@ require "GS_I18n"
 require "GS_NativeProduct"
 require "GS_CategoryResolution"
 require "GS_RuleSanitizer"
+require "GS_RuleIdentity"
 require "GS_NodeFilters"
 
 local UI = require "GS_UI_Framework"
@@ -30,12 +31,14 @@ GlobalStorageSiK.RulesUI.OP_ADD_KEY   = { OR = "IGUI_GS_NodeRulesAddOr",   AND =
 --- como texto visible para poder sustituirlas, pero no se interpretan.
 ---@param key string
 ---@return string
-function GlobalStorageSiK.RulesUI.categoryLabel(key)
+function GlobalStorageSiK.RulesUI.categoryLabel(key, condition)
 	if not key or key == "" then return "?" end
 	local nativePath = GlobalStorageSiK.NativeProduct.decodePath(key)
 	if nativePath then return GlobalStorageSiK.NativeProduct.getView(nativePath).fullLabel end
-	local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule({ value = key })
-	if status == "DEPRECATED_EXTERNAL" then return GlobalStorageSiK.I18n.text("IGUI_GS_RuleDeprecatedExternal", key) end
+	local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition or { value = key })
+	if status == "ORPHANED_NATIVE" or status == "DEPRECATED_EXTERNAL" then
+		return GlobalStorageSiK.I18n.text("IGUI_GS_RuleDeprecatedExternal", key)
+	end
 	if status == "TECHNICAL_RESIDUE" then return GlobalStorageSiK.I18n.text("IGUI_GS_RuleTechnicalResidue", key) end
 	if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then
 		return GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = key })
@@ -51,7 +54,7 @@ end
 function GlobalStorageSiK.RulesUI.describeCondition(condition)
 	if not condition then return "?" end
 	if condition.type == "category" then
-		return GlobalStorageSiK.RulesUI.categoryLabel(condition.nativePath or condition.value)
+		return GlobalStorageSiK.RulesUI.categoryLabel(condition.nativePath or condition.value, condition)
 	end
 	return GlobalStorageSiK.NodeFilters.describe(condition)
 end
@@ -69,9 +72,103 @@ function GlobalStorageSiK.RulesUI.layoutSignature(rules)
 	return table.concat(parts)
 end
 
+function GlobalStorageSiK.RulesUI.stateSignature(rules)
+	local parts = {}
+	for index = 1, #(rules or {}) do
+		local token = GlobalStorageSiK.RuleIdentity.signature(rules[index])
+		if not token then return nil end
+		parts[#parts + 1] = tostring(#token) .. ":" .. token
+	end
+	return table.concat(parts)
+end
+
+local function ruleGestureActive(editor)
+	for _, host in pairs(editor._ruleChipsHosts or {}) do
+		for _, row in ipairs(host.childrenInOrder or {}) do
+			-- Empty groups contain labels inheriting ISUIElement.close (a method),
+			-- whereas a dismissible row owns an actual close-button table.
+			local closeButton = rawget(row, "close")
+			if type(closeButton) == "table" and closeButton._sikPressed == true then return true end
+		end
+	end
+	return false
+end
+
+-- Network sync is event driven. Only an in-flight chip press postpones it;
+-- the existing visible editor update applies the latest snapshot once on release.
+local function flushRuleSync(editor)
+	local pending = editor._pendingRuleSync
+	editor._pendingRuleSync = nil
+	if not pending then return end
+	if pending.model then pending.model() end
+	if pending.content then pending.content() end
+end
+
+function GlobalStorageSiK.RulesUI.applyWhenIdle(editor, callback, kind)
+	editor._pendingRuleSync = editor._pendingRuleSync or {}
+	editor._pendingRuleSync[kind == "content" and "content" or "model"] = callback
+	if not ruleGestureActive(editor) then flushRuleSync(editor); return end
+	if editor._ruleSyncUpdateInstalled then return end
+	editor._ruleSyncUpdateInstalled = true
+	local rawUpdate, previous = rawget(editor, "update"), editor.update
+	editor.update = function(self, ...)
+		if previous then previous(self, ...) end
+		if not self._pendingRuleSync or not ruleGestureActive(self) then
+			self._ruleSyncUpdateInstalled = nil
+			self.update = rawUpdate
+			if not self.getIsVisible or self:getIsVisible() then flushRuleSync(self)
+			else self._pendingRuleSync = nil end
+		end
+	end
+end
+
+function GlobalStorageSiK.RulesUI.refreshEditorRules(editor, rules)
+	local signature = GlobalStorageSiK.RulesUI.stateSignature(rules)
+	if signature ~= nil and editor._rulesIdentityAtBuild == signature then return false end
+	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do editor:rebuildRuleChips(op) end
+	editor._rulesIdentityAtBuild = signature
+	editor._rulesLayoutAtBuild = GlobalStorageSiK.RulesUI.layoutSignature(rules)
+	if editor.rulesBlock and editor.rulesBlock.refreshLayout then editor.rulesBlock:refreshLayout() end
+	editor._lastLayoutW = nil
+	editor:layoutForm()
+	return true
+end
+
+--- Rewrap a passive rule summary only when its text or available width changes.
+function GlobalStorageSiK.RulesUI.refreshSummary(host, rules, width, font, color)
+	if not host then return 0 end
+	width = math.max(1, tonumber(width) or host.width)
+	font = font or UIFont.Small
+	local signature = tostring(width) .. ":" .. GlobalStorageSiK.RulesUI.layoutSignature(rules)
+	if host._summarySignature == signature then return host.height end
+	host._summarySignature = signature
+	for index = #(host.childrenInOrder or {}), 1, -1 do
+		local child = host.childrenInOrder[index]
+		host:removeChild(child)
+		if child.dispose then child:dispose() end
+	end
+	local layout = GlobalStorageSiK.RulesUI.layoutSummary(rules, width, font, color)
+	local fontHeight = getTextManager():getFontHeight(font)
+	host:setWidth(width)
+	host:setHeight(math.max(fontHeight, layout.lineCount * (fontHeight + 2)))
+	for index = 1, #(layout.runs or {}) do
+		local run = layout.runs[index]
+		local tint = run.color
+		local copy = UI.Controls.copyText(host, {
+			x = run.x, y = (run.line - 1) * (fontHeight + 2),
+			w = math.max(1, width - run.x), text = run.text, font = font,
+			lineGap = 0, tone = run.fallback and "textMuted" or "ruleSummary",
+			theme = not run.fallback and { ruleSummary = {
+				r = tint[1], g = tint[2], b = tint[3], a = tint[4] or 1 } } or nil,
+		})
+		if copy.setMouseTransparent then copy:setMouseTransparent(true) end
+	end
+	return host.height
+end
+
 ---@param condition table|nil
----@param fallback table|nil
----@return table RGB
+---@param fallback table|false|nil false requests only a native category colour
+---@return table|nil RGB
 function GlobalStorageSiK.RulesUI.conditionColor(condition, fallback)
 	if type(condition) == "table" and condition.type == "category" then
 		local nativePath = condition.nativePath
@@ -83,7 +180,34 @@ function GlobalStorageSiK.RulesUI.conditionColor(condition, fallback)
 			return GlobalStorageSiK.NativeProduct.getColor(nativePath)
 		end
 	end
+	if fallback == false then return nil end
 	return fallback or { 0.72, 0.75, 0.78 }
+end
+
+-- Preserve extension metadata without sharing mutable tables with the source.
+-- Iterative copying also tolerates repeated references without recursive depth.
+local function cloneCondition(source)
+	local result = {}
+	local copies = { [source] = result }
+	local pending = { source }
+	local index = 1
+	while index <= #pending do
+		local current = pending[index]
+		local target = copies[current]
+		for key, value in pairs(current) do
+			if type(value) == "table" then
+				if not copies[value] then
+					copies[value] = {}
+					pending[#pending + 1] = value
+				end
+				target[key] = copies[value]
+			else
+				target[key] = value
+			end
+		end
+		index = index + 1
+	end
+	return result
 end
 
 --- Copia profunda de una lista de reglas {op, condition}.
@@ -94,9 +218,9 @@ function GlobalStorageSiK.RulesUI.cloneRules(source)
 	for i = 1, #(source or {}) do
 		local rule = source[i]
 		if not GlobalStorageSiK.RuleSanitizer.isJunkCategoryCondition(rule.condition) then
-			local condition = {}
-			for k, v in pairs(rule.condition or {}) do condition[k] = v end
-			result[#result + 1] = { op = rule.op, condition = condition }
+			local copy = cloneCondition(rule)
+			copy.condition = copy.condition or {}
+			result[#result + 1] = copy
 		end
 	end
 	return result
@@ -241,7 +365,8 @@ function GlobalStorageSiK.RulesUI.layoutSummary(rules, maxWidth, font, fallbackC
 	end
 	local function addRun(text, color)
 		if text == "" then return end
-		runs[#runs + 1] = { text = text, x = x, line = line, color = color }
+		runs[#runs + 1] = { text = text, x = x, line = line, color = color,
+			fallback = color == fallbackColor }
 		x = x + tm:MeasureStringX(font, text)
 	end
 	local function addWord(word, color)

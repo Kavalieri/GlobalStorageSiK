@@ -26,8 +26,22 @@ function GS_ProgramDiskAction:isValid()
 	end
 	if self.terminalContext and (not self.callbacks or type(self.callbacks.isAvailable) ~= "function"
 		or not self.callbacks.isAvailable()) then return false end
-	return GlobalStorageSiK.DiskProgramming.knowsProgram(self.character, self.programId)
-		and GlobalStorageSiK.DiskProgramming.terminalInRange(self.character)
+	if self.sourceItem and (self.sourceItem:getContainer() ~= self.character:getInventory()
+		or self.sourceItem:getID() ~= self.sourceItemId
+		or self.sourceItem:getFullType() ~= GlobalStorageSiK.DiskProgramming.BLANK_DISK) then return false end
+	-- World lookup is bounded to this active action. Completion always forces
+	-- a fresh check; the server independently validates before consuming.
+	local now = type(getTimestampMs) == "function" and getTimestampMs() or nil
+	if not now or not self._nextContextCheck or now >= self._nextContextCheck then
+		if self.terminalContext then
+			self._contextReady = GlobalStorageSiK.DiskProgramming.terminalInRange(self.character)
+		else
+			self._contextReady = GlobalStorageSiK.DiskProgramming.contextReadiness(self.character)
+		end
+		self._nextContextCheck = now and (now + 250) or nil
+	end
+	return self._contextReady == true
+		and GlobalStorageSiK.DiskProgramming.knowsProgram(self.character, self.programId)
 end
 
 ---@return boolean
@@ -63,10 +77,11 @@ function GS_ProgramDiskAction:stop()
 end
 
 function GS_ProgramDiskAction:perform()
+	self._nextContextCheck = nil
 	if not self:isValid() then self:stop(); return end
 	self._performed = true
 	ISBaseTimedAction.perform(self)
-	local payload = { programId = self.programId }
+	local payload = { programId = self.programId, itemId = self.sourceItemId }
 	if self.terminalContext then
 		payload.networkId = self.terminalContext.networkId
 		payload.terminalAnchor = self.terminalContext.terminalAnchor
@@ -81,11 +96,15 @@ end
 ---@param character IsoPlayer
 ---@param programId string
 ---@return GS_ProgramDiskAction
-function GS_ProgramDiskAction:new(character, programId, callbacks, terminalContext)
+function GS_ProgramDiskAction:new(character, programId, callbacks, terminalContext, sourceItem)
 	local o = ISBaseTimedAction.new(self, character)
 	o._performed = false
 	o.programId = programId
 	o.callbacks = callbacks
+	if sourceItem then
+		o.sourceItem = sourceItem
+		o.sourceItemId = sourceItem:getID()
+	end
 	if terminalContext then
 		local anchor = terminalContext.terminalAnchor
 		o.terminalContext = { networkId = terminalContext.networkId,

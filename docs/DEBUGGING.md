@@ -42,6 +42,18 @@ session.json
 
 `session.json` inventaría las evidencias generadas. El panel de staff muestra `sessionId`, `runId`, contadores y rutas relativas envueltas; no transmite el contenido completo de los informes al cliente. `excluded-internal-<runId>.log` contiene la lista completa y ordenada de proxies internos separados de `unclassified`, con la regla estructural aplicada (`BodyLocation=base:zeddmg`). La invariante del informe es `totalTypes = classified + unclassified + excludedInternal + pending + classifierErrors`; `reconciliationDelta` debe ser `0`. Auditoría y corpus no requieren activar categorías sandbox. El fichero de permisos solo se crea cuando están activados `Modo depuración (debug)` / `Debug mode` y `>> Identidad y permisos` / `>> Identity & permissions`. En dedicado, activa además `Reenviar logs del dedicado a administradores` / `Relay dedicated-server logs to administrators` únicamente si necesitas el eco acotado en el cliente.
 
+En Corpus, `failedCases` cuenta cada caso fallido una sola vez. Los contadores
+`classificationFailures`, `evidenceFailures` y `facetAttributeFailures` cuentan
+casos por causa y pueden solaparse: un objeto con ruta y faceta incorrectas
+aparece en ambos. No deben sumarse para calcular los casos fallidos.
+`requiredMissingFailures` identifica los casos obligatorios ausentes. Por bloque,
+`facetAttributeChecks` y `facetAttributeCorrect` cuentan comprobaciones de campos,
+no objetos; un objeto puede declarar varias. Desde `1.5.2-dev1`, el encabezado
+conserva también las causas secundarias que antes solo aparecían en el detalle.
+Para comprobarlo, ejecuta Corpus desde Staff y conserva `taxonomy/corpus-<runId>.log`;
+no requiere activar opciones sandbox. El resumen y las divergencias deben
+coincidir aunque el mismo objeto falle en más de una dimensión.
+
 El censo `taxonomy/census-<runId>.log` es un TSV de diagnóstico autoritativo,
 generado únicamente al solicitar la auditoría. Su esquema 2 conserva las nueve
 columnas originales y añade módulo de script, categoría/tipo originales, tags
@@ -229,13 +241,15 @@ Comprueba en dedicado el propietario, un administrador y varios miembros con nom
 
 Repite la presentación y las operaciones esenciales cambiando solo el idioma del cliente entre español, inglés, chino y ruso; añade cualquier otro idioma instalado como pasada de humo. Los UUID, roles, número de candidatos y resultados `ok/changed/reason` deben ser idénticos: únicamente cambia el texto localizado. Reinicia el cliente después de cada cambio de idioma y no reutilices capturas de una sesión anterior.
 
-Si otro mod sustituye `ISToolTipInv.render` después de GS, el vigilante restaura el wrapper exterior y, con `DebugCatTooltip`, deja una única línea resumida:
-
-```text
-[12.3s][CLI] [GlobalStorageSiK:DEBUG:ItemNetworkTooltip] hook chain changed; GS outer wrapper restored
-```
-
-Para confirmar que un ítem concreto atraviesa el render solo durante un diagnóstico dirigido, activa además `DebugCatInventory` y `DebugDetailInventory`; las líneas resultantes usan el área `ItemNetworkTooltipDetail` y pueden repetirse cada frame.
+El tooltip instala su integración una sola vez, con reintentos de arranque
+acotados. No mantiene un vigilante que vuelva a envolver `ISToolTipInv.render`.
+Cuando TooltipLib está disponible, registra un proveedor y evita añadir dos
+veces el anexo de red en inventarios reales. Si otro mod sustituye después la
+cadena sin delegar, conserva el orden de carga y `console.txt` para diagnóstico;
+no se intenta ganar la prioridad reinstalando hooks. Activa únicamente
+`Modo depuración (debug)` / `Debug mode` y `>> Tooltip de red` /
+`>> Network tooltip`: las líneas de `ItemNetworkTooltip` describen la instalación
+y sus fallos, sin trazas por objeto o frame.
 
 ## Craft y Builder
 
@@ -262,6 +276,31 @@ Formato:
 ```
 
 El tiempo transcurrido permite medir esperas. `operationId` correlaciona cliente, servidor, claims y resultado; no abras un segundo identificador para el mismo intento.
+
+### Prueba DEV: recarga de sopletes con propano de red
+
+Activa solo `Modo debug (Craft)` / `Debug mode (Craft)` y `Operaciones` /
+`Operations`. Desde un terminal accesible con la impresora instalada, recarga
+un soplete usando un depósito de propano parcial y después uno lleno. Repite
+desde su menú contextual y desde Global Storage, con varios sopletes en el
+inventario principal y en una bolsa propia abierta. El objetivo explícito debe
+ser el elegido; una selección agregada usa un candidato no lleno del inventario
+activo propio, nunca de un contenedor del mundo ni de otro jugador. Si el
+objetivo desaparece, no debe sustituirse por otro.
+
+Cancela mientras se esperan materiales, cierra y reabre la sesión y repite con
+dos jugadores, muerte y reconexión. El registro `craftAttempt START/WAIT/RESUME`
+debe corresponder a una sola operación por activación; una operación cancelada
+no puede emitir un nuevo `RESUME` cuando llegue un material tardío. La línea
+`pending craft abort failed` indica un fallo de cleanup que debe investigarse.
+Para seguir el reembolso añade al Core únicamente `Modo depuración (debug)` /
+`Debug mode` y `>> Inventario y transferencias` / `>> Inventory & transfers`.
+Conserva los `console.txt` del cliente y del dedicado.
+
+Compara gas y estado antes y después con la receta vanilla `RefillBlowTorch`:
+esta receta crea el soplete de resultado a partir del consumido y conserva el
+depósito. No se exige conservar el ID del soplete consumido; sí evitar cualquier
+consumo o resultado duplicado y devolver el depósito exacto y sus sobrantes.
 
 En un lote correcto, `batchPlan` debe reflejar todas las entradas adicionales, los callbacks avanzan `PROGRESS 1/N` ... `END N/N` y los diagnósticos servidor conservan solo contenedores físicos. Un salto a todos los contenedores visibles de la UI (por ejemplo, `containers=30`) seguido de `resultCreated=false` indica que el panel repobló el `HandcraftLogic` entre acciones. Tras un lote exitoso, `operation_complete_return` debe contener herramientas o sobrantes reales; devolver exactamente los consumibles de una unidad es señal de que hubo un callback sin resultado creado.
 

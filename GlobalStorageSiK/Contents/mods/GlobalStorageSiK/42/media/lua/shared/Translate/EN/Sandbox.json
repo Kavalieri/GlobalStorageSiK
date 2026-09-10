@@ -45,7 +45,7 @@
 	"Sandbox_GlobalStorageSiK_EnableFuelConsumption": "[WIP] Consume generator fuel",
 	"Sandbox_GlobalStorageSiK_EnableFuelConsumption_tooltip": "EXPERIMENTAL, still being tested. OFF by default out of caution: the network consumes nothing, it just requires power to be present (see 'Require electricity' above, that one is stable). If turned ON, while the network is running off a nearby active generator (never off the normal grid, before the blackout), fuel is slowly drained according to 'Base consumption' and 'Per-container consumption'.",
 	"Sandbox_GlobalStorageSiK_FuelConsumptionBase": "   >> [WIP] Base consumption (per game hour)",
-	"Sandbox_GlobalStorageSiK_FuelConsumptionBase_tooltip": "Requires 'Consume generator fuel' ON (experimental). Fuel the network drains per in-game hour just for being active, before adding per-container consumption. Same unit the generator itself uses (like the vanilla 'Generator fuel consumption' option).",
+	"Sandbox_GlobalStorageSiK_FuelConsumptionBase_tooltip": "Requires 'Consume generator fuel' ON (experimental). Fuel that the network drains per in-game hour simply for being active, before adding per-container consumption. Same unit the generator itself uses (like the vanilla 'Generator fuel consumption' option).",
 	"Sandbox_GlobalStorageSiK_FuelConsumptionPerContainer": "   >> [WIP] Per-container consumption (per game hour)",
 	"Sandbox_GlobalStorageSiK_FuelConsumptionPerContainer_tooltip": "Requires 'Consume generator fuel' ON (experimental). Extra fuel the network drains per in-game hour, multiplied by the number of containers/nodes it has registered. Bigger networks consume more.",
 	"Sandbox_GlobalStorageSiK_EnableGeneratorGrid": "   >> [WIP] Multi-generator grid per building",

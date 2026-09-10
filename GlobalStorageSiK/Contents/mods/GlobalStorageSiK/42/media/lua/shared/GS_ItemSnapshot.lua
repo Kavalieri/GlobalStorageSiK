@@ -484,12 +484,15 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	elseif foodStateKey then
 		detailKind = "food"
 		variantKey = foodStateKey
-	elseif conditionSignature then
-		detailKind = "condition"
-		variantKey = conditionSignature
 	elseif literatureTitle or learnedRecipeNamesFromItem(item) or numberOfPagesFromItem(item) then
 		detailKind = "literature"
 		variantKey = "literature:" .. tostring(literatureTitle or fullType)
+		-- Literature inherits condition from InventoryItem. Testing condition
+		-- first merged different titles whenever both books had the same wear.
+		if conditionSignature then variantKey = variantKey .. "|" .. conditionSignature end
+	elseif conditionSignature then
+		detailKind = "condition"
+		variantKey = conditionSignature
 	end
 	-- El mismo fullType Moveable puede representar sprites y funciones físicas
 	-- distintas. El sprite participa siempre en la identidad de la fila, sin

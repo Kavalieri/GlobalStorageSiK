@@ -288,6 +288,7 @@ local function compactParentRows(detailRows)
 			summary = {
 				key = variantKey, count = 0, detailKind = detailKind,
 				fullType = detail.fullType, displayName = detail.displayName,
+				literatureTitle = detail.literatureTitle,
 				mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
 				mediaCodes = detail.mediaCodes,
 				dynamicSignature = detail.dynamicSignature,
@@ -303,6 +304,19 @@ local function compactParentRows(detailRows)
 			}
 			parent._variantSeen[variantKey] = summary
 			parent.variantSummary[#parent.variantSummary + 1] = summary
+		end
+		-- Reuse the captured exact identities. One deterministic representative
+		-- per literature variant supports sequential reading without another
+		-- detail query or a fabricated row key. The snapshot already signs IDs.
+		if detailKind == "literature" then
+			for j = 1, #(detail.itemIds or {}) do
+				local id = detail.itemIds[j]
+				if type(id) == "number" and id >= 0 and id < math.huge
+					and id == math.floor(id)
+					and (not summary.representativeItemId or id < summary.representativeItemId) then
+					summary.representativeItemId = id
+				end
+			end
 		end
 		summary.count = summary.count + (detail.count or 0)
 		if detailKind then parent._detailKinds[detailKind] = true end

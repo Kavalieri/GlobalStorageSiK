@@ -4,13 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310&quot;,
-  &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74&quot;,
+  &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;a09871d13274e065f3dc0ffa8ff89287cb2fc21f3a8b41c67d3a5c2976fe9d89&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;1b9095f31605e9c16bfefe95087ce166ffa670753ee78843248152f4a0521480&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;814e85c0ad7b1cc8c5c909a2afa45e87a3763f5e442d5f44aeb12447ba7302a2&quot;
+  &quot;visualMasterSha256&quot;: &quot;15f8cc6b74186e79047077857756f3b72c5703c7d1c7a2813e2e9c6d37ddcba5&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;91d66e21001561186b1a7e19d59ab06f50f225903dd1225f51d2e4d3ae36bb23&quot;
 }">
   <title>tab-options</title>
   <style>:root {
@@ -35,10 +35,11 @@
   --sik-resize-grip: 14px;
   --sik-rail-icon-size: 56px;
   --sik-bg: #0b0b0b;
-  --sik-window: #101010;
-  --sik-panel: #131313;
-  --sik-panel-alt: #171717;
-  --sik-header: #191919;
+  --sik-window: rgba(16, 16, 16, .86);
+  --sik-panel: rgba(19, 19, 19, .13);
+  --sik-panel-alt: rgba(23, 23, 23, .18);
+  --sik-table-block: #131313;
+  --sik-header: rgba(25, 25, 25, .20);
   --sik-row: #0f0f0f;
   --sik-row-alt: #121212;
   --sik-row-hover: #18202a;
@@ -87,11 +88,11 @@ body {
   color: var(--sik-text);
   font: var(--sik-font-size)/1.35 var(--sik-font);
 }
-html[data-palette="blue"] { --sik-window:#0d1114; --sik-panel:#11171b; --sik-panel-alt:#151d22; --sik-header:#171d21; --sik-row:#0e1418; --sik-row-alt:#11191e; --sik-border:#30404a; --sik-border-strong:#465c69; }
-html[data-palette="purple"] { --sik-window:#110e13; --sik-panel:#171219; --sik-panel-alt:#1d171f; --sik-header:#1d181f; --sik-row:#140f16; --sik-row-alt:#18121a; --sik-border:#433548; --sik-border-strong:#5e4a65; }
-html[data-palette="green"] { --sik-window:#0d120f; --sik-panel:#111813; --sik-panel-alt:#161e19; --sik-header:#171d19; --sik-row:#0e1511; --sik-row-alt:#111a15; --sik-border:#33483a; --sik-border-strong:#496552; }
-html[data-palette="wine"] { --sik-window:#130e0e; --sik-panel:#1a1212; --sik-panel-alt:#211717; --sik-header:#201818; --sik-row:#170f0f; --sik-row-alt:#1c1212; --sik-border:#4a3434; --sik-border-strong:#684949; }
-html[data-palette="amber"] { --sik-window:#13120d; --sik-panel:#1a1811; --sik-panel-alt:#211e16; --sik-header:#201e17; --sik-row:#17150e; --sik-row-alt:#1c1911; --sik-border:#4a4432; --sik-border-strong:#685f46; }
+html[data-palette="blue"] { --sik-window:rgba(13,17,20,.86); --sik-panel:rgba(17,23,27,.13); --sik-panel-alt:rgba(21,29,34,.18); --sik-table-block:#11171b; --sik-header:rgba(23,29,33,.20); --sik-row:#0e1418; --sik-row-alt:#11191e; --sik-border:#30404a; --sik-border-strong:#465c69; }
+html[data-palette="purple"] { --sik-window:rgba(17,14,19,.86); --sik-panel:rgba(23,18,25,.13); --sik-panel-alt:rgba(29,23,31,.18); --sik-table-block:#171219; --sik-header:rgba(29,24,31,.20); --sik-row:#140f16; --sik-row-alt:#18121a; --sik-border:#433548; --sik-border-strong:#5e4a65; }
+html[data-palette="green"] { --sik-window:rgba(13,18,15,.86); --sik-panel:rgba(17,24,19,.13); --sik-panel-alt:rgba(22,30,25,.18); --sik-table-block:#111813; --sik-header:rgba(23,29,25,.20); --sik-row:#0e1511; --sik-row-alt:#111a15; --sik-border:#33483a; --sik-border-strong:#496552; }
+html[data-palette="wine"] { --sik-window:rgba(19,14,14,.86); --sik-panel:rgba(26,18,18,.13); --sik-panel-alt:rgba(33,23,23,.18); --sik-table-block:#1a1212; --sik-header:rgba(32,24,24,.20); --sik-row:#170f0f; --sik-row-alt:#1c1212; --sik-border:#4a3434; --sik-border-strong:#684949; }
+html[data-palette="amber"] { --sik-window:rgba(19,18,13,.86); --sik-panel:rgba(26,24,17,.13); --sik-panel-alt:rgba(33,30,22,.18); --sik-table-block:#1a1811; --sik-header:rgba(32,30,23,.20); --sik-row:#17150e; --sik-row-alt:#1c1911; --sik-border:#4a4432; --sik-border-strong:#685f46; }
 
 button,
 input { font: inherit; }
@@ -115,7 +116,12 @@ button:disabled { cursor: default; }
   overflow: hidden;
   border: 1px solid #4a525a;
   background: var(--sik-window);
-  box-shadow: 0 14px 38px #000d;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, .46);
+}
+
+.sik-window.is-active-window {
+  border-color: var(--sik-focus);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, .46), inset 0 0 0 1px rgba(233, 195, 125, .54);
 }
 
 .sik-window-header {
@@ -225,7 +231,7 @@ button:disabled { cursor: default; }
   flex-direction: column;
   gap: 4px;
   border-right: 1px solid #303941;
-  background: var(--sik-window);
+  background: transparent;
 }
 
 .sik-rail-tab {
@@ -280,7 +286,7 @@ button:disabled { cursor: default; }
   min-height: 0;
   padding: var(--sik-window-content-inset);
   overflow: hidden;
-  background: var(--sik-window);
+  background: transparent;
 }
 .sik-content-host--flush { padding: 0; }
 .sik-content-host--flush > .sik-surface-root {
@@ -324,6 +330,7 @@ button:disabled { cursor: default; }
   border: 1px solid var(--sik-border);
   background: var(--sik-panel);
 }
+.sik-block:has(.sik-table-row) { background: var(--sik-table-block); }
 .sik-block:has(> .sik-block-header) {
   display: flex;
   flex-direction: column;
@@ -484,7 +491,7 @@ button:disabled { cursor: default; }
   min-height: var(--sik-control-height);
   padding: 0 calc(var(--sik-control-extra) / 2);
   border: 1px solid var(--sik-border-strong);
-  background: #1b1b1b;
+  background: rgba(27, 27, 27, .88);
   color: var(--sik-text);
 }
 
@@ -517,6 +524,9 @@ button:disabled { cursor: default; }
 .sik-control-row--equal > .sik-button { flex: 1 1 0; min-width: 0; }
 .sik-control-row--wrap { flex-wrap: wrap; }
 .sik-control-row--equal.sik-control-row--wrap > .sik-button { flex: 1 1 180px; }
+.sik-control-row--responsive { flex-wrap: wrap; }
+.sik-control-row--responsive > .sik-combo-wrap { flex: 1 1 220px; }
+.sik-control-row--responsive > .sik-button { flex: 0 0 auto; }
 .sik-combo-wrap { position: relative; min-width: 0; flex: 1 1 0; }
 .sik-combo-wrap .sik-combo-list { position: absolute; z-index: 25; left: 0; right: 0; top: 100%; }
 .sik-status-grid,
@@ -635,10 +645,8 @@ button:disabled { cursor: default; }
 .sik-addon-slot > .sik-tooltip { left: 12px; top: calc(100% + 6px); width: min(360px, calc(200% - 18px)); }
 .sik-addon-slot > .sik-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-addon-slot > .sik-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
-.sik-program-card { min-width: 0; display: flex; flex-direction: column; gap: var(--sik-space-2); }
-.sik-program-card .sik-program-main { flex: 1 1 auto; }
 .sik-program-resource-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sik-space-3); }
-.sik-program-main { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: var(--sik-space-3); align-items: start; }
+.sik-program-resource-row .sik-program-main { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start; }
 .sik-program-state { color: var(--sik-text-soft); font-size: 11px; }
 .sik-program-state.is-ready { color: var(--sik-good); }
 .sik-program-state.is-warning { color: var(--sik-warn); }
@@ -936,6 +944,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   max-width: min(900px, calc(100vw - 32px));
 }
 .sik-modal-body { padding: var(--sik-window-content-inset); text-align: left; }
+.sik-modal--task-requirements {
+  width: min(960px, calc(100vw - 32px));
+  min-width: min(720px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  display: grid;
+  grid-template-rows: var(--sik-window-header-height) minmax(0, 1fr);
+  resize: both;
+}
+.sik-modal--terminal-config {
+  width: min(720px, calc(100vw - 32px));
+  min-width: min(560px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  display: grid;
+  grid-template-rows: var(--sik-window-header-height) minmax(0, 1fr);
+  resize: both;
+}
+.sik-modal--task-requirements > .sik-modal-body,
+.sik-modal--terminal-config > .sik-editor-body { min-height: 0; overflow: auto; }
+.sik-editor-preview--resizable {
+  width: min(1180px, 100%);
+  min-width: min(760px, 100%);
+  resize: both;
+}
 .sik-modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sik-space-2); margin-top: var(--sik-space-5); }
 .sik-modal-actions.sik-block { margin-top: 0; }
 .sik-modal-actions.sik-block > .sik-block-header { grid-column: 1 / -1; }
@@ -1128,6 +1159,11 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   .sik-action-status { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 }
 
+@container sik-ui-tab-panel (max-width: 560px) {
+  .sik-control-row--responsive > .sik-combo-wrap,
+  .sik-control-row--responsive > .sik-button { flex-basis: 100%; width: 100%; }
+}
+
 @media (max-width: 560px) {
   .review-grid { grid-template-columns: 1fr; }
   .review-state-gallery { grid-template-columns: 1fr; }
@@ -1139,7 +1175,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     /* La shell canónica no consume los perfiles históricos del tablero: el header siempre abarca rail y contenido. */
     :root[data-profile] .sik-terminal-shell { --sik-pref-h:900px; --sik-max-h:1600px; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
     .sik-shell-body { display:grid; grid-template-columns:var(--sik-shell-rail-width) minmax(0,1fr); gap:var(--sik-shell-rail-content-gap); min-height:0; overflow:hidden; }
-    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; container-name:sik-ui-tab-panel; container-type:inline-size; }
     .sik-shell-body > .sik-shell-main > .sik-content-host { display:flex; width:100%; height:100%; min-height:0; padding:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main > .sik-content-host > [data-panel] { flex:1 1 auto; min-width:0; min-height:0; }
     .sik-rail { width:var(--sik-shell-rail-width); }
@@ -1218,6 +1254,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                   <div class="sik-block" data-options-block="members" data-state-group data-state="owner">
                     <button data-state-option="owner" type="button" hidden></button>
                     <button data-state-option="owner-without-backup" type="button" hidden></button>
+                    <button data-state-option="owner-many" type="button" hidden></button>
+                    <button data-state-option="owner-zero" type="button" hidden></button>
+                    <button data-state-option="owner-cjk" type="button" hidden></button>
                     <div class="sik-block-header" data-help="Muestra rol y última conexión. Pulsa una fila para gestionar rol, zonas permitidas, propiedad o retirada de acceso.">Miembros</div>
                     <div class="sik-block-body">
                       <div class="sik-table" data-sik-table>
@@ -1230,22 +1269,47 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                         <div class="sik-table-row is-interactive"><span class="sik-role-admin">Admin</span><span>Sarini</span><span class="sik-state-offline">Hace 2 d</span></div>
                         <div class="sik-table-row is-interactive"><span>Miembro</span><span>Rook</span><span class="sik-state-offline">Hace 6 h</span></div>
                       </div>
-                      <div class="sik-block sik-member-successor-alert" data-state-view="owner">
-                        <div class="sik-block-header" data-help="La sucesión conserva una vía de recuperación para la red si muere su propietario actual."><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Si mueres, la red queda vacante. Un sucesor con acceso podrá reclamarla; tu propia cuenta conserva prioridad para recuperar el acceso.</span></button>Sucesión de la red</div>
-                        <div class="sik-block-copy">Si mueres, la red queda vacante. Un miembro con acceso puede reclamarla.</div>
+                      <div class="sik-feedback sik-feedback--alert-row sik-member-successor-alert" data-state-view="owner owner-many owner-zero owner-cjk">
+                        <button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Si mueres, la red queda vacante. Un sucesor con acceso podrá reclamarla; tu propia cuenta conserva prioridad para recuperar el acceso.</span></button><span>Sucesión de la red</span>
                       </div>
-                      <div class="sik-block sik-member-successor-alert" data-state-view="owner-without-backup" hidden>
-                        <div class="sik-block-header" data-help="No hay otro miembro que pueda reclamar la red si fallece el propietario."><button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Sin otros miembros: si mueres, esta red se quedará sin propietario hasta que una identidad autorizada pueda recuperarla.</span></button>Sucesión de la red</div>
-                        <div class="sik-block-copy">Sin otros miembros: si mueres, esta red se quedará sin propietario.</div>
+                      <div class="sik-feedback sik-feedback--alert-row sik-member-successor-alert" data-state-view="owner-without-backup" hidden>
+                        <button class="sik-alert" type="button" data-symbol-state="warning" aria-label="Aviso de sucesión"><span class="sik-tooltip">Sin otros miembros: si mueres, esta red se quedará sin propietario hasta que una identidad autorizada pueda recuperarla.</span></button><span>Sucesión de la red</span>
                       </div>
                       <button class="sik-button sik-button--full" data-visible-when="can-claim-as-admin" type="button" hidden>Reclamar propiedad</button>
-                      <div class="sik-action-section" data-visible-when="admin-or-owner">
+                      <div class="sik-action-section" data-visible-when="admin-or-owner" data-state-view="owner owner-many owner-without-backup">
                         <div class="sik-subheading">Añadir acceso</div>
-                        <div class="sik-control-row sik-control-row--wrap">
-                          <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-selected="none" type="button">Seleccionar jugador o facción...</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="faction">Mi facción</div><div class="sik-combo-option" data-value="rook">Rook · jugador conectado</div><div class="sik-combo-option" data-value="server">Servidor</div></div></div>
+                        <div class="sik-control-row sik-control-row--responsive" data-access-state="many">
+                          <div class="sik-combo-wrap" data-access-picker><button class="sik-combo is-open" data-combo data-searchable="true" data-selected="none" type="button" aria-expanded="true">Seleccionar jugador o facción...</button><div class="sik-combo-list"><input class="sik-field" data-access-picker-search data-combo-search type="search" value="" placeholder="Buscar..." aria-label="Buscar"><div class="sik-subheading" data-access-picker-group="faction" data-combo-group-heading="faction">Mi facción</div><div class="sik-combo-option" data-value="faction" data-group="faction" data-group-label="Mi facción">Mi facción</div><div class="sik-subheading" data-access-picker-group="connected" data-combo-group-heading="connected">Jugadores conectados</div><div class="sik-combo-option" data-value="rook" data-group="connected" data-group-label="Jugadores conectados">Rook · jugador conectado</div><div class="sik-combo-option" data-value="li-lei" data-group="connected" data-group-label="Jugadores conectados">李雷 · jugador conectado</div><div class="sik-combo-option" data-value="server" data-group="connected" data-group-label="Jugadores conectados">Servidor</div></div></div>
+                          <button class="sik-button sik-button--field-action" type="button" disabled>Añadir</button>
+                        </div>
+                      </div>
+                      <div class="sik-action-section" data-visible-when="admin-or-owner" data-state-view="owner-zero" hidden>
+                        <div class="sik-subheading">Añadir acceso</div>
+                        <div class="sik-control-row sik-control-row--responsive" data-access-state="zero">
+                          <div class="sik-combo-wrap"><button class="sik-combo" data-selected="none" type="button" disabled>No hay jugadores o facciones disponibles</button></div>
+                          <button class="sik-button sik-button--field-action" type="button" disabled>Añadir</button>
+                        </div>
+                      </div>
+                      <div class="sik-action-section" data-visible-when="admin-or-owner" data-state-view="owner-cjk" hidden>
+                        <div class="sik-subheading">Añadir acceso</div>
+                        <div class="sik-control-row sik-control-row--responsive" data-access-state="cjk">
+                          <div class="sik-combo-wrap" data-access-picker><button class="sik-combo is-open" data-combo data-searchable="true" data-selected="li-lei" type="button" aria-expanded="true">李雷 · jugador conectado</button><div class="sik-combo-list"><input class="sik-field" data-access-picker-search data-combo-search type="search" value="" placeholder="Buscar..." aria-label="Buscar"><div class="sik-subheading" data-access-picker-group="faction" data-combo-group-heading="faction">Mi facción</div><div class="sik-combo-option" data-value="faction" data-group="faction" data-group-label="Mi facción">Mi facción</div><div class="sik-subheading" data-access-picker-group="connected" data-combo-group-heading="connected">Jugadores conectados</div><div class="sik-combo-option" data-value="rook" data-group="connected" data-group-label="Jugadores conectados">Rook · jugador conectado</div><div class="sik-combo-option" data-value="li-lei" data-group="connected" data-group-label="Jugadores conectados">李雷 · jugador conectado</div><div class="sik-combo-option" data-value="server" data-group="connected" data-group-label="Jugadores conectados">Servidor</div></div></div>
                           <button class="sik-button sik-button--field-action" type="button">Añadir</button>
                         </div>
-                        <div class="sik-feedback is-warning" data-visible-when="add-without-selection" hidden><span class="sik-feedback-mark"></span><span>Nada seleccionado.</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div data-state-group data-state="sp">
+                    <button data-state-option="sp" type="button" hidden></button>
+                    <button data-state-option="mp" type="button" hidden></button>
+                    <div class="sik-block" data-options-block="taxonomy-world" data-state-view="sp">
+                      <div class="sik-block-header" data-help="Corrige la clasificación de un tipo de objeto para toda esta partida en un jugador. No depende de la red abierta y no se muestra en multijugador.">Correcciones de categorías</div><div class="sik-form">
+                        <span>Tipo de objeto</span><div class="sik-action-row"><input class="sik-field" value="Base.Axe" placeholder="Tipo de objeto" aria-label="Tipo de objeto"><button class="sik-button" type="button">Consultar</button></div>
+                        <div class="sik-rule-chip"><span>Actual: Combate → Armas cuerpo a cuerpo → Hachas · Automática</span></div>
+                        <span>Nueva clasificación</span><div class="sik-action-row sik-action-row--equal"><button class="sik-combo" type="button">Combate</button><button class="sik-combo" type="button">Armas cuerpo a cuerpo</button><button class="sik-combo" type="button">Hachas</button></div>
+                        <span>Motivo</span><input class="sik-field" value="Ajuste revisado para esta partida" placeholder="Motivo" aria-label="Motivo de la corrección">
+                        <div class="sik-action-row sik-action-row--equal"><button class="sik-button" type="button">Aplicar corrección</button><button class="sik-button" type="button">Restaurar automática</button></div>
+                        <div class="sik-feedback"><span class="sik-feedback-mark"></span><span>Sin cambios pendientes</span></div>
                       </div>
                     </div>
                   </div>
@@ -1590,6 +1654,47 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
 
+  function filterSearchableCombo(combo) {
+    if (!combo || combo.dataset.searchable !== "true") return;
+    const wrap = combo.closest(".sik-combo-wrap");
+    const search = wrap?.querySelector("[data-combo-search]");
+    const query = foldText(search?.value);
+    const visibleGroups = new Set();
+    wrap?.querySelectorAll(".sik-combo-option").forEach((option) => {
+      const visible = !query || foldText(option.textContent).includes(query);
+      option.hidden = !visible;
+      if (visible && option.dataset.group) visibleGroups.add(option.dataset.group);
+    });
+    wrap?.querySelectorAll("[data-combo-group-heading]").forEach((heading) => {
+      heading.hidden = !visibleGroups.has(heading.dataset.comboGroupHeading);
+    });
+  }
+
+  function resetSearchableCombo(combo) {
+    if (!combo || combo.dataset.searchable !== "true") return;
+    const search = combo.closest(".sik-combo-wrap")?.querySelector("[data-combo-search]");
+    if (search) search.value = "";
+    filterSearchableCombo(combo);
+  }
+
+  function closeCombo(combo) {
+    if (!combo) return;
+    combo.classList.remove("is-open");
+    combo.setAttribute("aria-expanded", "false");
+    resetSearchableCombo(combo);
+  }
+
+  function openCombo(combo) {
+    if (!combo) return;
+    resetSearchableCombo(combo);
+    combo.classList.add("is-open");
+    combo.setAttribute("aria-expanded", "true");
+  }
+
+  function closeAllCombos() {
+    document.querySelectorAll("[data-combo].is-open").forEach(closeCombo);
+  }
+
   function filterWarehouse() {
     const table = document.querySelector(".sik-warehouse-table");
     if (!table) return;
@@ -1703,8 +1808,8 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     const combo = event.target.closest("[data-combo]");
     if (combo) {
       const wasOpen = combo.classList.contains("is-open");
-      document.querySelectorAll("[data-combo].is-open").forEach((candidate) => candidate.classList.remove("is-open"));
-      if (!wasOpen) combo.classList.add("is-open");
+      closeAllCombos();
+      if (!wasOpen) openCombo(combo);
     }
 
     const comboOption = event.target.closest(".sik-combo-option");
@@ -1714,7 +1819,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       if (owner) {
         owner.textContent = comboOption.textContent;
         owner.dataset.selected = comboOption.dataset.value || "all";
-        owner.classList.remove("is-open");
+        closeCombo(owner);
         filterWarehouse();
       }
     }
@@ -1757,9 +1862,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       document.querySelectorAll("[data-preview-query]").forEach((button) => button.classList.toggle("is-active", button === preview));
     }
 
-    if (!event.target.closest(".sik-combo-wrap")) {
-      document.querySelectorAll("[data-combo].is-open").forEach((candidate) => candidate.classList.remove("is-open"));
-    }
+    if (!event.target.closest(".sik-combo-wrap")) closeAllCombos();
   });
 
   document.addEventListener("keydown", (event) => {
@@ -1768,10 +1871,13 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       event.target.click();
     }
     if (event.key === "Escape") setModal(false);
-    if (event.key === "Escape") document.querySelectorAll("[data-combo].is-open").forEach((candidate) => candidate.classList.remove("is-open"));
+    if (event.key === "Escape") closeAllCombos();
   });
 
   document.addEventListener("input", (event) => {
+    if (event.target.matches("[data-combo-search]")) {
+      filterSearchableCombo(event.target.closest(".sik-combo-wrap")?.querySelector("[data-combo][data-searchable=\"true\"]"));
+    }
     if (event.target.matches("[data-warehouse-search]")) filterWarehouse();
     if (event.target.matches(".sik-priority-field")) {
       const value = event.target.value;

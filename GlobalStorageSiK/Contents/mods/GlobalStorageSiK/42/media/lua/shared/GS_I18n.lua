@@ -197,7 +197,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_LeftNetworkMsg = "You left the network",
 	IGUI_GS_TerminalDefaultNameFmt = "Terminal {1}",
 	IGUI_GS_MemberEditorLeaveBtn = "Leave network",
-	IGUI_GS_MemberEditorLeaveConfirm = "Leave this network? If you're the owner, ownership passes automatically to another admin or member, same as on death.",
+	IGUI_GS_MemberEditorLeaveConfirm = "Leave this network? If you are the owner, ownership passes to another eligible administrator or member, if available.",
 	IGUI_GS_MemberZoneAccessTitle = "Container access by zone",
 	IGUI_GS_MemberZoneAccessHint = "Checked zones allow access to all their containers. New zones are allowed by default.",
 	IGUI_GS_MemberZoneSelectAll = "Select all",
@@ -260,11 +260,11 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NoNodesYet = "No containers detected in zones.",
 	IGUI_GS_ShowTerminalCoverage = "Show coverage",
 	IGUI_GS_HideTerminalCoverage = "Hide coverage",
-	IGUI_GS_NodesPriorityHelp = "Destination order:\n1) Zone rules: if the zone has its own acceptance protocol, the item must pass it first.\n2) A container with its own rule that accepts the item ALWAYS wins over one with no rules at all (Global) - regardless of either one's priority.\n3) Priority: among equally specific containers (all with their own rule, or all Global), zone priority decides first, then container priority.\n4) Affinity: if priority is still tied, the container that already holds that same item (or its family) is preferred.\nIf no valid destination has space, the item stays in your inventory.",
+	IGUI_GS_NodesPriorityHelp = "Destination order:\n1) The item must pass the zone and container rules.\n2) More specific matching rules take precedence over broader rules and unrestricted containers.\n3) With equal specificity, zone priority comes first, then container priority (1 = first, 100 = last).\n4) Only unrestricted containers use matching contents or family to break remaining ties.\nIf no valid destination has space, the item stays in your inventory.",
 	IGUI_GS_CreateZoneTitle = "Create a new zone",
 	IGUI_GS_NodesDestOrderLabel = "Destination order",
 	IGUI_GS_ZonePriorityLabel = "Zone priority:",
-	IGUI_GS_ZonePriorityHint = "Decides which zone is offered first when several accept the same item. 1 = first, 100 = last. Left at 50 (default), all zones are equal and this rule has no effect; affinity decides instead.",
+	IGUI_GS_ZonePriorityHint = "Among equally specific destinations, zone priority decides before container priority. 1 = first, 100 = last; default = 50. Equal zone priorities are resolved by container priority. For containers without rules, affinity breaks any remaining tie.",
 	IGUI_GS_ZonePriorityValue = "Zone {1}",
 	IGUI_GS_NodeConfigTemplateTitle = "Configuration template",
 	IGUI_GS_NodeConfigTemplateReady = "Copied from {1}: {2} categories, {3} custom filters, priority {4}.",
@@ -310,7 +310,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodeCollapse = "Hide container contents",
 	IGUI_GS_RefreshScan = "Rescan containers",
 	IGUI_GS_ZoneListTitle = "Configured zones (rename or delete):",
-	IGUI_GS_NoZonesYet = "No zones yet. Create one with the buttons above.",
+	IGUI_GS_NoZonesYet = "No zones yet.",
 	IGUI_GS_ScanSummary = "Last scan: +{1} new, {2} offline",
 	IGUI_GS_ScanNew = "New containers: {1}",
 	IGUI_GS_ScanUpdated = "Updated: {1}",
@@ -376,7 +376,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_ItemTypes = "Item types in network: {1}",
 	IGUI_GS_NoZones = "No containers. Create a zone in Setup and press Rescan.",
 	IGUI_GS_NodesHelp = "Rename containers and pick one category. «Any» = accept all items.",
-	IGUI_GS_NodesHelpShort = "Click + on a zone header to expand or collapse it.\nRight-click a zone header to highlight it in the world.\nClick a container row to open its editor.",
+	IGUI_GS_NodesHelpShort = "Click the arrow on a zone header to expand or collapse it.\nRight-click a zone header to highlight it in the world.\nClick a container row to open its editor.",
 	IGUI_GS_CategoryLabel = "Category:",
 	IGUI_GS_CategoryAny = "Any (all items)",
 	-- Improved node editor
@@ -388,7 +388,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_NodePriorityHigh      = "High - fill first",
 	IGUI_GS_NodePriorityNormal    = "Normal",
 	IGUI_GS_NodePriorityLow       = "Low - fill last",
-	IGUI_GS_NodePriorityHint      = "Decides which container fills first when several accept the same item. 1 = first, 100 = last. Left at 50 (default), all containers are equal and this rule has no effect; affinity decides instead.",
+	IGUI_GS_NodePriorityHint      = "Among equally specific destinations, zone priority decides before container priority. 1 = first, 100 = last; default = 50. Equal zone priorities are resolved by container priority. For containers without rules, affinity breaks any remaining tie.",
 	IGUI_GS_NodePriorityPresetHigh   = "High (10)",
 	IGUI_GS_NodePriorityPresetNormal = "Normal (50)",
 	IGUI_GS_NodePriorityPresetLow    = "Low (90)",
@@ -573,7 +573,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_CraftMissing = "Missing materials",
 	IGUI_GS_CraftOk = "Crafted: {1}",
 	IGUI_GS_CraftFail = "Could not craft",
-	IGUI_GS_CraftCancelled = "Installation cancelled (interrupted). Try again.",
+	IGUI_GS_CraftCancelled = "Action interrupted. Try again.",
 	IGUI_GS_CraftMaterialsFail = "Not enough materials in inventory",
 	IGUI_GS_CraftSkillFail = "Requires Electricity level {1}",
 	IGUI_GS_CraftSkillReq = "Skill: Electricity {1}",
@@ -648,15 +648,15 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_TransferOwnershipBtn = "Transfer",
 	IGUI_GS_NetworkNameSection = "Network name",
 	IGUI_GS_NetworkIdInternal = "ID: {1} (permanent, not editable)",
-	IGUI_GS_NetworkNameHint = "Each placed terminal creates a network. The visible name can change; the ID cannot.",
-	IGUI_GS_NetworkSingleHint = "Each terminal creates a unique network. A player or faction may operate several networks.",
+	IGUI_GS_NetworkNameHint = "A terminal can create a network or join an existing one. The network name can change; its ID cannot.",
+	IGUI_GS_NetworkSingleHint = "Each network has a unique ID and may have several terminals. A player or faction may have several networks.",
 	IGUI_GS_NetworkDefaultName = "Global storage",
 	IGUI_GS_NetworkFooter = "Network: {1}",
 	IGUI_GS_NetworkDisplay = "{1} (id: {2})",
 	IGUI_GS_RescanAll = "Rescan all zones",
 	IGUI_GS_RescanAllHint = "Detects new containers in every zone. Use per-zone Rescan for a single area.",
 	IGUI_GS_Redistribute = "Auto-sort",
-	IGUI_GS_RedistributeHint = "CAUTION! Experimental tool for large networks. It moves misplaced items to the highest-priority matching container. Scanning and moves now run in small background steps and may take several minutes; use it when server load is low.",
+	IGUI_GS_RedistributeHint = "CAUTION! Experimental tool for large networks. It moves misplaced items to compatible containers according to rules, priorities and affinity. Scanning and moves run in small background steps and may take several minutes; use it when server load is low.",
 	IGUI_GS_RedistributeIdle = "Ready to auto-sort",
 	IGUI_GS_RedistributeProgressIndex = "Auto-sort: preparing snapshot {1}/{2} items ({3} moved)",
 	IGUI_GS_RedistributeProgressMove = "Auto-sort: checking {1}/{2} items ({3} moved)",
@@ -1467,6 +1467,8 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		.. "\1" .. tostring(row.subCategory or "") .. "\1" .. tostring(row.gsSubKeysStr or "")
 		.. "\1" .. tostring(row.nativePath or "") .. "\1" .. tostring(row.variantSearchText or "")
 		.. "\1" .. tostring(row.mediaTitle or "")
+	local tokenRegistry = GlobalStorageSiK.SearchTokenRegistry
+	if tokenRegistry then cacheKey = cacheKey .. "\1search:" .. tostring(tokenRegistry.revision()) end
 	local cached = itemSearchHaystackCache[cacheKey]
 	if cached ~= nil then
 		return cached
@@ -1543,6 +1545,10 @@ function GlobalStorageSiK.I18n.itemSearchHaystack(row)
 		addPart(shortName)
 	end
 
+	if tokenRegistry then
+		local tokens = tokenRegistry.resolve(fullType, locName or "", GlobalStorageSiK.I18n.asciiLower)
+		for index = 1, #tokens do addPart(tokens[index]) end
+	end
 	local haystack = GlobalStorageSiK.I18n.asciiLower(table.concat(parts, " "))
 	storeItemSearchHaystack(cacheKey, haystack)
 	return haystack

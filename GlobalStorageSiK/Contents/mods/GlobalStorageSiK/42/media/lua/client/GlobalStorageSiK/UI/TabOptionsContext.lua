@@ -12,6 +12,7 @@ require "GS_TerminalUI_TerminalEditor"
 require "GS_TerminalUI_MemberEditor"
 require "GS_UI_PalettePreference"
 local CapacityPresentation = require "GlobalStorageSiK/UI/CapacityPresentation"
+local WorldTaxonomy = require "GlobalStorageSiK/UI/WorldTaxonomyContext"
 
 GlobalStorageSiK = GlobalStorageSiK or {}
 GlobalStorageSiK.UI = GlobalStorageSiK.UI or {}
@@ -139,20 +140,51 @@ local function normalizeMemberRows(perms, rowMap)
 	return result
 end
 
+local function firstIdentity(first, second)
+	if type(first) == "string" and first ~= "" then return first end
+	if type(second) == "string" and second ~= "" then return second end
+	return ""
+end
+
+local function accessIdentity(source)
+	local id = firstIdentity(source.characterId, source.id)
+	local account = firstIdentity(source.factionUsername, source.username)
+	if id ~= "" then return "member:" .. id, id, account end
+	if account ~= "" then return "member-account:" .. account, "", account end
+	return nil, "", ""
+end
+
 local function accessRows(perms, pickMap)
 	local rows = {}
+	local function add(key, label, pick, group)
+		if not key or pickMap[key] or type(label) ~= "string" or label == "" then return end
+		rows[#rows + 1] = { id = key, value = key, text = label, group = group,
+			groupLabel = text(group == "faction" and "IGUI_GS_PickGroupFaction" or "IGUI_GS_PermOnlinePickLabel") }
+		pickMap[key] = pick
+	end
 	local candidates = perms.pickerCandidates
 	if type(candidates) == "table" then
-		for index = 1, #candidates do
-			local source = candidates[index]
-			local id = tostring(source.characterId or source.id or "")
-			local key = "member:" .. (id ~= "" and id or tostring(index))
-			rows[#rows + 1] = { id = key, value = key, text = memberName(source) }
-			pickMap[key] = { kind = "member", value = source.characterName or source.name,
-				characterId = id, factionUsername = source.factionUsername or "" }
+		-- The authoritative roster is sorted by name across both sources.
+		-- Stable partitioning changes presentation only, never candidate identity.
+		for _, group in ipairs({ "faction", "online" }) do
+			for index = 1, #candidates do
+				local source = candidates[index]
+				local sourceGroup = source.source == "faction" and "faction" or "online"
+				if sourceGroup == group then
+					if group == "faction" and type(perms.playerFactionName) == "string"
+						and perms.playerFactionName ~= "" then
+						add("faction:" .. perms.playerFactionName,
+							text("IGUI_GS_PermPickWholeFaction", perms.playerFactionName),
+							{ kind = "whole", value = perms.playerFactionName }, group)
+					end
+					local key, id, account = accessIdentity(source)
+					local name = source.characterName or source.name or ""
+					add(key, memberName(source), { kind = "member", value = name,
+						characterId = id, factionUsername = account }, group)
+				end
+			end
 		end
-		return rows
-	end
+	else
 	local permissionUi = GlobalStorageSiK.TerminalPermissions
 	local factions = permissionUi and type(permissionUi.collectFactionPickerOptions) == "function"
 		and permissionUi.collectFactionPickerOptions(perms) or {}
@@ -160,16 +192,37 @@ local function accessRows(perms, pickMap)
 		and permissionUi.collectOnlineCharacters(perms) or {}
 	for index = 1, #factions do
 		local source = factions[index]
-		local key = "faction:" .. tostring(source.characterId or source.value or index)
-		rows[#rows + 1] = { id = key, value = key, text = source.label or source.value }
-		pickMap[key] = source
+		if source.kind == "whole" then
+			if type(source.value) == "string" and source.value ~= "" then
+				add("faction:" .. source.value, source.label or source.value, source, "faction")
+			end
+		else
+			local key, id, account = accessIdentity(source)
+			add(key, source.label or source.value, { kind = "member", value = source.value,
+				characterId = id, factionUsername = account }, "faction")
+		end
 	end
 	for index = 1, #players do
 		local source = players[index]
-		local key = "member:" .. tostring(source.id or index)
-		rows[#rows + 1] = { id = key, value = key, text = source.label or source.name }
-		pickMap[key] = { kind = "member", value = source.name, characterId = source.id,
-			factionUsername = source.username or "" }
+		local key, id, account = accessIdentity(source)
+		add(key, source.label or source.name, { kind = "member", value = source.name, characterId = id,
+			factionUsername = account }, "online")
+	end
+	end
+	-- Preserve complete Unicode names. Disambiguation is presentation only;
+	-- never derive identity from labels, text normalization or roster positions.
+	local counts = {}
+	for index = 1, #rows do
+		local label = rows[index].text
+		counts[label] = (counts[label] or 0) + 1
+	end
+	for index = 1, #rows do
+		local row = rows[index]
+		if counts[row.text] > 1 then
+			local pick = pickMap[row.id]
+			local identity = firstIdentity(pick.characterId, pick.factionUsername)
+			row.text = row.text .. " [" .. identity .. "]"
+		end
 	end
 	return rows
 end
@@ -180,14 +233,14 @@ local function playerFor(terminal)
 	return nil
 end
 
-local function paletteRows()
+local function paletteRows(playerNum)
 	local palette = GlobalStorageSiK.UIPalette
 	local result = {}
 	for index = 1, #((palette and palette.DEFINITIONS) or {}) do
 		local source = palette.DEFINITIONS[index]
 		result[#result + 1] = { id = source.key, key = source.key, value = source.key,
 			text = text(source.titleKey), swatches = palette.previewSwatches(source.key),
-			selected = palette.getActiveKey() == source.key }
+			selected = palette.getActiveKey(playerNum) == source.key }
 	end
 	return result
 end
@@ -277,7 +330,16 @@ function TabOptionsContext.create(terminal)
 			if type(terminal.onClaimAsAdmin) ~= "function" then return false, "claim_unavailable" end
 			terminal:onClaimAsAdmin(); return true
 		end,
-		["options.select-access"] = function(envelope) context.selectedAccessKey = semantic(envelope).value; return true end,
+		["options.select-access"] = function(envelope)
+			local key = semantic(envelope).value
+			if not context.accessPicks[key] then return false, "access_subject_not_selected" end
+			context.selectedAccessKey = key
+			local options = GlobalStorageSiK.TerminalOptions
+			if options and type(options.refreshScroll) == "function" then
+				options.refreshScroll(terminal, context.lastState or terminal.terminalState)
+			end
+			return true
+		end,
 		["options.add-access"] = function()
 			local pick = context.accessPicks[context.selectedAccessKey]
 			if not pick then return false, "access_subject_not_selected" end
@@ -296,9 +358,6 @@ function TabOptionsContext.create(terminal)
 			local palette = GlobalStorageSiK.UIPalette
 			if not key or not palette or type(palette.save) ~= "function" then return false, "palette_unavailable" end
 			palette.save(playerFor(terminal), key)
-			if type(palette.refreshTree) == "function" then
-				palette.refreshTree(GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
-			end
 			if GlobalStorageSiK.TerminalOptions
 				and type(GlobalStorageSiK.TerminalOptions.refreshScroll) == "function" then
 				GlobalStorageSiK.TerminalOptions.refreshScroll(terminal, terminal.terminalState or {})
@@ -307,16 +366,29 @@ function TabOptionsContext.create(terminal)
 			return true
 		end,
 	}
+	context.worldTaxonomy = WorldTaxonomy.create(terminal.playerNum or 0, context.actions, function()
+		local options = GlobalStorageSiK.TerminalOptions
+		if options and options.refreshTaxonomy then options.refreshTaxonomy(terminal) end
+	end)
 
 	function context:snapshot(serverState)
 		if self.disposed then return nil, "disposed" end
 		local state = serverState or terminal.terminalState or {}
+		self.lastState = state
 		local perms = state.permissions or {}
 		self.terminalRows, self.memberRows, self.accessPicks = {}, {}, {}
 		local terminals = normalizeTerminalRows(state, self.terminalRows)
 		local members = normalizeMemberRows(perms, self.memberRows)
 		local access = accessRows(perms, self.accessPicks)
-		if not self.accessPicks[self.selectedAccessKey] then self.selectedAccessKey = nil end
+		if not self.accessPicks[self.selectedAccessKey] then
+			-- A roster refresh must not retarget an already intended Add click.
+			self.selectedAccessKey = nil
+		end
+		local hasAccessCandidates = #access > 0
+		local accessControl = { items = access, selected = self.selectedAccessKey or false,
+			enabled = hasAccessCandidates, searchable = true,
+			searchPlaceholder = text("IGUI_GS_Search"),
+			placeholder = text(hasAccessCandidates and "IGUI_GS_OptionsAccessSelect" or "IGUI_GS_AccessNoCandidates") }
 		local powered = state.powered ~= false
 		local terminalCount = #terminals
 		if state.terminalAnchor and state.terminalAnchor.x then terminalCount = math.max(1, terminalCount) end
@@ -336,8 +408,9 @@ function TabOptionsContext.create(terminal)
 		local backupKnown = backupCount ~= nil and backupCount == backupCount and backupCount >= 0
 		GlobalStorageSiK.Log.debug("OptionsTables", "snapshot rows terminals="
 			.. tostring(#terminals) .. " members=" .. tostring(#members))
-		return {
+		self.lastSnapshot = {
 			data = { options = {
+				taxonomy = WorldTaxonomy.snapshot(self.worldTaxonomy),
 				state = {
 					power = status(powered and text("IGUI_GS_ValPowerOk") or text("IGUI_GS_ValPowerOff"), powered and "success" or "danger", true),
 					terminalStatus = status(text("IGUI_GS_StatsTerminals", terminalCount)),
@@ -347,41 +420,61 @@ function TabOptionsContext.create(terminal)
 					capacity = CapacityPresentation.fromState(capacity, { count = itemCount(state) }),
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
 					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
-					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(),
+					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(terminal.playerNum),
 				},
 				admin = {
 					terminalHeaderActions = {}, terminals = terminals, memberHeaderActions = {}, members = members,
-					successionHint = status(text("IGUI_GS_SuccessionBody"), "textMuted"),
-					backupWarning = status(text("IGUI_GS_PermNoBackupWarn"), "textMuted"),
+					successionHint = { text = text("IGUI_GS_SuccessionTitle"), icon = "sik.alert.warning.24",
+						tooltip = text("IGUI_GS_SuccessionTooltip"), severity = "warning" },
+					backupWarning = { text = text("IGUI_GS_SuccessionTitle"), icon = "sik.alert.warning.24",
+						tooltip = text("IGUI_GS_SuccessionNoBackupTooltip"), severity = "warning" },
 					successionIndicator = { icon = "sik.alert.warning.24", tooltip = text("IGUI_GS_SuccessionTooltip"), severity = "warning" },
 					noBackupIndicator = { icon = "sik.alert.warning.24", tooltip = text("IGUI_GS_SuccessionNoBackupTooltip"), severity = "warning" },
 					canClaim = status(text("IGUI_GS_ClaimOwnershipButton"), "warning"),
-					access = { items = access, selected = self.selectedAccessKey,
-						subject = { items = access, selected = self.selectedAccessKey } }, accessActions = {},
+					access = { items = accessControl.items, selected = accessControl.selected,
+						enabled = hasAccessCandidates, subject = accessControl },
+					accessActions = { enabled = self.selectedAccessKey ~= nil },
 				},
 			} },
 			state = { options = {
-				admin = { access = { subject = { items = access, selected = self.selectedAccessKey } } },
+				admin = { access = { subject = accessControl } },
 			} },
 			conditions = {
+				["singleplayer"] = WorldTaxonomy.available(),
 				owner = isOwner, ["owner-without-backup"] = isOwner and backupKnown and backupCount == 0,
 				["owner-with-backup"] = isOwner and (not backupKnown or backupCount > 0),
 				["can-claim-as-admin"] = perms.canClaimAsAdmin == true, ["admin-or-owner"] = isAdmin,
 				["add-without-selection"] = isAdmin and self.selectedAccessKey == nil,
 				["tablet-addon-installed"] = antennaInstalled,
 			},
-			i18n = runtimeI18n(),
+			i18n = WorldTaxonomy.i18n(runtimeI18n()),
 			tableOptions = {
 				["options-terminals-table"] = { autoHeight = true, minRows = 0 },
 				["options-members-table"] = { autoHeight = true, minRows = 0 },
 			},
 			actions = self.actions, playerNum = terminal.playerNum or 0,
 		}
+		return self.lastSnapshot
+	end
+
+	function context:taxonomySnapshot()
+		if self.disposed then return nil, "disposed" end
+		if not self.lastSnapshot then return self:snapshot(self.lastState) end
+		local snapshot, data, options = {}, {}, {}
+		for key, value in pairs(self.lastSnapshot) do snapshot[key] = value end
+		for key, value in pairs(self.lastSnapshot.data) do data[key] = value end
+		for key, value in pairs(self.lastSnapshot.data.options) do options[key] = value end
+		options.taxonomy = WorldTaxonomy.snapshot(self.worldTaxonomy)
+		data.options, snapshot.data = options, data
+		self.lastSnapshot = snapshot
+		return snapshot
 	end
 
 	function context:dispose()
 		if self.disposed then return false end
 		self.disposed = true
+		self.lastState = nil
+		self.lastSnapshot, self.worldTaxonomy = nil, nil
 		self.actions, self.terminalRows, self.memberRows, self.accessPicks, self.terminal = nil, nil, nil, nil, nil
 		return true
 	end

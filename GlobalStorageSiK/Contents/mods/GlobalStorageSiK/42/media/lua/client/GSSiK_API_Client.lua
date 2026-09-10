@@ -10,6 +10,8 @@ require "GS_TerminalUI_Api"
 require "GS_ItemActions"
 require "GSSiK_API_WorkSession"
 require "GSSiK_API_Terminal"
+require "GSSiK_API_ItemPresentation"
+require "GSSiK_API_InventoryView"
 
 local API = GSSiK.API
 local RemoteAccess = API.RemoteAccess

@@ -37,6 +37,54 @@ return {
         "activate"
       },
       ["id"] = "options.change-palette"
+    },
+    {
+      ["events"] = {
+        "change"
+      },
+      ["id"] = "options.taxonomy.type"
+    },
+    {
+      ["events"] = {
+        "change"
+      },
+      ["id"] = "options.taxonomy.reason"
+    },
+    {
+      ["events"] = {
+        "change"
+      },
+      ["id"] = "options.taxonomy.choice1"
+    },
+    {
+      ["events"] = {
+        "change"
+      },
+      ["id"] = "options.taxonomy.choice2"
+    },
+    {
+      ["events"] = {
+        "change"
+      },
+      ["id"] = "options.taxonomy.choice3"
+    },
+    {
+      ["events"] = {
+        "activate"
+      },
+      ["id"] = "options.taxonomy.consult"
+    },
+    {
+      ["events"] = {
+        "activate"
+      },
+      ["id"] = "options.taxonomy.apply"
+    },
+    {
+      ["events"] = {
+        "activate"
+      },
+      ["id"] = "options.taxonomy.restore"
     }
   },
   ["assets"] = {},
@@ -72,7 +120,7 @@ return {
   ["documentKind"] = "sik-ui-runtime-surface",
   ["frameworkRef"] = {
     ["id"] = "SiKUIFramework",
-    ["manifestSha256"] = "3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310",
+    ["manifestSha256"] = "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
     ["manifestVersion"] = "0.1.0-preview",
     ["namespace"] = "SiK.UI"
   },
@@ -508,6 +556,78 @@ return {
           ["text"] = "No hay otro miembro que pueda reclamar la red si fallece el propietario."
         }
       }
+    },
+    {
+      ["id"] = "options.taxonomy.title",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Correcciones de este mundo"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.help",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Corrige la clasificación de los objetos en toda esta partida, independientemente de la red. Restaurar recupera la clasificación automática. El motivo se conserva en el registro privado."
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.type",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Tipo de objeto"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.choice",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Nueva clasificación"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.reason",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Motivo"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.consult",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Consultar"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.apply",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Aplicar corrección"
+        }
+      }
+    },
+    {
+      ["id"] = "options.taxonomy.restore",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Restaurar automática"
+        }
+      }
     }
   },
   ["product"] = {
@@ -535,13 +655,13 @@ return {
     }
   },
   ["provenance"] = {
-    ["frameworkManifestSha256"] = "3b899e833fa75fb09923ffcc953cad73c4a2ba64482777300373fc9d093eb310",
-    ["generatorSha256"] = "151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b",
+    ["frameworkManifestSha256"] = "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
+    ["generatorSha256"] = "b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "a09871d13274e065f3dc0ffa8ff89287cb2fc21f3a8b41c67d3a5c2976fe9d89",
+    ["surfaceSpecSha256"] = "1b9095f31605e9c16bfefe95087ce166ffa670753ee78843248152f4a0521480",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "17dec32c41e780bf67e942c9e5b3e366a556500b8cd4a27c14924995587d9819",
-    ["visualSubtreeSha256"] = "814e85c0ad7b1cc8c5c909a2afa45e87a3763f5e442d5f44aeb12447ba7302a2"
+    ["visualMasterSha256"] = "15f8cc6b74186e79047077857756f3b72c5703c7d1c7a2813e2e9c6d37ddcba5",
+    ["visualSubtreeSha256"] = "91d66e21001561186b1a7e19d59ab06f50f225903dd1225f51d2e4d3ae36bb23"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -1364,208 +1484,92 @@ return {
             },
             {
               ["actions"] = {},
-              ["capabilities"] = {
-                {
-                  ["id"] = "block.header",
-                  ["props"] = {
-                    {
-                      ["name"] = "info-visible",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = true
-                      }
-                    },
-                    {
-                      ["name"] = "leading-indicator",
-                      ["value"] = {
-                        ["kind"] = "data",
-                        ["path"] = "options.admin.successionIndicator"
-                      }
-                    }
-                  }
-                }
-              },
-              ["children"] = {
-                {
-                  ["actions"] = {},
-                  ["children"] = {},
-                  ["id"] = "options-succession-hint",
-                  ["layout"] = {
-                    ["base"] = {
-                      {
-                        ["name"] = "fill",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = true
-                        }
-                      }
-                    },
-                    ["mode"] = "row",
-                    ["overrides"] = {}
-                  },
-                  ["props"] = {
-                    {
-                      ["name"] = "kind",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = "feedback"
-                      }
-                    },
-                    {
-                      ["name"] = "label",
-                      ["value"] = {
-                        ["kind"] = "i18n",
-                        ["ref"] = "options.admin.succession.help"
-                      }
-                    },
-                    {
-                      ["name"] = "data",
-                      ["value"] = {
-                        ["kind"] = "data",
-                        ["path"] = "options.admin.successionHint"
-                      }
-                    }
-                  },
-                  ["type"] = "control",
-                  ["variant"] = "subtle"
-                }
-              },
-              ["id"] = "options-succession-owner-block",
+              ["children"] = {},
+              ["id"] = "options-succession-hint",
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "gap",
+                    ["name"] = "fill",
                     ["value"] = {
-                      ["kind"] = "token",
-                      ["ref"] = "spacing.8"
+                      ["kind"] = "literal",
+                      ["value"] = true
                     }
                   }
                 },
-                ["mode"] = "column",
+                ["mode"] = "row",
                 ["overrides"] = {}
               },
               ["props"] = {
                 {
-                  ["name"] = "title",
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "alert-row"
+                  }
+                },
+                {
+                  ["name"] = "label",
                   ["value"] = {
                     ["kind"] = "i18n",
                     ["ref"] = "options.admin.succession.title"
                   }
                 },
                 {
-                  ["name"] = "help",
+                  ["name"] = "data",
                   ["value"] = {
-                    ["kind"] = "i18n",
-                    ["ref"] = "options.admin.succession.header-help"
+                    ["kind"] = "data",
+                    ["path"] = "options.admin.successionHint"
                   }
                 }
               },
-              ["type"] = "block",
-              ["variant"] = "default",
+              ["type"] = "control",
+              ["variant"] = "subtle",
               ["visual"] = {
                 ["visibleWhen"] = "owner-with-backup"
               }
             },
             {
               ["actions"] = {},
-              ["capabilities"] = {
-                {
-                  ["id"] = "block.header",
-                  ["props"] = {
-                    {
-                      ["name"] = "info-visible",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = true
-                      }
-                    },
-                    {
-                      ["name"] = "leading-indicator",
-                      ["value"] = {
-                        ["kind"] = "data",
-                        ["path"] = "options.admin.noBackupIndicator"
-                      }
-                    }
-                  }
-                }
-              },
-              ["children"] = {
-                {
-                  ["actions"] = {},
-                  ["children"] = {},
-                  ["id"] = "options-backup-warning",
-                  ["layout"] = {
-                    ["base"] = {
-                      {
-                        ["name"] = "fill",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = true
-                        }
-                      }
-                    },
-                    ["mode"] = "row",
-                    ["overrides"] = {}
-                  },
-                  ["props"] = {
-                    {
-                      ["name"] = "kind",
-                      ["value"] = {
-                        ["kind"] = "literal",
-                        ["value"] = "feedback"
-                      }
-                    },
-                    {
-                      ["name"] = "label",
-                      ["value"] = {
-                        ["kind"] = "i18n",
-                        ["ref"] = "options.admin.succession.warning"
-                      }
-                    },
-                    {
-                      ["name"] = "data",
-                      ["value"] = {
-                        ["kind"] = "data",
-                        ["path"] = "options.admin.backupWarning"
-                      }
-                    }
-                  },
-                  ["type"] = "control",
-                  ["variant"] = "subtle"
-                }
-              },
-              ["id"] = "options-succession-no-backup-block",
+              ["children"] = {},
+              ["id"] = "options-backup-warning",
               ["layout"] = {
                 ["base"] = {
                   {
-                    ["name"] = "gap",
+                    ["name"] = "fill",
                     ["value"] = {
-                      ["kind"] = "token",
-                      ["ref"] = "spacing.8"
+                      ["kind"] = "literal",
+                      ["value"] = true
                     }
                   }
                 },
-                ["mode"] = "column",
+                ["mode"] = "row",
                 ["overrides"] = {}
               },
               ["props"] = {
                 {
-                  ["name"] = "title",
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "alert-row"
+                  }
+                },
+                {
+                  ["name"] = "label",
                   ["value"] = {
                     ["kind"] = "i18n",
                     ["ref"] = "options.admin.succession.title"
                   }
                 },
                 {
-                  ["name"] = "help",
+                  ["name"] = "data",
                   ["value"] = {
-                    ["kind"] = "i18n",
-                    ["ref"] = "options.admin.succession.no-backup-help"
+                    ["kind"] = "data",
+                    ["path"] = "options.admin.backupWarning"
                   }
                 }
               },
-              ["type"] = "block",
-              ["variant"] = "default",
+              ["type"] = "control",
+              ["variant"] = "subtle",
               ["visual"] = {
                 ["visibleWhen"] = "owner-without-backup"
               }
@@ -1793,6 +1797,13 @@ return {
                         ["kind"] = "i18n",
                         ["ref"] = "options.admin.access.add"
                       }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.admin.accessActions"
+                      }
                     }
                   },
                   ["type"] = "control",
@@ -1815,23 +1826,17 @@ return {
                       ["kind"] = "token",
                       ["ref"] = "spacing.8"
                     }
+                  },
+                  {
+                    ["name"] = "stack-below",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = 560
+                    }
                   }
                 },
                 ["mode"] = "row",
-                ["overrides"] = {
-                  {
-                    ["bindings"] = {
-                      {
-                        ["name"] = "columns",
-                        ["value"] = {
-                          ["kind"] = "literal",
-                          ["value"] = 1
-                        }
-                      }
-                    },
-                    ["profileId"] = "compact"
-                  }
-                }
+                ["overrides"] = {}
               },
               ["props"] = {
                 {
@@ -1846,45 +1851,6 @@ return {
               ["variant"] = "inline",
               ["visual"] = {
                 ["visibleWhen"] = "admin-or-owner"
-              }
-            },
-            {
-              ["actions"] = {},
-              ["children"] = {},
-              ["id"] = "options-access-warning",
-              ["layout"] = {
-                ["base"] = {
-                  {
-                    ["name"] = "fill",
-                    ["value"] = {
-                      ["kind"] = "literal",
-                      ["value"] = true
-                    }
-                  }
-                },
-                ["mode"] = "row",
-                ["overrides"] = {}
-              },
-              ["props"] = {
-                {
-                  ["name"] = "kind",
-                  ["value"] = {
-                    ["kind"] = "literal",
-                    ["value"] = "status"
-                  }
-                },
-                {
-                  ["name"] = "label",
-                  ["value"] = {
-                    ["kind"] = "i18n",
-                    ["ref"] = "options.admin.access.empty"
-                  }
-                }
-              },
-              ["type"] = "control",
-              ["variant"] = "warning",
-              ["visual"] = {
-                ["visibleWhen"] = "add-without-selection"
               }
             }
           },
@@ -1920,6 +1886,622 @@ return {
           },
           ["type"] = "block",
           ["variant"] = "default"
+        },
+        {
+          ["actions"] = {},
+          ["capabilities"] = {
+            {
+              ["id"] = "block.header",
+              ["props"] = {
+                {
+                  ["name"] = "info-visible",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = true
+                  }
+                }
+              }
+            }
+          },
+          ["children"] = {
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-taxonomy-type-label",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "status"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.taxonomy.type"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.labelStyle"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.type",
+                      ["event"] = "change"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-type",
+                  ["layout"] = {
+                    ["base"] = {
+                      {
+                        ["name"] = "grow",
+                        ["value"] = {
+                          ["kind"] = "literal",
+                          ["value"] = 1
+                        }
+                      }
+                    },
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "field"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.taxonomy.type"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.fullType"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                },
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.consult",
+                      ["event"] = "activate"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-consult",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "button"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.taxonomy.consult"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.consult"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "field-action"
+                }
+              },
+              ["id"] = "options-taxonomy-lookup-row",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "gap",
+                    ["value"] = {
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
+                    }
+                  },
+                  {
+                    ["name"] = "padding",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = 0
+                    }
+                  }
+                },
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {},
+              ["type"] = "container",
+              ["variant"] = "fill"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-taxonomy-current",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "status"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.current"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-taxonomy-choice-label",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "status"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.taxonomy.choice"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.labelStyle"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.choice1",
+                      ["event"] = "change"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-choice1",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "combo"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.choice1"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                },
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.choice2",
+                      ["event"] = "change"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-choice2",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "combo"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.choice2"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                },
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.choice3",
+                      ["event"] = "change"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-choice3",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "combo"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.choice3"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                }
+              },
+              ["id"] = "options-taxonomy-choices",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "gap",
+                    ["value"] = {
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
+                    }
+                  },
+                  {
+                    ["name"] = "padding",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = 0
+                    }
+                  }
+                },
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {},
+              ["type"] = "container",
+              ["variant"] = "fill"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-taxonomy-reason-label",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "status"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.taxonomy.reason"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.labelStyle"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {
+                {
+                  ["actionId"] = "options.taxonomy.reason",
+                  ["event"] = "change"
+                }
+              },
+              ["children"] = {},
+              ["id"] = "options-taxonomy-reason",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "field"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.taxonomy.reason"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.reason"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.apply",
+                      ["event"] = "activate"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-apply",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "button"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.taxonomy.apply"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.apply"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                },
+                {
+                  ["actions"] = {
+                    {
+                      ["actionId"] = "options.taxonomy.restore",
+                      ["event"] = "activate"
+                    }
+                  },
+                  ["children"] = {},
+                  ["id"] = "options-taxonomy-restore",
+                  ["layout"] = {
+                    ["base"] = {},
+                    ["mode"] = "row",
+                    ["overrides"] = {}
+                  },
+                  ["props"] = {
+                    {
+                      ["name"] = "kind",
+                      ["value"] = {
+                        ["kind"] = "literal",
+                        ["value"] = "button"
+                      }
+                    },
+                    {
+                      ["name"] = "label",
+                      ["value"] = {
+                        ["kind"] = "i18n",
+                        ["ref"] = "options.taxonomy.restore"
+                      }
+                    },
+                    {
+                      ["name"] = "data",
+                      ["value"] = {
+                        ["kind"] = "data",
+                        ["path"] = "options.taxonomy.restore"
+                      }
+                    }
+                  },
+                  ["type"] = "control",
+                  ["variant"] = "default"
+                }
+              },
+              ["id"] = "options-taxonomy-actions",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "gap",
+                    ["value"] = {
+                      ["kind"] = "token",
+                      ["ref"] = "spacing.8"
+                    }
+                  },
+                  {
+                    ["name"] = "padding",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = 0
+                    }
+                  }
+                },
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {},
+              ["type"] = "container",
+              ["variant"] = "fill"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-taxonomy-feedback",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "status"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.taxonomy.feedback"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            }
+          },
+          ["id"] = "options-world-taxonomy-block",
+          ["layout"] = {
+            ["base"] = {
+              {
+                ["name"] = "span",
+                ["value"] = {
+                  ["kind"] = "literal",
+                  ["value"] = 2
+                }
+              },
+              {
+                ["name"] = "gap",
+                ["value"] = {
+                  ["kind"] = "token",
+                  ["ref"] = "spacing.8"
+                }
+              }
+            },
+            ["mode"] = "column",
+            ["overrides"] = {}
+          },
+          ["props"] = {
+            {
+              ["name"] = "title",
+              ["value"] = {
+                ["kind"] = "i18n",
+                ["ref"] = "options.taxonomy.title"
+              }
+            },
+            {
+              ["name"] = "help",
+              ["value"] = {
+                ["kind"] = "i18n",
+                ["ref"] = "options.taxonomy.help"
+              }
+            }
+          },
+          ["type"] = "block",
+          ["variant"] = "default",
+          ["visual"] = {
+            ["visibleWhen"] = "singleplayer"
+          }
         },
         {
           ["actions"] = {},

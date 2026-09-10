@@ -522,6 +522,12 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 
 
 	if moveItem(item, source, target.container, character) then
+		if GlobalStorageSiK.isAuthoritative() and GlobalStorageSiK.NetworkReadLoans then
+			GlobalStorageSiK.NetworkReadLoans.settleByExactItem(player, networkId, item)
+		end
+		if GlobalStorageSiK.isAuthoritative() and GlobalStorageSiK.ItemLease then
+			GlobalStorageSiK.ItemLease.settleByExactItem(player, networkId, item)
+		end
 		local targetId = target.entry and target.entry.id or nil
 		local targetIndex = targetId and session.affinityIndex.nodeIndexById[tostring(targetId)] or nil
 		GlobalStorageSiK.Router.updateAffinityIndex(session.affinityIndex, targetIndex, item, 1)

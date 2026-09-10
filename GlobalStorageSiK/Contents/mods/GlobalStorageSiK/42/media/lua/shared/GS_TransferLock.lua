@@ -46,7 +46,7 @@ function GlobalStorageSiK.TransferLock.acquire(networkId, player, op)
 	local now = getTimestampMs and getTimestampMs() or 0
 	local lock = _locks[key]
 	if lock then
-		if lock.owner == user then
+		if lock.owner == user and not lock.authority then
 			lock.since = now
 			lock.op = op or lock.op
 			return true, nil
@@ -78,7 +78,7 @@ function GlobalStorageSiK.TransferLock.release(networkId, player)
 	end
 	local key = lockKey(networkId)
 	local lock = _locks[key]
-	if lock and lock.owner == user then
+	if lock and lock.owner == user and not lock.authority then
 		_locks[key] = nil
 	end
 end
@@ -106,4 +106,24 @@ function GlobalStorageSiK.TransferLock.withNetworkLock(networkId, player, op, fn
 		error(r1)
 	end
 	return r1, r2, r3, r4, r5, r6, r7, r8
+end
+
+-- Trusted authoritative background work shares the same network mutex. It is
+-- not a synthetic player and cannot acquire player permissions or inventory.
+function GlobalStorageSiK.TransferLock.withAuthorityLock(networkId, ownerKey, op, fn)
+	if not GlobalStorageSiK.isAuthoritative() then return false, "authority_required" end
+	if type(ownerKey) ~= "string" or #ownerKey == 0 or #ownerKey > 512
+		or type(fn) ~= "function" then return false, "invalid_request" end
+	local key, owner = lockKey(networkId), "authority:" .. ownerKey
+	local now, previous = getTimestampMs(), _locks[key]
+	local sameOwner = previous and previous.authority == true and previous.owner == owner
+	if previous and not sameOwner and now - previous.since <= LOCK_TIMEOUT_MS then
+		return false, "network_busy"
+	end
+	local lock = { owner = owner, authority = true, since = now, op = op }
+	_locks[key] = lock
+	local ok, a, b, c, d, e, f, g, h = pcall(fn)
+	if _locks[key] == lock then _locks[key] = sameOwner and previous or nil end
+	if not ok then error(a) end
+	return a, b, c, d, e, f, g, h
 end

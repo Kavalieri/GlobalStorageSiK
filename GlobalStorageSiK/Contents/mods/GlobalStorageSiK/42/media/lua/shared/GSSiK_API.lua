@@ -17,6 +17,10 @@ GSSiK.API.Installation = GSSiK.API.Installation or {}
 GSSiK.API.RemoteAccess = GSSiK.API.RemoteAccess or {}
 GSSiK.API.Diagnostics = GSSiK.API.Diagnostics or {}
 GSSiK.API.ItemActions = GSSiK.API.ItemActions or {}
+GSSiK.API.Search = GSSiK.API.Search or {}
+GSSiK.API.ItemLease = GSSiK.API.ItemLease or {}
+GSSiK.API.ItemPresentation = GSSiK.API.ItemPresentation or {}
+GSSiK.API.InventoryView = GSSiK.API.InventoryView or {}
 
 local API = GSSiK.API
 local Addon = GSSiK.API.Addon
@@ -35,6 +39,11 @@ local CAPABILITY_VERSIONS = {
 	ItemActions = "1.0.0",
 	WorkSession = "1.0.0",
 	Terminal = "1.0.0",
+	Search = "1.0.0",
+	ItemLease = "1.0.0",
+	DeviceLease = "1.0.0",
+	ItemPresentation = "1.0.0",
+	InventoryView = "1.0.0",
 }
 
 local OK = "OK"
@@ -609,5 +618,84 @@ function Diagnostics.emit(line)
 	local ok = pcall(current.emit, line)
 	return ok == true, ok == true and OK or ERR_INTERNAL
 end
+
+--- Optional tokens augment text search only, never identity or permissions.
+function API.Search.registerTokenProvider(definition)
+	local registry = resolveInternal("GS_SearchTokenRegistry", "SearchTokenRegistry")
+	if not registry then return false, ERR_UNAVAILABLE end
+	return registry.register(definition)
+end
+
+-- These calls run only in the authoritative Lua process. There is deliberately
+-- no wire handler for attesting consumption or replacement from client data.
+local function itemLeaseCall(method, ...)
+	if not GlobalStorageSiK.isAuthoritative or not GlobalStorageSiK.isAuthoritative() then
+		return false, "authority_required"
+	end
+	local service = resolveInternal("GS_ItemLease", "ItemLease")
+	if not service then return false, ERR_UNAVAILABLE end
+	return service[method](...)
+end
+
+function API.ItemLease.get(player, addonId)
+	return itemLeaseCall("get", player, addonId)
+end
+
+function API.ItemLease.check(player, addonId, sequence)
+	return itemLeaseCall("check", player, addonId, sequence)
+end
+
+function API.ItemLease.checkAccess(player, addonId, networkId, anchor)
+	return itemLeaseCall("checkAccess", player, addonId, networkId, anchor)
+end
+
+function API.ItemLease.listCandidates(player, args, inspect)
+	return itemLeaseCall("listCandidates", player, args, inspect)
+end
+
+function API.ItemLease.borrow(player, args, inspect)
+	return itemLeaseCall("borrow", player, args, inspect)
+end
+
+function API.ItemLease.consume(player, addonId, sequence, contextKey, invoke, verify)
+	return itemLeaseCall("consume", player, addonId, sequence, contextKey, invoke, verify)
+end
+
+function API.ItemLease.replace(player, addonId, sequence, contextKey, invoke, verify, matches)
+	return itemLeaseCall("replace", player, addonId, sequence, contextKey, invoke, verify, matches)
+end
+
+function API.ItemLease.returnItem(player, addonId, sequence)
+	return itemLeaseCall("returnItem", player, addonId, sequence)
+end
+
+function API.ItemLease.adoptActive(player, addonId, ref, verify)
+	return itemLeaseCall("adoptActive", player, addonId, ref, verify)
+end
+
+-- Device-owned work: public entry points are authority-only, with trusted Lua
+-- callbacks. No network handler accepts callback attestations from clients.
+API.DeviceLease = API.DeviceLease or {}
+local function deviceLeaseCall(method, ...)
+	if not GlobalStorageSiK.isAuthoritative() then return false, "authority_required" end
+	local service = resolveInternal("GS_DeviceItemLease", "DeviceItemLease")
+	if not service then return false, ERR_UNAVAILABLE end
+	return service[method](...)
+end
+function API.DeviceLease.get(addonId, networkId, anchor)
+	return deviceLeaseCall("get", addonId, networkId, anchor)
+end
+function API.DeviceLease.open(player, args) return deviceLeaseCall("open", player, args) end
+function API.DeviceLease.check(key) return deviceLeaseCall("check", key) end
+function API.DeviceLease.validate(addonId, networkId, anchor)
+	return deviceLeaseCall("validate", addonId, networkId, anchor)
+end
+function API.DeviceLease.consume(key, ref, inspect, invoke, verify)
+	return deviceLeaseCall("consume", key, ref, inspect, invoke, verify)
+end
+function API.DeviceLease.release(key, invoke, verify, matches)
+	return deviceLeaseCall("release", key, invoke, verify, matches)
+end
+function API.DeviceLease.close(key) return deviceLeaseCall("close", key) end
 
 return API

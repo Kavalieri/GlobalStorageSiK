@@ -139,6 +139,18 @@ function Options.layoutUi(_, ui)
 	return ui
 end
 
+-- Local field changes reuse the current roster and network presentation.
+function Options.refreshTaxonomy(terminal)
+	local panel = terminal and terminal.configPanel
+	local adapter = panel and panel._sikOptionsContext
+	local surface = panel and panel._sikOptionsSurface
+	if not adapter or not surface then return nil, "options_panel_unavailable" end
+	local snapshot, reason = adapter:taxonomySnapshot()
+	if not snapshot then return nil, reason end
+	snapshot.viewport = panelBounds(panel)
+	return surface:refresh(snapshot)
+end
+
 function Options.syncScrollLayout(terminal)
 	local panel = terminal and terminal.configPanel
 	local surface = panel and panel._sikOptionsSurface

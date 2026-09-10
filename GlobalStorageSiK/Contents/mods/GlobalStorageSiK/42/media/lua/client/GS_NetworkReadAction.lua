@@ -13,6 +13,7 @@ require "GS_I18n"
 require "GS_UI_Feedback"
 require "GS_Log"
 require "GS_WithdrawClient"
+local Sequence = require "GS_NetworkReadSequence"
 
 GlobalStorageSiK.NetworkReadAction = GlobalStorageSiK.NetworkReadAction or {}
 
@@ -24,13 +25,30 @@ local serial = 0
 local pendingStarts = {}
 local pendingReturns = {}
 local tickInstalled = false
+local sessions = {}
+local activeLoans = {}
+local recoveryJobs = {}
 
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
 end
 
 local function playerFor(loan)
-	return getSpecificPlayer and getSpecificPlayer(loan.playerNum or 0) or nil
+	if loan.session ~= (sessions[loan.playerNum or 0] or 0) then return nil end
+	local current = getSpecificPlayer and getSpecificPlayer(loan.playerNum or 0) or nil
+	if current ~= loan.player then return nil end
+	return current
+end
+
+local function position(player)
+	if not player or not player.getX or not player.getY or not player.getZ then return nil end
+	return { x = player:getX(), y = player:getY(), z = player:getZ() }
+end
+
+local function moved(player, origin)
+	if not origin then return false end
+	return not player or math.abs(player:getX() - origin.x) > 0.001
+		or math.abs(player:getY() - origin.y) > 0.001 or player:getZ() ~= origin.z
 end
 
 local function showError(player, key)
@@ -63,9 +81,12 @@ local function inventoryItemById(player, itemId)
 end
 
 local function countPending()
-	local count = 0
+	local count = Sequence.hasPending() and 1 or 0
 	for _ in pairs(pendingStarts) do count = count + 1 end
-	for _ in pairs(pendingReturns) do count = count + 1 end
+	for _, loan in pairs(pendingReturns) do
+		if not loan.returnInFlight then count = count + 1 end
+	end
+	for _, job in pairs(recoveryJobs) do if not job.waiting then count = count + 1 end end
 	return count
 end
 
@@ -83,8 +104,18 @@ local function uninstallTickIfIdle()
 	tickInstalled = false
 end
 
+local function settleLoan(loan, ok)
+	if loan.settled then return end
+	loan.settled = true
+	loan.player = nil
+	if activeLoans[loan.loanId] == loan then activeLoans[loan.loanId] = nil end
+	if loan.onSettled then loan.onSettled(ok) end
+	if Sequence.hasPending() then ensureTick() end
+end
+
 local function scheduleReturn(loan, source)
 	if not loan or loan.returnScheduled then return end
+	if loan.session ~= (sessions[loan.playerNum] or 0) then settleLoan(loan, false); return end
 	loan.returnScheduled = true
 	loan.returnSource = source or "unknown"
 	loan.nextAttemptMs = nowMs()
@@ -97,9 +128,21 @@ local function scheduleReturn(loan, source)
 end
 
 local function startVanillaRead(loan, player, item)
+	if (loan.isCancelled and loan.isCancelled())
+		or (player and player.isDead and player:isDead()) or moved(player, loan.position) then
+		scheduleReturn(loan, "cancelled")
+		return
+	end
 	if not player or not item or not ISReadABook or not ISTimedActionQueue then
 		showError(player, "IGUI_GS_ReadStartFailed")
 		scheduleReturn(loan, "start_unavailable")
+		return
+	end
+	local data = item.getModData and item:getModData() or nil
+	if loan.validateIdentity and tostring(data and data.literatureTitle or "")
+		~= tostring(loan.literatureTitle or "") then
+		showError(player, "IGUI_GS_ReadStartFailed")
+		scheduleReturn(loan, "title_mismatch")
 		return
 	end
 	if not item.getFullType or item:getFullType() ~= loan.fullType then
@@ -121,7 +164,7 @@ local function startVanillaRead(loan, player, item)
 	local originalStop = action.stop
 	action.perform = function(self)
 		local ok, result = pcall(originalPerform, self)
-		scheduleReturn(loan, "complete")
+		scheduleReturn(loan, ok and "complete" or "perform_failed")
 		if not ok then
 			GlobalStorageSiK.Log.error("NetworkReadAction", "vanilla read perform failed",
 				"loanId=" .. tostring(loan.loanId) .. " error=" .. tostring(result))
@@ -172,13 +215,16 @@ function GlobalStorageSiK.NetworkReadAction.describe(rowData, player)
 	if probe.canBeWrite and probe:canBeWrite() then return nil end
 
 	local modData = probe.getModData and probe:getModData() or nil
+	-- Context eligibility uses the captured title, never the random title of
+	-- a newly created probe. The borrowed object is checked again before reading.
+	local literatureTitle = rowData.literatureTitle or (modData and modData.literatureTitle)
 	local isPrintMedia = modData and modData.printMedia ~= nil
 	local picture = probe.hasTag and ItemTag and probe:hasTag(ItemTag.PICTURE)
 	local pictureBook = probe.hasTag and ItemTag and probe:hasTag(ItemTag.PICTUREBOOK)
 	local illiterate = player and player.hasTrait and CharacterTrait
 		and player:hasTrait(CharacterTrait.ILLITERATE)
-	local recentlyRead = modData and modData.literatureTitle and player
-		and player.isLiteratureRead and player:isLiteratureRead(modData.literatureTitle)
+	local recentlyRead = literatureTitle and player
+		and player.isLiteratureRead and player:isLiteratureRead(literatureTitle)
 
 	local baseLabel = getVanillaText("ContextMenu_Read", "Read")
 	if isPrintMedia then
@@ -244,7 +290,7 @@ end
 ---@param networkId string
 ---@param searchQuery string|nil
 ---@return boolean
-function GlobalStorageSiK.NetworkReadAction.request(rowData, player, networkId, searchQuery)
+function GlobalStorageSiK.NetworkReadAction.request(rowData, player, networkId, searchQuery, options)
 	local spec = GlobalStorageSiK.NetworkReadAction.describe(rowData, player)
 	if not spec or not spec.available or not player or not networkId then return false end
 	serial = serial + 1
@@ -253,37 +299,82 @@ function GlobalStorageSiK.NetworkReadAction.request(rowData, player, networkId, 
 		playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
 		networkId = networkId,
 		fullType = rowData.fullType,
+		literatureTitle = rowData.literatureTitle,
+		validateIdentity = rowData._gsReadIdentity == true,
+		onSettled = options and options.onSettled,
+		isCancelled = options and options.isCancelled,
+		position = position(player),
+		player = player,
 	}
-	return GlobalStorageSiK.WithdrawClient.sendWithdraw(
+	loan.session = sessions[loan.playerNum] or 0
+	sessions[loan.playerNum] = loan.session
+	activeLoans[loan.loanId] = loan
+	local sent = GlobalStorageSiK.WithdrawClient.sendWithdraw(
 		rowData, 1, "player:main", searchQuery, {
 			networkId = networkId, playerNum = loan.playerNum,
 			returnItemIds = true,
+			readLoanId = loan.loanId,
 			onComplete = function(ok, result)
+				-- A completed borrow belongs to this loan for its entire lifecycle.
+				-- A repeated callback must never enqueue a second vanilla action,
+				-- including after the exact item has already been returned.
+				if loan.borrowResolved then return end
+				loan.borrowResolved = true
+				if loan.session ~= (sessions[loan.playerNum] or 0) then
+					settleLoan(loan, false)
+					return
+				end
 				local ids = result and result.itemIds or {}
-				if not ok or #ids ~= 1 then
-					showError(playerFor(loan) or player, "IGUI_GS_ReadBorrowFailed")
+				if #ids ~= 1 then
+					showError(playerFor(loan), "IGUI_GS_ReadBorrowFailed")
+					settleLoan(loan, false)
 					return
 				end
 				loan.itemId = ids[1]
 				loan.preferredNodeId = result and result.sourceNodeId or nil
+				if not ok then
+					showError(playerFor(loan), "IGUI_GS_ReadBorrowFailed")
+					scheduleReturn(loan, "borrow_incomplete")
+					return
+				end
 				loan.startDeadlineMs = nowMs() + START_WAIT_MS
 				pendingStarts[loan.loanId] = loan
 				ensureTick()
 			end,
 		})
+	if not sent then settleLoan(loan, false) end
+	return sent
+end
+
+function GlobalStorageSiK.NetworkReadAction.requestSelection(rows, player, networkId, searchQuery)
+	if not player then return false end
+	local plan = Sequence.plan(rows, GlobalStorageSiK.NetworkReadAction.describe, player)
+	if not plan then return false end
+	local origin = position(player)
+	return Sequence.start(player:getPlayerNum(), plan, function(row, onSettled, isCancelled)
+		if moved(player, origin) or (player.isDead and player:isDead()) then return false end
+		return GlobalStorageSiK.NetworkReadAction.request(row, player, networkId, searchQuery,
+			{ onSettled = onSettled, isCancelled = isCancelled })
+	end)
 end
 
 ---@param context ISContextMenu
 ---@param player IsoPlayer|nil
 ---@param rowData table
 ---@param terminal GS_TerminalUI
-function GlobalStorageSiK.NetworkReadAction.addToContext(context, player, rowData, terminal)
+function GlobalStorageSiK.NetworkReadAction.addToContext(context, player, rowData, terminal, selectedRows)
 	local spec = GlobalStorageSiK.NetworkReadAction.describe(rowData, player)
 	if not spec then return end
-	local option = context:addOption(spec.label, rowData, function(data)
+	local rows = selectedRows or { rowData }
+	local plan = Sequence.plan(rows, GlobalStorageSiK.NetworkReadAction.describe, player)
+	if not plan then
+		if #rows ~= 1 or spec.available then return end
+		plan = {} -- Preserve the vanilla disabled option and its explanation.
+	end
+	local option = context:addOption(spec.label, plan, function(captured)
 		local networkId = terminal and terminal.terminalState and terminal.terminalState.networkId
 		local searchQuery = terminal and terminal.itemSearchQuery or nil
-		GlobalStorageSiK.NetworkReadAction.request(data, player, networkId, searchQuery)
+		GlobalStorageSiK.NetworkReadAction.requestSelection(captured, player, networkId, searchQuery)
 	end)
 	option.itemForTexture = spec.probe
 	if not spec.available then
@@ -296,6 +387,8 @@ function GlobalStorageSiK.NetworkReadAction.addToContext(context, player, rowDat
 end
 
 function GlobalStorageSiK.NetworkReadAction.onTick()
+	GlobalStorageSiK.NetworkReadAction.updateRecovery()
+	Sequence.update()
 	local now = nowMs()
 	local startIds = {}
 	for loanId in pairs(pendingStarts) do startIds[#startIds + 1] = loanId end
@@ -319,32 +412,138 @@ function GlobalStorageSiK.NetworkReadAction.onTick()
 	for loanId in pairs(pendingReturns) do returnIds[#returnIds + 1] = loanId end
 	for i = 1, #returnIds do
 		local loan = pendingReturns[returnIds[i]]
-		if loan and now >= (loan.nextAttemptMs or 0) then
+		if loan and not loan.returnInFlight and now >= (loan.nextAttemptMs or 0) then
 			local player = playerFor(loan)
 			local sent = false
 			if player then
+				-- Queue acceptance is not a completed transfer. Keep this exact loan
+				-- until its logical job receives the final authoritative ACK.
+				loan.returnInFlight = true
 				sent = GlobalStorageSiK.DepositClient.sendDepositItems(
 					{ loan.itemId }, player, {
 						networkId = loan.networkId,
 						origin = "network_read_return",
 						operationId = loan.loanId,
 						preferredNodeId = loan.preferredNodeId,
+						onComplete = function(ok, result)
+							if pendingReturns[loan.loanId] ~= loan then return end
+							loan.returnInFlight = false
+							if ok and result and result.moved == 1 then
+								pendingReturns[loan.loanId] = nil
+								settleLoan(loan, loan.returnSource == "complete" or loan.recovery == true)
+							elseif nowMs() >= loan.returnDeadlineMs then
+								pendingReturns[loan.loanId] = nil
+								showError(playerFor(loan), "IGUI_GS_ReadReturnFailed")
+								settleLoan(loan, false)
+							else
+								loan.nextAttemptMs = nowMs() + RETRY_MS
+							end
+							ensureTick()
+						end,
 					})
 			end
 			if sent then
-				pendingReturns[loan.loanId] = nil
 				GlobalStorageSiK.Log.info("NetworkReadAction", "return queued",
 					"loanId=" .. tostring(loan.loanId) .. " itemId=" .. tostring(loan.itemId)
 						.. " preferredNodeId=" .. tostring(loan.preferredNodeId))
 			elseif now >= (loan.returnDeadlineMs or 0) then
 				pendingReturns[loan.loanId] = nil
 				showError(player, "IGUI_GS_ReadReturnFailed")
+				settleLoan(loan, false)
 				GlobalStorageSiK.Log.error("NetworkReadAction", "return queue timeout",
 					"loanId=" .. tostring(loan.loanId) .. " itemId=" .. tostring(loan.itemId))
 			else
+				loan.returnInFlight = false
 				loan.nextAttemptMs = now + RETRY_MS
 			end
 		end
 	end
 	uninstallTickIfIdle()
 end
+
+-- Opening an authorized terminal supplies a fresh private journal projection.
+-- No login polling, inventory sweep, automatic learning or new transfer path.
+function GlobalStorageSiK.NetworkReadAction.onTerminalOpen(args)
+	if type(args) ~= "table" or type(args.readLoans) ~= "table" or #args.readLoans == 0 then return end
+	local playerNum = tonumber(args.playerNum) or 0
+	local player = getSpecificPlayer and getSpecificPlayer(playerNum)
+	if not player or recoveryJobs[playerNum] then return end
+	local records = {}
+	for i = 1, math.min(#args.readLoans, 64) do
+		local row = args.readLoans[i]
+		if type(row) == "table" then
+			records[#records + 1] = {
+				loanId = row.loanId, itemId = row.itemId, networkId = row.networkId,
+				fullType = row.fullType, preferredNodeId = row.preferredNodeId,
+			}
+		end
+	end
+	recoveryJobs[playerNum] = {
+		player = player, networkId = args.networkId, rows = records, index = 1,
+	}
+	ensureTick()
+end
+
+function GlobalStorageSiK.NetworkReadAction.updateRecovery()
+	local slots = {}
+	for playerNum in pairs(recoveryJobs) do slots[#slots + 1] = playerNum end
+	for i = 1, #slots do
+		local playerNum = slots[i]
+		local job = recoveryJobs[playerNum]
+		local player = getSpecificPlayer and getSpecificPlayer(playerNum)
+		if not player or player ~= job.player or (player.isDead and player:isDead()) then
+			recoveryJobs[playerNum] = nil
+		elseif not job.waiting then
+			while job.index <= math.min(#job.rows, 64) do
+				local record = job.rows[job.index]
+				job.index = job.index + 1
+				if type(record) == "table" and type(record.loanId) == "string"
+					and record.networkId == job.networkId and not activeLoans[record.loanId] then
+					local item = inventoryItemById(player, record.itemId)
+					if item and item:getFullType() == record.fullType then
+						local loan = {
+							loanId = record.loanId, itemId = record.itemId, fullType = record.fullType,
+							playerNum = playerNum, player = player, networkId = job.networkId,
+							preferredNodeId = record.preferredNodeId, recovery = true,
+							session = sessions[playerNum] or 0,
+							onSettled = function(ok)
+								if recoveryJobs[playerNum] ~= job then return end
+								if ok then job.waiting = false else recoveryJobs[playerNum] = nil end
+								ensureTick()
+							end,
+						}
+						sessions[playerNum] = loan.session
+						activeLoans[loan.loanId] = loan
+						job.waiting = true
+						scheduleReturn(loan, "recovery")
+						break
+					end
+				end
+			end
+			if not job.waiting then recoveryJobs[playerNum] = nil end
+		end
+	end
+end
+
+function GlobalStorageSiK.NetworkReadAction.cancelPlayer(player)
+	local playerNum = player and player.getPlayerNum and player:getPlayerNum()
+	if playerNum == nil or (getSpecificPlayer and getSpecificPlayer(playerNum) ~= player) then return end
+	Sequence.cancel(playerNum)
+end
+
+local function onDisconnect()
+	Sequence.cancelAll()
+	-- No callback from the previous connection may address a new character
+	-- merely because it reused the same split-screen slot.
+	local slots = {}
+	for playerNum in pairs(sessions) do slots[#slots + 1] = playerNum end
+	for i = 1, #slots do sessions[slots[i]] = sessions[slots[i]] + 1 end
+	pendingStarts, pendingReturns = {}, {}
+	activeLoans, recoveryJobs = {}, {}
+	uninstallTickIfIdle()
+end
+
+if Events and Events.OnPlayerDeath then
+	Events.OnPlayerDeath.Add(GlobalStorageSiK.NetworkReadAction.cancelPlayer)
+end
+if Events and Events.OnDisconnect then Events.OnDisconnect.Add(onDisconnect) end

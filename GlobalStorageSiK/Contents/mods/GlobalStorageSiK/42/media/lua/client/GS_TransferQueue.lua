@@ -181,6 +181,22 @@ local function initialiseJob(job)
 	job.maxBatches = math.max(MIN_MAX_BATCHES, #(job.itemIds or {}) + 10)
 end
 
+-- Local completion belongs to the logical gesture, never an individual batch.
+-- Detach before invoking so callbacks can safely arm/cancel another operation.
+local function completeJob(job, ok, reason)
+	local callback = job and job.onComplete
+	if not callback then return end
+	job.onComplete = nil
+	local called, err = pcall(callback, ok == true, {
+		moved = job.totalMoved or 0, skipped = job.totalSkipped or 0,
+		missing = job.totalMissing or 0, failed = job.totalFailed or 0,
+		reason = reason or job.failureReason, operationId = job.operationId,
+	})
+	if not called then
+		GlobalStorageSiK.Log.error("TransferQueue", "completion callback failed", tostring(err))
+	end
+end
+
 ---@param job table
 ---@param firstRequestInFlight boolean
 local function activateJob(job, firstRequestInFlight)
@@ -206,6 +222,7 @@ end
 function Q.arm(input, player)
     if type(input) ~= "table" then return nil end
     local job = {}
+	job.onComplete = type(input.onComplete) == "function" and input.onComplete or nil
     for _, key in ipairs({ "type", "networkId", "origin", "operationId", "preferredNodeId",
         "referenceItemId", "expectedUnits", "count", "searchQuery" }) do job[key] = input[key] end
     job.player = player
@@ -337,12 +354,15 @@ end
 --- Limpia la cola de transferencias en curso (p. ej. al perder acceso).
 function Q.clear(reason, feedbackHandled)
     local player = pendingJob and pendingJob.player
+    local cancelled, waiting = pendingJob, queuedJobs
     pendingJob = nil
     queuedJobs = {}
     nextRunMs = 0
     inFlight = false
     responseDeadlineMs = 0
     finishOperation()
+    completeJob(cancelled, false, reason or "cancelled")
+    for index = 1, #waiting do completeJob(waiting[index], false, reason or "cancelled") end
     if reason and player and not feedbackHandled then
         GlobalStorageSiK.UIFeedback.halo(player, GlobalStorageSiK.I18n.text("IGUI_GS_DepositFailGeneric"),
             255, 180, 100, 2500, { tone = "warning", channel = "deposit", dedupeKey = reason })
@@ -528,6 +548,9 @@ function Q.onActionResult(args)
 	end
 
 	local completedJob = pendingJob
+	local completedOk = args.ok == true and summary.reconcile ~= true
+		and (completedJob.totalFailed or 0) == 0 and (completedJob.totalMissing or 0) == 0
+		and (completedJob.totalSkipped or 0) == 0
 	local completedBatches = batchCount + 1
 	if operation then
 		operation.totalInspected = (operation.totalInspected or 0) + (summary.processed or 0)
@@ -547,8 +570,16 @@ function Q.onActionResult(args)
 				.. " moved=" .. tostring(completedJob.totalMoved or 0)
 				.. " queued=" .. tostring(#queuedJobs))
 		finishOperation()
-		if not activateJob(table.remove(queuedJobs, 1), false) then Q.clear("transfer_failed"); return false end
+		pendingJob = nil
+		local nextJob = table.remove(queuedJobs, 1)
+		if not activateJob(nextJob, false) then
+			Q.clear("transfer_failed")
+			completeJob(nextJob, false, "transfer_failed")
+			completeJob(completedJob, completedOk, summary.reason)
+			return false
+		end
 		showProgress(false)
+		completeJob(completedJob, completedOk, summary.reason)
 		return true
 	end
 	local finalMoved = operation and operation.totalMoved or completedJob.totalMoved or 0
@@ -578,7 +609,9 @@ function Q.onActionResult(args)
 		args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_DepositSummary",
 			tostring(summary.moved), tostring(summary.skipped), tostring(summary.failed or 0))
 	end
+	pendingJob = nil
 	Q.clear()
+	completeJob(completedJob, completedOk, summary.reason)
 	return false
 end
 

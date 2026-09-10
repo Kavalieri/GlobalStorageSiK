@@ -89,7 +89,7 @@ local function start(entry)
 	local worker = createOperation(context)
 	entry.worker = worker
 	local options = { networkId = entry.networkId, returnItemIds = entry.returnItemIds,
-		onComplete = entry.onComplete }
+		onComplete = entry.onComplete, readLoanId = entry.readLoanId }
 	local accepted
 	if entry.batch then
 		accepted = worker.sendWithdrawBatch(entry.rows, entry.amount, entry.targetKey, entry.searchQuery, options)
@@ -141,6 +141,7 @@ local function enqueue(rows, batch, amount, targetKey, searchQuery, options)
 		playerNum = playerNum, player = player, networkId = networkId, rows = captured,
 		batch = batch, amount = numericAmount, targetKey = targetKey, searchQuery = searchQuery or "",
 		returnItemIds = options.returnItemIds == true, onComplete = options.onComplete,
+		readLoanId = options.readLoanId,
 		operationId = "withdraw:" .. tostring(playerNum) .. ":"
 			.. tostring(getTimestampMs and getTimestampMs() or 0) .. ":" .. tostring(serial),
 	}

@@ -81,7 +81,8 @@ end
 ---@param prev table|nil
 ---@return table|nil
 local function mergeInventorySyncState(incoming, prev)
-	if not incoming or not incoming.inventorySync or not prev then
+	if not incoming or not incoming.inventorySync or not prev
+		or incoming.networkId ~= prev.networkId then
 		return incoming
 	end
 	local merged = {}
@@ -102,6 +103,9 @@ end
 
 local function applyInventoryCatalog(incoming, playerNum)
 	if not incoming or not incoming.networkId then return incoming end
+	-- This private stamp describes actual catalog contents, not a generic
+	-- state/ACK revision. A failed notModified restore must not inherit it.
+	incoming._gsAppliedCatalogRevision = -1
 	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork =
 		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
 	local key = inventoryCatalogKey(playerNum, incoming.networkId)
@@ -112,6 +116,7 @@ local function applyInventoryCatalog(incoming, playerNum)
 			incoming.items = cached.items
 			incoming.itemTypeCount = cached.itemTypeCount
 			incoming.catalogRestored = true
+			incoming._gsAppliedCatalogRevision = incoming.inventoryRevision
 		end
 	elseif type(incoming.items) == "table" and incoming.inventoryRevision ~= nil
 		and type(incoming.catalogScope) == "string" then
@@ -123,6 +128,7 @@ local function applyInventoryCatalog(incoming, playerNum)
 			inventoryRevision = incoming.inventoryRevision,
 			catalogScope = incoming.catalogScope,
 		}
+		incoming._gsAppliedCatalogRevision = incoming.inventoryRevision
 	end
 	return incoming
 end
@@ -486,7 +492,7 @@ local function onServerCommand(module, command, args)
 			-- expandidos para una unica reconsulta.
 			if GlobalStorageSiK.TerminalItems
 				and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
-				GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(args.networkId)
+				GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(args.networkId, playerNum)
 			end
 		end
 		local deferVisibleRefresh = false
@@ -624,6 +630,9 @@ local function onServerCommand(module, command, args)
 			end
 		else
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "cached items=" .. tostring(itemCount))
+		end
+		if explicitOpen and GlobalStorageSiK.NetworkReadAction then
+			GlobalStorageSiK.NetworkReadAction.onTerminalOpen(args)
 		end
 	elseif command == "itemDetails" then
 		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}

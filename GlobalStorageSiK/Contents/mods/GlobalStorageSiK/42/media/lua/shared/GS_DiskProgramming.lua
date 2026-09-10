@@ -1,7 +1,8 @@
 --[[
 	GlobalStorageSiK - Mecánica de "programar" disquetes
 	Descripción: Convierte un GS_FloppyDisk_Blank (disquete en blanco) en un
-	disquete con un programa concreto (de momento solo el de desinstalar).
+	disquete con el programa elegido, entregado al inventario del jugador.
+	Grabar no instala ni modifica componentes del terminal.
 	Accesible desde el panel de crafteo vanilla (craftRecipe "Program GS
 	Uninstall Disk", solo pide el disquete en blanco + la receta aprendida)
 	y desde el propio disquete en blanco por clic derecho > Global Storage
@@ -34,6 +35,7 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_NetworkDisk_DiskProgram",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk",
 		menuTextKey = "IGUI_GS_ProgramNetworkDiskMenu",
+		titleKey = "IGUI_GS_ProgramNetworkDiskTitle",
 		iconPath = "media/textures/Item_GS_FloppyDisk.png",
 		descKey = "IGUI_GS_ProgramNetworkDiskDesc",
 	},
@@ -43,6 +45,7 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_DiskPrograms",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk_Uninstall",
 		menuTextKey = "IGUI_GS_ProgramUninstallDiskMenu",
+		titleKey = "IGUI_GS_ProgramUninstallDiskTitle",
 		iconPath = "media/textures/Item_GS_UninstallDisk.png",
 		descKey = "IGUI_GS_ProgramUninstallDiskDesc",
 	},
@@ -52,6 +55,7 @@ GlobalStorageSiK.DiskProgramming.PROGRAMS = {
 		manualItem = "GlobalStorageSiK.GS_Manual_DriveInstall_DiskProgram",
 		outputItem = "GlobalStorageSiK.GS_FloppyDisk_DriveInstall",
 		menuTextKey = "IGUI_GS_ProgramDriveInstallDiskMenu",
+		titleKey = "IGUI_GS_ProgramDriveInstallDiskTitle",
 		iconPath = "media/textures/Item_GS_FloppyDisk_DriveInstall.png",
 		descKey = "IGUI_GS_ProgramDriveInstallDiskDesc",
 	},
@@ -70,7 +74,7 @@ GlobalStorageSiK.DiskProgramming._addonProgramIds =
 
 local PROGRAM_FIELDS = {
 	"id", "recipeName", "manualItem", "outputItem", "menuTextKey",
-	"iconPath", "descKey",
+	"iconPath", "descKey", "titleKey",
 }
 
 local function validProgramString(value, limit)
@@ -88,6 +92,7 @@ local function copyProgram(def, explicitId)
 		or not validProgramString(def.menuTextKey, 128)
 		or not validProgramString(def.iconPath, 256)
 		or not validProgramString(def.descKey, 128)
+		or (def.titleKey ~= nil and not validProgramString(def.titleKey, 128))
 		or string.find(def.iconPath, "..", 1, true)
 		or string.sub(def.iconPath, 1, 1) == "/"
 		or string.find(def.iconPath, ":", 1, true) then
@@ -189,6 +194,31 @@ function GlobalStorageSiK.DiskProgramming.terminalInRange(player)
 	return GlobalStorageSiK.TerminalAccess.findNearestKnownComputer(player, range) ~= nil
 end
 
+-- The contextual route also bootstraps the first network: a compatible
+-- computer need not already be a GS terminal. The portable reader is a
+-- prerequisite, never a reason to expose the installed-terminal tab.
+function GlobalStorageSiK.DiskProgramming.contextReadiness(player)
+	if not player or (player.isDead and player:isDead()) then return false, "invalid" end
+	local access = GlobalStorageSiK.TerminalAccess
+	local target = access.findNearestKnownComputer(player,
+		GlobalStorageSiK.Sandbox.getTerminalProximityRange())
+	if not target then return false, "terminal" end
+	local anchor = { x = target.x, y = target.y, z = target.z }
+	local networkId
+	if target.alreadyInstalled then
+		networkId = GlobalStorageSiK.Network.findNetworkIdAtTerminal(anchor.x, anchor.y, anchor.z)
+		if not networkId or not GlobalStorageSiK.Permissions.canAccess(player, networkId) then
+			return false, "terminal"
+		end
+	end
+	local addons = GlobalStorageSiK.Addons
+	if not addons or not addons.hasReaderAvailable
+		or not addons.hasReaderAvailable(player, networkId, anchor) then
+		return false, "reader"
+	end
+	return true, nil
+end
+
 --- Graba un programa en un disquete en blanco. SOLO se llama en el servidor
 --- (o SP autoritativo); vuelve a validar todo, nunca confía en lo que dijo
 --- el cliente.
@@ -196,27 +226,36 @@ end
 ---@param programId string
 ---@return boolean ok
 ---@return string|nil reason "invalid"|"book"|"terminal"|"materials"|"output"
-function GlobalStorageSiK.DiskProgramming.program(player, programId)
+local function recordProgram(player, programId, itemId)
 	local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[programId]
-	if not player or not def then
+	if not GlobalStorageSiK.isAuthoritative() or not player or not def
+		or (player.isDead and player:isDead()) then
 		return false, "invalid"
 	end
 	if not GlobalStorageSiK.DiskProgramming.knowsProgram(player, programId) then
 		return false, "book"
 	end
-	if not GlobalStorageSiK.DiskProgramming.terminalInRange(player) then
-		return false, "terminal"
-	end
-	local containers = GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
-	local disk = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player,
-		GlobalStorageSiK.DiskProgramming.BLANK_DISK, containers)
-	if not disk then
-		return false, "materials"
-	end
 	local inv = player:getInventory()
 	if not inv then
 		return false, "invalid"
 	end
+	local disk
+	if itemId ~= nil then
+		if type(itemId) ~= "number" or itemId ~= itemId or math.abs(itemId) > 9007199254740991
+			or itemId ~= math.floor(itemId) then return false, "invalid" end
+		-- Context menus queue the vanilla transfer first. An explicit item must
+		-- be this exact disk in this player's main inventory; never substitute.
+		disk = inv:getItemWithID(itemId)
+		if not disk or disk:getContainer() ~= inv
+			or disk:getFullType() ~= GlobalStorageSiK.DiskProgramming.BLANK_DISK then
+			return false, "materials"
+		end
+	else
+		local containers = GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
+		disk = GlobalStorageSiK.CraftUtils.findItemTypeNearby(player,
+			GlobalStorageSiK.DiskProgramming.BLANK_DISK, containers)
+	end
+	if not disk then return false, "materials" end
 	local replaced, _, replaceReason = GlobalStorageSiK.CraftUtils.replaceItemsWithOutput(player,
 		{ disk }, def.outputItem)
 	if not replaced then
@@ -225,6 +264,12 @@ function GlobalStorageSiK.DiskProgramming.program(player, programId)
 	return true, nil
 end
 
+function GlobalStorageSiK.DiskProgramming.program(player, programId, itemId)
+	if not GlobalStorageSiK.isAuthoritative() then return false, "invalid" end
+	local ready, reason = GlobalStorageSiK.DiskProgramming.contextReadiness(player)
+	if not ready then return false, reason end
+	return recordProgram(player, programId, itemId)
+end
 
 -- Terminal UI commands bind the installed peripheral to the exact captured
 -- network/anchor. Standalone disk recipes retain their original requirements.
@@ -260,5 +305,5 @@ function GlobalStorageSiK.DiskProgramming.programAtTerminal(player, programId, c
 	-- evaluate may fall back to another terminal; it cannot authorize this one.
 	if not allowed or (mode ~= "bypass" and (not hint or hint.x ~= anchor.x
 		or hint.y ~= anchor.y or hint.z ~= anchor.z)) then return false, "terminal" end
-	return GlobalStorageSiK.DiskProgramming.program(player, programId)
+	return recordProgram(player, programId)
 end

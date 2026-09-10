@@ -28,9 +28,9 @@ local CRAFT_BTN_H = FONT_HGT_SMALL + 10
 ---@param r number
 ---@param g number
 ---@param b number
-local function pushWrappedLines(out, text, maxWidth, r, g, b)
+local function pushWrappedLines(out, text, maxWidth, r, g, b, met)
 	for _, line in ipairs(UI.Controls.wrapText(text, maxWidth, UIFont.Small)) do
-		table.insert(out, { text = line, r = r, g = g, b = b })
+		table.insert(out, { text = line, r = r, g = g, b = b, ok = met == true })
 	end
 end
 
@@ -73,18 +73,20 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 	if recipe.requireBooks then
 		local bookR, bookG, bookB = recipe.knowsBook and 0.5 or 0.82, recipe.knowsBook and 0.78 or 0.32, recipe.knowsBook and 0.5 or 0.32
 		local bookLine = T("IGUI_GS_ProgrammingRecipeRequirement", recipe.manualDisplay or "?")
-		table.insert(lines, { text = bookLine, r = bookR, g = bookG, b = bookB, itemType = recipe.manualItem })
+		table.insert(lines, { text = bookLine, r = bookR, g = bookG, b = bookB,
+			itemType = recipe.manualItem, ok = recipe.knowsBook == true })
 	end
 	if (recipe.skillLevel or 0) > 0 then
 		local skillLine = T("IGUI_GS_CraftSkillReqLine", recipe.skillHave or 0, recipe.skillLevel or 0)
 		local skR, skG, skB = recipe.skillOk and 0.5 or 0.82, recipe.skillOk and 0.78 or 0.32, recipe.skillOk and 0.5 or 0.32
 		local skillIcon = Perks and Perks.Electricity and GlobalStorageSiK.CraftUtils.getPerkTexture(Perks.Electricity) or nil
-		table.insert(lines, { text = skillLine, r = skR, g = skG, b = skB, icon = skillIcon })
+		table.insert(lines, { text = skillLine, r = skR, g = skG, b = skB,
+			icon = skillIcon, ok = recipe.skillOk == true })
 	end
 	if recipe.requireWorkbench then
 		local wbR, wbG, wbB = recipe.nearWorkbench and 0.5 or 0.82, recipe.nearWorkbench and 0.78 or 0.32, recipe.nearWorkbench and 0.5 or 0.32
 		local wbLine = recipe.nearWorkbench and T("IGUI_GS_ReqWorkbenchOk") or T("IGUI_GS_ReqWorkbenchMissing")
-		pushWrappedLines(lines, wbLine, textWIcon, wbR, wbG, wbB)
+		pushWrappedLines(lines, wbLine, textWIcon, wbR, wbG, wbB, recipe.nearWorkbench)
 	end
 	if recipe.requireLight then
 		local _lp = UI.Theme.palette()
@@ -92,7 +94,7 @@ function GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, textW)
 		local ltG = recipe.hasCraftLight and _lp.statusOk[2] or _lp.statusDanger[2]
 		local ltB = recipe.hasCraftLight and _lp.statusOk[3] or _lp.statusDanger[3]
 		local ltLine = recipe.hasCraftLight and T("IGUI_GS_ReqLightOk") or T("IGUI_GS_ReqLightMissing")
-		pushWrappedLines(lines, ltLine, textWIcon, ltR, ltG, ltB)
+		pushWrappedLines(lines, ltLine, textWIcon, ltR, ltG, ltB, recipe.hasCraftLight)
 	end
 	local _ip = UI.Theme.palette()
 	for j = 1, #(recipe.ingredients or {}) do
@@ -127,7 +129,9 @@ function GlobalStorageSiK.TerminalRecipeCards.createRequirements(parent, recipe,
 	for _, spec in ipairs(GlobalStorageSiK.TerminalRecipeCards.buildBodyLines(recipe, width)) do
 		local rows = groups[spec.material and 2 or 1].rows
 		rows[#rows + 1] = { text = spec.text, texture = resolveReqIcon(spec),
-			state = (spec.ok == true or (spec.ok == nil and (spec.g or 0) > (spec.r or 0))) and "met" or "missing" }
+			-- Requirement truth is product state, independent of palette RGB.
+			-- The shared row inherits its live semantic colour from parent.
+			state = spec.ok == true and "met" or "missing" }
 	end
 	return UI.Requirements.create({ parent = parent, w = width, groups = groups, playerNum = playerNum })
 end

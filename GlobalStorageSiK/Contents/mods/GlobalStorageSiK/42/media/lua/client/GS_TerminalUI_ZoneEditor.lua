@@ -31,19 +31,19 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local FONT_HGT_MEDIUM = getTextManager():getFontHeight(UIFont.Medium)
 local CONTROL_METRICS = UI.Controls.metrics("editor")
-local PALETTE = UI.Theme.palette()
 local PAD = 10
 
 -- Conserva los rectangulos aprobados del editor y deja a SiK.UI la
 -- construccion, el chrome y el lifecycle de las hojas visibles.
 local function createText(parent, x, y, w, text, color)
-	color = color or PALETTE.textMuted
+	local explicit = type(color) == "table"
+	local tone = explicit and "editorText" or (color or "textMuted")
 	local copy = UI.Controls.copyText(parent, {
 		x = x, y = y, w = math.max(1, w), text = text,
-		font = UIFont.Small, lineGap = 0, tone = "editorText",
-		theme = { editorText = {
+		font = UIFont.Small, lineGap = 0, tone = tone,
+		theme = explicit and { editorText = {
 			r = color[1], g = color[2], b = color[3], a = color[4] or 1,
-		} },
+		} } or nil,
 	})
 	if copy.setMouseTransparent then copy:setMouseTransparent(true) end
 	return copy
@@ -55,8 +55,8 @@ local function createHost(parent, x, y, w, h)
 	})
 end
 
-local function createField(text, x, y, w, numeric, onSubmit)
-	return UI.Controls.field(nil, {
+local function createField(parent, text, x, y, w, numeric, onSubmit)
+	return UI.Controls.field(parent, {
 		x = x, y = y, w = w, h = CONTROL_METRICS.inputHeight,
 		text = text, numeric = numeric == true, onSubmit = onSubmit,
 	})
@@ -65,25 +65,10 @@ end
 local function addSummaryRuns(host, layout)
 	for i = 1, #(layout and layout.runs or {}) do
 		local run = layout.runs[i]
-		local color = run.color
+		local color = run.fallback and "textMuted" or run.color
 		createText(host, run.x, (run.line - 1) * (FONT_HGT_SMALL + 2),
 			math.max(1, host.width - run.x), run.text, color)
 	end
-end
-
-local function createProductButton(x, y, w, h, title, target, onClick,
-	activeColor, fullWidth)
-	local button = UI.Controls.button(nil, {
-		x = x, y = y, w = w, h = h, text = title,
-		payload = target, fullWidth = fullWidth == true,
-		danger = activeColor ~= nil,
-		onClick = function() return onClick(target) end,
-	})
-	if activeColor then
-		button.backgroundColor = { r = activeColor[1], g = activeColor[2],
-			b = activeColor[3], a = activeColor[4] or 0.92 }
-	end
-	return button
 end
 
 local function confirmAction(owner, title, question, consequences, onAccept)
@@ -94,11 +79,7 @@ end
 --- Color de acento por operador (mismo trio que GS_TerminalUI_NodeEditor.lua,
 --- los puntos de composicion de la lista de contenedores y el borde del
 --- modal "Anadir regla" - nunca inventado por separado).
-local RULE_OP_COLOR = {
-	OR  = PALETTE.ruleOr,
-	AND = PALETTE.ruleAnd,
-	NOT = PALETTE.ruleNot,
-}
+local RULE_OP_TONE = { OR = "info", AND = "warning", NOT = "danger" }
 
 --- Contenedores de una zona (dev26 ronda 3, linea informativa). Se queda
 --- deliberadamente en esto y no intenta sumar objetos/tipos: esos numeros
@@ -160,7 +141,17 @@ function GS_ZoneEditorUI:layoutForm()
 		return
 	end
 	self._lastLayoutW = innerW
-	self:rebuildForm()
+	local bottom = 0
+	for _, block in ipairs(self._formBlocks or {}) do
+		block:reflow({ x = 0, y = bottom, w = innerW, h = block.h })
+		bottom = block.y + block.h + 8
+	end
+	self._actionsStartY = bottom
+	if self.actionsBlock and self.editorDock then
+		local rect = self.editorDock:getFixedBottomRect()
+		self.actionsBlock:reflow({ x = 0, y = 0, w = rect.w, h = self.actionsBlock.h })
+	end
+	self:updateScrollHeight(bottom)
 end
 
 function GS_ZoneEditorUI:calculateLayout()
@@ -178,11 +169,12 @@ function GS_ZoneEditorUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	UI.Modal.apply(self, {
 		kind = "task", profile = "editor", scroll = false, contentMode = "dock",
-		geometryKey = "zoneEditor",
+		geometryKey = "zoneEditor", resizable = true,
 		geometryVersion = 2,
 		title = T("IGUI_GS_ZoneEditorTitle"),
 		onReflow = function() self:calculateLayout() end,
 		onClose = function()
+			self._pendingRuleSync = nil
 			if self.editorDock then self.editorDock:dispose(); self.editorDock = nil end
 			GlobalStorageSiK.TerminalZoneEditor.instance = nil
 			if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
@@ -258,22 +250,24 @@ function GS_ZoneEditorUI:ensureForm()
 	UI.Scroll.clear(scroll, false)
 	local parent, width = UI.Scroll.childHost(scroll), UI.Scroll.contentWidth(scroll)
 	local bottom = 0
+	self._formBlocks = {}
 	local function section(title, tooltip)
 		return UI.Block.create({ parent = parent, x = 0, y = bottom, w = width,
 			title = title, tooltip = tooltip or title, playerNum = self.playerNum })
 	end
 	local function finish(block, column)
 		column:finish()
+		self._formBlocks[#self._formBlocks + 1] = block
 		bottom = block.y + block.h + 8
 	end
 	local function label(column, text, color)
-		local widget = createText(column.parent, 0, 0, column.width, text, color or PALETTE.textPrimary)
-		column:label(widget, FONT_HGT_SMALL)
+		local widget = createText(column.parent, 0, 0, column.width, text, color or "text")
+		column:label(widget, function(w) widget:reflow(w); return widget.height end)
 		return widget
 	end
 	local function field(column, title, value, numeric, onSubmit)
 		label(column, title)
-		local widget = createField(value, 0, 0, column.width, numeric, onSubmit)
+		local widget = createField(column.parent, value, 0, 0, column.width, numeric, onSubmit)
 		column:block(widget, CONTROL_METRICS.inputHeight)
 		return widget
 	end
@@ -286,7 +280,7 @@ function GS_ZoneEditorUI:ensureForm()
 	local count = zoneContainerCount(zone, terminal)
 	local identity = section(T("IGUI_GS_ZoneIdentity"))
 	self.identityBlock = identity
-	local identityColumn = identity:beginColumn()
+	local identityColumn = identity:beginColumn({ retain = true })
 	local presentation = CapacityPresentation.fromState(self.capacityInfo, { count = count, kind = "containers" })
 	self.capacityBar = UI.Controls.progress(identityColumn.parent, {
 		w = identityColumn.width, h = CONTROL_METRICS.rowHeight,
@@ -316,16 +310,18 @@ function GS_ZoneEditorUI:ensureForm()
 	-- Rules is a parent Block. Protocol and operator groups are real child Blocks.
 	local rulesBlock = section(T("IGUI_GS_EditorRules"), T("IGUI_GS_EditorRulesHint"))
 	self.rulesBlock = rulesBlock
-	local rulesColumn = rulesBlock:beginColumn()
+	local rulesColumn = rulesBlock:beginColumn({ retain = true })
 	local protocol = UI.Block.create({ parent = rulesColumn.parent, w = rulesColumn.width,
 		title = T("IGUI_GS_ZoneRulesTitle"), tooltip = T("IGUI_GS_ZoneRulesHint"), playerNum = self.playerNum })
-	local protocolColumn = protocol:beginColumn()
+	local protocolColumn = protocol:beginColumn({ retain = true })
 	local summary = GlobalStorageSiK.RulesUI.layoutSummary(zone.rules or {}, protocolColumn.width,
-		UIFont.Small, PALETTE.textSecondary)
+		UIFont.Small, UI.Theme.palette(self._sikThemeContext).textSecondary)
 	self.rulesSummaryHost = createHost(protocolColumn.parent, 0, 0, protocolColumn.width,
 		math.max(FONT_HGT_SMALL, summary.lineCount * (FONT_HGT_SMALL + 2)))
-	addSummaryRuns(self.rulesSummaryHost, summary)
-	protocolColumn:block(self.rulesSummaryHost, self.rulesSummaryHost.height)
+	protocolColumn:block(self.rulesSummaryHost, function(w)
+		return GlobalStorageSiK.RulesUI.refreshSummary(self.rulesSummaryHost,
+			self.zone.rules or {}, w, UIFont.Small, UI.Theme.palette(self._sikThemeContext).textSecondary)
+	end)
 	rulesColumn:block(protocol, protocolColumn:finish())
 	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
 		local group = self:buildRuleSection(rulesBlock, op)
@@ -339,11 +335,12 @@ function GS_ZoneEditorUI:ensureForm()
 	-- GS_FilterEditor.lua ANTES de que zone.rules tenga la regla nueva.
         self._ruleCountAtBuild = #(self.zone and self.zone.rules or {})
 	self._rulesLayoutAtBuild = GlobalStorageSiK.RulesUI.layoutSignature(zone.rules)
+	self._rulesIdentityAtBuild = GlobalStorageSiK.RulesUI.stateSignature(zone.rules)
 
 	-- Flat table: it is an action surface, not a disclosure hierarchy.
 	local containers = section(T("IGUI_GS_NativeTax_containers"), T("IGUI_GS_ZonesPriorityHint"))
 	self.containersBlock = containers
-	local containersColumn = containers:beginColumn()
+	local containersColumn = containers:beginColumn({ retain = true })
 	local zoneRows = GlobalStorageSiK.TerminalNodes.zoneRows(
 		terminal.terminalState and terminal.terminalState.nodes or {}, zone)
 	local tableH = UI.Table.intrinsicHeight and UI.Table.intrinsicHeight(#zoneRows, { minRows = 1 })
@@ -379,7 +376,7 @@ function GS_ZoneEditorUI:refreshZoneNodes()
 	if not self.zoneNodesTable or not self.containersBlock or not self.zone then return end
 	local nodes = self.terminal and self.terminal.terminalState and self.terminal.terminalState.nodes or {}
 	self.zoneNodesTable:setRows(GlobalStorageSiK.TerminalNodes.zoneRows(nodes, self.zone), true)
-	local column = self.containersBlock:beginColumn()
+	local column = self.containersBlock:beginColumn({ retain = true })
 	column:block(self.zoneNodesTable, self.zoneNodesTable:getHeight())
 	column:finish()
 	self:updateScrollHeight(self.containersBlock.y + self.containersBlock.h)
@@ -393,7 +390,7 @@ function GS_ZoneEditorUI:mountFixedActions()
                 w = rect.w, title = T("IGUI_GS_PermColActions"),
                 tooltip = T("IGUI_GS_ZonesManageHint"), playerNum = self.playerNum })
         self.actionsBlock = block
-        local column = block:beginColumn()
+	local column = block:beginColumn({ retain = true })
         local function action(title, callback, danger, tooltip)
                 return UI.Controls.button(column.parent, { text = title, onClick = callback,
                         danger = danger == true, tooltip = tooltip, playerNum = self.playerNum })
@@ -544,14 +541,18 @@ function GS_ZoneEditorUI:buildRuleSection(parentBlock, op)
 	end
 	local chipH, chipGap = UI.Controls.dismissibleRowHeight({ profile = "editor" }), 8
 	local chipsH = math.max(FONT_HGT_SMALL, count * (chipH + chipGap) - chipGap)
-	local color = RULE_OP_COLOR[op]
 	local card = UI.Block.create({ parent = parentBlock.childParent,
 		w = parentBlock:getContentRect().w, title = T(GlobalStorageSiK.RulesUI.OP_TITLE_KEY[op]),
 		tooltip = T("IGUI_GS_ZoneRulesHint"), playerNum = self.playerNum,
-		accent = color })
-	local column = card:beginColumn()
+		accentTone = RULE_OP_TONE[op] })
+	local column = card:beginColumn({ retain = true })
 	local host = createHost(column.parent, 0, 0, column.width, chipsH)
-	column:block(host, chipsH)
+	function host:reflow(w)
+		for _, child in ipairs(self.childrenInOrder or {}) do
+			if child.reflow then child:reflow(math.max(1, w - (child.x or 0) * 2)) end
+		end
+	end
+	column:block(host, function() return host.height end)
 	self._ruleCards = self._ruleCards or {}
 	self._ruleCards[op] = card
 	self._ruleChipsHosts = self._ruleChipsHosts or {}
@@ -584,7 +585,7 @@ function GS_ZoneEditorUI:buildRuleSection(parentBlock, op)
 			end
 		end
 		GlobalStorageSiK.FilterEditor.show({ kind = "zone", id = self.zone.id, rules = self.zone.rules, containerGroups = containerGroups, scopeRules = scopeRules }, op, function()
-			self:rebuildForm()
+			GlobalStorageSiK.RulesUI.refreshEditorRules(self, self.zone.rules)
 		end, self)
 	end })
 	column:block(addBtn, CONTROL_METRICS.buttonHeight)
@@ -622,27 +623,29 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 			shown = shown + 1
 			local label = GlobalStorageSiK.RulesUI.describeCondition(rule.condition)
 			local labelColor = GlobalStorageSiK.RulesUI.conditionColor(
-				rule.condition, PALETTE.textPrimary)
+				rule.condition, false)
 
 			local capturedIdx = realIdx
+			local capturedRule = GlobalStorageSiK.RuleIdentity.signature(rule)
 			UI.Controls.dismissibleRow(host, {
 				x = 0, y = cy, w = hostW, h = CHIP_H, profile = "editor",
 				text = label, tooltip = label, actionTooltip = removeText, playerNum = self.playerNum,
-				tone = "ruleText", theme = { ruleText = { r = labelColor[1],
-					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } },
+				tone = labelColor and "ruleText" or "text",
+				theme = labelColor and { ruleText = { r = labelColor[1],
+					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } } or nil,
 				onRemove = function()
-					if not self.zone then return end
-					GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.zone.id, removeRuleIndex = capturedIdx })
-					table.remove(self.zone.rules, capturedIdx)
-					self:rebuildForm()
+					if not self.zone or not capturedRule then return end
+					GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.zone.id,
+						removeRuleIndex = capturedIdx, expectedRule = capturedRule })
 				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end
 	end
 	if shown == 0 then
 		createText(host, 4, CHIP_PAD, math.max(1, hostW - 8),
-			T("IGUI_GS_NodeRulesEmpty"), PALETTE.textMuted)
+			T("IGUI_GS_NodeRulesEmpty"), "textMuted")
 	end
+	host:setHeight(math.max(FONT_HGT_SMALL, cy - CHIP_PAD))
 end
 
 --- Reconstruye el panel completo (tras añadir/quitar una regla) - preserva
@@ -709,10 +712,13 @@ function GlobalStorageSiK.TerminalZoneEditor.open(terminal, zone, allNodes, owne
 
 	-- Tamano/posicion compartidos con GS_TerminalUI_NodeEditor.lua (dev26
 	-- ronda 4; el perfil editor SiK.UI conserva geometria por jugador.
-	local bounds = UI.Window.resolveBounds({ profile = "editor" })
+	local modalOwner = owner or terminal
+	local playerNum = modalOwner and modalOwner.playerNum or 0
+	local bounds = UI.Window.resolveBounds({ profile = "editor", playerNum = playerNum })
 	local x, y, w, h = bounds.x, bounds.y, bounds.w, bounds.h
 
 	local ui = GS_ZoneEditorUI:new(x, y, w, h)
+	ui.playerNum, ui._sikModalOwner = playerNum, modalOwner
 	ui:initialise()
 	UI.Modal.presentChild(owner or terminal, ui)
 	GlobalStorageSiK.TerminalZoneEditor.instance = ui
@@ -754,7 +760,9 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 	end
 	for i = 1, #(zones or {}) do
 		if zones[i].id == ui.zone.id then
-			ui.zone = zones[i]
+			local updated = zones[i]
+			GlobalStorageSiK.RulesUI.applyWhenIdle(ui, function()
+			ui.zone = updated
 			local state = ui.terminal and ui.terminal.terminalState
 			local capacity = state and state.capacity and state.capacity.perZone
 				and state.capacity.perZone[ui.zone.id]
@@ -763,18 +771,9 @@ function GlobalStorageSiK.TerminalZoneEditor.syncZoneData(zones)
 				ui:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = ui.zone.name or "?",
 					separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
 			end
-			-- Mismo bug/mismo fix que GS_TerminalUI_NodeEditor.lua:syncFormButtons
-			-- - anadir/quitar una regla dispara rebuildForm() de inmediato
-			-- (callback de GS_FilterEditor.lua) ANTES de que este sync traiga
-			-- la regla nueva/quitada; sin este chequeo, la zona se quedaba
-			-- con las tarjetas OR/AND/NOT dimensionadas para el conteo
-			-- ANTIGUO y el chip nuevo no aparecia (o quedaba tapado) hasta el
-			-- siguiente rebuild por otro motivo.
-			if ui._rulesLayoutAtBuild ~= GlobalStorageSiK.RulesUI.layoutSignature(ui.zone.rules) then
-				ui:rebuildForm()
-			else
-				ui:refreshZoneNodes()
-			end
+			GlobalStorageSiK.RulesUI.refreshEditorRules(ui, ui.zone.rules)
+			ui:refreshZoneNodes()
+			end)
 			return
 		end
 	end

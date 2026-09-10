@@ -22,7 +22,7 @@ local T = GlobalStorageSiK.I18n.text
 local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
 local LINE_GAP = 6
 local CONTROL_METRICS = UI.Controls.metrics("compact")
-local PANEL_W = UI.Modal.STANDARD_MODAL_W
+local WINDOW_PROFILE = "terminal-config"
 
 local function addCopy(parent, x, y, width, text, tone)
 	return UI.Controls.copyText(parent, {
@@ -48,7 +48,7 @@ function GS_TerminalEditorUI:initialise()
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0.35, g = 0.38, b = 0.42, a = 0.95 }
 	UI.Modal.apply(self, {
-		kind = "compact", resizable = true, contentMode = "dock",
+		kind = "compact", profile = WINDOW_PROFILE, resizable = true, contentMode = "dock",
 		title = T("IGUI_GS_TerminalEditorTitle"),
 		onClose = function()
 			if self.editorDock then self.editorDock:dispose(); self.editorDock = nil end
@@ -188,8 +188,11 @@ function GS_TerminalEditorUI:buildLayout()
 		text = T("IGUI_GS_TerminalEditorDeleteBtn"), danger = true,
 		playerNum = self.playerNum, onClick = function() self:onDeleteClicked() end })
 	self:reflowEditor()
-	UI.Modal.fitContent(self, self.identityBlock.h + self.actionsBlock.h + 8,
-		{ bottomPadding = 0, center = true })
+	if not self._initialLayoutFitted then
+		UI.Modal.fitContent(self, self.identityBlock.h + self.actionsBlock.h + 8,
+			{ bottomPadding = 0, center = true })
+		self._initialLayoutFitted = true
+	end
 	self:reflowEditor()
 end
 
@@ -222,12 +225,10 @@ function GlobalStorageSiK.TerminalTerminalEditor.open(terminal, row)
 	if GlobalStorageSiK.TerminalTerminalEditor.instance then
 		GlobalStorageSiK.TerminalTerminalEditor.instance:destroy()
 	end
-	local sw = getCore():getScreenWidth()
-	local sh = getCore():getScreenHeight()
-	local h = 280
-	local x = (sw - PANEL_W) / 2
-	local y = (sh - h) / 2
-	local ui = GS_TerminalEditorUI:new(x, y, PANEL_W, h)
+	local playerNum = terminal and terminal.playerNum or 0
+	local bounds = UI.Window.resolveBounds({ profile = WINDOW_PROFILE, playerNum = playerNum })
+	local ui = GS_TerminalEditorUI:new(bounds.x, bounds.y, bounds.w, bounds.h)
+	ui.playerNum, ui._sikModalOwner = playerNum, terminal
 	ui.terminal = terminal
 	ui.row = row
 	ui:initialise()

@@ -39,7 +39,8 @@ GlobalStorageSiK.CatalogManager = GlobalStorageSiK.CatalogManager or {}
 -- Equipamiento, decision de producto de sistemas para DEV27).
 -- DEV32.3: nuevas hojas estables y anclas exactas de Materiales/Herramientas.
 -- El bump separa las cachés/fingerprints previos de las rutas L3 nuevas.
-local CLASSIFIER_SCHEMA = "10"
+-- Core 1.5.2-dev1: equippable containers and exact Battery/.357 anchors.
+local CLASSIFIER_SCHEMA = "11"
 
 local state = {
 	catalogEpoch = 0,

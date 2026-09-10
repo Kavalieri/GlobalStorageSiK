@@ -123,7 +123,7 @@ local function categoryRuleTier(rule, item, categorySource)
 	local stored = GlobalStorageSiK.CategoryResolution.classifyStoredRule({
 		type = "category", value = rule, categorySource = categorySource,
 	})
-	if stored == "DEPRECATED_EXTERNAL" or stored == "TECHNICAL_RESIDUE" or stored == "LEGACY_GS_ALIAS" then return nil end
+	if stored == "ORPHANED_NATIVE" or stored == "DEPRECATED_EXTERNAL" or stored == "TECHNICAL_RESIDUE" or stored == "LEGACY_GS_ALIAS" then return nil end
 	local fullType = item and item.getFullType and item:getFullType() or nil
 	if not fullType then return nil end
 	local resolved = GlobalStorageSiK.CategoryResolution.resolve(fullType, nil, item)
@@ -195,7 +195,7 @@ function GlobalStorageSiK.Router.evaluateContainerRules(entry, item)
 			-- alias recuperable para mundos/reglas anteriores y solo se consulta
 			-- mientras la migración aditiva todavía no añadió nativePath.
 			local status = GlobalStorageSiK.CategoryResolution.classifyStoredRule(condition)
-			if status == "DEPRECATED_EXTERNAL" or status == "TECHNICAL_RESIDUE" then return nil end
+			if status == "ORPHANED_NATIVE" or status == "DEPRECATED_EXTERNAL" or status == "TECHNICAL_RESIDUE" then return nil end
 			return categoryConditionTier(condition, item)
 		end
 		if GlobalStorageSiK.NodeFilters.matchesOne(condition, item) then

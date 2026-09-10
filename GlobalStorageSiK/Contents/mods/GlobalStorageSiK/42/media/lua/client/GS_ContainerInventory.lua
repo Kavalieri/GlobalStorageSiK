@@ -138,12 +138,9 @@ function Inventory.mount(parent, editor, node, options)
 	panel.itemTable = view.table
 	GlobalStorageSiK.TerminalDrop.setupPanel(panel, view.controller)
 	function view:getHeight() return self.block.h end
-	function view:render()
+	function view:reflow(width)
 		if self.disposed then return end
-		if self.rendering then self.renderAgain = true; return end
-		self.rendering = true
-		local model = GlobalStorageSiK.TerminalItems.presentationModel(panel, self.controller, self.rows)
-		self.table:setRows(model.rows, true)
+		if width then self.block:setBounds(self.block.x, self.block.y, width, self.block.h) end
 		local rect = self.block:getContentRect()
 		local y, h = rect.y, self.rowHeight
 		move(self.bar, rect.x, y, rect.w, h)
@@ -156,6 +153,17 @@ function Inventory.mount(parent, editor, node, options)
 		self.table:setBounds(rect.x, y, rect.w, tableH)
 		local height = y + tableH + 8
 		self.block:setBounds(self.block.x, self.block.y, self.block.w, height)
+		if self.lastHeight ~= height then
+			self.lastHeight = height
+			if options.onHeightChanged then options.onHeightChanged(self) end
+		end
+	end
+	function view:render()
+		if self.disposed then return end
+		if self.rendering then self.renderAgain = true; return end
+		self.rendering = true
+		local model = GlobalStorageSiK.TerminalItems.presentationModel(panel, self.controller, self.rows)
+		self.table:setRows(model.rows, true)
 		local count = 0
 		for i = 1, #self.rows do count = count + (tonumber(self.rows[i].count) or 0) end
 		self.bar:setProgress(Capacity.fromState(self.capacity, {
@@ -163,10 +171,7 @@ function Inventory.mount(parent, editor, node, options)
 			typeCount = #self.rows,
 		}))
 		self.rendering = false
-		if self.lastHeight ~= height then
-			self.lastHeight = height
-			if options.onHeightChanged then options.onHeightChanged(self) end
-		end
+		self:reflow()
 		if self.renderAgain then self.renderAgain = false; self:render() end
 	end
 	function view:request()

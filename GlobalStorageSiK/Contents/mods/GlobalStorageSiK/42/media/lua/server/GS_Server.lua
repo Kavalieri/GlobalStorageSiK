@@ -34,7 +34,9 @@ require "GS_Network"
 
 require "GS_Index"
 require "GS_WithdrawSelectionTickets"
+require "GS_NetworkReadLoans"
 require "GS_RuleSanitizer"
+require "GS_RuleIdentity"
 require "GS_RuleCoverage"
 
 require "GS_NetworkCapacity"
@@ -601,16 +603,19 @@ local function serializeZones(networkId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 
 	local list = {}
+	-- Opening the terminal needs counts, not one complete node scan per zone.
+	-- Keep this local to the snapshot: no persistent cache or extra invalidation.
+	local countsByZone = {}
+	for _, node in pairs(registry.nodes or {}) do
+		if node.zoneId ~= nil then
+			countsByZone[node.zoneId] = (countsByZone[node.zoneId] or 0) + 1
+		end
+	end
 
 	for _, zone in pairs(registry.zones or {}) do
 
 		if zone.networkId == networkId then
-			local nodeCount = 0
-			for _, node in pairs(registry.nodes or {}) do
-				if node.zoneId == zone.id then
-					nodeCount = nodeCount + 1
-				end
-			end
+			local nodeCount = countsByZone[zone.id] or 0
 
 			table.insert(list, {
 
@@ -2140,6 +2145,10 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player, requestMeta)
 	payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
 	payload.openUi = openUi == true
+	if openUi == true then
+		GlobalStorageSiK.NetworkReadLoans.reconcileStored(player, networkId)
+		payload.readLoans = GlobalStorageSiK.NetworkReadLoans.pending(player, networkId)
+	end
 	if meta and meta.openSeq then
 		payload.openSeq = meta.openSeq
 	end
@@ -3137,16 +3146,24 @@ local function sanitizeNodeRule(rule)
 	return { op = op, condition = condition }
 end
 
---- Valida una lista completa de reglas (reemplazo total, ej. pegado de
---- plantilla) - mismo tope de 20 que categories/filters.
+--- Un reemplazo es indivisible: descartar una condicion invalida podria
+--- eliminar un NOT/AND y ampliar silenciosamente lo que acepta el destino.
+--- Solo una lista vacia explicita permite borrar todas las reglas.
 ---@param rules table
----@return table
+---@return table|nil
 local function sanitizeNodeRules(rules)
+	if type(rules) ~= "table" then return nil end
+	local count = 0
+	for key in pairs(rules) do
+		if type(key) ~= "number" or key < 1 or key > 20 or key ~= math.floor(key) then return nil end
+		count = count + 1
+		if count > 20 then return nil end
+	end
 	local result = {}
-	if type(rules) ~= "table" then return result end
-	for i = 1, math.min(#rules, 20) do
+	for i = 1, count do
 		local clean = sanitizeNodeRule(rules[i])
-		if clean then result[#result + 1] = clean end
+		if not clean then return nil end
+		result[i] = clean
 	end
 	return result
 end
@@ -3495,6 +3512,21 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 		if requested <= 0 then requested = pacing.batchUnits end
 		requested = math.min(requested, pacing.batchUnits)
 		if requestedItemIds then requested = math.min(requested, #requestedItemIds) end
+		if args.readLoanId ~= nil then
+			if selectionMode ~= "exact_ids" or requested ~= 1 or floorTarget
+				or targetKey ~= "player:main" then
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, requested, "invalid_read_loan")
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+			local prepared, prepareReason = GlobalStorageSiK.NetworkReadLoans.prepare(
+				player, args.readLoanId, networkId, requestedItemIds[1], fullType)
+			if not prepared then
+				sendWithdrawFailure(player, networkId, withdrawId, fullType, requested, prepareReason)
+				GlobalStorageSiK.OperationPacing.release(pacingKey)
+				return
+			end
+		end
 		local ok, reason, moved, movedItemIds, sourceNodeIds, snapshotsUpdated, floorReconcile
 		if floorTarget then
 			ok, reason, moved, movedItemIds, sourceNodeIds, snapshotsUpdated, floorReconcile =
@@ -3507,6 +3539,12 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 					dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes,
 					pacing.batchUnits, sourceNodeId)
 			end)
+		end
+		if args.readLoanId ~= nil then
+			if moved == 1 and movedItemIds and #movedItemIds == 1 then
+				GlobalStorageSiK.NetworkReadLoans.confirm(player, args.readLoanId,
+					dest:getItemById(movedItemIds[1]), sourceNodeIds and sourceNodeIds[1])
+			else GlobalStorageSiK.NetworkReadLoans.abandon(player, args.readLoanId) end
 		end
 		local ticketComplete, ticketConsumed, ticketCommitReason = false, nil, nil
 		if ticketBatch then
@@ -4163,7 +4201,7 @@ local function onClientCommand(module, command, player, args)
 		if command == "programTerminalDisk" then
 			ok, reason = GlobalStorageSiK.DiskProgramming.programAtTerminal(player, args.programId, args)
 		else
-			ok, reason = GlobalStorageSiK.DiskProgramming.program(player, args.programId)
+			ok, reason = GlobalStorageSiK.DiskProgramming.program(player, args.programId, args.itemId)
 		end
 		GlobalStorageSiK.Log.info("Acquire", "program disk result",
 			"program=" .. tostring(args.programId) .. " ok=" .. tostring(ok)
@@ -4481,7 +4519,17 @@ local function onClientCommand(module, command, player, args)
 			end
 			if requested ~= 1 then preferredNodeId = nil end
 			local summary
-			if args.sourceKey ~= nil or args.mode == "floor" then
+			local readReturn = origin == "network_read_return" and args.mode == nil
+				and args.sourceKey == nil and requested == 1
+				and GlobalStorageSiK.NetworkReadLoans.matchReturn(player, operationId, networkId, args.itemIds)
+			if origin == "network_read_return" and not readReturn
+				and GlobalStorageSiK.NetworkReadLoans.isKnown(player, operationId) then
+				summary = { moved = 0, skipped = 0, failed = 1, reason = "read_loan_mismatch" }
+			elseif readReturn == "settled" then
+				-- The original exact transfer was already confirmed. A lost ACK
+				-- must not trigger another movement or refresh an unchanged snapshot.
+				summary = { moved = 1, skipped = 0, failed = 0, replay = true }
+			elseif args.sourceKey ~= nil or args.mode == "floor" then
 				if not GlobalStorageSiK.FloorTargets.isKey(args.sourceKey)
 					or args.mode ~= "floor" or type(args.itemIds) ~= "table" or #args.itemIds ~= 1 then
 					summary = { moved = 0, failed = 1, skipped = 0, reason = "invalid_request" }
@@ -4505,6 +4553,9 @@ local function onClientCommand(module, command, player, args)
 				end)
 			end
 
+			if readReturn == "pending" and summary.moved == 1 then
+				GlobalStorageSiK.NetworkReadLoans.settle(player, operationId, networkId, args.itemIds, 1)
+			end
 			local msg = GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
 			local logFn = summary.reason == "limit" and GlobalStorageSiK.Log.detail
 				or GlobalStorageSiK.Log.info
@@ -4521,7 +4572,7 @@ local function onClientCommand(module, command, player, args)
 			if summary.reason ~= "limit" then
 				GlobalStorageSiK.OperationPacing.release(pacingKey)
 			end
-			if (summary.moved or 0) > 0 or summary.reconcile then
+			if not summary.replay and ((summary.moved or 0) > 0 or summary.reconcile) then
 				afterTransferSync(player, networkId, searchQuery, {
 					suppressUi = summary.reason == "limit",
 					snapshotsUpdated = summary.snapshotsUpdated,
@@ -4884,6 +4935,19 @@ local function onClientCommand(module, command, player, args)
 			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
 			return
 		end
+		if args.removeRuleIndex ~= nil and (args.rules ~= nil or args.addRule ~= nil
+			or not GlobalStorageSiK.RuleIdentity.matches(node.rules, args.removeRuleIndex, args.expectedRule)) then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RulesChangedRetry") })
+			pushTerminalState(player, networkId, nil, searchQuery)
+			return
+		end
+		local replacementRules = args.rules ~= nil and sanitizeNodeRules(args.rules) or nil
+		if args.rules ~= nil and not replacementRules then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
+			return
+		end
 		if args.membership == "excluded" then
 			node.membership = "excluded"
 			node.enabled = false
@@ -4964,7 +5028,7 @@ local function onClientCommand(module, command, player, args)
 			-- Reemplazo completo del motor unificado AND/OR/NOT (dev26): pegado
 			-- de plantilla o guardado desde el nuevo editor. Mismo patron que
 			-- args.filters de arriba.
-			node.rules = sanitizeNodeRules(args.rules)
+			node.rules = replacementRules
 		elseif args.addRule ~= nil then
 			local clean = sanitizeNodeRule(args.addRule)
 			if clean then
@@ -5026,6 +5090,11 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		local rules = sanitizeNodeRules(args.rules)
+		if not rules then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
+			return
+		end
 		local updated = 0
 		for _, target in pairs(registry.nodes or {}) do
 			if target.zoneId == zone.id then
@@ -5152,8 +5221,21 @@ local function onClientCommand(module, command, player, args)
 			})
 			return
 		end
+		if args.removeRuleIndex ~= nil and (args.rules ~= nil or args.addRule ~= nil
+			or not GlobalStorageSiK.RuleIdentity.matches(zone.rules, args.removeRuleIndex, args.expectedRule)) then
+			gsSendServerCommand(player, "actionResult", { ok = false,
+				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RulesChangedRetry") })
+			pushTerminalState(player, networkId, nil, searchQuery)
+			return
+		end
 		if args.rules ~= nil then
-			zone.rules = sanitizeNodeRules(args.rules)
+			local rules = sanitizeNodeRules(args.rules)
+			if not rules then
+				gsSendServerCommand(player, "actionResult", { ok = false,
+					message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
+				return
+			end
+			zone.rules = rules
 		elseif args.addRule ~= nil then
 			local clean = sanitizeNodeRule(args.addRule)
 			if clean then

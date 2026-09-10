@@ -641,7 +641,8 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 			-- cerca SIEMPRE se revalida en el momento del clic (pudo cambiar
 			-- desde que se abrio el menu).
 			if first:getFullType() == GlobalStorageSiK.DiskProgramming.BLANK_DISK and player then
-				local hasTerminalNear = GlobalStorageSiK.DiskProgramming.terminalInRange(player)
+				local contextReady, contextReason = GlobalStorageSiK.DiskProgramming.contextReadiness(player)
+				local hasTerminalNear = contextReady or contextReason == "reader"
 				for id, def in pairs(GlobalStorageSiK.DiskProgramming.PROGRAMS) do
 					local sub = ensureSub()
 					if sub then
@@ -654,20 +655,23 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 								end
 								return
 							end
-							if not GlobalStorageSiK.DiskProgramming.terminalInRange(p) then
+							local freshReady, freshReason = GlobalStorageSiK.DiskProgramming.contextReadiness(p)
+							if not freshReady then
 								if p then
-									GlobalStorageSiK.UIFeedback.halo(p, T("IGUI_GS_ProgramDiskFailTerminal"),
+									GlobalStorageSiK.UIFeedback.halo(p, T(freshReason == "reader"
+										and "IGUI_GS_NeedReaderNetworkOrInventoryMsg" or "IGUI_GS_ProgramDiskFailTerminal"),
 										220, 180, 100, 300, { tone = "warning" })
 								end
 								return
 							end
-							ISTimedActionQueue.add(GS_ProgramDiskAction:new(p, id))
+							-- Reuse vanilla access/walk/transfer for the clicked disk
+							-- from bags, loot, vehicles or a physical network node.
+							ISInventoryPaneContextMenu.transferIfNeeded(p, first)
+							ISTimedActionQueue.add(GS_ProgramDiskAction:new(p, id, nil, nil, first))
 						end)
-						-- Checklist SIEMPRE visible (pedido explicito 2026-08-23),
-						-- disponible o no la opcion - las recetas de programar
-						-- disco no exigen ninguna herramienta (soldador,
-						-- destornillador...), solo revista + terminal cerca, asi
-						-- que el checklist se limita a esos dos requisitos reales.
+						-- The contextual route accepts the reader carried by the
+						-- player or installed in this nearby terminal. It remains
+						-- available before the first GS network exists.
 						-- Progresivo (pedido explicito 2026-08-23): sin terminal
 						-- detectado, no se valida la revista todavia.
 						if not hasTerminalNear then
@@ -675,10 +679,11 @@ local function onPreFillInventoryObjectContextMenu(playerArg, context, items)
 						else
 							attachTooltip(option, table.concat({
 								reqLine(T("IGUI_GS_ReqTerminalNear"), true),
-								reqLine(T("IGUI_GS_ReqMagazineKnown"), knows == true),
+								reqLine(GlobalStorageSiK.I18n.typeDisplayName(GlobalStorageSiK.Config.ITEM_TERMINAL_READER), contextReady == true),
+								reqLine(T("IGUI_GS_ProgrammingRecipeRequirement", GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)), knows == true),
 							}, " <LINE> "))
 						end
-						if not knows or not hasTerminalNear then
+						if not knows or not contextReady then
 							markUnavailable(option)
 						end
 					end

@@ -9,8 +9,7 @@ GlobalStorageSiK.UIPalette = GlobalStorageSiK.UIPalette or {}
 
 local Palette = GlobalStorageSiK.UIPalette
 local PREF_KEY = "GSSiK_UIPalette"
-local FONT_HGT_SMALL = getTextManager():getFontHeight(UIFont.Small)
-local LABEL_GAP = 4
+local activeByPlayer = {}
 
 local function rgb(hex, alpha)
 	return { hex[1] / 255, hex[2] / 255, hex[3] / 255, alpha or 1 }
@@ -72,8 +71,8 @@ local function copyColor(source)
 	}
 end
 
-function Palette.getActiveKey()
-	return Palette._activeKey or "graphite"
+function Palette.getActiveKey(playerNum)
+	return activeByPlayer[playerNum or 0] or "graphite"
 end
 
 function Palette.previewSwatches(key)
@@ -86,14 +85,15 @@ function Palette.previewSwatches(key)
 	}
 end
 
-function Palette.apply(key)
+function Palette.apply(key, playerNum)
+	playerNum = playerNum or 0
 	local definition = definitionByKey(key)
 	local overrides = {}
 	for name, source in pairs(definition.colors) do
 		overrides[name] = copyColor(source)
 	end
-	UI.Theme.set(overrides)
-	Palette._activeKey = definition.key
+	UI.Theme.set(overrides, playerNum)
+	activeByPlayer[playerNum] = definition.key
 	return definition.key
 end
 
@@ -103,72 +103,16 @@ function Palette.load(player)
 		local modData = player:getModData()
 		key = type(modData[PREF_KEY]) == "string" and modData[PREF_KEY] or key
 	end
-	return Palette.apply(key)
+	return Palette.apply(key, player and player.getPlayerNum and player:getPlayerNum() or 0)
 end
 
 function Palette.save(player, key)
-	key = Palette.apply(key)
+	key = Palette.apply(key, player and player.getPlayerNum and player:getPlayerNum() or 0)
 	if player and player.getModData then
 		-- Local visual preference: deliberately not transmitted.
 		player:getModData()[PREF_KEY] = key
 	end
 	return key
-end
-
-function Palette.refreshTree(root)
-	if not root then return end
-	if root._sikUiInputStyled then
-		if root.options then UI.Controls.styleCombo(root)
-		elseif root.getText then UI.Controls.styleField(root) end
-	end
-	local children = root.childrenInOrder or root.children
-	if type(children) == "table" then
-		for index = 1, #children do Palette.refreshTree(children[index]) end
-	end
-end
-
-function Palette.createSelector(x, y, width, player, onChanged)
-	width = math.max(200, tonumber(width) or 260)
-	local comboHeight = 26
-	local panel = UI.Controls.panel(nil, {
-		x = x, y = y, w = width, h = FONT_HGT_SMALL + LABEL_GAP + comboHeight,
-		controlId = "palettePreference",
-	})
-	panel._sikPaletteSelector = true
-	panel.player = player
-	panel.label = UI.Controls.sectionTitle(panel, {
-		x = 0, y = 0, w = width, h = FONT_HGT_SMALL,
-		text = GlobalStorageSiK.I18n.text("IGUI_GS_UIPaletteLabel"),
-	})
-	local _, selected = definitionByKey(Palette.getActiveKey())
-	local items = {}
-	for index = 1, #Palette.DEFINITIONS do
-		local definition = Palette.DEFINITIONS[index]
-		items[index] = {
-			key = definition.key,
-			text = GlobalStorageSiK.I18n.text(definition.titleKey),
-		}
-	end
-	panel.combo = UI.Controls.combo(panel, {
-		x = 0, y = FONT_HGT_SMALL + LABEL_GAP, w = width, h = comboHeight,
-		items = items, selected = selected,
-		onChange = function(context)
-			local definition = context and context.value
-			local key = definition and definition.key or "graphite"
-			Palette.save(panel.player, key)
-			Palette.refreshTree(GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance)
-			if onChanged then onChanged(key) end
-		end,
-	})
-	return panel
-end
-
-function Palette.layoutSelector(panel, width)
-	if not panel or not panel._sikPaletteSelector then return end
-	width = math.max(200, tonumber(width) or panel.width or 260)
-	panel:setWidth(width)
-	if panel.label and panel.label.reflow then panel.label:reflow(width) end
-	if panel.combo then panel.combo:setWidth(width) end
 end
 
 return Palette

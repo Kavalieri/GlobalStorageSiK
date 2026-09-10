@@ -18,6 +18,15 @@ local T = GlobalStorageSiK.I18n.text
 local lastDepositMs = {}
 local DEPOSIT_COOLDOWN_MS = 500
 
+local function accepts(items, options)
+	if options and options.isEnabled and not options.isEnabled() then return false end
+	if not items or #items == 0 then return false end
+	if options and options.acceptItem then
+		for i = 1, #items do if not options.acceptItem(items[i]) then return false end end
+	end
+	return true
+end
+
 --- Indica si el ratón está sobre el terminal visible.
 ---@return boolean
 function GlobalStorageSiK.TerminalDrop.isMouseOverTerminal()
@@ -30,6 +39,11 @@ end
 ---@return boolean
 function GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
 	local ui = panel
+	local ancestor = panel
+	while ancestor do
+		if ancestor.isVisible and not ancestor:isVisible() then return false end
+		ancestor = ancestor.parent
+	end
 	if not ui or not ui.getIsVisible or not ui:getIsVisible() then
 		return false
 	end
@@ -45,7 +59,7 @@ end
 --- Intenta depositar ítems pendientes o en arrastre (una sola petición por cooldown).
 ---@param items InventoryItem[]|nil
 ---@return boolean
-function GlobalStorageSiK.TerminalDrop.tryDepositItems(items, playerNum)
+function GlobalStorageSiK.TerminalDrop.tryDepositItems(items, playerNum, options)
 	playerNum = playerNum or 0
 	local now = getTimestampMs and getTimestampMs() or 0
 	if lastDepositMs[playerNum] and now - lastDepositMs[playerNum] < DEPOSIT_COOLDOWN_MS then
@@ -54,7 +68,7 @@ function GlobalStorageSiK.TerminalDrop.tryDepositItems(items, playerNum)
 	end
 
 	items = items or GlobalStorageSiK.DepositClient.collectDraggedItems()
-	if #items == 0 then
+	if not accepts(items, options) then
 		GlobalStorageSiK.Log.debug("ExactWithdraw", "deposit.rejected reason=no_items")
 		return false
 	end
@@ -69,7 +83,7 @@ function GlobalStorageSiK.TerminalDrop.tryDepositItems(items, playerNum)
 		return false
 	end
 
-	local sent = GlobalStorageSiK.DepositClient.sendDraggedItems(items, playerNum)
+	local sent = GlobalStorageSiK.DepositClient.sendDraggedItems(items, playerNum, options and options.transferOptions)
     if sent then
         lastDepositMs[playerNum] = now
         GlobalStorageSiK.DepositClient.clearDrag()
@@ -82,7 +96,7 @@ end
 --- Configura el panel como destino visual mediante el contrato publico SiK UI.
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI|nil
-function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
+function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal, options)
 	if not panel or panel.gsDropSetup then
 		return
 	end
@@ -99,12 +113,12 @@ function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 			return { payload = items }
 		end,
 		accept = function(items)
-			return items ~= nil and #items > 0
+			return accepts(items, options)
 				and GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
 				and GlobalStorageSiK.DepositClient.canDepositDraggedItems(items, terminal and terminal.playerNum or panel.playerNum or 0)
 		end,
 		onDrop = function(items)
-			return GlobalStorageSiK.TerminalDrop.tryDepositItems(items, terminal and terminal.playerNum or panel.playerNum or 0)
+			return GlobalStorageSiK.TerminalDrop.tryDepositItems(items, terminal and terminal.playerNum or panel.playerNum or 0, options)
 		end,
 	})
 	-- Cada superficie tiene su monitor. Compartir uno en `terminal` dejaba los
@@ -124,7 +138,7 @@ function GlobalStorageSiK.TerminalDrop.setupPanel(panel, terminal)
 				return GlobalStorageSiK.TerminalDrop.isMouseOverPanel(panel)
 			end,
 			onDrop = function(items)
-				return GlobalStorageSiK.TerminalDrop.tryDepositItems(items, terminal and terminal.playerNum or panel.playerNum or 0)
+				return GlobalStorageSiK.TerminalDrop.tryDepositItems(items, terminal and terminal.playerNum or panel.playerNum or 0, options)
 			end,
 		})
 	end

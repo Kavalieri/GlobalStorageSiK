@@ -38,9 +38,9 @@ local function playerFor(terminal)
 	return GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer(terminal and terminal.playerNum or 0) or nil
 end
 
-local function countBlankDisksNearby(player)
+local function countBlankDisksNearby(player, containers)
 	if not player or not GlobalStorageSiK.CraftUtils.collectIngredientContainers then return 0 end
-	local containers = GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
+	containers = containers or GlobalStorageSiK.CraftUtils.collectIngredientContainers(player)
 	local total = 0
 	for i = 1, #containers do
 		local ok, count = pcall(function()
@@ -89,17 +89,24 @@ local function readerResource(terminal)
 	}
 end
 
-local function programReadiness(player, id)
+local function programReadiness(player, id, disk)
 	local known = GlobalStorageSiK.DiskProgramming.knowsProgram(player, id)
-	local disk = player ~= nil and GlobalStorageSiK.CraftUtils.findItemTypeNearby(
-		player, GlobalStorageSiK.DiskProgramming.BLANK_DISK) ~= nil
+	-- Presentation shares its resource snapshot; action callers omit it and
+	-- perform a fresh lookup before queuing the recording action.
+	if disk == nil then
+		disk = player ~= nil and GlobalStorageSiK.CraftUtils.findItemTypeNearby(
+			player, GlobalStorageSiK.DiskProgramming.BLANK_DISK) ~= nil
+	end
 	return known == true, disk == true
 end
 
 function Programming.context(terminal)
 	local player = playerFor(terminal)
 	local captured = captureTerminal(terminal)
-	local blankCount = countBlankDisksNearby(player)
+	local containers = player and GlobalStorageSiK.CraftUtils.collectIngredientContainers(player) or {}
+	local blankCount = countBlankDisksNearby(player, containers)
+	local blankAvailable = player ~= nil and GlobalStorageSiK.CraftUtils.findItemTypeNearby(
+		player, GlobalStorageSiK.DiskProgramming.BLANK_DISK, containers) ~= nil
 	local reader = readerResource(terminal, player)
 	local canProgram = reader.availability ~= "unavailable"
 	local cards = {}
@@ -107,30 +114,35 @@ function Programming.context(terminal)
 	for i = 1, #ids do
 		local id = ids[i]
 		local def = GlobalStorageSiK.DiskProgramming.PROGRAMS[id]
-		local known, hasDisk = programReadiness(player, id)
+		local known, hasDisk = programReadiness(player, id, blankAvailable)
 		local ready = canProgram and known and hasDisk
 		local recording = terminal and terminal._gsRecordingProgramId == id
 		local manualName = GlobalStorageSiK.I18n.typeDisplayName(def.manualItem)
-		local title = T(def.menuTextKey or id)
+		local outputName = GlobalStorageSiK.I18n.typeDisplayName(def.outputItem)
+		local title = def.titleKey and T(def.titleKey) or outputName
 		-- menuTextKey already contains the complete localized action (for
 		-- example, "Grabar disco de red"). Formatting it through a second
 		-- "Grabar %1" template duplicates the verb and leaks %1 on runtimes
 		-- whose Translator does not expand numbered placeholders.
-		local actionLabel = title
+		local actionLabel = T(def.menuTextKey or id)
 		cards[#cards + 1] = {
 			variant = "output", title = title,
-			description = def.descKey and T(def.descKey) or "", icon = def.iconPath,
 			requirement = {
 				text = T("IGUI_GS_ProgrammingRecipeRequirement", manualName),
-				icon = "media/textures/Item_MagazineElectronics03.png",
+				icon = GlobalStorageSiK.CraftUtils.getItemIconTexture(def.manualItem),
 				state = known and "success" or "missing",
 				iconSize = 32,
 			},
+			output = {
+				text = T("IGUI_GS_ProgrammingOutput", outputName),
+				icon = def.iconPath, tone = "text", iconSize = 32,
+			},
 			actionLabel = actionLabel,
-			locked = not ready or recording,
+			locked = not ready or (terminal and terminal._gsRecordingProgramId ~= nil),
 			tooltip = (not canProgram and reader.text)
 				or (not known and T("IGUI_GS_ProgrammingRecipeRequirement", manualName))
-				or (not hasDisk and T("IGUI_GS_ProgrammingNeedsBlankDisk") or nil),
+				or (not hasDisk and T("IGUI_GS_ProgrammingNeedsBlankDisk"))
+				or T("IGUI_GS_ProgrammingOutput", outputName),
 			payload = { programId = id, state = recording and "recording"
 				or (ready and "available") or "unavailable" },
 		}

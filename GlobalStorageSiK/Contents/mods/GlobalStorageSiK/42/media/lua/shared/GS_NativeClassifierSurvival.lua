@@ -101,6 +101,13 @@ local function classifySurvival(fullType, si)
 	if isSeedTag and U.hasTag(si, isSeedTag) then
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
 	end
+	-- B42 marks complete vehicle tires with WholeTire. Their metal content
+	-- and recipes for cutting armor do not turn the intact part into material.
+	-- Do not infer this identity from a name containing "tire" or "wheel".
+	local wholeTireTag = U.tagByLocation("base", "wholetire")
+	if wholeTireTag and U.hasTag(si, wholeTireTag) and U.bodyLocationLower(si) == "" then
+		return { l1 = "vehicles", l2 = "part", l3 = nil }, {}, {}, U.evidence("script_tag_whole_tire", 100)
+	end
 	local tokens = U.tokenize(U.typeName(si))
 	if #tokens == 0 then return nil end
 	local itemType = U.itemTypeLower(si)

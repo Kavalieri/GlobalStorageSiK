@@ -28,7 +28,7 @@ end
 local PAD = 14
 local BLOCK_GAP = 8
 local CONTROL_METRICS = UI.Controls.metrics("task")
-local PANEL_W = math.max(UI.Modal.STANDARD_MODAL_W, 640)
+local WINDOW_PROFILE = "task-requirements"
 
 GS_PCAcquireUI = UI.Window.derive("GS_PCAcquireUI")
 
@@ -99,8 +99,9 @@ function GS_PCAcquireUI:initialise()
 	self.backgroundColor = { r = 0.06, g = 0.06, b = 0.06, a = 0.98 }
 	self.borderColor = { r = 0, g = 0, b = 0, a = 1 }
 	UI.Modal.apply(self, {
-		kind = "task", padding = PAD, playerNum = self.playerNum,
-		owner = self.modalOwner, resizable = false,
+		kind = "task", profile = WINDOW_PROFILE, padding = PAD, playerNum = self.playerNum,
+		owner = self.modalOwner, resizable = true,
+		onReflow = function() self:reflowContent() end,
 		title = T("IGUI_GS_PCAcquireOpenBtn"),
 		onClose = function()
 			GlobalStorageSiK.PCAcquireUI.instance = nil
@@ -164,7 +165,7 @@ function GS_PCAcquireUI:buildLayout()
 		tooltip = not GlobalStorageSiK.Sandbox.isSolderingIronCraftEnabled()
 			and T("IGUI_GS_SolderingIronFindHint") or T("IGUI_GS_AcquireRequirements"), playerNum = self.playerNum,
 	}))
-	local requirementColumn = requirements:beginColumn()
+	local requirementColumn = requirements:beginColumn({ retain = true })
 
 	local lines, allReady = buildStatusLines(self.player)
 	local reqRect = requirements:getContentRect()
@@ -175,9 +176,13 @@ function GS_PCAcquireUI:buildLayout()
 	for i = 3, #lines - 2 do groups[2].rows[#groups[2].rows + 1] = row(lines[i]) end
 	self.requirementsHandle = UI.Requirements.create({ parent = requirementColumn.parent,
 		x = 0, y = 0, w = reqRect.w, groups = groups, playerNum = self.playerNum })
-	requirementColumn:block(self.requirementsHandle.panel, self.requirementsHandle.height)
+	requirementColumn:block(self.requirementsHandle.panel, function(width)
+		self.requirementsHandle:reflow(width)
+		return self.requirementsHandle.height
+	end)
 	self._lastSig = requirementsSignature(lines)
 	self._layoutWidth = textW
+	self.requirementsBlock = requirements
 
 	requirementColumn:finish()
 
@@ -186,7 +191,7 @@ function GS_PCAcquireUI:buildLayout()
 		w = textW, title = T("IGUI_GS_PermColActions"),
 		tooltip = T("IGUI_GS_PermColActions"), playerNum = self.playerNum,
 	}))
-	local actionColumn = actions:beginColumn()
+	local actionColumn = actions:beginColumn({ retain = true })
 
 	-- Decision revertida (2026-08-26, pedido explicito del usuario, mismo
 	-- criterio aplicado a Programacion/disquetera): antes el boton se dejaba
@@ -209,25 +214,38 @@ function GS_PCAcquireUI:buildLayout()
 	})
 	actionColumn:block(self.craftBtn, CONTROL_METRICS.buttonHeight)
 	actionColumn:finish()
+	self.actionsBlock = actions
 
-	-- fitContent resuelve el viewport una vez; los refrescos conservan la
-	-- posicion a la que el jugador haya arrastrado la ventana.
-	local previousX = self:getX()
-	local previousY = self:getY()
-	local wasPositioned = self._positioned == true
-	UI.Modal.fitContent(self, actions.y + actions.h, {
-		contentBottom = true, bottomPadding = 0, center = not wasPositioned,
-	})
-	if wasPositioned then
-		self:setX(previousX)
-		self:setY(previousY)
-	else
-		self._positioned = true
+	local contentHeight = actions.y + actions.h
+	if not self._initialLayoutFitted then
+		UI.Modal.fitContent(self, contentHeight, { contentBottom = true, bottomPadding = 0, center = true })
+		self._initialLayoutFitted = true
+	elseif self.contentBlock and self.contentBlock.setContentHeight then
+		-- Requirement refreshes update the scrollable content, never a height
+		-- chosen by the player through the resize handle.
+		self.contentBlock:setContentHeight(contentHeight)
+		self:reflow()
 	end
 	if GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled and GlobalStorageSiK.UIDebug.enabled() then
 		GlobalStorageSiK.UIDebug.dumpTree(self, "PCAcquireUI")
 		GlobalStorageSiK.UIDebug.checkOverlaps(self, "PCAcquireUI")
 	end
+end
+
+--- Reflow only the retained presentation tree. Inventory-derived controls are
+--- rebuilt by refresh() when their signature changes, never by a resize.
+function GS_PCAcquireUI:reflowContent()
+	local host = self.contentHost or self
+	if not self.requirementsBlock or not self.actionsBlock or not host then return end
+	local width = math.max(0, host.width or 0)
+	self.requirementsBlock:setBounds(0, 0, width, self.requirementsBlock.h)
+	self.actionsBlock:setBounds(0, self.requirementsBlock.h + BLOCK_GAP, width, self.actionsBlock.h)
+	local contentHeight = self.actionsBlock.y + self.actionsBlock.h
+	if self.contentBlock and self.contentBlock.setContentHeight then
+		self.contentBlock:setContentHeight(contentHeight)
+	end
+	self._layoutWidth = width
+	return contentHeight
 end
 
 --- Refresca sin reabrir (mientras la ventana esta abierta y algo cambia).
@@ -251,8 +269,9 @@ function GS_PCAcquireUI:refresh(force)
 	local sig = requirementsSignature(lines)
 	local host = self.contentHost or self
 	local widthChanged = self._layoutWidth ~= (host.width or 0)
+	if widthChanged then self:reflowContent() end
 	self._refreshPending = false
-	if not force and not widthChanged and sig == self._lastSig then
+	if not force and sig == self._lastSig then
 		return
 	end
 	self._lastSig = sig
@@ -270,7 +289,7 @@ function GlobalStorageSiK.PCAcquireUI.show(player, owner)
 	if GlobalStorageSiK.PCAcquireUI.instance then
 		GlobalStorageSiK.PCAcquireUI.instance:destroy()
 	end
-	local ui = GS_PCAcquireUI:new(0, 0, PANEL_W, 200)
+	local ui = GS_PCAcquireUI:new(0, 0, 1, 200)
 	ui.player = player
 	ui.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
 	ui.modalOwner = owner

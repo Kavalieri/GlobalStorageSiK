@@ -115,6 +115,9 @@ local function applyTerminalState(ui, state, forceDeferred)
 	end
 	local itemCount = state and state.items and #state.items or 0
 	ui._gsPendingTerminalState = state
+	-- A queued callback owns the latest state even if a newer catalog is small.
+	-- Running it immediately would leave the old callback refreshing nil next tick.
+	if ui._gsTerminalRefreshQueued then return end
 	local function runRefresh()
 		local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
 			and type(getTimestampMs) == "function" and getTimestampMs() or nil
@@ -132,13 +135,14 @@ local function applyTerminalState(ui, state, forceDeferred)
 		end
 	end
 	if (forceDeferred or itemCount > DEFER_REFRESH_ITEM_COUNT) and Events and Events.OnTick then
-		if ui._gsTerminalRefreshQueued then return end
 		ui._gsTerminalRefreshQueued = true
 		local function deferOnce()
 			Events.OnTick.Remove(deferOnce)
 			ui._gsTerminalRefreshQueued = nil
 			if GlobalStorageSiK.TerminalUI.getInstanceForPlayer(ui.playerNum) == ui then
 				runRefresh()
+			else
+				ui._gsPendingTerminalState = nil
 			end
 		end
 		Events.OnTick.Add(deferOnce)
@@ -218,7 +222,7 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	ui._sikWindowProfile = rect.profile
 	ui.terminalState = state or {}
 	ui:initialise()
-	ui:addToUIManager()
+	ui:show()
 	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
 	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d",
 		rect.x, rect.y, rect.w, rect.h)
