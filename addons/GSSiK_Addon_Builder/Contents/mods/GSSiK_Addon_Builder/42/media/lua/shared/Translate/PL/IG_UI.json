@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Zapisz dyskietkę Builder",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Dyskietka tablicy cyfrowej",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Nagraj: Dyskietka tablicy cyfrowej",
 	"IGUI_GS_TabBuilder": "Budowanie",
 	"IGUI_GS_AddonBuilderTitle": "Budowanie",
 	"IGUI_GS_AddonBuilderDesc": "Dodatek Budowanie: wymaga magazynu (Elektryczność 5). Wytwórz i zainstaluj moduł w zakładce Dodatki.",

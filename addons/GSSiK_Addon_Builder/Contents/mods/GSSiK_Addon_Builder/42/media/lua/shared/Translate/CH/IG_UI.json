@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "寫入 Builder 磁碟",
+	"IGUI_GS_ProgramBuilderDiskTitle": "數位白板磁碟片",
+	"IGUI_GS_ProgramBuilderDiskMenu": "寫入數位白板磁碟片",
 	"IGUI_GS_TabBuilder": "建造",
 	"IGUI_GS_AddonBuilderTitle": "建造",
 	"IGUI_GS_AddonBuilderDesc": "建造擴充：需要雜誌（電力 5 級）。在擴充標籤頁製作並安裝模組。",

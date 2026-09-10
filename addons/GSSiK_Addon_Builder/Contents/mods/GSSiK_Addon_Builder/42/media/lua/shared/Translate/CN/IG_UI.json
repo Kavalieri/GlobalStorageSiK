@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "写入Builder磁盘",
+	"IGUI_GS_ProgramBuilderDiskTitle": "数字白板软盘",
+	"IGUI_GS_ProgramBuilderDiskMenu": "写入数字白板软盘",
 	"IGUI_GS_TabBuilder": "建造",
 	"IGUI_GS_AddonBuilderTitle": "建造",
 	"IGUI_GS_AddonBuilderDesc": "建造扩展：需要杂志（电力5级）。在扩展标签页制作并安装模块。",

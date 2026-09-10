@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Записать дискету Builder",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Дискета цифровой доски",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Записать: Дискета цифровой доски",
 	"IGUI_GS_TabBuilder": "Строительство",
 	"IGUI_GS_AddonBuilderTitle": "Строительство",
 	"IGUI_GS_AddonBuilderDesc": "Дополнение Строительство: требуется журнал (Электричество 5). Изготовьте и установите модуль во вкладке Дополнения.",

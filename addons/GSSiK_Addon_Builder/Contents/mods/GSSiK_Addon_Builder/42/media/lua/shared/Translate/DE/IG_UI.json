@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Builder-Diskette beschreiben",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Digitaltafel-Diskette",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Digitaltafel-Diskette beschreiben",
 	"IGUI_GS_TabBuilder": "Bauen",
 	"IGUI_GS_AddonBuilderTitle": "Bauen",
 	"IGUI_GS_AddonBuilderDesc": "Erweiterung Bauen: Magazin erforderlich (Elektrizität 5). Modul im Reiter Erweiterungen herstellen und installieren.",

@@ -53,6 +53,7 @@ local definition = {
 		manualItem = "GSSiK_Addon_Builder.GS_Manual_Builder_DiskProgram",
 		outputItem = "GSSiK_Addon_Builder.GS_FloppyDisk_Builder",
 		menuTextKey = "IGUI_GS_ProgramBuilderDiskMenu",
+		titleKey = "IGUI_GS_ProgramBuilderDiskTitle",
 		iconPath = "media/textures/Item_GS_FloppyDisk_Builder.png",
 		descKey = "IGUI_GS_ProgramBuilderDiskDesc",
 	},

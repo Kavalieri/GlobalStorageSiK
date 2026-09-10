@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Graver disquette Builder",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Disquette de tableau numérique",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Enregistrer : Disquette de tableau numérique",
 	"IGUI_GS_TabBuilder": "Construction",
 	"IGUI_GS_AddonBuilderTitle": "Construction",
 	"IGUI_GS_AddonBuilderDesc": "Extension Construction : magazine requis (Électricité 5). Fabriquez et installez le module depuis l'onglet Extensions.",

@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Grabar disco Constructor",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Disquete de pizarra digital",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Grabar disquete de pizarra digital",
 	"IGUI_GS_ProgramBuilderDiskDesc": "Disquete de instalación para el periférico Pizarra Digital GS: construcción con materiales de la red.",
 	"IGUI_GS_TabBuilder": "Construcción",
 	"IGUI_GS_AddonBuilderTitle": "Constructor",

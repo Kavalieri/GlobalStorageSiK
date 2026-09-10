@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="sik-ui-provenance" content="{
-  &quot;frameworkManifestSha256&quot;: &quot;0a1107442861c28bdbcdd8145bae7b2fdd2146d948b6382f1a023a6f6ee581ad&quot;,
-  &quot;generatorSha256&quot;: &quot;151a7bcc388869c774c9e65eb30d478f5894e7a5d25c1791718b9cfd2881ba3b&quot;,
+  &quot;frameworkManifestSha256&quot;: &quot;9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74&quot;,
+  &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;b528d833136842bd7f107c0962726278fe6e1f177fdd6e3f68af8a48416f13a8&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;5d62485bc2820ee802f0f4101e83a2cbd42103cbdde5d8fd2d87a481259109b8&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;3369e47f994b1e5efd93ae75b2d67ac126e9092e328f655bd2e4239a165ec97e&quot;,
+  &quot;visualMasterSha256&quot;: &quot;4c7de7d07baf52992f1c29b45cffc44a8ff46f734c397995c1f5af346edb2f3a&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;2b86e7f2bf052c736234ea4c9f156e4ee5927c34dbf305a5130c70587126b48c&quot;
 }">
   <title>tab-builder</title>
@@ -67,6 +67,7 @@
   --sik-block-header-symbol-gap: 8px;
   --sik-combo-arrow-size: 14px;
   --sik-combo-arrow-inset: var(--sik-space-3);
+  --sik-field-inline-padding: var(--sik-space-3);
   --sik-icon-close: url("icons/sik-close-18.png");
   --sik-icon-check: url("icons/sik-check-18.png");
   --sik-icon-info: url("icons/sik-info-24.png");
@@ -516,6 +517,9 @@ button:disabled { cursor: default; }
 .sik-control-row--equal > .sik-button { flex: 1 1 0; min-width: 0; }
 .sik-control-row--wrap { flex-wrap: wrap; }
 .sik-control-row--equal.sik-control-row--wrap > .sik-button { flex: 1 1 180px; }
+.sik-control-row--responsive { flex-wrap: wrap; }
+.sik-control-row--responsive > .sik-combo-wrap { flex: 1 1 220px; }
+.sik-control-row--responsive > .sik-button { flex: 0 0 auto; }
 .sik-combo-wrap { position: relative; min-width: 0; flex: 1 1 0; }
 .sik-combo-wrap .sik-combo-list { position: absolute; z-index: 25; left: 0; right: 0; top: 100%; }
 .sik-status-grid,
@@ -644,6 +648,7 @@ button:disabled { cursor: default; }
 .sik-role-owner { color: var(--sik-accent); font-weight: 600; }
 .sik-role-admin { color: var(--sik-warn); font-weight: 600; }
 .sik-state-online { color: var(--sik-good); }
+.sik-state-warning { color: var(--sik-warn); }
 .sik-state-offline { color: var(--sik-text-muted); }
 .sik-state-cell { font-weight: 600; white-space: nowrap; }
 .sik-state-cell.is-ok { color: var(--sik-good); }
@@ -708,7 +713,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 }
 
 .sik-field,
-.sik-search { padding: 0 var(--sik-space-3); }
+.sik-search { padding-inline: var(--sik-field-inline-padding); }
+.sik-field::placeholder,
+.sik-search::placeholder { opacity: 1; }
 .sik-field { width: 100%; }
 .sik-quantity-modal { min-width: min(360px, 100%); }
 .sik-quantity-control { display: grid; grid-template-columns: 36px minmax(0, 1fr) 36px; gap: var(--sik-space-2); }
@@ -905,6 +912,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   font: 11px/1.45 var(--sik-font);
   text-align: left;
 }
+.sik-tooltip--scrollable { position: relative; left: 0; top: 0; width: 240px; height: 100px; display: block; pointer-events: auto; overscroll-behavior: contain; }
 .sik-floating-tooltip { position: fixed !important; z-index: 200 !important; display: block !important; pointer-events: none; box-shadow: 0 8px 22px #000c; }
 .sik-floating-tooltip strong { display: block; margin-bottom: 4px; color: var(--sik-accent); font-size: 12px; }
 .sik-floating-tooltip em { display: block; margin-top: 6px; color: var(--sik-info); font-style: normal; }
@@ -969,12 +977,21 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 .sik-stack { display: grid; grid-auto-rows: max-content; align-content: start; gap: var(--sik-space-3); }
 .sik-demo-long { height: 150px; }
 .sik-demo-short { height: 100px; }
-.sik-demo-shell { height: 190px; display: grid; grid-template-columns: 54px minmax(0,1fr); }
-.sik-demo-rail { padding: var(--sik-space-2); display: grid; align-content: start; gap: var(--sik-space-1); background: #111; border-right: 1px solid #050505; }
-.sik-demo-rail .sik-rail-tab { min-height: 42px; }
-.sik-demo-main { display: grid; grid-template-rows: 32px minmax(0,1fr); min-width: 0; }
-.sik-demo-main .sik-window-header { height: 32px; }
-.sik-demo-main .sik-content-host { padding: var(--sik-space-3); }
+.sik-demo-shell {
+  height: 280px;
+  min-width: 0;
+  display: grid;
+  grid-template-rows: var(--sik-window-header-height) minmax(0, 1fr) var(--sik-window-footer-height);
+  overflow: hidden;
+  border: 1px solid var(--sik-border-strong);
+  background: var(--sik-window);
+}
+.sik-demo-shell > .sik-window-header { width: 100%; }
+.sik-demo-shell-body { min-width: 0; min-height: 0; display: grid; grid-template-columns: 80px minmax(0, 1fr); overflow: hidden; }
+.sik-demo-rail { width: 80px; min-width: 80px; padding: var(--sik-window-content-inset) 12px; }
+.sik-demo-content-host { min-width: 0; min-height: 0; padding: var(--sik-window-content-inset); overflow: hidden; }
+.sik-demo-content-host > .sik-block { height: 100%; }
+.sik-demo-shell > .sik-status-footer { width: 100%; }
 
 /* Taxonomy map: same Window/Block chrome, with runtime L1 colour inheritance. */
 .sik-taxonomy-stage { align-items: stretch; padding: 28px; }
@@ -1093,6 +1110,11 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 .review-card[data-family="tabs"] .sik-review-frame { height:max(900px,calc(100vh - 150px)); }
 .review-card[data-family="editors"] .sik-review-frame,
 .review-card[data-family="staff"] .sik-review-frame { height:calc(100vh - 150px); min-height:620px; }
+.review-reference-note { margin: 0; padding: 8px 10px; border-block: 1px solid #242424; color: var(--sik-text-muted); font-size: 11px; }
+.review-state-gallery { padding: 10px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.review-state-card { min-width: 0; border: 1px solid #303030; background: #080808; }
+.review-state-card > strong { min-height: 30px; padding: 0 8px; display: flex; align-items: center; color: var(--sik-text-soft); font-size: 11px; }
+.review-state-card .sik-review-frame { height: 520px; border-top: 1px solid #242424; }
 
 @media (max-width: 899px), (max-height: 699px) {
   .sik-catalog-grid { grid-template-columns: 1fr; }
@@ -1109,8 +1131,14 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   .sik-action-status { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 }
 
+@container sik-ui-tab-panel (max-width: 560px) {
+  .sik-control-row--responsive > .sik-combo-wrap,
+  .sik-control-row--responsive > .sik-button { flex-basis: 100%; width: 100%; }
+}
+
 @media (max-width: 560px) {
   .review-grid { grid-template-columns: 1fr; }
+  .review-state-gallery { grid-template-columns: 1fr; }
   .sik-review-frame { height: 360px; }
 }
 
@@ -1119,7 +1147,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     /* La shell canónica no consume los perfiles históricos del tablero: el header siempre abarca rail y contenido. */
     :root[data-profile] .sik-terminal-shell { --sik-pref-h:900px; --sik-max-h:1600px; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }
     .sik-shell-body { display:grid; grid-template-columns:var(--sik-shell-rail-width) minmax(0,1fr); gap:var(--sik-shell-rail-content-gap); min-height:0; overflow:hidden; }
-    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; }
+    .sik-shell-body > .sik-shell-main { display:block; width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; container-name:sik-ui-tab-panel; container-type:inline-size; }
     .sik-shell-body > .sik-shell-main > .sik-content-host { display:flex; width:100%; height:100%; min-height:0; padding:0; overflow:hidden; }
     .sik-shell-body > .sik-shell-main > .sik-content-host > [data-panel] { flex:1 1 auto; min-width:0; min-height:0; }
     .sik-rail { width:var(--sik-shell-rail-width); }
@@ -1130,14 +1158,18 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     .sik-addon-grid--slots .sik-addon-slot > img {
       width:88px; height:88px; object-fit:contain;
     }
-    [data-state-view="estado"] > .sik-stack { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
-    [data-options-block="network"], [data-options-block="palette"] { grid-column:1 / -1; }
-    [data-options-block="operational"], [data-options-block="resources"] { min-height:224px; }
+    .sik-options-information-card { min-height:0; }
+    .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+    .sik-options-summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .sik-options-summary-card { min-height:132px; }
+    .sik-options-summary-card .sik-status-item { color:var(--sik-text); }
+    .sik-status-dot--danger { background:var(--sik-danger); }
     .sik-palette-selector { grid-template-columns:repeat(3,minmax(0,1fr)); }
+    .sik-terminal-shell > .sik-status-footer { grid-column:1 / -1; width:100%; box-sizing:border-box; }
     @media (max-width:899px) {
       .sik-terminal-shell { min-height:min(480px,calc(100vh - 32px)); }
-      .sik-addon-grid--slots, [data-state-view="estado"] > .sik-stack { grid-template-columns:1fr; }
-      [data-options-block="network"], [data-options-block="palette"] { grid-column:auto; }
+      .sik-addon-grid--slots, .sik-options-summary-grid { grid-template-columns:1fr; }
+      .sik-options-information-card .sik-info-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     @media (max-width:620px) { .sik-palette-selector { grid-template-columns:1fr; } }
   </style>
@@ -1291,6 +1323,68 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
     row.setAttribute("aria-expanded", expanded ? "false" : "true");
     const marker = row.querySelector(".sik-expander");
     if (marker) marker.textContent = expanded ? "▶" : "▼";
+    const table = row.closest(".sik-table");
+    if (table?.classList.contains("sik-warehouse-table")) {
+      refreshInlinePagers(table);
+      filterWarehouse();
+    }
+    else refreshInlinePagers(table || document);
+    requestAnimationFrame(refreshOverflow);
+  }
+
+  function getInlinePagerRows(pager) {
+    const table = pager.closest(".sik-table");
+    const key = pager.dataset.groupChild;
+    if (!table || !key) return [];
+    return Array.from(table.querySelectorAll(`[data-group-child="${key}"]`)).filter((row) => !row.classList.contains("sik-pager-row"));
+  }
+
+  function refreshInlinePager(pager) {
+    const rows = getInlinePagerRows(pager);
+    if (!rows.length) return;
+    const pages = Array.from(new Set(rows.map((row) => Number(row.dataset.pagerPage || 1)))).sort((left, right) => left - right);
+    const requestedPage = Number(pager.dataset.currentPage || pages[0]);
+    const page = pages.includes(requestedPage) ? requestedPage : pages[0];
+    pager.dataset.currentPage = String(page);
+    const visibleRows = rows.filter((row) => Number(row.dataset.pagerPage || 1) === page);
+    const first = Math.min(...visibleRows.map((row) => Number(row.dataset.pagerRowIndex || 1)));
+    const last = Math.max(...visibleRows.map((row) => Number(row.dataset.pagerRowIndex || first)));
+    const totalUnits = visibleRows.reduce((sum, row) => sum + (Number(row.dataset.pagerUnits) || 0), 0);
+    const label = pager.querySelector("[data-pager-label]");
+    if (label) label.textContent = `Mostrando ${first}–${last} de ${rows.length} líneas · ${totalUnits} objetos`;
+    pager.querySelectorAll("[data-pager-direction]").forEach((button) => {
+      button.disabled = button.dataset.pagerDirection === "previous" ? page === pages[0] : page === pages[pages.length - 1];
+    });
+    const parent = pager.closest(".sik-table")?.querySelector(`[data-expand-group="${pager.dataset.groupChild}"]`);
+    if (!pager.closest(".sik-warehouse-table")) {
+      const expanded = parent?.getAttribute("aria-expanded") !== "false";
+      rows.forEach((row) => { row.hidden = !expanded || Number(row.dataset.pagerPage || 1) !== page; });
+      pager.hidden = !expanded;
+    }
+  }
+
+  function refreshInlinePagers(scope = document) {
+    if (!scope) return;
+    const pagers = scope.matches?.(".sik-pager-row") ? [scope] : scope.querySelectorAll?.(".sik-pager-row");
+    Array.from(pagers || []).forEach(refreshInlinePager);
+  }
+
+  function changeInlinePager(button) {
+    const pager = button.closest(".sik-pager-row");
+    if (!pager || button.disabled) return;
+    const rows = getInlinePagerRows(pager);
+    const pages = Array.from(new Set(rows.map((row) => Number(row.dataset.pagerPage || 1)))).sort((left, right) => left - right);
+    const current = Number(pager.dataset.currentPage || pages[0]);
+    const index = pages.indexOf(current);
+    const next = button.dataset.pagerDirection === "previous" ? pages[index - 1] : pages[index + 1];
+    if (!next) return;
+    pager.dataset.currentPage = String(next);
+    const table = pager.closest(".sik-table");
+    if (table?.classList.contains("sik-warehouse-table")) {
+      refreshInlinePager(pager);
+      filterWarehouse();
+    }
+    else refreshInlinePagers(table || document);
     requestAnimationFrame(refreshOverflow);
   }
 
@@ -1467,7 +1561,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
       const detailMatch = detail === "all" || rowDetail === detail;
       const collapsed = childGroup && parent && parent.getAttribute("aria-expanded") === "false";
       const filtering = Boolean(query) || family !== "all" || group !== "all" || detail !== "all";
-      row.hidden = !(textMatch && familyMatch && groupMatch && detailMatch) || (collapsed && !filtering);
+      const pager = childGroup ? table.querySelector(`.sik-pager-row[data-group-child="${childGroup}"]`) : null;
+      const offPage = pager && Number(row.dataset.pagerPage || 1) !== Number(pager.dataset.currentPage || 1);
+      row.hidden = !(textMatch && familyMatch && groupMatch && detailMatch) || (collapsed && !filtering) || offPage;
     });
     refreshOverflow();
   }
@@ -1523,6 +1619,11 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
         dialog.showModal();
         dialog.querySelector(".sik-modal-actions .sik-button")?.focus();
       }
+    }
+    const pagerButton = event.target.closest("[data-pager-direction]");
+    if (pagerButton) {
+      changeInlinePager(pagerButton);
+      return;
     }
     const tab = event.target.closest("[data-tab]");
     if (tab) activateTab(tab);
@@ -1613,6 +1714,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   installFloatingTooltips();
   installItemTooltips();
   document.querySelectorAll("[data-sik-table]").forEach(configureTable);
+  refreshInlinePagers();
   const requestedTab = params.get("tab");
   if (requestedTab) {
     const tab = findByDataset("[data-tab]", "tab", requestedTab);
@@ -1628,6 +1730,29 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   if (window.ResizeObserver) {
     const observer = new ResizeObserver(refreshOverflow);
     document.querySelectorAll(".sik-block-viewport, .sik-scroll-region").forEach((viewport) => observer.observe(viewport));
+  }
+})();
+
+/* Product state fixture; uses the existing rail interaction and shared components. */
+(() => {
+  const reader = new URLSearchParams(location.search).get('reader') || 'installed';
+  const installed = reader === 'installed';
+  document.documentElement.dataset.reader = reader;
+  const tab = document.querySelector('[data-tab="programming"]');
+  const panel = document.querySelector('[data-panel="programming"]');
+  if (!installed) {
+    if (tab.classList.contains('is-active')) document.querySelector('[data-tab="warehouse"]').click();
+    tab.hidden = true;
+    panel.hidden = true;
+    panel.inert = true;
+    const slot = document.querySelector('[data-addon-id="Reader"]');
+    slot.dataset.addonState = 'not-installed';
+    slot.classList.remove('is-active');
+    const label = slot.querySelector('[data-addon-part="stateLabel"]');
+    label.textContent = 'No instalado aquí';
+    label.classList.remove('is-installed');
+    const tooltip = slot.querySelector('.sik-tooltip em');
+    tooltip.textContent = 'Instala la disquetera en este terminal para abrir Programación.';
   }
 })();
 </script>

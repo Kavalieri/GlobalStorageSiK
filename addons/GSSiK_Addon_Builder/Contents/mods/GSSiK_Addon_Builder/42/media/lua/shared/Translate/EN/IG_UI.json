@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Write Builder disk",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Digital board disk",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Record digital board disk",
 	"IGUI_GS_ProgramBuilderDiskDesc": "Installation disk for the GS Digital Whiteboard peripheral: building with network materials.",
 	"IGUI_GS_TabBuilder": "Build",
 	"IGUI_GS_AddonBuilderTitle": "Builder",

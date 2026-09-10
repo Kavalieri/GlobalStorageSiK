@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Gravar disquete Builder",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Disquete do quadro digital",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Gravar disquete do quadro digital",
 	"IGUI_GS_TabBuilder": "Construção",
 	"IGUI_GS_AddonBuilderTitle": "Construir",
 	"IGUI_GS_AddonBuilderDesc": "Complemento Construir: revista necessária (Eletricidade 5). Fabrique e instale o módulo na aba Complementos.",

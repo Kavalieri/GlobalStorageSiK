@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramBuilderDiskMenu": "Scrivi dischetto Builder",
+	"IGUI_GS_ProgramBuilderDiskTitle": "Dischetto della lavagna digitale",
+	"IGUI_GS_ProgramBuilderDiskMenu": "Registra: Dischetto della lavagna digitale",
 	"IGUI_GS_TabBuilder": "Costruzione",
 	"IGUI_GS_AddonBuilderTitle": "Costruzione",
 	"IGUI_GS_AddonBuilderDesc": "Espansione Costruzione: richiede il manuale (Elettricità 5). Crea e installa il modulo nella scheda Espansioni.",
