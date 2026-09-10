@@ -7,9 +7,9 @@
   &quot;frameworkManifestSha256&quot;: &quot;9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74&quot;,
   &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;1b9095f31605e9c16bfefe95087ce166ffa670753ee78843248152f4a0521480&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;1608293709819339ad49e0cb44b388bf385d0b66bd0f6a6b82e783b9eff67eaa&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;15f8cc6b74186e79047077857756f3b72c5703c7d1c7a2813e2e9c6d37ddcba5&quot;,
+  &quot;visualMasterSha256&quot;: &quot;fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5&quot;,
   &quot;visualSubtreeSha256&quot;: &quot;91d66e21001561186b1a7e19d59ab06f50f225903dd1225f51d2e4d3ae36bb23&quot;
 }">
   <title>tab-options</title>
@@ -519,6 +519,10 @@ button:disabled { cursor: default; }
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.sik-list-option:has(> .sik-list-option-icon) { min-height: 48px; }
+.sik-list-option > .sik-list-option-icon { width: 32px; height: 32px; flex: 0 0 32px; margin: 0; }
+.sik-list-option > .sik-list-option-copy { min-width: 0; flex: 1 1 auto; }
+.sik-list-option > .sik-icon--check { flex: 0 0 18px; margin-left: auto; }
 
 .sik-control-row { display: flex; gap: var(--sik-space-2); align-items: center; }
 .sik-control-row--equal > .sik-button { flex: 1 1 0; min-width: 0; }
@@ -1169,6 +1173,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   .review-state-gallery { grid-template-columns: 1fr; }
   .sik-review-frame { height: 360px; }
 }
+
+/* Same bounded multimedia viewport as the previous inline declaration. */
+[data-surface-id="tab-multimedia"] .sik-table { max-height: 420px; overflow-y: auto; }
 
 
     .sik-terminal-shell { --sik-shell-rail-width:80px; --sik-shell-rail-content-gap:0px; --sik-pref-h:900px; --sik-max-h:1600px; height:min(max(var(--sik-pref-h),calc(100vh - 32px)),var(--sik-max-h)); min-height:min(480px,calc(100vh - 32px)); max-height:calc(100vh - 32px); display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; }

@@ -9,7 +9,7 @@
   "product": { "id": "global-storage-sik", "namespace": "GlobalStorageSiK" },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "4c7de7d07baf52992f1c29b45cffc44a8ff46f734c397995c1f5af346edb2f3a",
+    "masterSha256": "fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5",
     "selector": "[data-surface-id=\"tab-red\"]",
     "subtreeSha256": "ad39b8c492c1950a2ce66922e31a5a2710eb54e5a4373e35524e1769d08ed00a",
     "canonicalizer": "sik-ui-dom-v2",
