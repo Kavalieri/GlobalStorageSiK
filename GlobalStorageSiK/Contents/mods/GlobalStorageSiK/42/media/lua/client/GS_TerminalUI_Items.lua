@@ -119,6 +119,7 @@ function GlobalStorageSiK.TerminalItems.hideRowTooltip(row)
 	if GlobalStorageSiK.RemoteItemDetail then
 		GlobalStorageSiK.RemoteItemDetail.deactivate(row)
 	end
+	row.onRemoteItemDetail = nil
 	local tooltip = row._gsTooltip
 	if not tooltip then return end
 	ObjectTooltipOverflow.release(tooltip)
@@ -1878,8 +1879,14 @@ end
 
 local function updateRemoteMediaTitle(row, detail, listPanel, terminal)
 	if not row._gsTooltip or not row.itemData or row.itemData._gsStale
-		or not pointerInsideRow(row) then return end
-	if tostring(detail and detail.itemId) ~= tostring(row.itemData.itemId) then return end
+		or (not pointerInsideRow(row)
+			and not ObjectTooltipOverflow.isRetained(row._gsTooltip)) then return end
+	local expectedItemId = row.itemData.itemId or row.itemData.representativeItemId
+	local expectedNodeId = row.itemData.nodeId or row.itemData.representativeNodeId
+	local expectedRevision = row.itemData.selectionRevision or row.itemData.representativeRevision
+	if tostring(detail and detail.itemId) ~= tostring(expectedItemId)
+		or tostring(detail and detail.nodeId) ~= tostring(expectedNodeId)
+		or tonumber(detail and detail.inventoryRevision) ~= tonumber(expectedRevision) then return end
 	local mediaTitle = detail and (detail.mediaTitle or detail.displayName) or nil
 	local mediaIndex = tonumber(row.itemData.mediaIndex or (detail and detail.mediaIndex))
 	if mediaIndex and mediaIndex >= 0 and mediaIndex <= 32767
@@ -1945,6 +1952,11 @@ end
 local function afterRenderFrameworkRow(context, listPanel, terminal)
 	local row, data = context.row, context.item
 	if not data then return end
+	row.onRemoteItemDetail = function(target, detail)
+		if target == listPanel._gsItemTooltipOwner and target.itemData == data then
+			updateRemoteMediaTitle(target, detail, listPanel, terminal)
+		end
+	end
 	local hovering = pointerInsideRow(row) or ObjectTooltipOverflow.isRetained(row._gsTooltip)
 	if not data._gsStale and hovering and not GlobalStorageSiK.TerminalWithdrawDrag.isActive() then
 		local tooltipKey = rowIdentity(data) or (tostring(data.fullType) .. "\31" .. tostring(data.worldSprite or ""))
@@ -1978,14 +1990,11 @@ local function afterRenderFrameworkRow(context, listPanel, terminal)
 					or getSpecificPlayer(playerNum)
 				row._gsTooltip:setCharacter(player)
 				row._gsTooltip._gsItemKey = tooltipKey
-				local detail, loading = nil, false
-				if not row._gsLocalTooltip then
-					detail, loading = GlobalStorageSiK.RemoteItemDetail.activate(row, data, terminal)
-				end
-				if not row._gsLocalTooltip then
-					GlobalStorageSiK.RemoteItemDetail.bindProbe(probe, data, detail, loading)
-				end
 			end
+		end
+		if row._gsTooltip and not row._gsLocalTooltip then
+			local detail, loading = GlobalStorageSiK.RemoteItemDetail.activate(row, data, terminal)
+			GlobalStorageSiK.RemoteItemDetail.bindProbe(row._gsTooltip.item, data, detail, loading)
 		end
 		if row._gsTooltip then
 			row._gsTooltip._gsRemoteRow = data

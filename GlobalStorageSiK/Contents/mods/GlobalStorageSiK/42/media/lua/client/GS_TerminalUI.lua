@@ -242,8 +242,8 @@ local function resolveRuntimeVersions()
 	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
 	local visible = coreVersion and ("Core " .. tostring(coreVersion)) or "Core"
 	local tooltip = { declaredModLine("SiKUIFramework", "SiK UI Framework") }
-	local registry = GlobalStorageSiK.AddonRegistry
-	local addons = registry and registry.listActive and registry.listActive() or {}
+	local ok, _, addons = GSSiK.API.Addon.listActive()
+	addons = ok and addons or {}
 	for i = 1, #addons do
 		local def = addons[i]
 		local fallback = def.titleKey and T(def.titleKey) or def.id or def.modId

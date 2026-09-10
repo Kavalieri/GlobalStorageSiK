@@ -293,8 +293,8 @@ local function compactParentRows(detailRows)
 			if type(id) == "number" and id >= 0 and id < math.huge
 				and id == math.floor(id) and type(nodeId) == "string" then
 				local better = not parent.representativeItemId
-					or nodeId < parent.representativeNodeId
-					or (nodeId == parent.representativeNodeId and id < parent.representativeItemId)
+					or id < parent.representativeItemId
+					or (id == parent.representativeItemId and nodeId < parent.representativeNodeId)
 				if better then
 					parent.representativeNodeId = nodeId
 					parent.representativeItemId = id
@@ -333,16 +333,23 @@ local function compactParentRows(detailRows)
 			parent._variantSeen[variantKey] = summary
 			parent.variantSummary[#parent.variantSummary + 1] = summary
 		end
-		-- Reuse the captured exact identities. One deterministic representative
-		-- per literature variant supports sequential reading without another
-		-- detail query or a fabricated row key. The snapshot already signs IDs.
-		if detailKind == "literature" then
-			for j = 1, #(detail.itemIds or {}) do
-				local id = detail.itemIds[j]
-				if type(id) == "number" and id >= 0 and id < math.huge
-					and id == math.floor(id)
-					and (not summary.representativeItemId or id < summary.representativeItemId) then
+		-- Reuse one exact captured identity for every stateful variant. This is
+		-- enough for lazy presentation and sequential reading without publishing
+		-- the full physical-ID set in the ordinary catalog.
+		for j = 1, #(detail.itemIds or {}) do
+			local id = detail.itemIds[j]
+			local nodeId = detail.unitNodeIds and detail.unitNodeIds[id] or detail.nodeId
+			if type(id) == "number" and id >= 0 and id < math.huge
+				and id == math.floor(id) and type(nodeId) == "string" then
+				local better = not summary.representativeItemId
+					or id < summary.representativeItemId
+					or (id == summary.representativeItemId
+						and nodeId < summary.representativeNodeId)
+				if better then
 					summary.representativeItemId = id
+					summary.representativeNodeId = nodeId
+					summary.representativeFullType = detail.fullType
+					summary.representativeDynamicSignature = detail.dynamicSignature
 				end
 			end
 		end
@@ -471,6 +478,11 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope,
 	for i = 1, #rows do
 		rows[i].selectionRevision = selectionRevision
 		rows[i].representativeRevision = selectionRevision
+		for j = 1, #(rows[i].variantSummary or {}) do
+			if rows[i].variantSummary[j].representativeItemId then
+				rows[i].variantSummary[j].representativeRevision = selectionRevision
+			end
+		end
 		rows[i].sourceNodeId = sourceNodeId
 		local resolution = nil
 		if not rows[i].mixedVariants or rows[i].nativePath then
