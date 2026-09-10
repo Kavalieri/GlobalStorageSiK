@@ -14,6 +14,25 @@ local function findById(rows, id)
     end
 end
 
+local function physicalRef(row)
+    if not row then return nil end
+    if row._gsRowKind == "child" and validId(row.itemId)
+        and type(row.nodeId) == "string" and type(row.fullType) == "string"
+        and type(row.selectionRevision) == "number" then
+        return { itemId = row.itemId, nodeId = row.nodeId, fullType = row.fullType,
+            revision = row.selectionRevision }
+    end
+    if row._gsRowKind == "parent" and validId(row.representativeItemId)
+        and type(row.representativeNodeId) == "string"
+        and type(row.representativeFullType) == "string"
+        and type(row.representativeRevision) == "number" then
+        return { itemId = row.representativeItemId, nodeId = row.representativeNodeId,
+            fullType = row.representativeFullType,
+            revision = row.representativeRevision }
+    end
+    return nil
+end
+
 local function resolveNode(row, state, player)
     local gs = GlobalStorageSiK
     if isClient and isClient() then
@@ -38,30 +57,32 @@ end
 
 local function resolve(row, terminal)
     local state = terminal and terminal.terminalState
-    if not state or not row or row._gsRowKind ~= "child" or row._gsStale
-        or not state.networkId or not validId(row.itemId)
-        or type(row.fullType) ~= "string" or type(row.nodeId) ~= "string"
-        or row.selectionRevision ~= state.inventoryRevision then return nil end
+    local ref = physicalRef(row)
+    if not state or not row or row._gsStale or not ref
+        or not state.networkId or not validId(ref.itemId)
+        or type(ref.fullType) ~= "string" or type(ref.nodeId) ~= "string"
+        or ref.revision ~= state.inventoryRevision then return nil end
     local gs = GlobalStorageSiK
     if not gs.Network or not gs.Network.findWorldObject
         or not gs.Utils or not gs.Utils.getObjectContainer then return nil end
     local player = getSpecificPlayer and getSpecificPlayer(terminal.playerNum or 0)
     if not player then return nil end
-    local node = resolveNode(row, state, player)
+    local node = resolveNode({ nodeId = ref.nodeId }, state, player)
     if not node or node.enabled == false or node.offline == true
         or node.membership == "excluded" then return nil end
     local object = gs.Network.findWorldObject(node)
     local container = object and gs.Utils.getObjectContainer(object, node.containerIndex)
     if not container then return nil end
-    local item = container.getItemWithID and container:getItemWithID(row.itemId)
-    if not item and container.getItemById then item = container:getItemById(row.itemId) end
-    if not item or item:getID() ~= row.itemId or item:getFullType() ~= row.fullType
+    local item = container.getItemWithID and container:getItemWithID(ref.itemId)
+    if not item and container.getItemById then item = container:getItemById(ref.itemId) end
+    if not item or item:getID() ~= ref.itemId or item:getFullType() ~= ref.fullType
         or item:getContainer() ~= container then return nil end
     local items = container:getItems()
     if not items or not items:contains(item) then return nil end
     return {item=item, container=container, object=object, node=node,
+        nodeId=ref.nodeId,
         networkId=state.networkId, revision=state.inventoryRevision,
-        itemId=row.itemId, fullType=row.fullType, playerNum=terminal.playerNum or 0,
+        itemId=ref.itemId, fullType=ref.fullType, playerNum=terminal.playerNum or 0,
         checkedAt=getTimestampMs and getTimestampMs() or 0}
 end
 
@@ -74,9 +95,11 @@ function LocalTooltip.isCurrent(binding, row, terminal)
     if not binding then return false end
     local ok, current = pcall(function()
         local state = terminal and terminal.terminalState
-        if not state or not row or row._gsStale or row.itemId ~= binding.itemId
-            or row.fullType ~= binding.fullType or state.networkId ~= binding.networkId
-            or state.inventoryRevision ~= binding.revision or row.selectionRevision ~= binding.revision
+        local ref = physicalRef(row)
+        if not state or not row or row._gsStale or not ref or ref.itemId ~= binding.itemId
+            or ref.fullType ~= binding.fullType or ref.nodeId ~= binding.nodeId
+            or state.networkId ~= binding.networkId
+            or state.inventoryRevision ~= binding.revision or ref.revision ~= binding.revision
             or (terminal.playerNum or 0) ~= binding.playerNum
             or binding.item:getID() ~= binding.itemId
             or binding.item:getFullType() ~= binding.fullType

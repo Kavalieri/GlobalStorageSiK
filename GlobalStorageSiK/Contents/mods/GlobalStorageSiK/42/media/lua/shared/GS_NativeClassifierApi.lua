@@ -238,8 +238,9 @@ local function computeClassification(fullType)
 		end
 	end
 	if bestRank < 1 then
-		local path, facets, attributes, evidence = GlobalStorageSiK.NativeSourceCategoryBridge.resolve(fullType, scriptItem)
-		if path then
+		local path, facets, attributes, evidence, overrideNominal =
+			GlobalStorageSiK.NativeSourceCategoryBridge.resolve(fullType, scriptItem)
+		if path and (bestRank < 0 or overrideNominal) then
 			GlobalStorageSiK.NativeSourceCategoryBridge.record(evidence)
 			return {
 				schemaVersion = 1,

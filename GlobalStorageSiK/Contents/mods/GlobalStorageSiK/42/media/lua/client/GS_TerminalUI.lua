@@ -219,38 +219,37 @@ local function buildHeaderSpec(state, activeOperation)
 	}
 end
 
-local function resolveRuntimeVersionText()
-	local parts = {}
-	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
-	parts[#parts + 1] = coreVersion and ("Core " .. tostring(coreVersion)) or "Core"
-	local addons = {
-		{ "Craft", "GSSiK_Addon_Craft", rawget(_G, "GSSiK_Addon_Craft") },
-		{ "Builder", "GSSiK_Addon_Builder", rawget(_G, "GSSiK_Addon_Builder") },
-		{ "Tablet", "GSSiK_Addon_Tablet", rawget(_G, "GSSiK_Addon_Tablet") },
-	}
-	for i = 1, #addons do
-		local runtime = addons[i][3]
-		local active = type(runtime) == "table"
-		if not active and getActivatedMods then
-			local ok, detected = pcall(function()
-				local mods = getActivatedMods()
-				return mods and mods:contains(addons[i][2]) == true
-			end)
-			active = ok and detected == true
-		end
-		if active then
-			local version = type(runtime) == "table" and (runtime.VERSION or runtime.MOD_VERSION) or nil
-			if not version and getModInfoByID then
-				local ok, detected = pcall(function()
-					local info = getModInfoByID(addons[i][2])
-					return info and info.getModVersion and info:getModVersion() or nil
-				end)
-				if ok then version = detected end
-			end
-			parts[#parts + 1] = addons[i][1] .. (version and (" " .. tostring(version)) or "")
-		end
+local function declaredModLine(modId, fallbackName)
+	local info = nil
+	if getModInfoByID and type(modId) == "string" and modId ~= "" then
+		local ok, detected = pcall(function() return getModInfoByID(modId) end)
+		if ok then info = detected end
 	end
-	return table.concat(parts, " | ")
+	local name, version = nil, nil
+	if info and info.getName then
+		local ok, value = pcall(function() return info:getName() end)
+		if ok and value ~= nil and tostring(value) ~= "" then name = tostring(value) end
+	end
+	if info and info.getModVersion then
+		local ok, value = pcall(function() return info:getModVersion() end)
+		if ok and value ~= nil and tostring(value) ~= "" then version = tostring(value) end
+	end
+	name = name or fallbackName or modId or "?"
+	return name .. (version and (" " .. version) or "")
+end
+
+local function resolveRuntimeVersions()
+	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
+	local visible = coreVersion and ("Core " .. tostring(coreVersion)) or "Core"
+	local tooltip = { declaredModLine("SiKUIFramework", "SiK UI Framework") }
+	local registry = GlobalStorageSiK.AddonRegistry
+	local addons = registry and registry.listActive and registry.listActive() or {}
+	for i = 1, #addons do
+		local def = addons[i]
+		local fallback = def.titleKey and T(def.titleKey) or def.id or def.modId
+		tooltip[#tooltip + 1] = declaredModLine(def.modId, fallback)
+	end
+	return visible, tooltip
 end
 
 --- Sincroniza únicamente datos del shell. Geometría, controles y dibujo
@@ -273,7 +272,10 @@ function GS_TerminalUI:syncHeaderChrome()
 		spec.status = { text = T(self._blockedHeaderTitleKey or "IGUI_GS_BlockedNoTerminalTitle"), tone = "danger" }
 	end
 	self:setHeader(spec)
-	if self.setVersions then self:setVersions(resolveRuntimeVersionText()) end
+	if self.setVersions then
+		local visible, tooltip = resolveRuntimeVersions()
+		self:setVersions(visible, tooltip)
+	end
 end
 
 local TAB_BG = { r = 0, g = 0, b = 0, a = 0 }
@@ -456,6 +458,7 @@ end
 function GS_TerminalUI:initialise()
 	UI.Window.callBase(self, "initialise")
 	self.clipChildren = true
+	local versionText, versionTooltip = resolveRuntimeVersions()
 	UI.Window.apply(self, {
 		x = self.x, y = self.y, w = self.width, h = self.height,
 		playerNum = self.playerNum or 0,
@@ -467,7 +470,7 @@ function GS_TerminalUI:initialise()
 		padding = self.padding, contentPadding = 0,
 		headerHeight = self.headerHeight,
 		header = buildHeaderSpec(self.terminalState),
-		footer = { versions = resolveRuntimeVersionText(), align = "center",
+		footer = { versions = versionText, tooltip = versionTooltip, align = "center",
 			expandWhenTight = true },
 		geometryKey = "terminal-shell",
 		geometryVersion = 2,

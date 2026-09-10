@@ -1788,7 +1788,8 @@ function GlobalStorageSiK.TerminalItems.describeRow(data, listPanel, terminal, z
 			or GlobalStorageSiK.I18n.itemCategoryDisplay(data.fullType, data.category, data.subCategory, data.gsSubKeysStr),
 		categoryColor = projection.color or pal.textMuted,
 		zone = zoneLabel or resolveZoneLabel(terminal, data) or T("IGUI_GS_PunctuationEmDash"),
-		count = tostring(data.count or 0), depth = data._gsDepth or 0,
+		count = data._gsRowKind == "parent" and (tonumber(data.count) or 0) > 1
+			and tostring(data.count) or "", depth = data._gsDepth or 0,
 		rowKind = data._gsRowKind, expanded = expanded,
 		literatureRead = GlobalStorageSiK.RecordedMedia.hasBeenConsumed(player, data)
 			or isLiteratureReadSafe(player, data), stale = data._gsStale == true,
@@ -1978,7 +1979,7 @@ local function afterRenderFrameworkRow(context, listPanel, terminal)
 				row._gsTooltip:setCharacter(player)
 				row._gsTooltip._gsItemKey = tooltipKey
 				local detail, loading = nil, false
-				if data._gsRowKind == "child" and not row._gsLocalTooltip then
+				if not row._gsLocalTooltip then
 					detail, loading = GlobalStorageSiK.RemoteItemDetail.activate(row, data, terminal)
 				end
 				if not row._gsLocalTooltip then

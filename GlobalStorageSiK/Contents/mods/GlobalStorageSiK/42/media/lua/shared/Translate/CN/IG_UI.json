@@ -3,6 +3,7 @@
 	"IGUI_GS_RemoteDetailLoading": "正在加载物品详细信息…",
 	"IGUI_GS_RemoteDetailUnavailable": "详细信息不可用；请刷新库存。",
 	"IGUI_GS_RemoteGroupTotal": "组内总计：{1} 件物品",
+	"IGUI_GS_RemoteGroupRepresentative": "代表性单件物品的数据",
 	"IGUI_GS_ScanUpdatingAge": "正在更新库存 · 上次有效数据为 {1} 秒前",
 	"IGUI_GS_ItemDetailPage": "第 {1}-{2} 行，共 {3} 行 · {4} 个物品",
 	"IGUI_GS_BlockedVacantTitle": "没有所有者的网络",

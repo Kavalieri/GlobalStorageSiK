@@ -25,6 +25,11 @@ local MAX_RETRY_KEYS = 256
 local FAILURE_BACKOFF_MS = 1500
 local REQUEST_TIMEOUT_MS = 5000
 
+local function validItemId(value)
+	return type(value) == "number" and value == value and value >= 0
+		and value <= 2147483647 and value == math.floor(value)
+end
+
 local function nowMs()
 	if getTimestampMs then return getTimestampMs() end
 	if getTimestamp then return (getTimestamp() or 0) * 1000 end
@@ -141,6 +146,25 @@ function RemoteDetail.contextForProbe(probe)
 	return probe and probeContexts[probe] or nil
 end
 
+local function physicalRow(row)
+	if not row then return nil end
+	if validItemId(row.itemId) and type(row.nodeId) == "string"
+		and type(row.fullType) == "string" and type(row.selectionRevision) == "number" then
+		return row
+	end
+	if validItemId(row.representativeItemId) and type(row.representativeNodeId) == "string"
+		and type(row.representativeFullType) == "string"
+		and type(row.representativeRevision) == "number" then
+		return {
+			itemId = row.representativeItemId,
+			nodeId = row.representativeNodeId,
+			fullType = row.representativeFullType,
+			selectionRevision = row.representativeRevision,
+		}
+	end
+	return nil
+end
+
 function RemoteDetail.unbindProbe(probe)
 	if probe then probeContexts[probe] = nil end
 end
@@ -148,7 +172,11 @@ end
 ---@return table|nil detail
 ---@return boolean loading
 function RemoteDetail.activate(owner, row, terminal)
-	local key, revision, networkId = contextKey(row, terminal)
+	local exactRow = physicalRow(row)
+	local state = terminal and terminal.terminalState or nil
+	if not exactRow or not state
+		or exactRow.selectionRevision ~= state.inventoryRevision then return nil, false end
+	local key, revision, networkId = contextKey(exactRow, terminal)
 	if not key then return nil, false end
 	if revisionByNetwork[networkId] ~= nil and revisionByNetwork[networkId] ~= revision then
 		RemoteDetail.invalidateNetwork(networkId)
@@ -175,9 +203,9 @@ function RemoteDetail.activate(owner, row, terminal)
 	local requestId = flight and flight.requestId or nil
 	if not requestId then
 		sequence = sequence + 1
-		requestId = "tooltip:" .. tostring(sequence) .. ":" .. tostring(row.itemId)
+		requestId = "tooltip:" .. tostring(sequence) .. ":" .. tostring(exactRow.itemId)
 		inFlightByKey[key] = { requestId = requestId, sentAt = now,
-			networkId = networkId, revision = revision, nodeId = row.nodeId, itemId = row.itemId }
+			networkId = networkId, revision = revision, nodeId = exactRow.nodeId, itemId = exactRow.itemId }
 		inFlightOrder[#inFlightOrder + 1] = key
 		capInFlight()
 		keyByRequestId[requestId] = key
@@ -188,8 +216,8 @@ function RemoteDetail.activate(owner, row, terminal)
 			requestId = requestId,
 			networkId = networkId,
 			inventoryRevision = revision,
-			nodeId = row.nodeId,
-			itemId = row.itemId,
+			nodeId = exactRow.nodeId,
+			itemId = exactRow.itemId,
 		}, getSpecificPlayer and getSpecificPlayer(terminal.playerNum or 0) or nil)
 		if not sent then
 			keyByRequestId[requestId] = nil

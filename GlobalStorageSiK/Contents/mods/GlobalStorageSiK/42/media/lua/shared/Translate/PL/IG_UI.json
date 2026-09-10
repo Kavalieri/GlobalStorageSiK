@@ -3,6 +3,7 @@
 	"IGUI_GS_RemoteDetailLoading": "Wczytywanie dokładnych danych…",
 	"IGUI_GS_RemoteDetailUnavailable": "Dane niedostępne; odśwież ekwipunek.",
 	"IGUI_GS_RemoteGroupTotal": "Suma grupy: {1} przedmiotów",
+	"IGUI_GS_RemoteGroupRepresentative": "Dane reprezentatywnego przedmiotu",
 	"IGUI_GS_ScanUpdatingAge": "Aktualizowanie ekwipunku · ostatni poprawny stan {1} s temu",
 	"IGUI_GS_ItemDetailPage": "Wiersze {1}-{2} z {3} · {4} przedmiotów",
 	"IGUI_GS_BlockedVacantTitle": "Sieć bez właściciela",

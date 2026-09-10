@@ -3,6 +3,7 @@
 	"IGUI_GS_RemoteDetailLoading": "Carregando detalhes exatos…",
 	"IGUI_GS_RemoteDetailUnavailable": "Detalhes indisponíveis; atualize o inventário.",
 	"IGUI_GS_RemoteGroupTotal": "Total do grupo: {1} objetos",
+	"IGUI_GS_RemoteGroupRepresentative": "Dados de um item representativo",
 	"IGUI_GS_ScanUpdatingAge": "Atualizando inventário · último estado válido há {1} s",
 	"IGUI_GS_ItemDetailPage": "Linhas {1}-{2} de {3} · {4} objetos",
 	"IGUI_GS_BlockedVacantTitle": "Rede sem proprietário",

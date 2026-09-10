@@ -569,8 +569,10 @@ function GlobalStorageSiK.TerminalPermissions.buildInNetworkScroll(scroll, termi
 	local tableFrame, frameError = UI.Block.create({
 		parent = UI.Scroll.childHost(scroll), x = pad, y = ui.permTableY,
 		w = rowW, h = titleH + ROW_H * 2 + pad * 2,
-		title = T("IGUI_GS_PermMembersTableTitle"),
-		tooltip = T("IGUI_GS_PermMembersTableTitle"),
+		-- The Block owns the standard title/help/padding; Table remains the
+		-- unframed inner viewport and must not recreate that chrome.
+		title = T("IGUI_GS_OptionsMembersTitle"),
+		tooltip = T("IGUI_GS_OptionsMembersHelp"),
 	})
 	if not tableFrame then error("SiK.UI.Block.create(admin.members): " .. tostring(frameError)) end
 	ui.memberTableFrame = tableFrame

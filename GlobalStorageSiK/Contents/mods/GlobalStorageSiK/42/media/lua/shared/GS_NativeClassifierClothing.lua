@@ -123,8 +123,13 @@ local function classifyClothing(fullType, si)
 	-- identidad contradictoria con Contenedores, que ya no reclama esto).
 	local nameTokens = U.tokenize(U.typeName(si))
 	local isAlicePack = U.fullTypeLower(si):find("alicepack", 1, true) ~= nil
-	local isEquippableContainer = U.itemTypeLower(si) == "base:container"
-		and U.displayCategoryLower(si) == "bag" and U.canBeEquippedLower(si) ~= ""
+	local isBagContainer = U.itemTypeLower(si) == "base:container"
+		and U.displayCategoryLower(si) == "bag"
+	local equippedSlot = isBagContainer and U.canBeEquippedLower(si) or ""
+	if isBagContainer and equippedSlot == "" then
+		equippedSlot = U.instanceCanBeEquippedLower(si)
+	end
+	local isEquippableContainer = equippedSlot ~= ""
 	if U.hasAnyToken(nameTokens, BACKPACK_TOKENS) or isAlicePack or isEquippableContainer then
 		local bodyLoc = U.bodyLocationLower(si)
 		if bodyLoc ~= "" then

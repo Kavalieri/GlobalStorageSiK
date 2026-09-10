@@ -199,6 +199,25 @@ function GlobalStorageSiK.NativeClassifierUtils.canBeEquippedLower(si)
 	return slot and string.lower(tostring(slot)) or ""
 end
 
+--- Resolve the runtime equipment slot only for structurally ambiguous script
+--- containers. B42 exposes Item.canBeEquipped as a Java field that Kahlua does
+--- not consistently project, while the instantiated InventoryItem exposes the
+--- callable `canBeEquipped()` method. Callers must keep this off hot paths; the
+--- native product cache makes it a one-time probe per fullType/epoch.
+---@param si table|nil
+---@return string
+function GlobalStorageSiK.NativeClassifierUtils.instanceCanBeEquippedLower(si)
+	if not si or not si.InstanceItem then return "" end
+	local item = safeCall(function() return si:InstanceItem(nil, false) end)
+	if not item then return "" end
+	local slot = nil
+	if item.canBeEquipped then slot = safeCall(function() return item:canBeEquipped() end) end
+	if slot == nil and item.getBodyLocation then
+		slot = safeCall(function() return item:getBodyLocation() end)
+	end
+	return slot and string.lower(tostring(slot)) or ""
+end
+
 -- dev14 (probe controlado de sistemas, confirmado via javap): ScriptItem
 -- hereda de GameEntityScript, que expone `containsComponent(ComponentType)`
 -- - señal ESTATICA real de "tiene un FluidContainer" (Base.Bucket/Canteen

@@ -95,6 +95,7 @@ local function mergeLiveContainer(byType, container, nodeId)
 				variantKey = row.variantKey,
 				itemIds = copyArray(row.itemIds),
 				unitDetails = copyMap(row.unitDetails),
+				unitNodeIds = {},
 				totalWeight = row.totalWeight or 0,
 				totalFluidAmount = row.totalFluidAmount or 0,
 				totalFluidCapacity = row.totalFluidCapacity or 0,
@@ -108,6 +109,9 @@ local function mergeLiveContainer(byType, container, nodeId)
 				count = row.count,
 				nodeId = nodeId,
 			}
+			for j = 1, #(row.itemIds or {}) do
+				byType[groupKey].unitNodeIds[row.itemIds[j]] = nodeId
+			end
 			addLocation(byType[groupKey], nodeId, row.count)
 		else
 			existing.count = existing.count + row.count
@@ -115,6 +119,8 @@ local function mergeLiveContainer(byType, container, nodeId)
 			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
 			existing.unitDetails = existing.unitDetails or {}
 			for itemId, detail in pairs(row.unitDetails or {}) do existing.unitDetails[itemId] = detail end
+			existing.unitNodeIds = existing.unitNodeIds or {}
+			for j = 1, #(row.itemIds or {}) do existing.unitNodeIds[row.itemIds[j]] = nodeId end
 			existing.totalWeight = (existing.totalWeight or 0) + (row.totalWeight or 0)
 			existing.totalFluidAmount = (existing.totalFluidAmount or 0) + (row.totalFluidAmount or 0)
 			existing.totalFluidCapacity = (existing.totalFluidCapacity or 0) + (row.totalFluidCapacity or 0)
@@ -163,6 +169,7 @@ local function mergeNodeSnapshot(byType, node)
 				variantKey = row.variantKey,
 				itemIds = copyArray(row.itemIds),
 				unitDetails = copyMap(row.unitDetails),
+				unitNodeIds = {},
 				totalWeight = row.totalWeight or 0,
 				totalFluidAmount = row.totalFluidAmount or 0,
 				totalFluidCapacity = row.totalFluidCapacity or 0,
@@ -176,6 +183,9 @@ local function mergeNodeSnapshot(byType, node)
 				count = row.count or 0,
 				nodeId = node.id,
 			}
+			for j = 1, #(row.itemIds or {}) do
+				byType[groupKey].unitNodeIds[row.itemIds[j]] = node.id
+			end
 			addLocation(byType[groupKey], node.id, row.count or 0)
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
@@ -183,6 +193,8 @@ local function mergeNodeSnapshot(byType, node)
 			for j = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[j] end
 			existing.unitDetails = existing.unitDetails or {}
 			for itemId, detail in pairs(row.unitDetails or {}) do existing.unitDetails[itemId] = detail end
+			existing.unitNodeIds = existing.unitNodeIds or {}
+			for j = 1, #(row.itemIds or {}) do existing.unitNodeIds[row.itemIds[j]] = node.id end
 			existing.totalWeight = (existing.totalWeight or 0) + (row.totalWeight or 0)
 			existing.totalFluidAmount = (existing.totalFluidAmount or 0) + (row.totalFluidAmount or 0)
 			existing.totalFluidCapacity = (existing.totalFluidCapacity or 0) + (row.totalFluidCapacity or 0)
@@ -275,6 +287,22 @@ local function compactParentRows(detailRows)
 		parent.totalFluidAmount = parent.totalFluidAmount + (detail.totalFluidAmount or 0)
 		parent.totalFluidCapacity = parent.totalFluidCapacity + (detail.totalFluidCapacity or 0)
 		parent._fullTypeSeen[detail.fullType] = true
+		for j = 1, #(detail.itemIds or {}) do
+			local id = detail.itemIds[j]
+			local nodeId = detail.unitNodeIds and detail.unitNodeIds[id] or detail.nodeId
+			if type(id) == "number" and id >= 0 and id < math.huge
+				and id == math.floor(id) and type(nodeId) == "string" then
+				local better = not parent.representativeItemId
+					or nodeId < parent.representativeNodeId
+					or (nodeId == parent.representativeNodeId and id < parent.representativeItemId)
+				if better then
+					parent.representativeNodeId = nodeId
+					parent.representativeItemId = id
+					parent.representativeFullType = detail.fullType
+					parent.representativeDynamicSignature = detail.dynamicSignature
+				end
+			end
+		end
 		for j = 1, #(detail.locations or {}) do
 			addLocation(parent, detail.locations[j].nodeId, detail.locations[j].count)
 		end
@@ -442,6 +470,7 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope,
 	-- que snapshots posteriores no vuelven a invocar al clasificador.
 	for i = 1, #rows do
 		rows[i].selectionRevision = selectionRevision
+		rows[i].representativeRevision = selectionRevision
 		rows[i].sourceNodeId = sourceNodeId
 		local resolution = nil
 		if not rows[i].mixedVariants or rows[i].nativePath then
@@ -461,6 +490,7 @@ function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope,
 		end
 		-- El snapshot ordinario nunca transporta todos los IDs físicos.
 		rows[i].itemIds = nil
+		rows[i].unitNodeIds = nil
 		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
 	end
 	return rows
@@ -519,9 +549,13 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 							conditionMax = unit and unit.conditionMax or row.conditionMax,
 							literatureTitle = row.literatureTitle,
 							nativePath = row.nativePath,
-							nativeStatus = row.nativePath and "classified" or row.nativeStatus,
-							effective = row.nativePath and "native" or row.effective,
-							categoryEffective = row.nativePath and "native" or row.categoryEffective,
+							nativeStatus = row.nativeStatus or (row.nativePath and "classified" or nil),
+							vanillaKey = row.vanillaKey,
+							effective = row.effective or (row.nativePath and "native" or nil),
+							categoryEffective = row.categoryEffective or row.effective
+								or (row.nativePath and "native" or nil),
+							routingIdentity = row.routingIdentity,
+							categorySource = row.categorySource,
 						}
 					end
 				end

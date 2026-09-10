@@ -37,24 +37,29 @@ function Presentation.blocks(context)
 	local row = context.row or {}
 	local exact = row._gsRowKind == "child"
 	local detail = type(context.detail) == "table" and context.detail or nil
-	local source = exact and detail and detail.ok == true and detail or row
+	local physical = exact or row.representativeItemId ~= nil
+	local source = physical and detail and detail.ok == true and detail or row
 	local title = source.displayName or row.displayName or row.fullType or ""
 	local lines = { tostring(title) }
-	if exact and not (detail and detail.ok == true) then
+	if physical and not (detail and detail.ok == true) then
 		lines[#lines + 1] = text(context.loading and "IGUI_GS_RemoteDetailLoading" or "IGUI_GS_RemoteDetailUnavailable")
 		return { { lines = lines, color = { 0.9, 0.9, 0.9, 1 } } }
 	end
-	if not exact then lines[#lines + 1] = text("IGUI_GS_RemoteGroupTotal", math.max(0, finite(row.count) or 0)) end
-	local weight = finite(exact and source.weight or row.totalWeight)
+	local groupCount = math.max(0, finite(row.count) or 0)
+	if not exact and groupCount > 1 then
+		lines[#lines + 1] = text("IGUI_GS_RemoteGroupTotal", groupCount)
+		lines[#lines + 1] = text("IGUI_GS_RemoteGroupRepresentative")
+	end
+	local weight = finite(physical and source.weight or row.totalWeight)
 	if weight then lines[#lines + 1] = getText("Tooltip_item_Weight") .. ": " .. numberText(weight) end
-	if exact and finite(source.condition) and finite(source.conditionMax) then
+	if physical and finite(source.condition) and finite(source.conditionMax) then
 		lines[#lines + 1] = getText("Tooltip_weapon_Condition") .. ": " .. tostring(source.condition) .. " / " .. tostring(source.conditionMax)
 	end
 	local food = GlobalStorageSiK.I18n.foodStateLabel(source)
 	if food ~= "" then lines[#lines + 1] = food end
-	local quantity = Presentation.fluidQuantity(source, not exact)
+	local quantity = Presentation.fluidQuantity(source, not physical)
 	local fluid = type(source.fluidState) == "table" and source.fluidState or nil
-	if exact and fluid then
+	if physical and fluid then
 		lines[#lines + 1] = getText("Fluid_Fluids") .. ": " .. fluidName(fluid, finite(source.fluidAmount))
 		if fluid.tainted == true then lines[#lines + 1] = getText("Fluid_Tainted") end
 		if fluid.poisonous == true then lines[#lines + 1] = getText("Tooltip_food_Poisonous") end
