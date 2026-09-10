@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Вес добычи: Проигрыватель GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Вес добычи: GS Multimedia: журнал о проигрывателе",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Вес добычи: 20 - GS Multimedia: журнал о программировании",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Вес добычи: GS Multimedia: компоненты",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Вес добычи: 20 - Дискета GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Режим отладки (Мультимедиа)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Регистрация дополнения",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Воспроизведение и возврат",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Относительный вес появления в подходящих контейнерах. 0 отключает это распределение; рецепты остаются доступны.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Относительный вес появления в подходящих контейнерах. 0 отключает это распределение; рецепты остаются доступны.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Относительный вес появления в подходящих контейнерах. 0 отключает это распределение; рецепты остаются доступны.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Относительный вес появления в подходящих контейнерах. 0 отключает это распределение; рецепты остаются доступны.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Относительный вес появления в подходящих контейнерах. 0 отключает это распределение; рецепты остаются доступны.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Включает диагностику мультимедиа. Также выберите нужную категорию.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Записывает ошибки регистрации дополнения. Требует режима отладки мультимедиа.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Ограниченно записывает запросы, отказы и выдачу кассет для воспроизведения. Требует режима отладки мультимедиа.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Мультимедиа",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Мультимедиа (debug)"
+}

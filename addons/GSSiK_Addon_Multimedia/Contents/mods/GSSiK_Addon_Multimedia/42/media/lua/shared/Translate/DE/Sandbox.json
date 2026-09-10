@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Beutegewicht: GS Multimedia-Player",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Beutegewicht: GS Multimedia: Player-Magazin",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Beutegewicht: 20 - GS Multimedia: Programmiermagazin",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Beutegewicht: GS Multimedia: Bauteile",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Beutegewicht: 20 - GS Multimedia-Diskette",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Debugmodus (Multimedia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Addon-Registrierung",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Wiedergabe und Rückgabe",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Relatives Vorkommensgewicht in passenden Behältern. 0 deaktiviert diese Verteilung; Rezepte bleiben verfügbar.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Relatives Vorkommensgewicht in passenden Behältern. 0 deaktiviert diese Verteilung; Rezepte bleiben verfügbar.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Relatives Vorkommensgewicht in passenden Behältern. 0 deaktiviert diese Verteilung; Rezepte bleiben verfügbar.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Relatives Vorkommensgewicht in passenden Behältern. 0 deaktiviert diese Verteilung; Rezepte bleiben verfügbar.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Relatives Vorkommensgewicht in passenden Behältern. 0 deaktiviert diese Verteilung; Rezepte bleiben verfügbar.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Aktiviert die Multimedia-Diagnose. Wähle zusätzlich die benötigte Kategorie.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Protokolliert Fehler bei der Addon-Registrierung. Benötigt den Multimedia-Debugmodus.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Protokolliert Wiedergabeanfragen, Ablehnungen und Ausleihen begrenzt. Benötigt den Multimedia-Debugmodus.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimedia (debug)"
+}

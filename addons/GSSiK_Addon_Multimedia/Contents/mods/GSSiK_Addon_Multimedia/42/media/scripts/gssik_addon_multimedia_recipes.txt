@@ -1,0 +1,113 @@
+module GSSiK_Addon_Multimedia
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	craftRecipe Build GS VHS Housing
+	{
+		timedAction = MakingElectrical,
+		time = 80,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:2,
+		needToBeLearn = true,
+		inputs
+		{
+			item 2 [Base.ScrapMetal],
+			item 1 [Base.SheetMetal],
+			item 1 [Base.Hammer] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Multimedia.GS_VHSHousing,
+		}
+	}
+
+	craftRecipe Build GS VHS Transport
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		inputs
+		{
+			item 2 [Base.ElectronicsScrap],
+			item 1 [Base.Wire],
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Multimedia.GS_VHSTransport,
+		}
+	}
+
+	craftRecipe Build GS VHS Signal Board
+	{
+		timedAction = MakingElectrical,
+		time = 90,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:3,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		inputs
+		{
+			item 3 [Base.ElectronicsScrap],
+			item 1 [Base.ElectricWire],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Multimedia.GS_VHSSignalBoard,
+		}
+	}
+
+	craftRecipe Build GS VHS Controller
+	{
+		timedAction = MakingElectrical,
+		time = 110,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:4,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		inputs
+		{
+			item 1 [GSSiK_Addon_Multimedia.GS_VHSHousing],
+			item 1 [GSSiK_Addon_Multimedia.GS_VHSTransport],
+			item 1 [GSSiK_Addon_Multimedia.GS_VHSSignalBoard],
+			item 1 [GlobalStorageSiK.GS_SolderingIron] mode:keep,
+			item 1 [Base.Screwdriver] mode:keep,
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Multimedia.GS_VHSController,
+		}
+	}
+
+	craftRecipe Program GS Multimedia Install Disk
+	{
+		timedAction = MakingElectrical,
+		time = 60,
+		Tags = AnySurfaceCraft;Electrical,
+		category = Electrical,
+		xpAward = Electricity:2,
+		SkillRequired = Electricity:3,
+		needToBeLearn = true,
+		inputs
+		{
+			item 1 [GlobalStorageSiK.GS_FloppyDisk_Blank],
+		}
+		outputs
+		{
+			item 1 GSSiK_Addon_Multimedia.GS_FloppyDisk_Multimedia,
+		}
+	}
+}

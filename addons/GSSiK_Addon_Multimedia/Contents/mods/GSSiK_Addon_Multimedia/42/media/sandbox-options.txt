@@ -1,0 +1,75 @@
+VERSION = 1,
+
+option GSSiK_Addon_Multimedia.LootPeripheralWeight
+{
+	type = double,
+	default = 0.08,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Multimedia,
+	translation = GSSiK_Addon_Multimedia_LootPeripheralWeight,
+}
+
+option GSSiK_Addon_Multimedia.LootMagazineWeight
+{
+	type = double,
+	default = 0.35,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Multimedia,
+	translation = GSSiK_Addon_Multimedia_LootMagazineWeight,
+}
+
+option GSSiK_Addon_Multimedia.LootDiskProgramMagazineWeight
+{
+	type = double,
+	default = 0.3,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Multimedia,
+	translation = GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight,
+}
+
+option GSSiK_Addon_Multimedia.LootComponentWeight
+{
+	type = double,
+	default = 0.2,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Multimedia,
+	translation = GSSiK_Addon_Multimedia_LootComponentWeight,
+}
+
+option GSSiK_Addon_Multimedia.LootInstallDiskWeight
+{
+	type = double,
+	default = 0.15,
+	min = 0,
+	max = 5,
+	page = GSSiK_Addon_Multimedia,
+	translation = GSSiK_Addon_Multimedia_LootInstallDiskWeight,
+}
+
+option GSSiK_Addon_Multimedia.DebugMode
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Multimedia_Debug,
+	translation = GSSiK_Addon_Multimedia_DebugMode,
+}
+
+option GSSiK_Addon_Multimedia.DebugRegistration
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Multimedia_Debug,
+	translation = GSSiK_Addon_Multimedia_DebugRegistration,
+}
+
+option GSSiK_Addon_Multimedia.DebugPlayback
+{
+	type = boolean,
+	default = false,
+	page = GSSiK_Addon_Multimedia_Debug,
+	translation = GSSiK_Addon_Multimedia_DebugPlayback,
+}

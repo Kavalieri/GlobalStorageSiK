@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Loot weight: GS Multimedia Player",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Loot weight: GS Multimedia: Player Magazine",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Loot weight: 20 - GS Multimedia: Programming Magazine",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Loot weight: GS Multimedia: components",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Loot weight: 20 - GS Multimedia Disk",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Debug mode (Multimedia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Addon registration",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Playback and return",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Relative spawn weight in compatible containers. 0 disables this distribution; recipes remain available.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Relative spawn weight in compatible containers. 0 disables this distribution; recipes remain available.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Relative spawn weight in compatible containers. 0 disables this distribution; recipes remain available.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Relative spawn weight in compatible containers. 0 disables this distribution; recipes remain available.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Relative spawn weight in compatible containers. 0 disables this distribution; recipes remain available.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Enable Multimedia diagnostics. Also select the required category.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Log addon registration failures. Requires Debug mode (Multimedia).",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Log bounded playback requests, rejections, and loans. Requires Debug mode (Multimedia).",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimedia (debug)"
+}

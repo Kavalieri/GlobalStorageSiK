@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Peso del bottino: Lettore GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Peso del bottino: GS Multimedia: rivista del lettore",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Peso del bottino: 20 - GS Multimedia: rivista di programmazione",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Peso del bottino: GS Multimedia: componenti",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Peso del bottino: 20 - Dischetto GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Modalità debug (Multimedia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Registrazione addon",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Riproduzione e restituzione",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Peso relativo di comparsa nei contenitori compatibili. 0 disattiva questa distribuzione; le ricette restano disponibili.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Peso relativo di comparsa nei contenitori compatibili. 0 disattiva questa distribuzione; le ricette restano disponibili.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Peso relativo di comparsa nei contenitori compatibili. 0 disattiva questa distribuzione; le ricette restano disponibili.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Peso relativo di comparsa nei contenitori compatibili. 0 disattiva questa distribuzione; le ricette restano disponibili.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Peso relativo di comparsa nei contenitori compatibili. 0 disattiva questa distribuzione; le ricette restano disponibili.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Attiva la diagnostica multimediale. Seleziona anche la categoria necessaria.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Registra gli errori di registrazione dell’addon. Richiede la modalità debug multimediale.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Registra in modo limitato richieste, rifiuti e prestiti di riproduzione. Richiede la modalità debug multimediale.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimedia (debug)"
+}

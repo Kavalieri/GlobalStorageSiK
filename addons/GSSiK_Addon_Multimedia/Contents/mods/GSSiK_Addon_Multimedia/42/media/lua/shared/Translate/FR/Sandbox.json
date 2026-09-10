@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Poids du butin: Lecteur GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Poids du butin: GS Multimedia : revue du lecteur",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Poids du butin: 20 - GS Multimedia : revue de programmation",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Poids du butin: GS Multimedia: composants",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Poids du butin: 20 - Disquette GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Mode débogage (Multimédia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Enregistrement de l’addon",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Lecture et restitution",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Poids relatif d’apparition dans les conteneurs compatibles. 0 désactive cette distribution ; les recettes restent disponibles.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Poids relatif d’apparition dans les conteneurs compatibles. 0 désactive cette distribution ; les recettes restent disponibles.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Poids relatif d’apparition dans les conteneurs compatibles. 0 désactive cette distribution ; les recettes restent disponibles.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Poids relatif d’apparition dans les conteneurs compatibles. 0 désactive cette distribution ; les recettes restent disponibles.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Poids relatif d’apparition dans les conteneurs compatibles. 0 désactive cette distribution ; les recettes restent disponibles.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Active le diagnostic multimédia. Sélectionnez aussi la catégorie nécessaire.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Consigne les erreurs d’enregistrement de l’addon. Nécessite le mode débogage multimédia.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Consigne de façon limitée les demandes, refus et emprunts de lecture. Nécessite le mode débogage multimédia.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimédia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimédia (debug)"
+}

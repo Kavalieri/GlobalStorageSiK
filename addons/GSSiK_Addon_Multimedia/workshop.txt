@@ -1,0 +1,6 @@
+version=1
+id=3798890105
+title=GSSiK Addon - Multimedia
+description=Adds a GS multimedia player peripheral to Global Storage terminals, with VHS playback, playlists and radio controls. Uses tapes stored in your network; no external television required. Development candidate; requires Global Storage SiK and SiK UI Framework.
+tags=Build 42;Items;Multiplayer;Interface;QOL;Addons SiK
+visibility=private

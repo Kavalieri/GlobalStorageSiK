@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "战利品权重: GS Multimedia 播放器",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "战利品权重: GS Multimedia：播放器杂志",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "战利品权重: 20 - GS Multimedia：编程杂志",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "战利品权重: GS Multimedia: 组件",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "战利品权重: 20 - GS Multimedia 软盘",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "调试模式（多媒体）",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "扩展注册",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "播放与归还",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "在兼容容器中生成的相对权重。设为0会禁用此类分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "在兼容容器中生成的相对权重。设为0会禁用此类分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "在兼容容器中生成的相对权重。设为0会禁用此类分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "在兼容容器中生成的相对权重。设为0会禁用此类分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "在兼容容器中生成的相对权重。设为0会禁用此类分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "启用多媒体诊断，同时选择所需的诊断类别。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "记录扩展注册失败的信息。需要启用多媒体调试模式。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "以有限频率记录播放请求、拒绝和录像带借用。需要启用多媒体调试模式。",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: 多媒体",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: 多媒体 (debug)"
+}

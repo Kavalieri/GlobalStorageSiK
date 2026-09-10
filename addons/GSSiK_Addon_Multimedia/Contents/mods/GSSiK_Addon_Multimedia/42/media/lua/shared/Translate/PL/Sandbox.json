@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Waga łupu: Odtwarzacz GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Waga łupu: GS Multimedia: czasopismo o odtwarzaczu",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Waga łupu: 20 - GS Multimedia: czasopismo o programowaniu",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Waga łupu: GS Multimedia: komponenty",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Waga łupu: 20 - Dyskietka GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Tryb debugowania (Multimedia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Rejestracja dodatku",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Odtwarzanie i zwrot",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Względna waga pojawiania się w zgodnych pojemnikach. 0 wyłącza tę dystrybucję; przepisy pozostają dostępne.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Względna waga pojawiania się w zgodnych pojemnikach. 0 wyłącza tę dystrybucję; przepisy pozostają dostępne.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Względna waga pojawiania się w zgodnych pojemnikach. 0 wyłącza tę dystrybucję; przepisy pozostają dostępne.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Względna waga pojawiania się w zgodnych pojemnikach. 0 wyłącza tę dystrybucję; przepisy pozostają dostępne.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Względna waga pojawiania się w zgodnych pojemnikach. 0 wyłącza tę dystrybucję; przepisy pozostają dostępne.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Włącza diagnostykę multimediów. Wybierz także potrzebną kategorię.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Zapisuje błędy rejestracji dodatku. Wymaga trybu debugowania multimediów.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Zapisuje w ograniczonym zakresie żądania, odrzucenia i wypożyczenia odtwarzania. Wymaga trybu debugowania multimediów.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimedia (debug)"
+}

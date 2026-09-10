@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "Peso de saque: Reprodutor GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "Peso de saque: GS Multimedia: revista do reprodutor",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "Peso de saque: 20 - GS Multimedia: revista de programação",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "Peso de saque: GS Multimedia: componentes",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "Peso de saque: 20 - Disquete GS Multimedia",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "Modo de depuração (Multimídia)",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "Registro do addon",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "Reprodução e devolução",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "Peso relativo de aparecimento em recipientes compatíveis. 0 desativa esta distribuição; as receitas continuam disponíveis.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "Peso relativo de aparecimento em recipientes compatíveis. 0 desativa esta distribuição; as receitas continuam disponíveis.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "Peso relativo de aparecimento em recipientes compatíveis. 0 desativa esta distribuição; as receitas continuam disponíveis.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "Peso relativo de aparecimento em recipientes compatíveis. 0 desativa esta distribuição; as receitas continuam disponíveis.",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "Peso relativo de aparecimento em recipientes compatíveis. 0 desativa esta distribuição; as receitas continuam disponíveis.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "Ativa o diagnóstico de multimídia. Selecione também a categoria necessária.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "Registra falhas no registro do addon. Requer o modo de depuração de multimídia.",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "Registra de forma limitada solicitações, rejeições e empréstimos de reprodução. Requer o modo de depuração de multimídia.",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: Multimídia",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: Multimídia (debug)"
+}

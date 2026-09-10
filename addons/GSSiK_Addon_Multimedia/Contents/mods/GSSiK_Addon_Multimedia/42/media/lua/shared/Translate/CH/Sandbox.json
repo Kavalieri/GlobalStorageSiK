@@ -1,0 +1,20 @@
+{
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight": "戰利品權重: GS Multimedia 播放器",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight": "戰利品權重: GS Multimedia：播放器雜誌",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight": "戰利品權重: 20 - GS Multimedia：程式設計雜誌",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight": "戰利品權重: GS Multimedia: 組件",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight": "戰利品權重: 20 - GS Multimedia 磁碟片",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode": "偵錯模式（多媒體）",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration": "擴充註冊",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback": "播放與歸還",
+	"Sandbox_GSSiK_Addon_Multimedia_LootPeripheralWeight_tooltip": "在相容容器中生成的相對權重。設為0會停用此類分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootMagazineWeight_tooltip": "在相容容器中生成的相對權重。設為0會停用此類分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootDiskProgramMagazineWeight_tooltip": "在相容容器中生成的相對權重。設為0會停用此類分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootComponentWeight_tooltip": "在相容容器中生成的相對權重。設為0會停用此類分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_LootInstallDiskWeight_tooltip": "在相容容器中生成的相對權重。設為0會停用此類分布，配方仍然可用。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugMode_tooltip": "啟用多媒體診斷，同時選擇所需的診斷類別。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugRegistration_tooltip": "記錄擴充註冊失敗的資訊。需要啟用多媒體偵錯模式。",
+	"Sandbox_GSSiK_Addon_Multimedia_DebugPlayback_tooltip": "以有限頻率記錄播放請求、拒絕及錄影帶借用。需要啟用多媒體偵錯模式。",
+	"Sandbox_GSSiK_Addon_Multimedia": "GSSiK: 多媒體",
+	"Sandbox_GSSiK_Addon_Multimedia_Debug": "GSSiK: 多媒體 (debug)"
+}

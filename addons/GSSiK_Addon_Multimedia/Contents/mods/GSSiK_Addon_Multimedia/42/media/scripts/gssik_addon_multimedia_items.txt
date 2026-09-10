@@ -1,0 +1,90 @@
+module GSSiK_Addon_Multimedia
+{
+	imports
+	{
+		Base,
+		GlobalStorageSiK
+	}
+
+	item GS_VHSController
+	{
+		DisplayName = GS Multimedia Player,
+		DisplayCategory = Electronics,
+		Weight = 4.0,
+		ItemType = base:normal,
+		Icon = GS_VHSController,
+		Tags = GlobalStorageSiK;GSSiKAddonModule,
+	}
+
+	item GS_VHSHousing
+	{
+		DisplayName = GS Multimedia Housing,
+		DisplayCategory = Electronics,
+		Weight = 1.5,
+		ItemType = base:normal,
+		Icon = GS_VHSHousing,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_VHSTransport
+	{
+		DisplayName = GS Multimedia Heads,
+		DisplayCategory = Electronics,
+		Weight = 1.0,
+		ItemType = base:normal,
+		Icon = GS_VHSTransport,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_VHSSignalBoard
+	{
+		DisplayName = GS Multimedia Power Supply,
+		DisplayCategory = Electronics,
+		Weight = 1.0,
+		ItemType = base:normal,
+		Icon = GS_VHSSignalBoard,
+		Tags = GlobalStorageSiK,
+	}
+
+	item GS_FloppyDisk_Multimedia
+	{
+		DisplayName = GS Multimedia Disk,
+		DisplayCategory = Electronics,
+		Weight = 0.1,
+		ItemType = base:normal,
+		Icon = GS_FloppyDisk_Multimedia,
+		Tags = GlobalStorageSiK;GlobalStorageSiKFloppy;GSSiKAddonDisk,
+	}
+
+	item GS_Manual_Multimedia
+	{
+		DisplayName = GS Multimedia: Player Magazine,
+		DisplayCategory = RecipeResource,
+		Weight = 0.5,
+		ItemType = base:literature,
+		Icon = MagazineElectronics03,
+		BoredomChange = -20,
+		StressChange = -15,
+		LearnedRecipes = Build GS VHS Housing;Build GS VHS Transport;Build GS VHS Signal Board;Build GS VHS Controller,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec3Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+
+	item GS_Manual_Multimedia_DiskProgram
+	{
+		DisplayName = GS Multimedia: Programming Magazine,
+		DisplayCategory = RecipeResource,
+		Weight = 0.3,
+		ItemType = base:literature,
+		Icon = MagazineElectronics02,
+		BoredomChange = -15,
+		StressChange = -10,
+		LearnedRecipes = Program GS Multimedia Install Disk,
+		StaticModel = Magazine,
+		WorldStaticModel = MagazineElec2Ground,
+		Tags = base:magazine;GlobalStorageSiK;GlobalStorageSiKManual,
+		OnCreate = ItemCodeOnCreate.onCreateRecipeMagazine,
+	}
+}
