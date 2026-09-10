@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "寫入 Craft 磁碟",
+	"IGUI_GS_ProgramCraftDiskTitle": "印表機磁碟片",
+	"IGUI_GS_ProgramCraftDiskMenu": "寫入印表機磁碟片",
 	"IGUI_GS_AddonCraftTitle": "製作",
 	"IGUI_GS_AddonCraftDesc": "製作擴充：需要雜誌（電力 5 級）。在此終端安裝模組。",
 	"IGUI_GS_SectionCraftRemote": "網路庫存製作",

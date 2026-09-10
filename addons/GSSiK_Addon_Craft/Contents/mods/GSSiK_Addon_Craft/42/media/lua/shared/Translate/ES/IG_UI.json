@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Grabar disco Crafteo",
+	"IGUI_GS_ProgramCraftDiskTitle": "Disquete de impresora",
+	"IGUI_GS_ProgramCraftDiskMenu": "Grabar disquete de impresora",
 	"IGUI_GS_ProgramCraftDiskDesc": "Disquete de instalación para el periférico Impresora 3D GS: fabricación con materiales de la red.",
 	"IGUI_GS_AddonCraftTitle": "Crafteo",
 	"IGUI_GS_AddonCraftDesc": "Addon Crafteo: revista obligatoria (Electricidad 5). Instala el módulo en este terminal.",

@@ -65,6 +65,7 @@ local definition = {
 		manualItem = "GSSiK_Addon_Craft.GS_Manual_Craft_DiskProgram",
 		outputItem = "GSSiK_Addon_Craft.GS_FloppyDisk_Craft",
 		menuTextKey = "IGUI_GS_ProgramCraftDiskMenu",
+		titleKey = "IGUI_GS_ProgramCraftDiskTitle",
 		iconPath = "media/textures/Item_GS_FloppyDisk_Craft.png",
 		descKey = "IGUI_GS_ProgramCraftDiskDesc",
 	},

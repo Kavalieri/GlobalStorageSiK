@@ -25,6 +25,7 @@ require "GSSiK_Addon_Craft_BatchState"
 require "GSSiK_Addon_Craft_NetworkCook"
 
 local BatchState = GSSiK_Addon_Craft.BatchState
+local RefillTarget = require "GSSiK_Addon_Craft_RefillTarget"
 local Session = API.WorkSession
 local Diagnostics = API.Diagnostics
 
@@ -141,6 +142,29 @@ end
 local pendingCraftStarts = {}
 local PENDING_CRAFT_TIMEOUT_MS = 4000
 
+local function claimInputsReady(entry)
+	local inv = entry.self.player and entry.self.player.getInventory and entry.self.player:getInventory()
+	local allReady, readyIds = true, nil
+	for itemId in pairs(entry.waitingIds) do
+		local found = nil
+		if inv and inv.getItemWithID then
+			local ok, result = pcall(function() return inv:getItemWithID(itemId) end)
+			if ok then found = result end
+		end
+		if found then
+			readyIds = readyIds or {}
+			readyIds[#readyIds + 1] = itemId
+		else
+			allReady = false
+		end
+	end
+	-- Keep the iteration stable and stop looking up units already received.
+	if readyIds then
+		for i = 1, #readyIds do entry.waitingIds[readyIds[i]] = nil end
+	end
+	return allReady
+end
+
 --- Revisa cada tick si los ítems reclamados ya aparecen (por ID) en el
 --- inventario del jugador; en cuanto TODOS estén, o tras un timeout de
 --- seguridad, deja que arranque de verdad la acción de crafteo vanilla.
@@ -151,22 +175,7 @@ local function checkPendingCraftStarts()
 	local nowMs = getTimestampMs and getTimestampMs() or 0
 	for i = #pendingCraftStarts, 1, -1 do
 		local entry = pendingCraftStarts[i]
-		local inv = entry.self.player and entry.self.player.getInventory and entry.self.player:getInventory()
-		local allReady = true
-		for itemId in pairs(entry.waitingIds) do
-			local found = nil
-			if inv and inv.getItemWithID then
-				local ok, result = pcall(function() return inv:getItemWithID(itemId) end)
-				if ok then
-					found = result
-				end
-			end
-			if found then
-				entry.waitingIds[itemId] = nil
-			else
-				allReady = false
-			end
-		end
+		local allReady = claimInputsReady(entry)
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_CRAFT_TIMEOUT_MS
 		if allReady or timedOut then
 			table.remove(pendingCraftStarts, i)
@@ -180,14 +189,21 @@ local function checkPendingCraftStarts()
 			GSSiK_Addon_Craft.Log.debug("Operations", string.format(
 				"craftAttempt RESUME operationId=%s waitResult=%s actionStarted=true",
 				tostring(entry.operationId), allReady and "allReady" or "timeout"))
+			local targetOk, targetValid = pcall(RefillTarget.apply, entry.self.player, entry.self.logic, entry.refillTarget)
+			if not targetOk or not targetValid then
+				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
+				BatchState.clear(entry.self)
+				return
+			end
 			local okFreshItems, freshItems = pcall(function()
 				return entry.self.logic and entry.self.logic:getRecipeData() and entry.self.logic:getRecipeData():getAllInputItems()
 			end)
 			local restore = narrowContainersForAction(entry.self, okFreshItems and freshItems or nil)
 			activeOperationId = entry.operationId
 			pcall(function() entry.self.logic:autoPopulateInputs() end)
+			local pinnedOk, pinned = pcall(RefillTarget.apply, entry.self.player, entry.self.logic, entry.refillTarget)
 			local okCanPerform, canPerform = pcall(function() return entry.self.logic:canPerformCurrentRecipe() end)
-			if not entry.force and okCanPerform and canPerform == false then
+			if not pinnedOk or not pinned or (not entry.force and okCanPerform and canPerform == false) then
 				activeOperationId = nil
 				restore()
 				failCraftOperation(entry.operationId, entry.self.player, "IGUI_GSSIK_CraftFailInvalid")
@@ -221,9 +237,14 @@ end
 local function patchedStartHandcraft(self, force)
 	local sess = activeSession()
 	if sess and self.logic and self.logic.getRecipeData then
+		local refillTarget = RefillTarget.take(self.logic)
+		local targetOk, targetValid = pcall(RefillTarget.apply, self.player, self.logic, refillTarget)
+		if not targetOk or not targetValid then return false end
 		local okRecipeData, recipeData = pcall(function() return self.logic:getRecipeData() end)
 		if okRecipeData and recipeData and recipeData.getAllInputItems then
 			local okItems, items = pcall(function() return recipeData:getAllInputItems() end)
+			if refillTarget and (not okItems or not items) then return false end
+			if refillTarget then RefillTarget.captureTank(refillTarget, items) end
 			local recipeName = "?"
 			local okName, name = pcall(function() return self.logic:getRecipe() and self.logic:getRecipe():getName() end)
 			if okName and name then
@@ -239,7 +260,7 @@ local function patchedStartHandcraft(self, force)
 			if okCon and containers and containers.size then
 				containersCount = containers:size()
 			end
-			local batchCount = readVanillaBatchCount(self)
+			local batchCount = refillTarget and 1 or readVanillaBatchCount(self)
 			local operationOk, operationCode, operation = Session.startOperation({
 				addonId = ADDON_ID, player = self.player, kind = "handcraft",
 				recipeName = recipeName, batchCount = batchCount,
@@ -249,7 +270,7 @@ local function patchedStartHandcraft(self, force)
 			if operationOk ~= true or not operation then
 				GSSiK_Addon_Craft.Log.debug("Operations",
 					"craftAttempt rejected code=" .. tostring(operationCode))
-				if operationCode == "ERR_SESSION" then return false end
+				if refillTarget or operationCode == "ERR_SESSION" then return false end
 				return originalStartHandcraft(self, force)
 			end
 			local operationId = operation.operationId
@@ -278,6 +299,7 @@ local function patchedStartHandcraft(self, force)
 						startedAt = getTimestampMs and getTimestampMs() or 0,
 						operationId = operationId,
 						batchCount = batchCount,
+						refillTarget = refillTarget,
 					})
 					GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt WAIT operationId=" .. operationId .. " (esperando confirmacion del servidor)")
 					return
@@ -290,8 +312,9 @@ local function patchedStartHandcraft(self, force)
 			GSSiK_Addon_Craft.Log.debug("Operations", "craftAttempt invBefore=" .. invBefore .. " operationId=" .. operationId)
 			activeOperationId = operationId
 			pcall(function() self.logic:autoPopulateInputs() end)
+			local pinnedOk, pinned = pcall(RefillTarget.apply, self.player, self.logic, refillTarget)
 			local okCanPerform, canPerform = pcall(function() return self.logic:canPerformCurrentRecipe() end)
-			if not force and okCanPerform and canPerform == false then
+			if not pinnedOk or not pinned or (not force and okCanPerform and canPerform == false) then
 				activeOperationId = nil
 				restore()
 				failCraftOperation(operationId, self.player, "IGUI_GSSIK_CraftFailInvalid")
@@ -547,20 +570,7 @@ local function checkPendingNeatCraftStarts()
 	local nowMs = getTimestampMs and getTimestampMs() or 0
 	for i = #pendingNeatCraftStarts, 1, -1 do
 		local entry = pendingNeatCraftStarts[i]
-		local inv = entry.self.player and entry.self.player.getInventory and entry.self.player:getInventory()
-		local allReady = true
-		for itemId in pairs(entry.waitingIds) do
-			local found = nil
-			if inv and inv.getItemWithID then
-				local ok, result = pcall(function() return inv:getItemWithID(itemId) end)
-				if ok then found = result end
-			end
-			if found then
-				entry.waitingIds[itemId] = nil
-			else
-				allReady = false
-			end
-		end
+		local allReady = claimInputsReady(entry)
 		local timedOut = entry.startedAt and (nowMs - entry.startedAt) > PENDING_CRAFT_TIMEOUT_MS
 		if allReady or timedOut then
 			table.remove(pendingNeatCraftStarts, i)
@@ -700,7 +710,27 @@ local function installCraftHooks()
 	GSSiK_Addon_Craft_NetworkCook.install()
 end
 
+local function cancelPendingStarts()
+	local queues = { pendingCraftStarts, pendingNeatCraftStarts }
+	-- Detach before callbacks: late claims and a new session cannot revive these
+	-- starts. Core keeps the exact loans until their existing return path finishes.
+	pendingCraftStarts, pendingNeatCraftStarts = {}, {}
+	for i = 1, #queues do
+		for j = 1, #queues[i] do
+			local entry = queues[i][j]
+			local called, aborted, code = pcall(Session.abortOperation, entry.operationId, entry.self.player)
+			if not called or aborted ~= true then
+				GSSiK_Addon_Craft.Log.debug("Operations", "pending craft abort failed operationId="
+					.. tostring(entry.operationId) .. " reason=" .. tostring(called and code or aborted))
+			end
+			BatchState.clear(entry.self)
+		end
+	end
+end
+
 local function uninstallCraftHooks()
+	cancelPendingStarts()
+	RefillTarget.clear()
 	if originalTransferIfNeeded then
 		ISInventoryPaneContextMenu.transferIfNeeded = originalTransferIfNeeded
 	end

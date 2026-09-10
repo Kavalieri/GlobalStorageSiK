@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Gravar disquete Craft",
+	"IGUI_GS_ProgramCraftDiskTitle": "Disquete da impressora",
+	"IGUI_GS_ProgramCraftDiskMenu": "Gravar disquete da impressora",
 	"IGUI_GS_AddonCraftTitle": "Fabricar",
 	"IGUI_GS_AddonCraftDesc": "Complemento Fabricar: revista necessária (Eletricidade 5). Instale o módulo neste terminal.",
 	"IGUI_GS_SectionCraftRemote": "Fabricação com inventário de rede",

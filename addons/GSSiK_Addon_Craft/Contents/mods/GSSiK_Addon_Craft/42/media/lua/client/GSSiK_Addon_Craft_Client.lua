@@ -9,6 +9,7 @@ require "GSSiK_Addon_Craft_Register"
 require "GSSiK_Addon_Craft_NetworkCraft"
 require "GSSiK_Addon_Craft_NetworkCook"
 local TerminalModule = require "GSSiK_Addon_Craft_TerminalUI"
+local RefillTarget = require "GSSiK_Addon_Craft_RefillTarget"
 require "GSSiK_Addon_Craft_Sandbox"
 require "GSSiK_Addon_Craft_Log"
 
@@ -93,12 +94,14 @@ end
 local function buildItemActionRequest(actionId, context)
 	local items = context and context.items or {}
 	local contextual = context and context.extra and context.extra.row or nil
-	local inputFullType = itemFullType(contextual) or itemFullType(items[1])
+	local selectedItem = contextual or items[1]
+	local inputFullType = itemFullType(selectedItem)
 	if actionId == "reload" and not DIRECT_RELOAD_TYPES[inputFullType] then
 		for i = 1, #items do
 			local candidate = itemFullType(items[i])
 			if DIRECT_RELOAD_TYPES[candidate] then
 				inputFullType = candidate
+				selectedItem = items[i]
 				break
 			end
 		end
@@ -116,6 +119,9 @@ local function buildItemActionRequest(actionId, context)
 		source = context and context.extra and context.extra.source or "inventory" }
 	if actionId == "reload" then
 		request.recipeName = "RefillBlowTorch"
+		if inputFullType == "Base.BlowTorch" and selectedItem and selectedItem.getID then
+			request.targetItemId = selectedItem:getID()
+		end
 	end
 	return request
 end
@@ -154,18 +160,27 @@ retainRegistration("item-actions", API.ItemActions.registerProvider({
 			if not recipe then return false end
 		end
 		local itemString = not recipe and request.inputFullType and ("!" .. request.inputFullType) or nil
-		return TerminalModule.openCraft(terminal, "vanilla", recipe, itemString)
+		return TerminalModule.openCraft(terminal, "vanilla", recipe, itemString, request)
 	end,
 }))
 
 --- Abre crafteo con contenedores de red.
 ---@param mode string
-function TerminalModule.openCraft(terminal, mode, recipe, itemString)
+function TerminalModule.openCraft(terminal, mode, recipe, itemString, request)
 	local player = Terminal.player(terminal)
 	if not player or not terminal then
 		return false, terminal and "no_player" or "no_terminal"
 	end
 	local state = Terminal.state(terminal) or {}
+	local targetItemId = nil
+	if request and request.recipeName == "RefillBlowTorch" then
+		targetItemId = RefillTarget.select(player, request.targetItemId)
+		if targetItemId == nil then
+			Session.reportOpenFailure("Craft", "ERR_INVALID")
+			if terminal.craftPanel then TerminalModule.refresh(terminal.craftPanel, terminal) end
+			return false, "ERR_INVALID"
+		end
+	end
 	-- Antes, si begin() u openHandcraft() fallaban, el clic no hacia nada
 	-- visible - ahora SIEMPRE se refresca el panel al final (exito o fallo)
 	-- para que WorkSession.getOpenFailure() se muestre en la
@@ -190,6 +205,17 @@ function TerminalModule.openCraft(terminal, mode, recipe, itemString)
 	local opened, openReason = false, beginReason
 	if began then
 		opened, openReason = Session.openHandcraft("Craft", mode, recipe, itemString)
+		if opened and targetItemId then
+			local window = ISEntityUI and ISEntityUI.GetWindowInstance
+				and ISEntityUI.GetWindowInstance(player:getPlayerNum(), "HandcraftWindow")
+			local logic = window and window.handCraftPanel and window.handCraftPanel.logic
+			local ok, bound = pcall(RefillTarget.bind, player, logic, targetItemId)
+			if not ok or not bound then
+				opened, openReason = false, "ERR_INVALID"
+				Session.reportOpenFailure("Craft", openReason)
+				Session.endSession(nil)
+			end
+		end
 		GSSiK_Addon_Craft.Log.debug("openHandcraft opened=" .. tostring(opened) .. " reason=" .. tostring(openReason))
 	end
 	if terminal.craftPanel then

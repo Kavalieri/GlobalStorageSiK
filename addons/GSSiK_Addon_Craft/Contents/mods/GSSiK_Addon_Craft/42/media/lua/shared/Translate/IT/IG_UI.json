@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Scrivi dischetto Craft",
+	"IGUI_GS_ProgramCraftDiskTitle": "Dischetto della stampante",
+	"IGUI_GS_ProgramCraftDiskMenu": "Registra: Dischetto della stampante",
 	"IGUI_GS_AddonCraftTitle": "Crafting",
 	"IGUI_GS_AddonCraftDesc": "Espansione Crafting: richiede il manuale (Elettricità 5). Installa il modulo su questo terminale.",
 	"IGUI_GS_SectionCraftRemote": "Crafting con inventario di rete",

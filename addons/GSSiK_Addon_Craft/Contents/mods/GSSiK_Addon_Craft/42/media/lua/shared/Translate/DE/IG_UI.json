@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Craft-Diskette beschreiben",
+	"IGUI_GS_ProgramCraftDiskTitle": "Druckerdiskette",
+	"IGUI_GS_ProgramCraftDiskMenu": "Druckerdiskette beschreiben",
 	"IGUI_GS_AddonCraftTitle": "Herstellen",
 	"IGUI_GS_AddonCraftDesc": "Erweiterung Herstellen: Magazin erforderlich (Elektrizität 5). Modul an diesem Terminal installieren.",
 	"IGUI_GS_SectionCraftRemote": "Herstellung mit Netzwerkinventar",

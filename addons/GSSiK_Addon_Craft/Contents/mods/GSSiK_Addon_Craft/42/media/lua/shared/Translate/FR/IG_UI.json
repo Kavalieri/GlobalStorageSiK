@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Graver disquette Craft",
+	"IGUI_GS_ProgramCraftDiskTitle": "Disquette d’imprimante",
+	"IGUI_GS_ProgramCraftDiskMenu": "Enregistrer : Disquette d’imprimante",
 	"IGUI_GS_AddonCraftTitle": "Fabrication",
 	"IGUI_GS_AddonCraftDesc": "Extension Fabrication : magazine requis (Électricité 5). Installez le module sur ce terminal.",
 	"IGUI_GS_SectionCraftRemote": "Fabrication avec l'inventaire réseau",

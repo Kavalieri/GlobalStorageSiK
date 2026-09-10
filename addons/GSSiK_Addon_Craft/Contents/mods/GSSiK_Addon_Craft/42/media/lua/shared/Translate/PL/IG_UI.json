@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Zapisz dyskietkę Craft",
+	"IGUI_GS_ProgramCraftDiskTitle": "Dyskietka drukarki",
+	"IGUI_GS_ProgramCraftDiskMenu": "Nagraj: Dyskietka drukarki",
 	"IGUI_GS_AddonCraftTitle": "Wytwarzanie",
 	"IGUI_GS_AddonCraftDesc": "Dodatek Wytwarzanie: wymaga magazynu (Elektryczność 5). Zainstaluj moduł na tym terminalu.",
 	"IGUI_GS_SectionCraftRemote": "Wytwarzanie z ekwipunku sieciowego",

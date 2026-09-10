@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "写入Craft磁盘",
+	"IGUI_GS_ProgramCraftDiskTitle": "打印机软盘",
+	"IGUI_GS_ProgramCraftDiskMenu": "写入打印机软盘",
 	"IGUI_GS_AddonCraftTitle": "制作",
 	"IGUI_GS_AddonCraftDesc": "制作扩展：需要杂志（电力5级）。在此终端安装模块。",
 	"IGUI_GS_SectionCraftRemote": "网络库存制作",

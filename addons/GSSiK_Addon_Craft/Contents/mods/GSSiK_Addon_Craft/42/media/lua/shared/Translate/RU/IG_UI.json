@@ -1,5 +1,6 @@
 {
-	"IGUI_GS_ProgramCraftDiskMenu": "Записать дискету Craft",
+	"IGUI_GS_ProgramCraftDiskTitle": "Дискета принтера",
+	"IGUI_GS_ProgramCraftDiskMenu": "Записать: Дискета принтера",
 	"IGUI_GS_AddonCraftTitle": "Крафт",
 	"IGUI_GS_AddonCraftDesc": "Дополнение Крафт: требуется журнал (Электричество 5). Установите модуль на этот терминал.",
 	"IGUI_GS_SectionCraftRemote": "Крафт с сетевым инвентарём",
