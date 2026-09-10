@@ -7,10 +7,10 @@
   &quot;frameworkManifestSha256&quot;: &quot;9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74&quot;,
   &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;476b2b64ddad47f2f56363df9125cffa14f043105d73b3865a810f4ff877bfc3&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;cc125820a5b6736b6892300340bdfa09349d7136f999d553430ac831d2be036b&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;4ce9d822c7928492131721dc6b99699d0dfe92f48c7d262d6cb9e34890c60acd&quot;
+  &quot;visualMasterSha256&quot;: &quot;7a630582d6dc0f8f1b32cb0c3dd585c72324fb3eeb87c501b1da5fa3d4613bb0&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;3fec3f554d178211ec9c77ef1f0b7779635cdc81686c9152f25409de8413ac79&quot;
 }">
   <title>tab-warehouse</title>
   <style>:root {
@@ -709,7 +709,19 @@ html[data-active-tab="blocked"] .sik-rail { display: none; }
 .sik-footer-blocked { display: none; }
 html[data-active-tab="blocked"] .sik-footer-normal { display: none !important; }
 html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
-.sik-status-footer .sik-status-versions { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sik-text-muted); text-align: center; }
+.sik-status-footer .sik-status-versions { position: relative; min-width: 0; overflow: visible; text-overflow: ellipsis; white-space: nowrap; color: var(--sik-text-muted); text-align: center; }
+.sik-status-versions-tooltip {
+  left: 50%;
+  top: auto;
+  bottom: calc(100% + var(--sik-space-2));
+  width: min(280px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  transform: translateX(-50%);
+  white-space: normal;
+}
+.sik-status-versions-tooltip > span { display: block; overflow-wrap: anywhere; }
+.sik-status-versions:hover > .sik-status-versions-tooltip,
+.sik-status-versions:focus > .sik-status-versions-tooltip { display: block; }
 
 .sik-field,
 .sik-combo,
@@ -796,6 +808,37 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   background-position: center;
   background-repeat: no-repeat;
 }
+
+/* Shared composed search control: icon, field and clear action share one control rect. */
+.sik-search-control {
+  min-width: 0;
+  min-height: var(--sik-control-height);
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--sik-border-strong);
+  background: #111;
+}
+.sik-search-control:focus-within { outline: 1px solid var(--sik-accent); border-color: var(--sik-accent); }
+.sik-search-control > .sik-icon { flex: 0 0 18px; margin-left: var(--sik-space-3); }
+.sik-search-control > .sik-search {
+  min-height: calc(var(--sik-control-height) - 2px);
+  border: 0;
+  outline: 0;
+  background: transparent;
+}
+.sik-search-control > .sik-search:focus { border-color: transparent; outline: 0; }
+.sik-search-clear {
+  width: var(--sik-control-height);
+  min-height: calc(var(--sik-control-height) - 2px);
+  flex: 0 0 var(--sik-control-height);
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.sik-search-clear:hover { background: #242424; }
+.sik-search-clear:focus-visible { outline: 1px solid var(--sik-accent); outline-offset: -3px; }
 
 .sik-table { width: 100%; min-width: 0; }
 .sik-table-row {
@@ -1218,9 +1261,10 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
             <div class="sik-warehouse-body" data-state-view="warehouse-list warehouse-drop">
               <div class="sik-stack">
                 <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-item-count="326" data-capacity-state="warning" data-capacity-personal-bonus="1066.2" role="progressbar" aria-label="Capacidad del almacén" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">326 objetos · 3843 / 4620 kg · 83% (+1066,2 kg personal)</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
-                <div class="sik-control-row">
+                <div class="sik-search-control" data-warehouse-search-control>
+                  <span class="sik-icon sik-icon--search" aria-hidden="true"></span>
                   <input class="sik-search" data-warehouse-search value="" placeholder="Buscar ítem..." aria-label="Buscar ítem">
-                  <button class="sik-button sik-search-button" type="button" aria-label="Buscar"></button>
+                  <button class="sik-search-clear" type="button" aria-label="Limpiar búsqueda" title="Limpiar búsqueda"><span class="sik-icon sik-icon--close" aria-hidden="true"></span></button>
                 </div>
                 <div class="sik-control-row">
                   <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-family data-selected="all" type="button">Familia · Todas</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Familia · Todas</div><div class="sik-combo-option" data-value="food">Comida y bebida</div><div class="sik-combo-option" data-value="vehicles">Vehículos</div><div class="sik-combo-option" data-value="containers">Contenedores</div><div class="sik-combo-option" data-value="knowledge">Conocimiento y medios</div><div class="sik-combo-option" data-value="materials">Materiales</div><div class="sik-combo-option" data-value="misc">Sin clasificar</div></div></div>
