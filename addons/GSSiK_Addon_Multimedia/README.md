@@ -1,6 +1,6 @@
 # GSSiK Addon — Multimedia
 
-Development version 0.1.0-dev1 for Project Zomboid B42.20+. Requires
+Development version 0.1.0-dev1.1 for Project Zomboid B42.20+. Requires
 `GlobalStorageSiK` and `SiKUIFramework`. Workshop ID: `3798890105`.
 This is a development candidate; its first Workshop upload was performed by Kava.
 
