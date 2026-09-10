@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "Добавляет периферийное устройство «Антенна Wi‑Fi GS» в терминал этой сети: удалённый доступ с планшета.",
-	"IGUI_GS_ProgramTabletDiskMenu": "Записать дискету Антенна",
+	"IGUI_GS_ProgramTabletDiskTitle": "Дискета антенны",
+	"IGUI_GS_ProgramTabletDiskMenu": "Записать: Дискета антенны",
 	"IGUI_GS_AddonTabletTitle": "WiFi-антенна GS",
 	"IGUI_GS_AddonTabletDesc": "Дополнение Планшет: требуется журнал (Электричество 5). Установите модуль на этот терминал.",
 	"IGUI_GSSiK_RemoteSelectorTitle": "Выбрать сеть",

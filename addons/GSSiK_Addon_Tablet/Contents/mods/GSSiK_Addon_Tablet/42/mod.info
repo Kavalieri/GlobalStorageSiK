@@ -1,9 +1,9 @@
 name=GSSiK Addon - Tablet
 id=GSSiK_Addon_Tablet
-description=Build 42.20+ v1.5.1. Arbol de tabletas por niveles: basica, Crafteo, Constructor y Maestra. La Antena WiFi se instala en el terminal. Requiere Global Storage SiK.
+description=Build 42.20+ v1.5.2-dev1. Arbol de tabletas por niveles: basica, Crafteo, Constructor y Maestra. La Antena WiFi se instala en el terminal. Requiere Global Storage SiK.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.5.1
+modversion=1.5.2-dev1
 versionMin=42.20.0
 require=SiKUIFramework,GlobalStorageSiK

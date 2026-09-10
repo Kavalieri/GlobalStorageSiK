@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "Aggiunge la periferica Antenna WiFi GS a un terminale di questa rete: accesso remoto tramite tablet.",
-	"IGUI_GS_ProgramTabletDiskMenu": "Scrivi dischetto Antenna",
+	"IGUI_GS_ProgramTabletDiskTitle": "Dischetto dell’antenna",
+	"IGUI_GS_ProgramTabletDiskMenu": "Registra: Dischetto dell’antenna",
 	"IGUI_GS_AddonTabletTitle": "Antenna WiFi GS",
 	"IGUI_GS_AddonTabletDesc": "Espansione Tablet: richiede il manuale (Elettricità 5). Installa il modulo su questo terminale.",
 	"IGUI_GSSiK_RemoteSelectorTitle": "Seleziona rete",

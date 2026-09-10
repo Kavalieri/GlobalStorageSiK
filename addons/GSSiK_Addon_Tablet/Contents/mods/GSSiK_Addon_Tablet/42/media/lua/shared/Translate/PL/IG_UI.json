@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "Dodaje urządzenie peryferyjne Antena WiFi GS do terminala w tej sieci: zdalny dostęp przez tablet.",
-	"IGUI_GS_ProgramTabletDiskMenu": "Zapisz dyskietkę Antena",
+	"IGUI_GS_ProgramTabletDiskTitle": "Dyskietka anteny",
+	"IGUI_GS_ProgramTabletDiskMenu": "Nagraj: Dyskietka anteny",
 	"IGUI_GS_AddonTabletTitle": "Antena WiFi GS",
 	"IGUI_GS_AddonTabletDesc": "Dodatek Tablet: wymaga czasopisma (Elektryczność 5). Zainstaluj moduł na tym terminalu.",
 	"IGUI_GSSiK_RemoteSelectorTitle": "Wybierz sieć",

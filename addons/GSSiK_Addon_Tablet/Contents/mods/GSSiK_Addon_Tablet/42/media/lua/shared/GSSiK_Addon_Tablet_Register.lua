@@ -73,6 +73,7 @@ local definition = {
 		manualItem = "GSSiK_Addon_Tablet.GS_Manual_Tablet_DiskProgram",
 		outputItem = "GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet",
 		menuTextKey = "IGUI_GS_ProgramTabletDiskMenu",
+		titleKey = "IGUI_GS_ProgramTabletDiskTitle",
 		iconPath = "media/textures/Item_GS_FloppyDisk_Tablet.png",
 		descKey = "IGUI_GS_ProgramTabletDiskDesc",
 	},

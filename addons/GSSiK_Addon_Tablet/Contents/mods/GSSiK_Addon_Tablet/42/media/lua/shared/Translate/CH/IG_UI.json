@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "將 GS WiFi 天線周邊裝置加入此網路的終端：可透過平板遠端存取。",
-	"IGUI_GS_ProgramTabletDiskMenu": "寫入天線磁碟",
+	"IGUI_GS_ProgramTabletDiskTitle": "天線磁碟片",
+	"IGUI_GS_ProgramTabletDiskMenu": "寫入天線磁碟片",
 	"IGUI_GS_AddonTabletTitle": "GS WiFi 天線",
 	"IGUI_GS_AddonTabletDesc": "平板擴充：需要雜誌（電力 5 級）。在此終端安裝模組。",
 	"IGUI_GSSiK_RemoteSelectorTitle": "選擇網路",

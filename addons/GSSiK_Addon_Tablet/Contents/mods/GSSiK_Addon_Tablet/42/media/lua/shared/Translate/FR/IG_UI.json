@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "Ajoute le périphérique Antenne Wi-Fi GS à un terminal de ce réseau : accès distant par tablette.",
-	"IGUI_GS_ProgramTabletDiskMenu": "Graver disquette Antenne",
+	"IGUI_GS_ProgramTabletDiskTitle": "Disquette d’antenne",
+	"IGUI_GS_ProgramTabletDiskMenu": "Enregistrer : Disquette d’antenne",
 	"IGUI_GS_AddonTabletTitle": "Antenne WiFi GS",
 	"IGUI_GS_AddonTabletDesc": "Extension Tablette : magazine requis (Électricité 5). Installez le module sur ce terminal.",
 	"IGUI_GSSiK_RemoteSelectorTitle": "Sélectionner un réseau",

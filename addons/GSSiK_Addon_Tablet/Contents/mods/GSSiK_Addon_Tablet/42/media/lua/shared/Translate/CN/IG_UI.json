@@ -1,6 +1,7 @@
 {
 	"IGUI_GS_ProgramTabletDiskDesc": "将 GS WiFi 天线外设添加到此网络中的终端：可通过平板远程访问。",
-	"IGUI_GS_ProgramTabletDiskMenu": "写入天线磁盘",
+	"IGUI_GS_ProgramTabletDiskTitle": "天线软盘",
+	"IGUI_GS_ProgramTabletDiskMenu": "写入天线软盘",
 	"IGUI_GS_AddonTabletTitle": "GS WiFi 天线",
 	"IGUI_GS_AddonTabletDesc": "平板扩展：需要杂志（电力5级）。在此终端安装模块。",
 	"IGUI_GSSiK_RemoteSelectorTitle": "选择网络",
