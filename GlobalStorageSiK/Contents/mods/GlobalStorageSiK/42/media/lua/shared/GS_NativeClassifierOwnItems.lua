@@ -31,6 +31,7 @@ local EXACT = {
 	["GSSiK_Addon_Craft.GS_FloppyDisk_Craft"] = { l2 = "floppy_disk", l3 = "recorded" },
 	["GSSiK_Addon_Tablet.GS_FloppyDisk_Tablet"] = { l2 = "floppy_disk", l3 = "recorded" },
 	["GSSiK_Addon_Builder.GS_FloppyDisk_Builder"] = { l2 = "floppy_disk", l3 = "recorded" },
+	["GSSiK_Addon_Multimedia.GS_FloppyDisk_Multimedia"] = { l2 = "floppy_disk", l3 = "recorded" },
 
 	-- Periféricos - Disquetera (unidad + componentes propios)
 	["GlobalStorageSiK.GS_TerminalReader"] = { l2 = "peripheral", l3 = "floppy_drive", role = "unit" },
@@ -43,6 +44,12 @@ local EXACT = {
 	["GSSiK_Addon_Craft.GS_Printer3D_Frame"] = { l2 = "peripheral", l3 = "printer_3d", role = "component" },
 	["GSSiK_Addon_Craft.GS_Printer3D_ExtruderHead"] = { l2 = "peripheral", l3 = "printer_3d", role = "component" },
 	["GSSiK_Addon_Craft.GS_Printer3D_ControlBoard"] = { l2 = "peripheral", l3 = "printer_3d", role = "component" },
+
+	-- Periféricos - Reproductor multimedia
+	["GSSiK_Addon_Multimedia.GS_VHSController"] = { l2 = "peripheral", l3 = "multimedia_player", role = "unit" },
+	["GSSiK_Addon_Multimedia.GS_VHSHousing"] = { l2 = "peripheral", l3 = "multimedia_player", role = "component" },
+	["GSSiK_Addon_Multimedia.GS_VHSTransport"] = { l2 = "peripheral", l3 = "multimedia_player", role = "component" },
+	["GSSiK_Addon_Multimedia.GS_VHSSignalBoard"] = { l2 = "peripheral", l3 = "multimedia_player", role = "component" },
 
 	-- Periféricos - Antena WiFi (tier como atributo, nunca L3 aparte)
 	["GSSiK_Addon_Tablet.GS_WifiAntenna"] = { l2 = "peripheral", l3 = "wifi_antenna", role = "unit", tier = "1" },

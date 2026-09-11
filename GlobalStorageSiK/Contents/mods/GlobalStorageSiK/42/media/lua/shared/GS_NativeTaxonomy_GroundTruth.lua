@@ -178,7 +178,7 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		minConfidence = 90, expectedSource = "canonical_fulltype_override", expectFacets = { ammo = true },
 		note = "B42 packaged ammunition, not a generic carton." },
 
-	-- 1. Objetos propios de Global Storage - inventario COMPLETO de los 44
+	-- 1. Objetos propios de Global Storage - inventario COMPLETO de los 49
 	-- ScriptItem reales del mapa exacto propio (dev25, confianza 90, sin
 	-- heuristica de nombre en ningun caso). caseId ASCII estable derivado
 	-- del nombre real del item. Todos presence=required: son objetos de
@@ -212,6 +212,26 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 		expectedL1 = "globalstoragesik", expectedL2 = "floppy_disk", expectedL3 = "recorded",
 		minConfidence = 90, expectedSource = "exact_fulltype_own_item",
 		note = "Disquete del addon Builder - mapeo exacto original." },
+	{ caseId = "own_gs_floppydisk_multimedia", fullType = "GSSiK_Addon_Multimedia.GS_FloppyDisk_Multimedia", block = "globalstoragesik", presence = "required",
+		expectedL1 = "globalstoragesik", expectedL2 = "floppy_disk", expectedL3 = "recorded",
+		minConfidence = 90, expectedSource = "exact_fulltype_own_item",
+		note = "Disquete del addon Multimedia - mapeo exacto coherente con el resto de programas GS." },
+	{ caseId = "own_gs_multimedia_player", fullType = "GSSiK_Addon_Multimedia.GS_VHSController", block = "globalstoragesik", presence = "required",
+		expectedL1 = "globalstoragesik", expectedL2 = "peripheral", expectedL3 = "multimedia_player",
+		minConfidence = 90, expectedSource = "exact_fulltype_own_item", expectFacets = { unit = true },
+		note = "Reproductor multimedia, unidad completa del addon Multimedia." },
+	{ caseId = "own_gs_multimedia_housing", fullType = "GSSiK_Addon_Multimedia.GS_VHSHousing", block = "globalstoragesik", presence = "required",
+		expectedL1 = "globalstoragesik", expectedL2 = "peripheral", expectedL3 = "multimedia_player",
+		minConfidence = 90, expectedSource = "exact_fulltype_own_item", expectFacets = { component = true },
+		note = "Carcasa del reproductor multimedia, componente de fabricacion." },
+	{ caseId = "own_gs_multimedia_heads", fullType = "GSSiK_Addon_Multimedia.GS_VHSTransport", block = "globalstoragesik", presence = "required",
+		expectedL1 = "globalstoragesik", expectedL2 = "peripheral", expectedL3 = "multimedia_player",
+		minConfidence = 90, expectedSource = "exact_fulltype_own_item", expectFacets = { component = true },
+		note = "Cabezales del reproductor multimedia, componente de fabricacion." },
+	{ caseId = "own_gs_multimedia_power", fullType = "GSSiK_Addon_Multimedia.GS_VHSSignalBoard", block = "globalstoragesik", presence = "required",
+		expectedL1 = "globalstoragesik", expectedL2 = "peripheral", expectedL3 = "multimedia_player",
+		minConfidence = 90, expectedSource = "exact_fulltype_own_item", expectFacets = { component = true },
+		note = "Fuente de alimentacion del reproductor multimedia, componente de fabricacion." },
 	{ caseId = "own_gs_terminalreader", fullType = "GlobalStorageSiK.GS_TerminalReader", block = "globalstoragesik", presence = "required",
 		expectedL1 = "globalstoragesik", expectedL2 = "peripheral", expectedL3 = "floppy_drive",
 		minConfidence = 90, expectedSource = "exact_fulltype_own_item", expectFacets = { unit = true },

@@ -152,12 +152,12 @@ local TREE = {
 		-- esto era un mapa anidado ({floppy_drive={}, printer_3d={}, ...}),
 		-- forma distinta a la de TODOS los demas grupos L2 (lista numerica
 		-- de strings) - hasL3() solo recorre listas numericas con ipairs-like
-		-- (#sub + indices 1..N), asi que estos 4 valores nunca se
+		-- (#sub + indices 1..N), asi que estos valores nunca se
 		-- reconocian como L3 validos. Cada periferico (unidad + sus
 		-- componentes propios, distinguidos por facets.role="unit"|
 		-- "component", ver §5 grupo 14) es su propio nodo L3 plano, igual
 		-- que el resto del registro - sin introducir un 4º nivel.
-		peripheral = { "floppy_drive", "printer_3d", "wifi_antenna", "digital_whiteboard" },
+		peripheral = { "floppy_drive", "printer_3d", "wifi_antenna", "digital_whiteboard", "multimedia_player" },
 		-- El Soldador es una HERRAMIENTA propia de GS, no un periferico de
 		-- red - subgrupo L2 propio (ver §5 grupo 14). Nombrado
 		-- "manufacturing" (pedido explicito del usuario: "fabricacion", para
