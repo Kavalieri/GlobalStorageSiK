@@ -99,12 +99,12 @@ end
 
 -- Estos helpers conservan la geometria historica del editor, pero delegan
 -- construccion, chrome y lifecycle de cada hoja visible en SiK.UI.
-local function createText(parent, x, y, w, text, color)
+local function createText(parent, x, y, w, text, color, noWrap)
 	local explicit = type(color) == "table"
 	local tone = explicit and "editorText" or (color or "textMuted")
 	local copy = UI.Controls.copyText(parent, {
 		x = x, y = y, w = math.max(1, w), text = text,
-		font = UIFont.Small, lineGap = 0, tone = tone,
+		font = UIFont.Small, lineGap = 0, tone = tone, noWrap = noWrap == true,
 		theme = explicit and { editorText = {
 			r = color[1], g = color[2], b = color[3], a = color[4] or 1,
 		} } or nil,
@@ -395,7 +395,7 @@ local function addSummaryRuns(host, layout, offsetY)
 		local color = run.fallback and "textMuted" or run.color
 		createText(host, run.x,
 			offsetY + (run.line - 1) * (FONT_HGT_SMALL + 2),
-			math.max(1, host.width - run.x), run.text, color)
+			math.max(1, host.width - run.x), run.text, color, true)
 	end
 end
 

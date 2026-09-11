@@ -157,7 +157,8 @@ function GlobalStorageSiK.RulesUI.refreshSummary(host, rules, width, font, color
 		local copy = UI.Controls.copyText(host, {
 			x = run.x, y = (run.line - 1) * (fontHeight + 2),
 			w = math.max(1, width - run.x), text = run.text, font = font,
-			lineGap = 0, tone = run.fallback and "textMuted" or "ruleSummary",
+			lineGap = 0, noWrap = true,
+			tone = run.fallback and "textMuted" or "ruleSummary",
 			theme = not run.fallback and { ruleSummary = {
 				r = tint[1], g = tint[2], b = tint[3], a = tint[4] or 1 } } or nil,
 		})
