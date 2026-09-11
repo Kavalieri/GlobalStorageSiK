@@ -367,10 +367,12 @@ local function nextOpenSequence(player)
 	GlobalStorageSiK.Client.pendingTerminalOpenByPlayer =
 		GlobalStorageSiK.Client.pendingTerminalOpenByPlayer or {}
 	local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+	if GlobalStorageSiK.CatalogFeedback then GlobalStorageSiK.CatalogFeedback.clear(playerNum) end
 	local seq = (GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] or 0) + 1
 	if seq > 2147483647 then seq = 1 end
 	GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] = seq
 	GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] = true
+	if GlobalStorageSiK.CatalogClient then GlobalStorageSiK.CatalogClient.start(playerNum, seq) end
 	local now = getTimestampMs and getTimestampMs() or 0
 	pendingOpenDeadlines[playerNum] = {seq=seq, started=now, deadline=now + OPEN_TIMEOUT_MS, player=player}
 	local guard = GlobalStorageSiK.TerminalAccessGuard
@@ -425,6 +427,7 @@ function GlobalStorageSiK.TerminalUI.cancelPendingOpen(playerArg)
 	if not player or not GlobalStorageSiK.Client then return end
 	local playerNum, cancelledSeq = nextOpenSequence(player)
 	clearPendingOpen(playerNum, cancelledSeq)
+	if GlobalStorageSiK.CatalogClient then GlobalStorageSiK.CatalogClient.clear(playerNum) end
 	local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests
 	if requests then requests[playerNum] = nil end
 end
@@ -468,6 +471,23 @@ function GlobalStorageSiK.TerminalUI.onRemoteOpenResult(payload, accepted)
 end
 
 -- Called by the existing access watcher only while a view or request exists.
+function GlobalStorageSiK.TerminalUI.showCatalogFailure(playerNum, reason, confirmed)
+	local feedback = require "GS_CatalogFeedback"
+	GlobalStorageSiK.CatalogFeedback = feedback
+	return feedback.show(playerNum, reason, confirmed)
+end
+
+function GlobalStorageSiK.TerminalUI.confirmCatalogAccess(payload)
+	local n = payload.playerNum
+	local client = GlobalStorageSiK.Client
+	if not client.terminalOpenSeqByPlayer or client.terminalOpenSeqByPlayer[n] ~= payload.openSeq then return false end
+	-- Access has its ACK; catalog completion retains the pending opening intent
+	-- and uses the transport deadline rather than the old access timeout.
+	pendingOpenDeadlines[n] = nil
+	return true
+end
+
+-- Called by the existing access watcher only while a view or request exists.
 -- Fence before callbacks: a late ACK must never reopen an expired request.
 function GlobalStorageSiK.TerminalUI.expirePendingOpens(now)
 	local client = GlobalStorageSiK.Client
@@ -493,13 +513,9 @@ function GlobalStorageSiK.TerminalUI.expirePendingOpens(now)
 					if transport and transport.sendCommand then
 						transport.sendCommand("closeTerminal", {targetOpenSeq=entry.seq}, entry.player)
 					end
-					local handled = GlobalStorageSiK.TerminalUI.onRemoteOpenResult(
+					GlobalStorageSiK.TerminalUI.showCatalogFailure(n, "open_timeout", false)
+					GlobalStorageSiK.TerminalUI.onRemoteOpenResult(
 						{playerNum=n, openSeq=entry.seq, reason="open_timeout"}, false)
-					if not handled and GlobalStorageSiK.UIFeedback and GlobalStorageSiK.I18n then
-						GlobalStorageSiK.UIFeedback.halo(entry.player,
-							GlobalStorageSiK.I18n.text("IGUI_GS_AccessUnconfirmed"), nil, nil, nil, nil,
-							{tone="warning", channel="terminal-access"})
-					end
 				end
 			end
 		end

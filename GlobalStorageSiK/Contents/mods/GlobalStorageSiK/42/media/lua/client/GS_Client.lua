@@ -15,6 +15,7 @@ require "GS_RemoteItemDetail"
 require "GS_Debug"
 require "GS_NetTrace"
 require "GS_Sandbox"
+require "GS_CatalogClient"
 
 require "GS_NodeNaming"
 require "GS_I18n"
@@ -196,6 +197,9 @@ local function onServerCommand(module, command, args)
 		GlobalStorageSiK.NetTrace.logClientRecv(command, args)
 	end
 	if GlobalStorageSiK.NativeWorldSync and GlobalStorageSiK.NativeWorldSync.onCommand(command, args) then return end
+	if command == "terminalOpenAck" then GlobalStorageSiK.CatalogClient.ack(args); return end
+	if command == "terminalCatalogChunk" then GlobalStorageSiK.CatalogClient.receive(args); return end
+	if command == "terminalCatalogError" then GlobalStorageSiK.CatalogClient.error(args); return end
 
 	if command == "terminalAccessResult" then
 		if GlobalStorageSiK.TerminalAccessGuard then
@@ -407,7 +411,7 @@ local function onServerCommand(module, command, args)
 			end
 		end
 	elseif command == "terminalState" then
-		if staleTerminalOpen(args) then return end
+		if staleTerminalOpen(args) then return false end
 		-- A confirmation can arrive after movement. Check geometry only, before
 		-- applying catalogs; do not re-read stale local terminal/antenna caches.
 		if args and args.openUi == true and GlobalStorageSiK.Sandbox.requireTerminalAccess()
@@ -442,7 +446,7 @@ local function onServerCommand(module, command, args)
 			end
 		end
 		if GlobalStorageSiK.TerminalAccessGuard
-			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(args, true) then return end
+			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(args, true) then return false end
 		local playerNum = tonumber(args and args.playerNum) or 0
 		args = applyInventoryCatalog(args, playerNum)
 		GlobalStorageSiK.Client.terminalStateByPlayer =
@@ -459,6 +463,7 @@ local function onServerCommand(module, command, args)
 			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult then
 			GlobalStorageSiK.TerminalUI.onRemoteOpenResult(args, true)
 		end
+		if staleTerminalOpen(args) then return false end
 		if inventorySync then
 			args = mergeInventorySyncState(args, previousState)
 		end
@@ -634,6 +639,7 @@ local function onServerCommand(module, command, args)
 		if explicitOpen and GlobalStorageSiK.NetworkReadAction then
 			GlobalStorageSiK.NetworkReadAction.onTerminalOpen(args)
 		end
+		return true
 	elseif command == "itemDetails" then
 		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}
 		-- Durante una transferencia visible puede diferirse la sustitucion del
@@ -1011,6 +1017,8 @@ if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.UIFeedback.installCleanup th
 end
 
 function GlobalStorageSiK.Client.clearTransientCaches(playerNum)
+	GlobalStorageSiK.CatalogClient.clear(playerNum)
+	if GlobalStorageSiK.CatalogFeedback then GlobalStorageSiK.CatalogFeedback.clear(playerNum) end
 	GlobalStorageSiK.Client.itemDetailsCache = {}
 	GlobalStorageSiK.Client.nodeContentsCache = {}
 	itemDetailsOrder = {}
@@ -1053,6 +1061,58 @@ local function logClientRuntimeIdentity()
 	GlobalStorageSiK.Log.runtimeIdentity("client", version)
 end
 
+GlobalStorageSiK.CatalogClient.configure({
+	current=function(n, seq)
+		return GlobalStorageSiK.Client.terminalOpenSeqByPlayer
+			and GlobalStorageSiK.Client.terminalOpenSeqByPlayer[n] == seq
+	end,
+	pending=function(n)
+		return GlobalStorageSiK.Client.pendingTerminalOpenByPlayer
+			and GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n] == true
+	end,
+	allowed=function(payload)
+		local player = GlobalStorageSiK.NetClient.getPlayer(payload.playerNum)
+		if not player or player:getPlayerNum() ~= payload.playerNum or (player.isDead and player:isDead()) then return false end
+		if not GlobalStorageSiK.Sandbox.requireTerminalAccess() then return true end
+		return GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player, payload.terminalAnchor,
+			payload.confirmedProximityRange, payload.confirmedWirelessRange)
+	end,
+	confirm=function(payload)
+		if GlobalStorageSiK.TerminalAccessGuard
+			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(payload, true) then return false end
+		return GlobalStorageSiK.TerminalUI.confirmCatalogAccess(payload)
+	end,
+	hasCache=function(payload)
+		local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
+		local entry = cache[inventoryCatalogKey(payload.playerNum, payload.networkId)]
+		return entry and entry.inventoryRevision == payload.inventoryRevision and entry.catalogScope == payload.catalogScope
+	end,
+	apply=function(payload) return onServerCommand(GlobalStorageSiK.MOD_ID, "terminalState", payload) == true end,
+	receipt=function(meta)
+		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
+			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
+		}, meta.playerNum)
+	end,
+	failure=function(n, seq, reason, confirmed)
+		local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
+		local request = requests[n]
+		GlobalStorageSiK.TerminalUI.cancelPendingOpen(n)
+		local ui = terminalUiForPlayer(n)
+		if ui and ui.onClose then ui:onClose() end
+		GlobalStorageSiK.NetClient.sendCommand("closeTerminal", {targetOpenSeq=seq}, n)
+		local player = GlobalStorageSiK.NetClient.getPlayer(n)
+		if player and player:getPlayerNum() == n and not (player.isDead and player:isDead()) then
+			GlobalStorageSiK.TerminalUI.showCatalogFailure(n, reason, confirmed)
+		end
+		-- Notify only after fencing/closing the failed session. A callback may
+		-- deliberately start a new opening and must not be cancelled afterwards.
+		if request and request.requestId == seq and type(request.callback) == "function" then
+			local ok, err = pcall(request.callback, false, reason, {playerNum=n, openSeq=seq, reason=reason})
+			if not ok then GlobalStorageSiK.Log.error("TerminalUI", "remote open callback", tostring(err)) end
+		end
+	end,
+})
 Events.OnServerCommand.Add(onServerCommand)
 Events.OnGameStart.Add(logClientRuntimeIdentity)
 

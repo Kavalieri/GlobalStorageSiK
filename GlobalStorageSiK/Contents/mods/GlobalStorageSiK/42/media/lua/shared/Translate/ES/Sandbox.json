@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNÓSTICO: transporte de catálogos",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requiere Modo debug. Registra lotes, bytes, revisiones y fallos sin volcar el inventario.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNÓSTICO: iconos de pestañas",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Requiere Modo depuración activado. Registra la ruta, resolución, tamaño nativo y tamaño final del espacio de cada icono solo cuando cambia la geometría de la barra.",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNÓSTICO: retirada interactiva",

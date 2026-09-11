@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNOSTIC: catalog transport",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requires Debug mode. Records batches, bytes, revisions and failures without dumping inventory.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> 诊断：选项卡图标",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "需要启用调试模式。仅在布局变化时记录每个图标的路径、加载结果、原始尺寸和最终槽位尺寸。",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> 诊断：交互式取出",

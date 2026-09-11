@@ -67,3 +67,8 @@ function GlobalStorageSiK.TerminalCommandOrder.markOpened(player, sequence)
 		state.activeSeq = sequence
 	end
 end
+
+function GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)
+	local state = sessions[player]
+	return state and state.activeSeq
+end

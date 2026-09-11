@@ -267,6 +267,14 @@ option GlobalStorageSiK.DebugCatNetwork
 	translation = GlobalStorageSiK_DebugCatNetwork,
 }
 
+option GlobalStorageSiK.DebugCatCatalogTransport
+{
+	type = boolean,
+	default = false,
+	page = GlobalStorageSiK_Debug,
+	translation = GlobalStorageSiK_DebugCatCatalogTransport,
+}
+
 
 option GlobalStorageSiK.DebugCatTerminalAccess
 {

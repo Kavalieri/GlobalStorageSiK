@@ -39,6 +39,7 @@ local AREA_CATEGORY = {
 	-- se filtra por categoria" y salia SIEMPRE con DebugMode activo, sin que
 	-- apagar DebugCatNetwork tuviera ningun efecto sobre ella.
 	Network = "Network",
+	CatalogTransport = "CatalogTransport",
 	TerminalAccess = "TerminalAccess",
 	Access = "TerminalAccess",
 	TerminalManifest = "TerminalAccess",

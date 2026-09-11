@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNOSTIC: catalog transport",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requires Debug mode. Records batches, bytes, revisions and failures without dumping inventory.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> 診斷：分頁圖示",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "需要啟用除錯模式。僅在分頁欄幾何變動時，記錄各分頁資產路徑、紋理解析、原生尺寸與最終插槽尺寸。",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> 診斷：互動式取出",

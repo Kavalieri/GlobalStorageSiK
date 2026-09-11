@@ -489,3 +489,8 @@ changing network. Physical floor deposits retain the same ACK callback as other
 deposits. The authoritative transfer path continues to enforce access, physical
 identity, destination capacity and DeviceLease locks; this facade creates no items
 and cannot release a tape from device custody.
+
+
+### Core 1.5.3-dev1 catalog delivery
+
+Terminal catalog delivery is privately fragmented and atomically reassembled. Existing public inventory consumers retain their complete-state contract. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md). No addon action, permission or persistence API changes.

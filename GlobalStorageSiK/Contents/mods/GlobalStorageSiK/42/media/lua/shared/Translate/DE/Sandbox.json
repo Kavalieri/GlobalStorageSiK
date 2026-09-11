@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNOSTIC: catalog transport",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requires Debug mode. Records batches, bytes, revisions and failures without dumping inventory.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSE: Registerkartensymbole",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Benötigt aktivierten Debug-Modus. Protokolliert Pfad, Auflösung, native Größe und endgültige Slotgröße jedes Symbols nur bei Geometrieänderungen.",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSE: interaktive Entnahme",

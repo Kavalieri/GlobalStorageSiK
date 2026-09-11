@@ -375,6 +375,7 @@ function GlobalStorageSiK.TerminalAccessGuard.onTick(player)
 	local now = getTimestampMs and getTimestampMs() or 0
 	local api = GlobalStorageSiK.TerminalUI
 	local pendingOpen = api and api.expirePendingOpens and api.expirePendingOpens(now)
+	local catalogPending = GlobalStorageSiK.CatalogClient and GlobalStorageSiK.CatalogClient.update(now)
 	if now < lastClock then
 		for n=0,3 do
 			if states[n] then
@@ -398,7 +399,7 @@ function GlobalStorageSiK.TerminalAccessGuard.onTick(player)
 		local view = viewForPlayer(n)
 		if view and (not view.isVisible or view:isVisible()) then visible = true end
 	end
-	if not visible and not pendingOpen and detach then detach() end
+	if not visible and not pendingOpen and not catalogPending and detach then detach() end
 end
 
 local function inventoryChanged(source)

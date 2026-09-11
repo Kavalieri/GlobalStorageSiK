@@ -22,6 +22,8 @@ GlobalStorageSiK.NetTrace._seqServerSend = 0
 --- (no aportan nada para depurar rename/prioridad/reorganizar). Se excluyen
 --- de la traza para poder leer con claridad lo que si importa.
 local NOISY_COMMANDS = {
+	terminalCatalogChunk = true,
+	terminalCatalogAck = true,
 	pingTerminalAccess = true,
 	-- debugEcho es el propio mecanismo de relay servidor->cliente de las
 	-- lineas de log (ver GS_Log._echoHook) - trazarlo tambien genera una

@@ -57,6 +57,9 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 		return false
 	end
 	args = args or {}
+	if command == "closeTerminal" and GlobalStorageSiK.CatalogClient then
+		GlobalStorageSiK.CatalogClient.clear(player:getPlayerNum(), args.targetOpenSeq)
+	end
 	if command == "closeTerminal" and args.closeSeq == nil then
 		local client = GlobalStorageSiK.Client
 		local sequences = client and client.terminalOpenSeqByPlayer

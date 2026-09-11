@@ -397,3 +397,15 @@ Craft/Builder limitan cada categoría a 20 líneas por segundo y sustituyen mens
 Retiradas: `DebugDetailNetwork`, `DebugDetailCraft`, `DebugDetailInventory`, `DebugDetailRouter`, `DebugDetailCapacityBonus` y `OperationHaloFeedback`. Sus valores antiguos no habilitan trazas o halos. Se conservan las categorías normales, todas OFF por defecto; `ZoneScanJob` y `NativeProduct` pertenecen a Inventario y `WithdrawClient` a Retirada interactiva.
 
 Para la corrección runtime activa: activa `Modo depuración (debug)` / `Debug mode`, `>> Inventario y transferencias` / `>> Inventory & transfers` y `>> DIAGNÓSTICO: retirada interactiva` / `>> DIAGNOSTIC: interactive withdrawal`. Espera IDs de operación, revisión, solicitados y confirmados coherentes; un escaneo invalidado termina como `INVALIDATED_BY_MUTATION`/`STALE_RETRY`, nunca `zone_error` por esa sola causa. Conserva `console.txt` de cliente y dedicado. El relé opcional requiere administrador; un jugador normal no recibe diagnóstico del servidor.
+
+## Core 1.5.3-dev1 — catalog transport
+
+Enable only `Modo depuración (debug)` / `Debug mode` and
+`>> DIAGNÓSTICO: transporte de catálogos` / `>> DIAGNOSTIC: catalog transport`
+for the focused transport test. The latter maps to `DebugCatCatalogTransport`
+and defaults to false. It records `CatalogTransport` events `queued`, `completed`
+and `failed` with batch, row count, encoded bytes and reason; no per-item dump.
+Preserve client `console.txt` and the dedicated server console log. Origin follows
+the common `[CLI]`, `[SRV]`, `[HOST]` or `[SP]` logger context. Do not enable unrelated
+categories or high-volume detail for this test. The trace describes transport,
+not permission acceptance or persistence success. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md).

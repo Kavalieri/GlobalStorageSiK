@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNOSTIC: catalog transport",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requires Debug mode. Records batches, bytes, revisions and failures without dumping inventory.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSTIC : icônes des onglets",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Nécessite le mode débogage. Journalise le chemin, la résolution, la taille native et l'emplacement final de chaque icône uniquement lorsque la géométrie change.",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSTIC : retrait interactif",

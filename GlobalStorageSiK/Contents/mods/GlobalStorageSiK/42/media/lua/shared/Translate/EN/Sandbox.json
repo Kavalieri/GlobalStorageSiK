@@ -1,4 +1,6 @@
 {
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport": "   >> DIAGNOSTIC: catalog transport",
+	"Sandbox_GlobalStorageSiK_DebugCatCatalogTransport_tooltip": "Requires Debug mode. Records batches, bytes, revisions and failures without dumping inventory.",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons": "   >> DIAGNOSTIC: tab icons",
 	"Sandbox_GlobalStorageSiK_DebugCatTabIcons_tooltip": "Requires Debug mode ON. Records each tab asset path, texture resolution, native size and final slot size only when the rail geometry changes.",
 	"Sandbox_GlobalStorageSiK_DebugCatExactWithdraw": "   >> DIAGNOSTIC: interactive withdrawal",

@@ -429,6 +429,7 @@ local function setTerminalWatcher(player, networkId)
 end
 
 local function clearTerminalWatcher(player)
+	if GlobalStorageSiK.CatalogServer then GlobalStorageSiK.CatalogServer.clear(player) end
 	local key = terminalWatcherKey(player)
 	if key then
 		local networkId = terminalWatchNetworkByPlayer[key]
@@ -492,17 +493,22 @@ local lastNetworkIdByPlayer = {}
 ---@param command string
 ---@param payload table|nil
 local function gsSendServerCommand(player, command, payload)
+	-- All catalog producers converge here, including scans and addon refreshes.
+	-- Only CatalogServer may put terminal state on the wire, in bounded frames.
+	if command == "terminalState" then
+		if payload and payload.items then
+			for i = 1, math.min(#payload.items, 3) do
+				local row = payload.items[i]
+				GlobalStorageSiK.NativeProduct.tracePathSample("preSend", row.fullType, row.nativePath)
+			end
+		end
+		return GlobalStorageSiK.CatalogServer.queue(player, payload)
+	end
 	-- Derive the local-player slot from the authoritative recipient, never from
 	-- a client payload. Success and early failures need the same ACK routing.
 	if command == "actionResult" then
 		payload = payload or {}
 		payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-	end
-	if command == "terminalState" and payload and payload.items then
-		for i = 1, math.min(#payload.items, 3) do
-			local row = payload.items[i]
-			GlobalStorageSiK.NativeProduct.tracePathSample("preSend", row.fullType, row.nativePath)
-		end
 	end
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logServerSend then
 		GlobalStorageSiK.NetTrace.logServerSend(player, command, payload)
@@ -1898,6 +1904,9 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 	if not player or not networkId then
 		return
 	end
+	if GlobalStorageSiK.CatalogServer.isOpening(player) then
+		return GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, searchQuery)
+	end
 	local ok, err = pcall(function()
 		local scopeSignature = catalogScopeSignature(player, networkId)
 		local rows = getCatalogRows(player, networkId, scopeSignature)
@@ -2136,6 +2145,19 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 	-- sitios a la vez, de una vez por todas.
 	if not terminalAnchor and player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.getSessionAnchor then
 		terminalAnchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+	end
+	if openUi == true then
+		-- Confirm authorization before catalog construction/serialization. This
+		-- is not an empty terminalState and cannot install an empty inventory.
+		local confirmed = {
+			playerNum=player:getPlayerNum(), openSeq=meta and meta.openSeq,
+			networkId=networkId, accessMode=accessMode,
+			accessProbeId=meta and meta.accessProbeId,
+			terminalAnchor=terminalAnchor and {x=terminalAnchor.x, y=terminalAnchor.y, z=terminalAnchor.z or 0},
+			confirmedProximityRange=GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
+			confirmedWirelessRange=GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(player, networkId, terminalAnchor),
+		}
+		if not GlobalStorageSiK.CatalogServer.begin(player, confirmed) then return end
 	end
 	local requestMeta = meta and {
 		knownInventoryRevision = meta.knownInventoryRevision,
@@ -3640,6 +3662,9 @@ local function onClientCommand(module, command, player, args)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 		GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player,
 			GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player))
+
+	elseif command == "terminalCatalogAck" then
+		GlobalStorageSiK.CatalogServer.receipt(player, args)
 
 	elseif command == "cancelWithdrawSelection" then
 		GlobalStorageSiK.Server.releaseWithdrawTicketPacing(player,
@@ -6003,6 +6028,37 @@ end
 
 
 
+require "GS_CatalogServer"
+GlobalStorageSiK.CatalogServer.configure({
+	send=gsSendServerCommand,
+	visit=forEachOnlinePlayer,
+	abort=function(player)
+		clearTerminalWatcher(player)
+		GlobalStorageSiK.TerminalAccess.clearSession(player)
+	end,
+	valid=function(player, session, payload)
+		if player.isDead and player:isDead() then return false, "catalog_access_changed" end
+		if GlobalStorageSiK.TerminalCommandOrder.activeSequence(player) ~= session.openSeq then return false end
+		local key = terminalWatcherKey(player)
+		if not key or terminalWatchNetworkByPlayer[key] ~= session.networkId then return false end
+		if not GlobalStorageSiK.Permissions.canAccess(player, session.networkId) then return false, "catalog_access_changed" end
+		local access, _, terminal = GlobalStorageSiK.TerminalAccess.evaluate(player, session.networkId,
+			GlobalStorageSiK.TerminalAccess.getSessionAnchor(player), {sessionLock=true, strictDistance=true})
+		if not access then return false, "catalog_access_changed" end
+		if terminal and GlobalStorageSiK.Network.findNetworkIdAtTerminal(terminal.x, terminal.y,
+			terminal.z or 0, {activeOnly=true}) ~= session.networkId then return false, "catalog_access_changed" end
+		local scope = catalogScopeSignature(player, session.networkId)
+		return payload.inventoryRevision == GlobalStorageSiK.Index.getInventoryRevision(session.networkId)
+			and payload.catalogScope == scope
+	end,
+	stale=function(player, networkId)
+		if not GlobalStorageSiK.Permissions.canAccess(player, networkId) then
+			clearTerminalWatcher(player)
+			return
+		end
+		queueTerminalRefresh(player, networkId, nil, true)
+	end,
+})
 Events.OnClientCommand.Add(onClientCommand)
 
 -- Un unico flush de snapshots como maximo por tick, compartido por todas las
@@ -6020,6 +6076,7 @@ if Events and Events.OnTick then
 				GlobalStorageSiK.Log.error("Server", "terminalRefreshQueue", tostring(err))
 			end
 		end
+		GlobalStorageSiK.CatalogServer.update()
 	end)
 end
 
