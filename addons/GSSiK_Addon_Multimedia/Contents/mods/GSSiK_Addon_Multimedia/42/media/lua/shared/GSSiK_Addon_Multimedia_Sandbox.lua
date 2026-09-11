@@ -1,6 +1,6 @@
 GSSiK_Addon_Multimedia = GSSiK_Addon_Multimedia or {}
 local M = GSSiK_Addon_Multimedia
-M.VERSION = "0.1.0-dev1.1"
+M.VERSION = "0.1.0"
 M.Sandbox = M.Sandbox or {}
 local defaults = { LootPeripheralWeight = 0.08, LootMagazineWeight = 0.35,
 	LootDiskProgramMagazineWeight = 0.3, LootComponentWeight = 0.2, LootInstallDiskWeight = 0.15 }

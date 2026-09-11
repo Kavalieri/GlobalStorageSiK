@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.5.2 - 2026-09-11
+
+### Global Storage SiK
+
+- Added sequential multi-reading, disk programming through every supported route and rule configuration from exact items to broad categories.
+- Added per-player opacity control and permission-aware option tools.
+- Reduced redundant server requests during inventory opening and refresh.
+- Expanded the shared taxonomy used by search, filters, rules and auto-sort.
+- Preserved vanilla tooltips while providing exact SiK annexes for remote items.
+- Fixed rule gesture runtime errors, overly broad group filters, detail-removal flicker and unnecessary table pagers.
+
+### Craft 1.5.2
+
+- Added network-propane blowtorch refilling through the existing vanilla action.
+- Aligned GS 3D Printer disk programming requirements, result and wording.
+
+### Builder 1.5.2
+
+- Aligned GS Digital Blueprint disk programming with the shared requirements/result format.
+- Widened crafting and installation surfaces without changing building loans or returns.
+
+### Tablet 1.5.2
+
+- Aligned WiFi Antenna disk programming, installation surfaces, names and item categories.
+
+### Multimedia 0.1.0
+
+- Introduced the installable GS Multimedia Player and its progression, components and programmed disk.
+- Added a network VHS catalog with search, filters, multi-selection and playback queues.
+- Added radio and volume controls plus authoritative exact-tape custody, return and recovery.
+- Uses Project Zomboid recorded content and learning/XP rules without adding XP or animated video.
+
 ## 1.5.1 - 2026-09-08
 
 ### Global Storage SiK

@@ -1,9 +1,9 @@
 name=GSSiK Addon - Multimedia
 id=GSSiK_Addon_Multimedia
-description=Build 42.20+ v0.1.0-dev1.1. Añade el Reproductor GS Multimedia al terminal de la red. Requiere Global Storage SiK.
+description=Build 42.20+ v0.1.0. Añade el Reproductor GS Multimedia al terminal de la red. Requiere SiK UI Framework y Global Storage SiK.
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=0.1.0-dev1.1
+modversion=0.1.0
 versionMin=42.20.0
 require=SiKUIFramework,GlobalStorageSiK
