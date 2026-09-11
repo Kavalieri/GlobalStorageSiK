@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "Aucun joueur ni aucune faction disponible.",
 	"IGUI_GS_RulesChangedRetry": "Les règles ont changé. Vérifiez la liste actualisée et réessayez.",
 	"IGUI_GS_RuleReplacementInvalid": "La configuration n’a pas été appliquée : elle contient des règles invalides ou dépasse la limite de 20. Vérifiez le modèle.",
-	"IGUI_GS_WorldTax_HelpSP": "Corrige la classification des objets dans toute cette partie, indépendamment du réseau. Restaurer rétablit la classification automatique. Le motif est conservé dans le journal privé."
+	"IGUI_GS_WorldTax_HelpSP": "Corrige la classification des objets dans toute cette partie, indépendamment du réseau. Restaurer rétablit la classification automatique. Le motif est conservé dans le journal privé.",
+	"IGUI_GS_UIOpacityLabel": "Opacité des fenêtres (%)",
+	"IGUI_GS_UIOpacityHelp": "45 % plus translucide · 80 % apparence approuvée · 100 % opaque. S’applique à toutes les fenêtres de ce personnage ; ne modifie pas le réseau."
 }

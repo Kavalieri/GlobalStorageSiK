@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "Brak dostępnych graczy lub frakcji.",
 	"IGUI_GS_RulesChangedRetry": "Reguły zostały zmienione. Sprawdź odświeżoną listę i spróbuj ponownie.",
 	"IGUI_GS_RuleReplacementInvalid": "Nie zastosowano konfiguracji: zawiera nieprawidłowe reguły lub przekracza limit 20. Sprawdź szablon.",
-	"IGUI_GS_WorldTax_HelpSP": "Poprawia klasyfikację przedmiotów w całym zapisie gry, niezależnie od sieci. Przywrócenie włącza klasyfikację automatyczną. Powód pozostaje w prywatnym rejestrze."
+	"IGUI_GS_WorldTax_HelpSP": "Poprawia klasyfikację przedmiotów w całym zapisie gry, niezależnie od sieci. Przywrócenie włącza klasyfikację automatyczną. Powód pozostaje w prywatnym rejestrze.",
+	"IGUI_GS_UIOpacityLabel": "Krycie okien (%)",
+	"IGUI_GS_UIOpacityHelp": "45% bardziej przezroczyste · 80% zatwierdzony wygląd · 100% nieprzezroczyste. Dotyczy wszystkich okien tej postaci; nie zmienia sieci."
 }

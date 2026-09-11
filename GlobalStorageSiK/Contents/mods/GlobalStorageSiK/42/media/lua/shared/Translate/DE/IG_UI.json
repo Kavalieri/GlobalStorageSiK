@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "Keine Spieler oder Fraktionen verfügbar.",
 	"IGUI_GS_RulesChangedRetry": "Die Regeln wurden geändert. Prüfe die aktualisierte Liste und versuche es erneut.",
 	"IGUI_GS_RuleReplacementInvalid": "Die Konfiguration wurde nicht angewendet: Sie enthält ungültige Regeln oder überschreitet das Limit von 20. Prüfe die Vorlage.",
-	"IGUI_GS_WorldTax_HelpSP": "Korrigiert die Gegenstandsklassifizierung im gesamten Spielstand, unabhängig vom Netzwerk. Wiederherstellen verwendet wieder die automatische Klassifizierung. Der Grund bleibt im privaten Protokoll."
+	"IGUI_GS_WorldTax_HelpSP": "Korrigiert die Gegenstandsklassifizierung im gesamten Spielstand, unabhängig vom Netzwerk. Wiederherstellen verwendet wieder die automatische Klassifizierung. Der Grund bleibt im privaten Protokoll.",
+	"IGUI_GS_UIOpacityLabel": "Fensterdeckkraft (%)",
+	"IGUI_GS_UIOpacityHelp": "45 % durchscheinender · 80 % freigegebene Darstellung · 100 % deckend. Gilt für alle Fenster dieses Charakters; das Netzwerk bleibt unverändert."
 }

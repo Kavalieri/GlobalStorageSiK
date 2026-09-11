@@ -33,6 +33,12 @@ local function semantic(envelope)
 	return type(envelope) == "table" and envelope or {}
 end
 
+local function scalar(envelope)
+	if type(envelope) ~= "table" then return envelope end
+	local payload = semantic(envelope)
+	return payload.value or payload.text or payload.id or envelope.value or envelope.text
+end
+
 local function status(value, tone, indicator)
 	return { text = tostring(value or ""), tone = tone or "text", indicator = indicator == true }
 end
@@ -284,6 +290,8 @@ local function runtimeI18n()
 		["options.state.range.network"] = text("IGUI_GS_DistNetworkReach", 0),
 		["options.state.palette.title"] = text("IGUI_GS_UIPaletteLabel"),
 		["options.state.palette.help"] = text("IGUI_GS_OptionsPaletteHelp"),
+		["options.state.opacity.label"] = text("IGUI_GS_UIOpacityLabel"),
+		["options.state.opacity.help"] = text("IGUI_GS_UIOpacityHelp"),
 		["options.admin.terminals.title"] = text("IGUI_GS_OptionsTerminalsTitle"),
 		["options.admin.terminals.help"] = text("IGUI_GS_OptionsTerminalsHelp"),
 		["options.admin.column.terminal-name"] = text("IGUI_GS_ColTerminalName"),
@@ -365,6 +373,18 @@ function TabOptionsContext.create(terminal)
 			if type(terminal.setDirty) == "function" then terminal:setDirty(true) end
 			return true
 		end,
+		["options.change-opacity"] = function(envelope)
+			local opacity = GlobalStorageSiK.UIOpacity
+			if not opacity or type(opacity.save) ~= "function" then return false, "opacity_unavailable" end
+			local value, err = opacity.save(playerFor(terminal), scalar(envelope))
+			if not value then return false, err end
+			if GlobalStorageSiK.TerminalOptions
+				and type(GlobalStorageSiK.TerminalOptions.refreshScroll) == "function" then
+				GlobalStorageSiK.TerminalOptions.refreshScroll(terminal, terminal.terminalState or {})
+			end
+			if type(terminal.setDirty) == "function" then terminal:setDirty(true) end
+			return true
+		end,
 	}
 	context.worldTaxonomy = WorldTaxonomy.create(terminal.playerNum or 0, context.actions, function()
 		local options = GlobalStorageSiK.TerminalOptions
@@ -408,6 +428,8 @@ function TabOptionsContext.create(terminal)
 		local backupKnown = backupCount ~= nil and backupCount == backupCount and backupCount >= 0
 		GlobalStorageSiK.Log.debug("OptionsTables", "snapshot rows terminals="
 			.. tostring(#terminals) .. " members=" .. tostring(#members))
+		local opacityValue = GlobalStorageSiK.UIOpacity and GlobalStorageSiK.UIOpacity.get
+			and GlobalStorageSiK.UIOpacity.get(playerFor(terminal)) or 80
 		self.lastSnapshot = {
 			data = { options = {
 				taxonomy = WorldTaxonomy.snapshot(self.worldTaxonomy),
@@ -421,6 +443,8 @@ function TabOptionsContext.create(terminal)
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
 					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
 					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(terminal.playerNum),
+					opacityControl = { text = tostring(opacityValue), value = opacityValue,
+						numeric = true, maxLength = 3 },
 				},
 				admin = {
 					terminalHeaderActions = {}, terminals = terminals, memberHeaderActions = {}, members = members,

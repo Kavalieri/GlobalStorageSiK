@@ -360,7 +360,10 @@ function GS_TerminalUI:new(x, y, width, height, playerNum)
 	local palettePlayer = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
 		and GlobalStorageSiK.NetClient.getPlayer(playerNum)
 		or (playerNum == 0 and getPlayer and getPlayer() or nil)
-	if palettePlayer then GlobalStorageSiK.UIPalette.load(palettePlayer) end
+	if palettePlayer then
+		GlobalStorageSiK.UIPalette.load(palettePlayer)
+		GlobalStorageSiK.UIOpacity.load(palettePlayer)
+	end
 	local o = UI.Window.newInstance(self, x, y, width, height)
 	o.moveWithMouse = false
 	playerNum = palettePlayer and palettePlayer.getPlayerNum and palettePlayer:getPlayerNum() or playerNum

@@ -85,6 +85,13 @@ return {
         "activate"
       },
       ["id"] = "options.taxonomy.restore"
+    },
+    {
+      ["events"] = {
+        "change",
+        "submit"
+      },
+      ["id"] = "options.change-opacity"
     }
   },
   ["assets"] = {},
@@ -120,7 +127,7 @@ return {
   ["documentKind"] = "sik-ui-runtime-surface",
   ["frameworkRef"] = {
     ["id"] = "SiKUIFramework",
-    ["manifestSha256"] = "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
+    ["manifestSha256"] = "2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063",
     ["manifestVersion"] = "0.1.0-preview",
     ["namespace"] = "SiK.UI"
   },
@@ -628,6 +635,24 @@ return {
           ["text"] = "Restaurar automática"
         }
       }
+    },
+    {
+      ["id"] = "options.state.opacity.label",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "Opacidad de ventanas (%)"
+        }
+      }
+    },
+    {
+      ["id"] = "options.state.opacity.help",
+      ["translations"] = {
+        {
+          ["locale"] = "es",
+          ["text"] = "45 % más translúcido · 80 % apariencia aprobada · 100 % opaco. Se aplica a todas las ventanas de este personaje; no cambia la red."
+        }
+      }
     }
   },
   ["product"] = {
@@ -655,13 +680,13 @@ return {
     }
   },
   ["provenance"] = {
-    ["frameworkManifestSha256"] = "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
+    ["frameworkManifestSha256"] = "2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063",
     ["generatorSha256"] = "b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae",
     ["schemaSha256"] = "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    ["surfaceSpecSha256"] = "1608293709819339ad49e0cb44b388bf385d0b66bd0f6a6b82e783b9eff67eaa",
+    ["surfaceSpecSha256"] = "4c41e6074d96164806cf1870ee7cd886299794953f819650c28514adf3b49046",
     ["visualCanonicalizer"] = "sik-ui-dom-v2",
-    ["visualMasterSha256"] = "fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5",
-    ["visualSubtreeSha256"] = "91d66e21001561186b1a7e19d59ab06f50f225903dd1225f51d2e4d3ae36bb23"
+    ["visualMasterSha256"] = "a314f1cfc3782d23d54e36f2c19a202cb3d0294fcc036586d2ded75bb2dd276a",
+    ["visualSubtreeSha256"] = "5a822281a8b7fed7ea0cb5f6680f56a404395934c3bdf602951483a796edd1dc"
   },
   ["schemaId"] = "sik-ui-runtime-v1",
   ["schemaVersion"] = 1,
@@ -2594,6 +2619,86 @@ return {
               },
               ["type"] = "card-collection",
               ["variant"] = "palette"
+            },
+            {
+              ["actions"] = {
+                {
+                  ["actionId"] = "options.change-opacity",
+                  ["event"] = "change"
+                },
+                {
+                  ["actionId"] = "options.change-opacity",
+                  ["event"] = "submit"
+                }
+              },
+              ["children"] = {},
+              ["id"] = "options-opacity-field",
+              ["layout"] = {
+                ["base"] = {
+                  {
+                    ["name"] = "fill",
+                    ["value"] = {
+                      ["kind"] = "literal",
+                      ["value"] = true
+                    }
+                  }
+                },
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "field"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.state.opacity.label"
+                  }
+                },
+                {
+                  ["name"] = "data",
+                  ["value"] = {
+                    ["kind"] = "data",
+                    ["path"] = "options.state.opacityControl"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "default"
+            },
+            {
+              ["actions"] = {},
+              ["children"] = {},
+              ["id"] = "options-opacity-help",
+              ["layout"] = {
+                ["base"] = {},
+                ["mode"] = "row",
+                ["overrides"] = {}
+              },
+              ["props"] = {
+                {
+                  ["name"] = "kind",
+                  ["value"] = {
+                    ["kind"] = "literal",
+                    ["value"] = "feedback"
+                  }
+                },
+                {
+                  ["name"] = "label",
+                  ["value"] = {
+                    ["kind"] = "i18n",
+                    ["ref"] = "options.state.opacity.help"
+                  }
+                }
+              },
+              ["type"] = "control",
+              ["variant"] = "subtle"
             }
           },
           ["id"] = "options-palette-block",

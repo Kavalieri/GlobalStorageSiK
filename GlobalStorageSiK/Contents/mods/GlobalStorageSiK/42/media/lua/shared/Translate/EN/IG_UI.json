@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "No players or factions available.",
 	"IGUI_GS_RulesChangedRetry": "The rules have changed. Review the refreshed list and try again.",
 	"IGUI_GS_RuleReplacementInvalid": "The configuration was not applied: it contains invalid rules or exceeds the limit of 20. Review the template.",
-	"IGUI_GS_WorldTax_HelpSP": "Correct item classification throughout this save, independently of the network. Restore returns to automatic classification. The reason is kept in the private record."
+	"IGUI_GS_WorldTax_HelpSP": "Correct item classification throughout this save, independently of the network. Restore returns to automatic classification. The reason is kept in the private record.",
+	"IGUI_GS_UIOpacityLabel": "Window opacity (%)",
+	"IGUI_GS_UIOpacityHelp": "45% more translucent · 80% approved appearance · 100% opaque. Applies to every window for this character; does not change the network."
 }

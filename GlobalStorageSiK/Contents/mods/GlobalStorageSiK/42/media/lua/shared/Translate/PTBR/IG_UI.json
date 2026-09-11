@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "Nenhum jogador ou facção disponível.",
 	"IGUI_GS_RulesChangedRetry": "As regras mudaram. Confira a lista atualizada e tente novamente.",
 	"IGUI_GS_RuleReplacementInvalid": "A configuração não foi aplicada: contém regras inválidas ou excede o limite de 20. Revise o modelo.",
-	"IGUI_GS_WorldTax_HelpSP": "Corrige a classificação dos itens em toda esta partida, independentemente da rede. Restaurar recupera a classificação automática. O motivo permanece no registro privado."
+	"IGUI_GS_WorldTax_HelpSP": "Corrige a classificação dos itens em toda esta partida, independentemente da rede. Restaurar recupera a classificação automática. O motivo permanece no registro privado.",
+	"IGUI_GS_UIOpacityLabel": "Opacidade das janelas (%)",
+	"IGUI_GS_UIOpacityHelp": "45% mais translúcido · 80% aparência aprovada · 100% opaco. Aplica-se a todas as janelas deste personagem; não altera a rede."
 }

@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "沒有可新增的玩家或派系。",
 	"IGUI_GS_RulesChangedRetry": "規則已變更。請檢查更新後的清單，然後再試一次。",
 	"IGUI_GS_RuleReplacementInvalid": "未套用設定：規則無效或超過 20 條上限。請檢查範本。",
-	"IGUI_GS_WorldTax_HelpSP": "修正此存檔中所有物品的分類，與所用網路無關。還原會恢復自動分類。原因將保留在私有紀錄中。"
+	"IGUI_GS_WorldTax_HelpSP": "修正此存檔中所有物品的分類，與所用網路無關。還原會恢復自動分類。原因將保留在私有紀錄中。",
+	"IGUI_GS_UIOpacityLabel": "視窗不透明度 (%)",
+	"IGUI_GS_UIOpacityHelp": "45% 較透明 · 80% 核准外觀 · 100% 完全不透明。套用至此角色的所有視窗；不會變更網路。"
 }

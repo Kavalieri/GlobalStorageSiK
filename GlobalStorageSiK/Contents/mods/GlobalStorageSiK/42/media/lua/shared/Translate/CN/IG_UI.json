@@ -1560,5 +1560,7 @@
 	"IGUI_GS_AccessNoCandidates": "没有可添加的玩家或派系。",
 	"IGUI_GS_RulesChangedRetry": "规则已更改。请检查更新后的列表，然后重试。",
 	"IGUI_GS_RuleReplacementInvalid": "未应用配置：规则无效或超过 20 条上限。请检查模板。",
-	"IGUI_GS_WorldTax_HelpSP": "修正此存档中所有物品的分类，与所用网络无关。还原会恢复自动分类。原因将保留在私有记录中。"
+	"IGUI_GS_WorldTax_HelpSP": "修正此存档中所有物品的分类，与所用网络无关。还原会恢复自动分类。原因将保留在私有记录中。",
+	"IGUI_GS_UIOpacityLabel": "窗口不透明度 (%)",
+	"IGUI_GS_UIOpacityHelp": "45% 更透明 · 80% 已核准外观 · 100% 完全不透明。应用于此角色的所有窗口；不会更改网络。"
 }

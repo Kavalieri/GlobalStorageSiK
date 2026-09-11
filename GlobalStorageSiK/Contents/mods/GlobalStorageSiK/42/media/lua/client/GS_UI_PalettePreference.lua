@@ -1,14 +1,17 @@
--- Global Storage local theme preference.  The visual tokens belong to SiK.UI;
--- this module owns only the product preference key and its selector lifecycle.
+-- Global Storage local visual preferences. The visual tokens belong to SiK.UI;
+-- this module owns only the product preference keys and their selector lifecycle.
 
 require "GS_I18n"
 
 local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.UIPalette = GlobalStorageSiK.UIPalette or {}
+GlobalStorageSiK.UIOpacity = GlobalStorageSiK.UIOpacity or {}
 
 local Palette = GlobalStorageSiK.UIPalette
+local Opacity = GlobalStorageSiK.UIOpacity
 local PREF_KEY = "GSSiK_UIPalette"
+local OPACITY_PREF_KEY = "GSSiK_UIOpacity"
 local activeByPlayer = {}
 
 local function rgb(hex, alpha)
@@ -113,6 +116,49 @@ function Palette.save(player, key)
 		player:getModData()[PREF_KEY] = key
 	end
 	return key
+end
+
+Opacity.MIN = 45
+Opacity.MAX = 100
+
+local function playerNum(player)
+	return player and player.getPlayerNum and player:getPlayerNum() or 0
+end
+
+local function normalizeOpacity(value)
+	value = tonumber(value)
+	if not value or value ~= value then return nil end
+	value = math.floor(value + 0.5)
+	if value < Opacity.MIN or value > Opacity.MAX then return nil end
+	return value
+end
+
+function Opacity.get(player)
+	return UI.Theme.getOpacity(playerNum(player))
+end
+
+function Opacity.load(player)
+	local value
+	if player and player.getModData then
+		value = normalizeOpacity(player:getModData()[OPACITY_PREF_KEY])
+	end
+	if value then
+		UI.Theme.setOpacity(value, playerNum(player))
+	else
+		UI.Theme.clearOpacity(playerNum(player))
+	end
+	return UI.Theme.getOpacity(playerNum(player))
+end
+
+function Opacity.save(player, value)
+	value = normalizeOpacity(value)
+	if not value then return nil, "invalid_opacity" end
+	UI.Theme.setOpacity(value, playerNum(player))
+	if player and player.getModData then
+		-- Local visual preference: deliberately not transmitted.
+		player:getModData()[OPACITY_PREF_KEY] = value
+	end
+	return value
 end
 
 return Palette
