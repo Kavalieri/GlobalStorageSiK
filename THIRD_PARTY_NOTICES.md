@@ -17,6 +17,7 @@ version and licence must be recorded here before publication.
 | `docs/assets/craft-banner.png` | Copy of the SiK-owned Craft Workshop preview | SiK proprietary |
 | `docs/assets/builder-banner.png` | Copy of the SiK-owned Builder Workshop preview | SiK proprietary |
 | `docs/assets/tablet-banner.png` | Copy of the SiK-owned Tablet Workshop preview | SiK proprietary |
+| `docs/assets/multimedia-banner.png` | Copy of the SiK-owned Multimedia Workshop preview | SiK proprietary |
 
 
 ## Español

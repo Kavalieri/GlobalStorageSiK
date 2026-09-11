@@ -1,8 +1,7 @@
 # GSSiK Addon — Multimedia
 
-Development version 0.1.0-dev1.1 for Project Zomboid B42.20+. Requires
+Version 0.1.0 for Project Zomboid B42.20+. Requires
 `GlobalStorageSiK` and `SiKUIFramework`. Workshop ID: `3798890105`.
-This is a development candidate; its first Workshop upload was performed by Kava.
 
 Find or build the GS Multimedia housing, heads and power supply, then assemble
 the GS Multimedia player. Learn its magazine and the separate GS Multimedia

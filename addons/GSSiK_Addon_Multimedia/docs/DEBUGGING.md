@@ -1,6 +1,6 @@
 # Multimedia diagnostics
 
-Version: 0.1.0-dev1.1. Logs are disabled by default. Enable only the relevant
+Version: 0.1.0. Logs are disabled by default. Enable only the relevant
 category together with the master option in the sandbox menu.
 
 | Key | Spanish label | English label | Purpose |

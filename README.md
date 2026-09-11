@@ -11,12 +11,19 @@ physical instances and auto-sort them through an authoritative SP/MP path.
 
 | Product | Version | Mod ID | Workshop ID | Dependency |
 | --- | --- | --- | --- | --- |
-| Core | 1.5.1 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
-| Craft | 1.5.1 | GSSiK_Addon_Craft | [3752379654](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654) | SiKUIFramework, GlobalStorageSiK |
-| Builder | 1.5.1 | GSSiK_Addon_Builder | [3752437465](https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465) | SiKUIFramework, GlobalStorageSiK |
-| Tablet | 1.5.1 | GSSiK_Addon_Tablet | [3752379947](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947) | SiKUIFramework, GlobalStorageSiK |
+| Core | 1.5.2 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
+| Craft | 1.5.2 | GSSiK_Addon_Craft | [3752379654](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654) | SiKUIFramework, GlobalStorageSiK |
+| Builder | 1.5.2 | GSSiK_Addon_Builder | [3752437465](https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465) | SiKUIFramework, GlobalStorageSiK |
+| Tablet | 1.5.2 | GSSiK_Addon_Tablet | [3752379947](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947) | SiKUIFramework, GlobalStorageSiK |
+| Multimedia | 0.1.0 | GSSiK_Addon_Multimedia | [3798890105](https://steamcommunity.com/sharedfiles/filedetails/?id=3798890105) | SiKUIFramework, GlobalStorageSiK |
 
-All four target Project Zomboid Build 42.20+ and are maintained. Load
+<a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158"><img src="docs/assets/global-storage-sik-banner.png" alt="Global Storage SiK" width="180"></a>
+<a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654"><img src="docs/assets/craft-banner.png" alt="GSSiK Addon - Craft" width="180"></a>
+<a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465"><img src="docs/assets/builder-banner.png" alt="GSSiK Addon - Builder" width="180"></a>
+<a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947"><img src="docs/assets/tablet-banner.png" alt="GSSiK Addon - Tablet" width="180"></a>
+<a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3798890105"><img src="docs/assets/multimedia-banner.png" alt="GSSiK Addon - Multimedia" width="180"></a>
+
+All five target Project Zomboid Build 42.20+ and are maintained. Load
 `SiKUIFramework`, then Core, then any official addons. Core supports
 singleplayer, hosted games and dedicated multiplayer paths. Project Cook
 integration remains optional and requires runtime confirmation in the
@@ -29,7 +36,7 @@ installed environment.
 - L1/L2/L3 taxonomy, OR/AND/NOT acceptance rules and deterministic routing.
 - Zone/container priority and affinity-aware auto-sort.
 - Network ownership, members, permissions, energy and range controls.
-- Optional Craft, Builder and Tablet surfaces over the public Core contract.
+- Optional Craft, Builder, Tablet and Multimedia surfaces over the public Core contract.
 
 Install from the official Workshop pages above. Existing containers and their
 contents remain physical; follow the in-game terminal requirements to create or
@@ -53,7 +60,7 @@ prioridades, variantes exactas, transferencias y auto-ordenado mediante rutas
 autoritativas para un jugador y multijugador.
 
 Instala `SiKUIFramework`, después `GlobalStorageSiK` y finalmente los addons
-que quieras. Los cuatro productos requieren Build 42.20+. Project Cook continúa
+que quieras. Los cinco productos requieren Build 42.20+. Project Cook continúa
 como integración opcional pendiente de confirmación runtime en cada entorno.
 
 La documentación contractual vive una sola vez en
