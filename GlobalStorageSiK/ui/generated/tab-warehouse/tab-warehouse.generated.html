@@ -7,10 +7,10 @@
   &quot;frameworkManifestSha256&quot;: &quot;2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063&quot;,
   &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;708950af13c364bee102b6cd1c6b3a6e9adf49f7189536871d437bc19ffa80a2&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;5b18d9d612bc613024803970df5c6e7f5590d33521088cc4f8e932988f7b467d&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;a314f1cfc3782d23d54e36f2c19a202cb3d0294fcc036586d2ded75bb2dd276a&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;3fec3f554d178211ec9c77ef1f0b7779635cdc81686c9152f25409de8413ac79&quot;
+  &quot;visualMasterSha256&quot;: &quot;9e5b8cc6044ee75e8d60a5943f14dc7dbc98d254b7db517b049ea8bd913c5ac9&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;9e5b1072f6a341b553cbc4825e979fd9b34f6614ad147df8e4ff1b67aedbbac6&quot;
 }">
   <title>tab-warehouse</title>
   <style>:root {
@@ -1271,23 +1271,32 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
   </style>
 </head>
 <body data-sik-surface="tab-warehouse">
-<section class="sik-surface-root" data-panel="warehouse" data-surface-id="tab-warehouse" data-state-group data-state="warehouse-list">
+<section class="sik-surface-root" data-panel="warehouse" data-surface-id="tab-warehouse" data-state-group data-state="connected">
             <button data-state-option="warehouse-list" type="button" hidden></button>
             <button data-state-option="warehouse-drop" type="button" hidden></button>
+            <button data-state-option="connected" type="button" hidden></button>
+            <button data-state-option="checking-access" type="button" hidden></button>
+            <button data-state-option="loading-inventory" type="button" hidden></button>
+            <button data-state-option="validating-inventory" type="button" hidden></button>
+            <button data-state-option="updating-inventory" type="button" hidden></button>
+            <button data-state-option="scanning" type="button" hidden></button>
+            <button data-state-option="transport-failed" type="button" hidden></button>
             <div class="sik-block sik-block--fill">
-            <div class="sik-block-header" data-help="Consulta y transfiere el inventario agregado de la red. Las filas padre agrupan unidades equivalentes y se despliegan para elegir variantes o copias exactas."><span class="sik-block-header-title">Inventario de red</span><span class="sik-block-header-actions"><button class="sik-button" type="button">Auto-ordenar</button></span></div>
-            <div class="sik-warehouse-body" data-state-view="warehouse-list warehouse-drop">
+            <div class="sik-block-header" data-help="Consulta y transfiere el inventario agregado de la red. Las filas padre agrupan unidades equivalentes y se despliegan para elegir variantes o copias exactas."><span class="sik-block-header-title">Inventario de red</span><span class="sik-block-header-actions"><button class="sik-button" data-state-view="warehouse-list warehouse-drop connected scanning" type="button">Auto-ordenar</button><button class="sik-button" data-state-view="validating-inventory updating-inventory" type="button" disabled hidden>Auto-ordenar</button></span></div>
+            <div class="sik-warehouse-body" data-state-view="warehouse-list warehouse-drop connected validating-inventory updating-inventory scanning">
               <div class="sik-stack">
                 <div class="sik-capacity-meter" data-capacity-contract="state.capacity" data-capacity-item-count="326" data-capacity-state="warning" data-capacity-personal-bonus="1066.2" role="progressbar" aria-label="Capacidad del almacén" aria-valuemin="0" aria-valuemax="4620" aria-valuenow="3843" style="--sik-capacity-value:83%"><span class="sik-capacity-fill" aria-hidden="true"></span><span class="sik-capacity-label">326 objetos · 3843 / 4620 kg · 83% (+1066,2 kg personal)</span><span class="sik-capacity-detail" aria-live="polite"></span></div>
                 <div class="sik-search-control" data-warehouse-search-control>
                   <span class="sik-icon sik-icon--search" aria-hidden="true"></span>
-                  <input class="sik-search" data-warehouse-search value="" placeholder="Buscar ítem..." aria-label="Buscar ítem">
-                  <button class="sik-search-clear" type="button" aria-label="Limpiar búsqueda" title="Limpiar búsqueda"><span class="sik-icon sik-icon--close" aria-hidden="true"></span></button>
+                  <input class="sik-search" data-warehouse-search data-state-view="warehouse-list warehouse-drop connected scanning" value="" placeholder="Buscar ítem..." aria-label="Buscar ítem">
+                  <input class="sik-search" data-state-view="validating-inventory updating-inventory" value="" placeholder="Buscar ítem..." aria-label="Buscar ítem" disabled hidden>
+                  <button class="sik-search-clear" data-state-view="warehouse-list warehouse-drop connected scanning" type="button" aria-label="Limpiar búsqueda" title="Limpiar búsqueda"><span class="sik-icon sik-icon--close" aria-hidden="true"></span></button>
+                  <button class="sik-search-clear" data-state-view="validating-inventory updating-inventory" type="button" aria-label="Limpiar búsqueda" title="Limpiar búsqueda" disabled hidden><span class="sik-icon sik-icon--close" aria-hidden="true"></span></button>
                 </div>
                 <div class="sik-control-row">
-                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-family data-selected="all" type="button">Familia · Todas</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Familia · Todas</div><div class="sik-combo-option" data-value="food">Comida y bebida</div><div class="sik-combo-option" data-value="vehicles">Vehículos</div><div class="sik-combo-option" data-value="containers">Contenedores</div><div class="sik-combo-option" data-value="knowledge">Conocimiento y medios</div><div class="sik-combo-option" data-value="materials">Materiales</div><div class="sik-combo-option" data-value="misc">Sin clasificar</div></div></div>
-                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-group data-selected="all" type="button">Grupo · Todos</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Grupo · Todos</div><div class="sik-combo-option" data-value="nonperishable">No perecedero</div><div class="sik-combo-option" data-value="consumables">Consumibles</div><div class="sik-combo-option" data-value="media">Medios grabados</div><div class="sik-combo-option" data-value="component">Componente</div></div></div>
-                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-detail data-selected="all" type="button">Detalle · Todos</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Detalle · Todos</div><div class="sik-combo-option" data-value="otherfood">Otros alimentos</div><div class="sik-combo-option" data-value="fuel">Combustible</div><div class="sik-combo-option" data-value="fixing">Fijación</div></div></div>
+                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-family data-selected="all" data-state-view="warehouse-list warehouse-drop connected scanning" type="button">Familia · Todas</button><button class="sik-combo" data-state-view="validating-inventory updating-inventory" type="button" disabled hidden>Familia · Todas</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Familia · Todas</div><div class="sik-combo-option" data-value="food">Comida y bebida</div><div class="sik-combo-option" data-value="vehicles">Vehículos</div><div class="sik-combo-option" data-value="containers">Contenedores</div><div class="sik-combo-option" data-value="knowledge">Conocimiento y medios</div><div class="sik-combo-option" data-value="materials">Materiales</div><div class="sik-combo-option" data-value="misc">Sin clasificar</div></div></div>
+                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-group data-selected="all" data-state-view="warehouse-list warehouse-drop connected scanning" type="button">Grupo · Todos</button><button class="sik-combo" data-state-view="validating-inventory updating-inventory" type="button" disabled hidden>Grupo · Todos</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Grupo · Todos</div><div class="sik-combo-option" data-value="nonperishable">No perecedero</div><div class="sik-combo-option" data-value="consumables">Consumibles</div><div class="sik-combo-option" data-value="media">Medios grabados</div><div class="sik-combo-option" data-value="component">Componente</div></div></div>
+                  <div class="sik-combo-wrap"><button class="sik-combo" data-combo data-warehouse-detail data-selected="all" data-state-view="warehouse-list warehouse-drop connected scanning" type="button">Detalle · Todos</button><button class="sik-combo" data-state-view="validating-inventory updating-inventory" type="button" disabled hidden>Detalle · Todos</button><div class="sik-combo-list"><div class="sik-combo-option" data-value="all">Detalle · Todos</div><div class="sik-combo-option" data-value="otherfood">Otros alimentos</div><div class="sik-combo-option" data-value="fuel">Combustible</div><div class="sik-combo-option" data-value="fixing">Fijación</div></div></div>
                 </div>
               </div>
               <div class="sik-warehouse-table-block">
