@@ -15,16 +15,20 @@ end
 local function lockWidget(ui, widget)
 	if not widget then return end
 	local locks = ui._gsCatalogWidgetLocks
-	if not locks[widget] then
+	local first = not locks[widget]
+	if first then
 		local enabled = widget.enable ~= false and widget.enabled ~= false
 		if widget.isEnabled then enabled = enabled and widget:isEnabled() ~= false end
 		locks[widget] = {enabled=enabled}
+	end
+	-- Snapshot descendants before a composite setEnabled cascades into them.
+	for _, child in pairs(widget.children or {}) do lockWidget(ui, child) end
+	if first then
 		-- Native enabled also blocks input to lists/panels, not just buttons.
 		if widget.setEnabled then widget:setEnabled(false) end
 		if ISUIElement and ISUIElement.setEnabled then ISUIElement.setEnabled(widget, false) end
 		if widget.unfocus then widget:unfocus() end
 	end
-	for _, child in pairs(widget.children or {}) do lockWidget(ui, child) end
 end
 function Loading.lock(ui)
 	if not ui or not ui._gsCatalogLoad then return end
@@ -33,12 +37,20 @@ function Loading.lock(ui)
 	local host = ui.navigationContainer
 	if host then lockWidget(ui, host.panel or host) end
 end
-function Loading.unlock(ui)
-	local locks = ui and ui._gsCatalogWidgetLocks or {}
-	for widget, state in pairs(locks) do
+local function unlockWidget(widget, locks)
+	if not widget then return end
+	local state = locks[widget]
+	if state then
 		if widget.setEnabled then widget:setEnabled(state.enabled) end
 		if ISUIElement and ISUIElement.setEnabled then ISUIElement.setEnabled(widget, state.enabled) end
 	end
+	-- Restore child-specific availability after composite parent setters.
+	for _, child in pairs(widget.children or {}) do unlockWidget(child, locks) end
+end
+function Loading.unlock(ui)
+	local locks = ui and ui._gsCatalogWidgetLocks or {}
+	local host = ui and ui.navigationContainer
+	if host then unlockWidget(host.panel or host, locks) end
 	if ui then ui._gsCatalogWidgetLocks = nil end
 end
 function Loading.set(ui, phase, sequence, done, total)

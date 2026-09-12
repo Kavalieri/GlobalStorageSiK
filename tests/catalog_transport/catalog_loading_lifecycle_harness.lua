@@ -84,6 +84,22 @@ check(body.enabled == false and disabled.enabled == false and close.enabled == t
 Loading.unlock(progressUi)
 check(body.enabled == true and disabled.enabled == false and close.enabled == true,
   "unlock did not restore native enabled states")
+-- A native composite setter can overwrite descendants. The real loader must
+-- snapshot children before that cascade and restore each original value.
+local cascadeA = {enabled=true}
+local cascadeB = {enabled=false}
+local cascadeParent = {enabled=true, children={a=cascadeA,b=cascadeB}}
+function cascadeParent:setEnabled(value)
+  self.enabled=value
+  for _, child in pairs(self.children) do child.enabled=value end
+end
+local cascadeUi = {_gsCatalogLoad={}, navigationContainer={panel=cascadeParent}}
+Loading.lock(cascadeUi)
+check(cascadeA.enabled == false and cascadeB.enabled == false,
+  "composite lock did not reach descendants")
+Loading.unlock(cascadeUi)
+check(cascadeA.enabled == true and cascadeB.enabled == false,
+  "composite unlock lost child-specific enabled states")
 local expected = progressUi._gsCatalogLoad
 Loading.finish(progressUi, expected)
 check(progressUi._gsCatalogLoad == nil and #refreshed == 0 and failures == 0,

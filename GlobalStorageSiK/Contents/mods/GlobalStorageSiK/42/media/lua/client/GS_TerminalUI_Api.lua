@@ -477,6 +477,10 @@ function GlobalStorageSiK.TerminalUI.cancelOpenNetworkRequest(requestId, playerA
 			local inFlight = GlobalStorageSiK.Client.pendingTerminalOpenByPlayer
 				and GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[playerNum] == true
 			GlobalStorageSiK.TerminalUI.cancelPendingOpen(player)
+			local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+			if ui and ui._gsCatalogLoad and ui._gsCatalogLoad.sequence == pending.requestId and ui.onClose then
+				ui:onClose()
+			end
 			local transport = GlobalStorageSiK.NetClient
 			if inFlight and transport and transport.sendCommand then
 				transport.sendCommand("closeTerminal", {targetOpenSeq=pending.requestId}, player)
@@ -635,6 +639,9 @@ function GlobalStorageSiK.TerminalUI.expirePendingOpens(now)
 					entry.started, entry.deadline = now, now + OPEN_TIMEOUT_MS
 				end
 				if now >= entry.deadline then
+					local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
+					local request = requests[n]
+					if request and request.requestId == entry.seq then requests[n] = nil else request = nil end
 					local seq = entry.seq + 1
 					if seq > 2147483647 then seq = 1 end
 					sequences[n] = seq
@@ -645,8 +652,13 @@ function GlobalStorageSiK.TerminalUI.expirePendingOpens(now)
 						transport.sendCommand("closeTerminal", {targetOpenSeq=entry.seq}, entry.player)
 					end
 					GlobalStorageSiK.TerminalUI.showCatalogFailure(n, "open_timeout", false)
-					GlobalStorageSiK.TerminalUI.onRemoteOpenResult(
-						{playerNum=n, openSeq=entry.seq, reason="open_timeout"}, false)
+					-- Closing the pending shell clears request tables. Preserve this
+					-- callback locally and invoke after cleanup; it may reopen.
+					if request and type(request.callback) == "function" then
+						local ok, err = pcall(request.callback, false, "open_timeout",
+							{playerNum=n, openSeq=entry.seq, reason="open_timeout"})
+						if not ok then GlobalStorageSiK.Log.error("TerminalUI", "remote open callback", tostring(err)) end
+					end
 				end
 			end
 		end
