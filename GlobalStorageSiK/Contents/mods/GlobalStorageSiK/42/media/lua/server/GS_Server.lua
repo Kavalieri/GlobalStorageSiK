@@ -791,6 +791,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	local knownScope = requestMeta and requestMeta.knownCatalogScope or nil
 	local scanNeeded = shouldScanOnOpen(networkId)
 	local notModified = requestMeta and requestMeta.allowNotModified == true
+		and (requestMeta.knownCatalogNetworkId == nil or requestMeta.knownCatalogNetworkId == networkId)
 		and not scanNeeded and pendingSnapshotSync[networkId] == nil
 		and not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 		and GlobalStorageSiK.Index.getSnapshotRevision(networkId) == inventoryRevision
@@ -2152,6 +2153,8 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		local confirmed = {
 			playerNum=player:getPlayerNum(), openSeq=meta and meta.openSeq,
 			networkId=networkId, accessMode=accessMode,
+			catalogScope=catalogScopeSignature(player, networkId),
+			inventoryRevision=GlobalStorageSiK.Index.getInventoryRevision(networkId),
 			accessProbeId=meta and meta.accessProbeId,
 			terminalAnchor=terminalAnchor and {x=terminalAnchor.x, y=terminalAnchor.y, z=terminalAnchor.z or 0},
 			confirmedProximityRange=GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
@@ -2160,11 +2163,16 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		if not GlobalStorageSiK.CatalogServer.begin(player, confirmed) then return end
 	end
 	local requestMeta = meta and {
+		knownCatalogNetworkId = meta.knownCatalogNetworkId,
 		knownInventoryRevision = meta.knownInventoryRevision,
 		knownCatalogScope = meta.knownCatalogScope,
 		allowNotModified = meta.allowNotModified,
 	} or nil
+	local buildStarted = getTimestampMs and getTimestampMs() or 0
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player, requestMeta)
+	GlobalStorageSiK.Log.debug("CatalogTransport", "built", "openSeq=" .. tostring(meta and meta.openSeq)
+		.. " buildMs=" .. tostring((getTimestampMs and getTimestampMs() or 0) - buildStarted)
+		.. " notModified=" .. tostring(payload.notModified == true))
 	payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
 	payload.openUi = openUi == true
 	if openUi == true then
@@ -2858,6 +2866,7 @@ local function handleOpenTerminal(player, args, networkId, searchQuery)
 
 	pushTerminalState(player, networkId, scanSummary, searchQuery, nil, true, accessMode, terminal, {
 		openSeq = openSeq,
+		knownCatalogNetworkId = args.knownCatalogNetworkId,
 		knownInventoryRevision = args.knownInventoryRevision,
 		knownCatalogScope = args.knownCatalogScope,
 		allowNotModified = true,
@@ -4462,6 +4471,7 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 		pushTerminalState(player, networkId, nil, searchQuery, nil, false, nil, nil, {
+			knownCatalogNetworkId = args.knownCatalogNetworkId,
 			knownInventoryRevision = args.knownInventoryRevision,
 			knownCatalogScope = args.knownCatalogScope,
 			allowNotModified = true,

@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_CheckingAccess": "Comprobando acceso",
+	"IGUI_GS_LoadingInventory": "Cargando inventario",
+	"IGUI_GS_ValidatingInventory": "Validando inventario",
+	"IGUI_GS_UpdatingInventory": "Actualizando inventario",
+	"IGUI_GS_InventoryIncomplete": "Carga de inventario incompleta",
 	"IGUI_GS_AccessTimeoutTitle": "No se pudo confirmar el acceso",
 	"IGUI_GS_AccessTimeoutBlock": "Conexión con la red",
 	"IGUI_GS_AccessTimeoutHint": "El terminal no recibió una respuesta a tiempo; no confirma ni deniega permisos.",

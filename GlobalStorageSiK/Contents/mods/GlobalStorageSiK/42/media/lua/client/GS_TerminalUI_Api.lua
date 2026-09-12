@@ -13,6 +13,7 @@ require "GS_UIDebug"
 require "GS_Log"
 
 local UI = require "GS_UI_Framework"
+local Loading = require "GS_TerminalLoading"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
 GlobalStorageSiK.TerminalUI.instances = GlobalStorageSiK.TerminalUI.instances or {}
@@ -115,6 +116,7 @@ local function applyTerminalState(ui, state, forceDeferred)
 	end
 	local itemCount = state and state.items and #state.items or 0
 	ui._gsPendingTerminalState = state
+	ui._gsPendingTerminalLoad = ui._gsCatalogLoad
 	-- A queued callback owns the latest state even if a newer catalog is small.
 	-- Running it immediately would leave the old callback refreshing nil next tick.
 	if ui._gsTerminalRefreshQueued then return end
@@ -122,10 +124,33 @@ local function applyTerminalState(ui, state, forceDeferred)
 		local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
 			and type(getTimestampMs) == "function" and getTimestampMs() or nil
 		local pendingState = ui._gsPendingTerminalState
+		local load = ui._gsPendingTerminalLoad
 		ui._gsPendingTerminalState = nil
+		ui._gsPendingTerminalLoad = nil
+		-- A newer fragment batch or access transition supersedes this refresh.
+		if load ~= ui._gsCatalogLoad or not pendingState then return end
+		-- Restore previous widget availability before the authoritative refresh
+		-- recomputes permissions. Input remains fenced throughout this callback.
+		Loading.unlock(ui)
+		if ui._gsCatalogBodyHidden then
+			local panel = ui.tabPanels and ui.tabPanels[ui.activeTabKey or "items"]
+			if panel and panel.setVisible then panel:setVisible(true) end
+			ui._gsCatalogBodyHidden = nil
+		end
 		local ok, err = pcall(ui.refreshFromState, ui, pendingState)
 		if not ok then
 			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
+			Loading.lock(ui)
+			ui:onClose()
+			GlobalStorageSiK.TerminalUI.showCatalogFailure(ui.playerNum, "catalog_apply", true)
+		else
+			Loading.finish(ui, load)
+			local client = GlobalStorageSiK.Client
+			if pendingState.openUi and client and client.pendingInitialTab then
+				local tab = client.pendingInitialTab
+				client.pendingInitialTab = nil
+				GlobalStorageSiK.TerminalTabs.activate(ui, tab)
+			end
 		end
 		if startedMs then
 			GlobalStorageSiK.UIDebug.action("state_refresh",
@@ -276,6 +301,10 @@ function GlobalStorageSiK.TerminalUI.showBlocked(payloadOrReason, rect)
 	local rw = rect and rect.w
 	local rh = rect and rect.h
 	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	if ui then
+		Loading.unlock(ui)
+		ui._gsCatalogLoad, ui._gsPendingTerminalState = nil, nil
+	end
 	-- Singleton estricto: si ya existe instancia, siempre reutilizar.
 	if ui then
 		local wasVisible = not ui.getIsVisible or ui:getIsVisible() ~= false
@@ -407,6 +436,8 @@ local function sendPhysicalOpen(player, hint, networkId, enrich)
 	local client = GlobalStorageSiK.Client
 	local transport = GlobalStorageSiK.NetClient
 	if not client or not transport or not transport.sendCommand then return nil end
+	local old = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(player:getPlayerNum())
+	if old and old.onClose then old:onClose() end
 	local playerNum, openSeq = nextOpenSequence(player)
 	local payload = {openSeq=openSeq, terminalHint=hint, networkId=networkId}
 	if enrich then
@@ -415,7 +446,10 @@ local function sendPhysicalOpen(player, hint, networkId, enrich)
 	if client.addInventoryCatalogToken then
 		payload = client.addInventoryCatalogToken(payload, playerNum, networkId)
 	end
-	if not transport.sendCommand("openTerminal", payload, player) then
+	GlobalStorageSiK.TerminalUI.showPending(playerNum, openSeq)
+	if not GlobalStorageSiK.TerminalUI.dispatchOpening(player, openSeq, function()
+		return transport.sendCommand("openTerminal", payload, player)
+	end) then
 		clearPendingOpen(playerNum, openSeq)
 		return nil
 	end
@@ -472,6 +506,15 @@ end
 
 -- Called by the existing access watcher only while a view or request exists.
 function GlobalStorageSiK.TerminalUI.showCatalogFailure(playerNum, reason, confirmed)
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(playerNum)
+	if ui and ui.onClose then ui:onClose() end
+	local seq = (GlobalStorageSiK.Client.terminalOpenSeqByPlayer or {})[playerNum]
+	ui = GlobalStorageSiK.TerminalUI.showPending(playerNum, seq)
+	if ui then
+		Loading.set(ui, "failed", seq)
+		ui._gsCatalogLoad.failureKey = confirmed and "IGUI_GS_InventoryIncomplete" or "IGUI_GS_AccessTimeoutTitle"
+		ui:syncHeaderChrome()
+	end
 	local feedback = require "GS_CatalogFeedback"
 	GlobalStorageSiK.CatalogFeedback = feedback
 	return feedback.show(playerNum, reason, confirmed)
@@ -485,6 +528,94 @@ function GlobalStorageSiK.TerminalUI.confirmCatalogAccess(payload)
 	-- and uses the transport deadline rather than the old access timeout.
 	pendingOpenDeadlines[n] = nil
 	return true
+end
+
+-- This is a shell presentation, never a synthetic terminalState response.
+function GlobalStorageSiK.TerminalUI.showPending(n, sequence)
+	if not GS_TerminalUI then return end
+	local player = GlobalStorageSiK.NetClient.getPlayer(n)
+	local rect = resolveShellRect(player)
+	local ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, n)
+	ui.terminalState = {playerNum=n}
+	ui._gsCatalogLoad = {phase="checking", sequence=sequence, started=getTimestampMs and getTimestampMs() or 0}
+	ui:initialise()
+	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(n, ui)
+	Loading.lock(ui)
+	ui:show()
+	GlobalStorageSiK.Log.debug("CatalogTransport", "shell_visible", "player=" .. tostring(n)
+		.. " openSeq=" .. tostring(sequence))
+	return ui
+end
+
+function GlobalStorageSiK.TerminalUI.dispatchOpening(player, sequence, dispatch)
+	local n = player:getPlayerNum()
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(n)
+	if not ui or not Events or not Events.OnTick then return dispatch() end
+	local function sendOnce()
+		Events.OnTick.Remove(sendOnce)
+		ui._gsOpenDispatch = nil
+		if GlobalStorageSiK.TerminalUI.getInstanceForPlayer(n) ~= ui
+			or GlobalStorageSiK.Client.terminalOpenSeqByPlayer[n] ~= sequence then return end
+		if not dispatch() then
+			local request = (GlobalStorageSiK.TerminalUI._remoteOpenRequests or {})[n]
+			ui:onClose()
+			GlobalStorageSiK.TerminalUI.showCatalogFailure(n, "catalog_send", false)
+			if request and request.requestId == sequence and type(request.callback) == "function" then
+				pcall(request.callback, false, "catalog_send", {playerNum=n, openSeq=sequence})
+			end
+		end
+	end
+	ui._gsOpenDispatch = sendOnce
+	Events.OnTick.Add(sendOnce)
+	return true
+end
+
+function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
+	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(payload.playerNum)
+	if not ui or GlobalStorageSiK.Client.terminalOpenSeqByPlayer[payload.playerNum] ~= payload.openSeq then return end
+	local first = not ui._gsCatalogLoad or ui._gsCatalogLoad.phase == "checking"
+	if first and done == 0 then
+		-- ACK is already authorized by CatalogClient. Reuse only data matching
+		-- this player's confirmed network/scope; no permission comes from cache.
+		local cache = GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
+		local preview = {}
+		for k, v in pairs(payload) do preview[k] = v end
+		if cache then
+			preview.items, preview.itemTypeCount = cache.items, cache.itemTypeCount
+			preview._gsAppliedCatalogRevision = cache.inventoryRevision
+		end
+		ui.terminalState = preview
+		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
+			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
+		else ui.accessMode = "full" end
+		Loading.set(ui, cache and "validating" or "loading", payload.openSeq, done, total)
+		if cache then
+			Loading.unlock(ui)
+			local ok, err = pcall(ui.refreshFromState, ui, preview)
+			Loading.lock(ui)
+			if not ok then GlobalStorageSiK.Log.error("TerminalUI", "catalog preview", tostring(err)) end
+		end
+	else
+		local previous = ui.terminalState or {}
+		local hasRows = type(previous.items) == "table"
+		-- A changed scope must not keep exposing the prior restricted catalog.
+		if previous.catalogScope ~= payload.catalogScope then
+			ui.terminalState = {playerNum=payload.playerNum, networkId=payload.networkId,
+				catalogScope=payload.catalogScope}
+			for _, panel in pairs(ui.tabPanels or {}) do
+				if panel.setVisible then panel:setVisible(false) end
+			end
+			ui._gsCatalogBodyHidden = true
+			if ui.itemsPanel and GlobalStorageSiK.TerminalItems.disposeSection then
+				GlobalStorageSiK.TerminalItems.disposeSection(ui.itemsPanel, ui)
+				ui._gsBuiltTabs.items = nil
+			end
+			hasRows = false
+		end
+		local phase = hasRows and "updating" or "loading"
+		if hasRows and ui._gsCatalogLoad and ui._gsCatalogLoad.phase == "validating" then phase = "validating" end
+		Loading.set(ui, phase, payload.openSeq, done, total)
+	end
 end
 
 -- Called by the existing access watcher only while a view or request exists.
@@ -536,6 +667,8 @@ function GlobalStorageSiK.TerminalUI.requestOpenNetwork(networkId, playerArg, ca
 	end
 	local player = GlobalStorageSiK.PlayerUtils.resolve(playerArg)
 	if not player then return nil end
+	local old = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(player:getPlayerNum())
+	if old and old.onClose then old:onClose() end
 	local playerNum, openSeq = nextOpenSequence(player)
 	GlobalStorageSiK.TerminalUI._remoteOpenRequests =
 		GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
@@ -549,7 +682,10 @@ function GlobalStorageSiK.TerminalUI.requestOpenNetwork(networkId, playerArg, ca
 	if GlobalStorageSiK.Client and GlobalStorageSiK.Client.addInventoryCatalogToken then
 		payload = GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
 	end
-	local sent = GlobalStorageSiK.NetClient.sendNetworkCommand("openTerminal", networkId, payload, player)
+	GlobalStorageSiK.TerminalUI.showPending(playerNum, openSeq)
+	local sent = GlobalStorageSiK.TerminalUI.dispatchOpening(player, openSeq, function()
+		return GlobalStorageSiK.NetClient.sendNetworkCommand("openTerminal", networkId, payload, player)
+	end)
 	if not sent then
 		GlobalStorageSiK.TerminalUI._remoteOpenRequests[playerNum] = nil
 		clearPendingOpen(playerNum, openSeq)

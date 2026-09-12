@@ -33,6 +33,7 @@ require "GS_UIDebug"
 require "GSSiK_API"
 
 local UI = require "GS_UI_Framework"
+local Loading = require "GS_TerminalLoading"
 local CapacityPresentation = require "GlobalStorageSiK/UI/CapacityPresentation"
 
 GlobalStorageSiK.TerminalUI = GlobalStorageSiK.TerminalUI or {}
@@ -165,7 +166,7 @@ local function operationLabel(key, done, total, asPercent)
 	return label .. " " .. tostring(math.floor(done)) .. "/" .. tostring(math.floor(total))
 end
 
-local function buildHeaderSpec(state, activeOperation)
+local function buildHeaderSpec(state, activeOperation, load)
 	state = state or {}
 	local networkTitle = state.networkName
 	if type(networkTitle) ~= "string" or networkTitle == "" then
@@ -180,6 +181,9 @@ local function buildHeaderSpec(state, activeOperation)
 	local transient = state.headerTransient
 	if activeOperation then
 		operation = activeOperation
+		if activeOperation.showProgress == true then
+			statusLabel, statusTone = T("IGUI_GS_UpdatingInventory"), "warning"
+		end
 	elseif type(transient) == "table" then
 		operation = {
 			label = transient.label or transient.text or "",
@@ -189,6 +193,7 @@ local function buildHeaderSpec(state, activeOperation)
 			tone = transient.tone or transient.status or "warning",
 		}
 	elseif state.redistributeActive == true then
+		statusLabel, statusTone = T("IGUI_GS_RedistributeRunning"), "warning"
 		local progress = state.redistributeProgress or {}
 		local value, mode = operationProgress(progress.checked, progress.total)
 		operation = {
@@ -204,10 +209,20 @@ local function buildHeaderSpec(state, activeOperation)
 		local total = scan.progressTotal or scan.zonesTotal
 		local value, mode = operationProgress(done, total)
 		operation = {
-			label = operationLabel("IGUI_GS_ScanRunningShort", done, total, true),
+			label = value and (tostring(math.floor(value * 100 + 0.5)) .. "%") or "",
 			value = value, mode = mode,
 			status = "warning", tone = "warning", showProgress = true,
 		}
+		statusLabel, statusTone = T("IGUI_GS_ScanRunningShort"), "warning"
+	end
+	if state.scanActive == true or state.reconcilePending == true
+		or (state.scanStatus and (state.scanStatus.state == "RUNNING" or state.scanStatus.state == "STALE_RETRY")) then
+		statusLabel, statusTone = T("IGUI_GS_ScanRunningShort"), "warning"
+	end
+	if load then
+		local pendingStatus, pendingOperation = Loading.header(load)
+		statusLabel, statusTone, operation = pendingStatus.text, pendingStatus.tone, pendingOperation
+		if load.phase == "checking" then networkTitle = nil end
 	end
 	return {
 		productName = T("IGUI_GS_TerminalTitle"),
@@ -263,7 +278,10 @@ function GS_TerminalUI:syncHeaderChrome()
 	end
 	local activeOperation = GlobalStorageSiK.UIFeedback.operationFor(self.playerNum,
 		self.terminalState and self.terminalState.networkId)
-	local spec = buildHeaderSpec(self.terminalState, activeOperation)
+	local spec = buildHeaderSpec(self.terminalState, activeOperation, self._gsCatalogLoad)
+	if not self._gsCatalogLoad and (self._gsAccessState == "revoking" or self._gsAccessState == "revalidating") then
+		spec.status, spec.operation = Loading.header({phase="checking"})
+	end
 	spec.variant = self.accessMode == "blocked" and "blocked" or "default"
 	if self.accessMode == "blocked" then
 		-- Use the body's already resolved presentation; no scan/read to paint a header.
@@ -472,7 +490,7 @@ function GS_TerminalUI:initialise()
 		capWidth = 1, capHeight = 1,
 		padding = self.padding, contentPadding = 0,
 		headerHeight = self.headerHeight,
-		header = buildHeaderSpec(self.terminalState),
+		header = buildHeaderSpec(self.terminalState, nil, self._gsCatalogLoad),
 		footer = { versions = versionText, tooltip = versionTooltip, align = "center",
 			expandWhenTight = true },
 		geometryKey = "terminal-shell",
@@ -746,6 +764,10 @@ function GS_TerminalUI:refreshFromState(state)
 	local prev = self.terminalState or {}
 	local incoming = state
 	local firstState = self._gsHasAppliedState ~= true
+	local reusedCatalog = not firstState and incoming and incoming.catalogRestored == true
+		and incoming.catalogScope == prev.catalogScope
+		and incoming.inventoryRevision == prev._gsAppliedCatalogRevision
+	if reusedCatalog then incoming.items = prev.items end
 	local inventoryChanged = firstState or (incoming and (
 		(incoming.inventoryRevision ~= nil and incoming.inventoryRevision ~= prev.inventoryRevision)
 		or (incoming.items ~= nil and incoming.items ~= prev.items)))
@@ -807,7 +829,7 @@ function GS_TerminalUI:refreshFromState(state)
 		end
 		state = merged
 	end
-	if state and state.items then
+	if state and state.items and not reusedCatalog then
 		state.items = GlobalStorageSiK.NativeProduct.copyRows(state.items)
 	end
 	if state and state.headerTransient == nil and prev.headerTransient ~= nil then
@@ -913,6 +935,12 @@ end
 function GS_TerminalUI:cleanupTerminalSession()
         if self._terminalSessionClosed then return true end
         self._terminalSessionClosed = true
+	if self._gsOpenDispatch and Events and Events.OnTick then
+		Events.OnTick.Remove(self._gsOpenDispatch)
+		self._gsOpenDispatch = nil
+	end
+	self._gsCatalogWidgetLocks = nil
+	self._gsCatalogLoad = nil
         if GlobalStorageSiK.TerminalOptions and GlobalStorageSiK.TerminalOptions.dispose then
                 GlobalStorageSiK.TerminalOptions.dispose(self)
         end
@@ -993,6 +1021,7 @@ function GS_TerminalUI:onClose()
 end
 
 function GS_TerminalUI:sendCommand(command, payload)
+	if self._gsCatalogLoad then return false end
 	return GlobalStorageSiK.NetClient.sendCommand(command, payload or {}, self.playerNum)
 end
 

@@ -50,8 +50,43 @@ ES and EN have dedicated copy; other locale files carry explicit English fallbac
 
 ## Validation scope
 
+Core 1.5.3-dev1.1 uses the existing four-frame global allowance across repeated
+round-robin visits, including a single busy recipient. Idle traversal is bounded
+by four times the starting session count, and synchronous SP removal is safe.
+The optional `knownCatalogNetworkId` identifies a cache token independently of
+the opening target. Physical opening still resolves the terminal on the server;
+only a matching network, revision and scope may reuse the cached inventory.
+Existing legacy tokens without this field retain their revision/scope checks.
+The private client `progress` callback receives an accepted access ACK with an
+unknown total, then counts only unique accepted fragments after confirmation.
+It does not install partial inventory or certify UI readiness.
+
 Authorial harnesses exercise the real codec and transport modules with at least
 1,500 rows, 64 nodes, UTF-8/CJK/emoji, ordering, duplicates, revision replacement
 and cleanup. Lua 5.1 and Kahlua compilation are development gates. These checks
 do not prove dedicated-server packet delivery or the rendered PZ modal; those
 remain explicit runtime checks for Sistemas/Kava on the frozen candidate.
+
+## Core 1.5.3-dev1.1 opening readiness
+
+`showPending` shows an empty shell before the opening command is dispatched on
+its next active tick. This separates shell visibility from server work; actual
+button-to-render latency remains a PZ measurement. Close and Escape remain usable.
+The navigation/body stays disabled while checking access, loading, validating or
+updating inventory. An access ACK alone never means Connected. The window clears
+its loading state only after the same generation's complete catalog refresh
+succeeds; a newer batch, denial or close invalidates a queued refresh.
+
+Warm openings retain one complete data-only catalog per local player. Tokens
+expire after five minutes at the next request (including clock rollback); no
+rows are truncated. Preview requires confirmed player/network/scope/revision.
+A matching notModified snapshot reuses displayed rows instead of rebuilding them.
+Scope changes hide prior panels until authoritative refresh. Failed transport
+leaves an empty, disabled shell with an error header and the existing specific
+notice; it never leaves a Connected header or retries automatically.
+
+Status and the existing progress bar share the same lifecycle: unknown totals
+are indeterminate, unique accepted fragments give real progress, scan says
+Scanning, and Connected is reserved for a ready, accessible view. Progress may
+reach 100 percent before decode/UI refresh completes, while the loading label
+and action lock remain active. Persistence, permissions and frame limits are unchanged.

@@ -93,6 +93,7 @@ function Server.queue(player, payload)
 		tokenCount=1, totalBytes=1, data={}}
 	local overhead = Codec.size(envelope)
 	if not overhead then failure(player, "catalog_budget", serial); return false end
+	local encodeStarted = now()
 	local encoded, reason = Codec.encode(payload, Codec.FRAME_BYTES - overhead - 128)
 	if not encoded then failure(player, reason, serial); return false end
 	if retainedBytes + encoded.totalBytes > GLOBAL_BYTES then
@@ -109,7 +110,8 @@ function Server.queue(player, payload)
 		nextPart=1, started=now(), rows=payload.itemTypeCount or 0}
 	retainedBytes = retainedBytes + reservation
 	log("queued", "batch=" .. tostring(serial) .. " rows=" .. tostring(payload.itemTypeCount or 0)
-		.. " parts=" .. tostring(#encoded.chunks) .. " bytes=" .. tostring(encoded.totalBytes))
+		.. " parts=" .. tostring(#encoded.chunks) .. " bytes=" .. tostring(encoded.totalBytes)
+		.. " encodeMs=" .. tostring(now() - encodeStarted))
 	return true
 end
 function Server.receipt(player, payload)
@@ -142,7 +144,10 @@ function Server.update()
 		end
 	end
 	-- Four frames globally per tick, round robin; quiet sessions send nothing.
-	while visited < #order and sent < 4 do
+	-- Revisit busy recipients to use the existing budget even with one player.
+	-- Bound idle traversal and re-check length: SP callbacks may remove sessions.
+	local visitBudget = #order * 4
+	while #order > 0 and visited < visitBudget and sent < 4 do
 		cursor = cursor % #order + 1
 		local player = order[cursor]
 		local job, session = jobs[player], sessions[player]

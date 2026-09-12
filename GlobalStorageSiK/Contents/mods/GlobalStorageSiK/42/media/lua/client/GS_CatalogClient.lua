@@ -47,6 +47,7 @@ local function applyReady(playerNum, slot)
 	if batch.bytes ~= batch.meta.totalBytes or batch.tokens ~= batch.meta.tokenCount then
 		fail(playerNum, "catalog_incomplete"); return
 	end
+	local decodeStarted = now()
 	local value, reason = Codec.decode(batch.parts, batch.meta.tokenCount)
 	if not value then fail(playerNum, reason); return end
 	if value.networkId ~= batch.meta.networkId or value.openSeq ~= batch.meta.openSeq
@@ -69,6 +70,12 @@ local function applyReady(playerNum, slot)
 	-- Completion of the old request cannot fail or acknowledge its replacement.
 	if slots[playerNum] ~= slot then return end
 	if not ok or accepted == false then fail(playerNum, "catalog_apply"); return end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("CatalogTransport", "applied", "player=" .. tostring(playerNum)
+			.. " openSeq=" .. tostring(slot.sequence) .. " batch=" .. tostring(batch.meta.batchId)
+			.. " receiveMs=" .. tostring(decodeStarted - batch.started)
+			.. " decodeApplyMs=" .. tostring(now() - decodeStarted))
+	end
 	context.receipt(batch.meta)
 end
 function Client.ack(payload)
@@ -80,6 +87,8 @@ function Client.ack(payload)
 	if not context.confirm(payload) then return end
 	slot.confirmed = payload
 	slot.started = now()
+	if context.progress then context.progress(payload, 0, nil) end
+	if slots[payload.playerNum] ~= slot then return end
 	applyReady(payload.playerNum, slot)
 end
 function Client.receive(payload)
@@ -131,6 +140,10 @@ function Client.receive(payload)
 	if batch.tokens > batch.meta.tokenCount or batch.bytes > batch.meta.totalBytes then
 		fail(payload.playerNum, "catalog_budget"); return
 	end
+	-- Only accepted, unique fragments advance presentation. A complete batch
+	-- still remains non-operable until decoding and the consumer apply finish.
+	if slot.confirmed and context.progress then context.progress(batch.meta, batch.count, batch.meta.total) end
+	if slots[payload.playerNum] ~= slot then return end
 	applyReady(payload.playerNum, slot)
 end
 function Client.error(payload)

@@ -167,6 +167,10 @@ local function checkPlayer(playerNum, now)
 	end
 
 	local main = viewForPlayer(playerNum)
+	-- No anchor exists before the opening ACK. The access deadline and
+	-- CatalogClient own this phase; do not revoke against an absent anchor.
+	if main and main._gsCatalogLoad and (main._gsCatalogLoad.phase == "checking"
+		or main._gsCatalogLoad.phase == "failed") then return end
 	local isVis = main ~= nil and (not main.isVisible or main:isVisible())
 	local blockedOpen = isVis and main.accessMode == "blocked"
 	local mainOpen = isVis and main.accessMode ~= "blocked"

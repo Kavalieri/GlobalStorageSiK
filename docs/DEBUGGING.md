@@ -409,3 +409,14 @@ Preserve client `console.txt` and the dedicated server console log. Origin follo
 the common `[CLI]`, `[SRV]`, `[HOST]` or `[SP]` logger context. Do not enable unrelated
 categories or high-volume detail for this test. The trace describes transport,
 not permission acceptance or persistence success. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md).
+
+Core 1.5.3-dev1.1 adds bounded phase timings under the same category:
+`built` reports `buildMs` and `notModified`; `queued` adds `encodeMs`;
+`applied` reports `receiveMs` (first accepted fragment to decoding) and
+`decodeApplyMs` (decode plus consumer dispatch). These are not button-to-frame
+or rendered-UI readiness timings; deferred UI work is outside consumer dispatch.
+The same category also records `shell_visible` (shell registered, not proof of a
+rendered frame) and `ui_ready` with `waitMs` from that opening to successful UI
+refresh. For a cold open and ten consecutive warm opens, preserve both events
+with player/openSeq, plus built/queued/applied/completed. Compare PZ frame/input
+observations separately; no timing here certifies FPS or renderer latency.

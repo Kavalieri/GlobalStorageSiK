@@ -121,7 +121,10 @@ local function applyInventoryCatalog(incoming, playerNum)
 		end
 	elseif type(incoming.items) == "table" and incoming.inventoryRevision ~= nil
 		and type(incoming.catalogScope) == "string" then
+		-- Retain one complete data-only catalog per local player. Never trim rows.
+		GlobalStorageSiK.Client.clearInventoryCatalog(playerNum)
 		GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = {
+			cachedAt = getTimestampMs and getTimestampMs() or 0,
 			playerNum = tonumber(playerNum) or 0,
 			networkId = incoming.networkId,
 			items = incoming.items,
@@ -979,11 +982,19 @@ GlobalStorageSiK.Client.activeNetworkIdByPlayer = {}
 
 function GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, networkId)
 	payload = payload or {}
+	-- A cached network is only a validation hint, never an opening target.
 	networkId = networkId or payload.networkId
+		or (GlobalStorageSiK.Client.activeNetworkIdByPlayer or {})[tonumber(playerNum) or 0]
 	if not networkId then return payload end
 	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
 	local entry = cache[inventoryCatalogKey(playerNum, networkId)]
+	local timestamp = getTimestampMs and getTimestampMs() or 0
+	if entry and entry.cachedAt and (timestamp < entry.cachedAt or timestamp - entry.cachedAt > 300000) then
+		cache[inventoryCatalogKey(playerNum, networkId)] = nil
+		entry = nil
+	end
 	if entry then
+		payload.knownCatalogNetworkId = networkId
 		payload.knownInventoryRevision = entry.inventoryRevision
 		payload.knownCatalogScope = entry.catalogScope
 	end
@@ -999,6 +1010,13 @@ function GlobalStorageSiK.Client.clearInventoryCatalog(playerNum, networkId)
 		if samePlayer and sameNetwork then remove[#remove + 1] = key end
 	end
 	for i = 1, #remove do cache[remove[i]] = nil end
+end
+
+function GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
+	local entry = (GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {})[
+		inventoryCatalogKey(payload.playerNum, payload.networkId)]
+	if entry and entry.catalogScope == payload.catalogScope
+		and entry.inventoryRevision == payload.inventoryRevision then return entry end
 end
 
 --- Registro neutral y acotado para que addons limpien UI/callbacks efímeros
@@ -1086,6 +1104,9 @@ GlobalStorageSiK.CatalogClient.configure({
 		local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
 		local entry = cache[inventoryCatalogKey(payload.playerNum, payload.networkId)]
 		return entry and entry.inventoryRevision == payload.inventoryRevision and entry.catalogScope == payload.catalogScope
+	end,
+	progress=function(payload, done, total)
+		GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 	end,
 	apply=function(payload) return onServerCommand(GlobalStorageSiK.MOD_ID, "terminalState", payload) == true end,
 	receipt=function(meta)

@@ -34,7 +34,7 @@ check(#sent == receiptBefore, "receipt must not send a response")
 Server.clear("p0")
 check(Server.isOpening("p0") == nil, "server clear released session")
 
-local failures, applied, receipts = {}, {}, 0
+local failures, applied, receipts, progressEvents = {}, {}, 0, {}
 local currentOpen, pendingOpen = true, true
 local clientContext = {
   current = function(player, seq) return currentOpen and player == 0 and seq == 7 end,
@@ -43,6 +43,9 @@ local clientContext = {
   confirm = function() return true end,
   apply = function(value) applied[#applied + 1] = value; return true end,
   receipt = function() receipts = receipts + 1 end,
+  progress = function(meta, received, total)
+    progressEvents[#progressEvents + 1] = {batchId=meta and meta.batchId, received=received, total=total}
+  end,
   failure = function(player, seq, reason) failures[#failures + 1] = reason end,
   hasCache = function() return true end,
 }
@@ -139,4 +142,42 @@ local beforeReopen = #applied
 for i = 1, #frames do Client.receive(frames[i]) end
 check(#applied == beforeReopen + 1, "replacement request was lost after old apply failed")
 
-print("catalog_transport_integration_harness: PASS server envelope, client reorder/dedup/supersession/timeout/reentry")
+-- An accepted but indeterminate ACK reports zero progress without a total.
+Client.clear(); progressEvents = {}; Client.configure(clientContext); Client.start(0, 7)
+Client.ack({playerNum=0, openSeq=7, networkId="net", inventoryRevision=4, catalogScope="all", accessMode="local"})
+check(#progressEvents == 1 and progressEvents[1].received == 0 and progressEvents[1].total == nil,
+  "indeterminate ACK did not report zero/unknown progress")
+
+-- Only unique accepted fragments advance progress; exact duplicates and stale
+-- batches remain silent.
+progressEvents = {}; Client.receive(frames[1])
+local uniqueProgress = #progressEvents
+check(uniqueProgress == 1 and progressEvents[1].received == 1, "first unique fragment did not advance progress")
+Client.receive(frames[1])
+check(#progressEvents == uniqueProgress, "exact duplicate advanced progress")
+Client.receive(newer[1])
+local newerProgress = #progressEvents
+Client.receive(frames[1])
+check(#progressEvents == newerProgress, "stale batch advanced progress")
+
+-- A progress callback may clear/start a replacement request; the old slot
+-- must not apply or acknowledge after the callback returns.
+Client.clear(); Client.configure(clientContext); Client.start(0, 7)
+local defaultProgress = clientContext.progress
+local reentered = false
+clientContext.progress = function(meta, received, total)
+  progressEvents[#progressEvents + 1] = {batchId=meta and meta.batchId, received=received, total=total}
+  if received == 1 and not reentered then
+    reentered = true; Client.clear(0); Client.start(0, 7)
+  end
+end
+Client.ack({playerNum=0, openSeq=7, networkId="net", inventoryRevision=4, catalogScope="all", accessMode="local"})
+local appliedBeforeProgressReentry = #applied
+Client.receive(frames[1]); for i = 2, #frames do Client.receive(frames[i]) end
+check(#applied == appliedBeforeProgressReentry, "old batch applied after progress reentry")
+clientContext.progress = defaultProgress
+Client.ack({playerNum=0, openSeq=7, networkId="net", inventoryRevision=4, catalogScope="all", accessMode="local"})
+for i = 1, #frames do Client.receive(frames[i]) end
+check(#applied == appliedBeforeProgressReentry + 1, "replacement batch was not applied after progress reentry")
+
+print("catalog_transport_integration_harness: PASS server envelope, client reorder/dedup/supersession/timeout/reentry/progress")

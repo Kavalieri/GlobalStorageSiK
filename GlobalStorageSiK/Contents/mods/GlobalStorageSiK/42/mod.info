@@ -4,6 +4,6 @@ description=Build 42.20+ v1.5.2. Todos los contenedores de tu base en un inventa
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.5.3-dev1
+modversion=1.5.3-dev1.1
 versionMin=42.20.0
 require=SiKUIFramework
