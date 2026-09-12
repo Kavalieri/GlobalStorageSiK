@@ -19,6 +19,8 @@ require "GS_Log"
 require "GS_Sandbox"
 
 local T = GlobalStorageSiK.I18n.text
+-- Approved terminal rail: exact 56 px slots and 12 px cross-axis insets.
+local RAIL_CROSS_INSET = 12
 
 local function terminalProfile(width)
 	return UI.Metrics.profile(width or 0, "terminal")
@@ -58,7 +60,7 @@ local function navigationOptions(terminal, items)
 		placement = "left", activeKey = terminal.activeTabKey or "items",
 		profile = "terminal",
 		contentPadding = 12,
-		railCrossInset = 10,
+		railCrossInset = RAIL_CROSS_INSET,
 		items = items, iconOnly = true, railTooltip = true,
 		onActivate = function(context)
 			local item = context and context.value
@@ -234,7 +236,7 @@ end
 
 function GlobalStorageSiK.TerminalTabs.measureRailWidth(terminal)
 	local profile = terminalProfile(terminal and terminal.width)
-	return profile.window.railWidth
+	return math.max(profile.window.railWidth, 56 + 2 * RAIL_CROSS_INSET)
 
 end
 
