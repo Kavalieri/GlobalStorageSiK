@@ -192,6 +192,12 @@ local function buildHeaderSpec(state, activeOperation, load)
 			status = transient.status or transient.tone or "warning",
 			tone = transient.tone or transient.status or "warning",
 		}
+	elseif tonumber(state.inventoryRevision)
+		and tonumber(state._gsAppliedCatalogRevision)
+		and state.inventoryRevision > state._gsAppliedCatalogRevision then
+		statusLabel, statusTone = T("IGUI_GS_UpdatingInventory"), "warning"
+		operation = {label="", value=nil, mode="indeterminate",
+			status="warning", tone="warning", showProgress=true}
 	elseif state.redistributeActive == true then
 		statusLabel, statusTone = T("IGUI_GS_RedistributeRunning"), "warning"
 		local progress = state.redistributeProgress or {}

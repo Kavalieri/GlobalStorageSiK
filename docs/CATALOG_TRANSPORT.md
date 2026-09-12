@@ -1,5 +1,31 @@
 # Catalog transport — Core 1.5.3-dev1
 
+## Core 1.5.3-dev1.2 live reconciliation
+
+Opening and recovery continue to use the complete fragmented catalog described
+below. A confirmed transfer uses `terminalCatalogDelta` inside the same
+authorized, per-player opening session. The message declares `baseRevision`,
+`inventoryRevision`, complete replacement rows and removed row keys. The client
+applies it atomically only when its complete cached catalog matches the exact
+network, scope, opening sequence and base revision. Late and duplicate revisions
+are ignored; a missing base retains the visible catalog and coalesces one normal
+fragmented recovery. A delta that cannot fit the established safe frame budget
+falls back to the complete fragmented transport without truncation.
+
+Transfer `actionResult` remains the independent per-microbatch ACK. Catalog
+construction is queued after it, so it cannot delay or release the gesture
+queue. The warehouse updates only the existing table rows through stable
+`rowKey` values; it does not refresh or remount the window, tabs, Block or
+header. Background `updating` status changes are header-only and do not lock
+the body. Cold opening and cache validation remain read-only until the complete
+catalog is accepted, and only then may the header report the connected state.
+
+Exact transfers also report their touched node IDs internally. If a budgeted
+zone scan is active, its staging protects those newer node snapshots and adopts
+the new inventory revision instead of discarding the whole scan and scheduling
+a second pass. Unidentified or incomplete mutations retain the strict stale
+discard and full reconciliation path.
+
 The private terminal wire protocol uses `terminalOpenAck`,
 `terminalCatalogChunk`, `terminalCatalogAck` and `terminalCatalogError`.
 Consumers continue to receive a complete `terminalState`; partial chunks never

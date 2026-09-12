@@ -254,7 +254,8 @@ end
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
-		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true }
+		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true,
+		touchedNodeIds = {} }
 
 	if not player or not itemIds or #itemIds == 0 then
 		summary.reason = "invalid"
@@ -325,13 +326,20 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 				if not allowed then
 					summary.skipped = summary.skipped + 1
 				else
-					local ok, reason, snapshotsUpdated = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
+					local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
 						preferredNodeId = options and options.preferredNodeId or nil,
 					})
 					if ok then
 						summary.moved = summary.moved + 1
 						if snapshotsUpdated ~= true then summary.snapshotsUpdated = false end
+						if targetNodeId then
+							local seen = false
+							for n = 1, #summary.touchedNodeIds do
+								if summary.touchedNodeIds[n] == targetNodeId then seen = true end
+							end
+							if not seen then summary.touchedNodeIds[#summary.touchedNodeIds + 1] = targetNodeId end
+						end
 					elseif reason == "filtered" then
 						summary.skipped = summary.skipped + 1
 					else
@@ -363,7 +371,8 @@ end
 ---@return table summary
 function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, referenceItemId, options)
 	local summary = { processed = 0, moved = 0, skipped = 0, failed = 0, missing = 0,
-		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true }
+		reason = nil, failureReason = nil, remainingIds = {}, snapshotsUpdated = true,
+		touchedNodeIds = {} }
 
 	local item, container = GlobalStorageSiK.Deposit.findItemById(player, referenceItemId)
 	if not item or not container then
@@ -407,12 +416,19 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		summary.processed = summary.processed + 1
 		local candidate = candidates[c]
 		if candidate and candidate:getContainer() == container then
-			local ok, reason, snapshotsUpdated = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
+			local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
 				session = routingSession,
 			})
 			if ok then
 				summary.moved = summary.moved + 1
 				if snapshotsUpdated ~= true then summary.snapshotsUpdated = false end
+				if targetNodeId then
+					local seen = false
+					for n = 1, #summary.touchedNodeIds do
+						if summary.touchedNodeIds[n] == targetNodeId then seen = true end
+					end
+					if not seen then summary.touchedNodeIds[#summary.touchedNodeIds + 1] = targetNodeId end
+				end
 			elseif reason == "filtered" then
 				summary.skipped = summary.skipped + 1
 			else

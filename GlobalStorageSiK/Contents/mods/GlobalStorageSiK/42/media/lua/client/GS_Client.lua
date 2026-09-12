@@ -137,6 +137,81 @@ local function applyInventoryCatalog(incoming, playerNum)
 	return incoming
 end
 
+local function applyCatalogDelta(payload)
+	if type(payload) ~= "table" or payload.protocol ~= 1
+		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
+		or type(payload.changedRows) ~= "table" or type(payload.removedRowKeys) ~= "table"
+		or type(payload.baseRevision) ~= "number" or type(payload.inventoryRevision) ~= "number"
+		or payload.inventoryRevision <= payload.baseRevision then return false, "catalog_schema" end
+	local playerNum = tonumber(payload.playerNum)
+	if not playerNum or playerNum < 0 or playerNum > 3 or playerNum ~= math.floor(playerNum)
+		or not GlobalStorageSiK.Client.terminalOpenSeqByPlayer
+		or GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum] ~= payload.openSeq then
+		return false, "catalog_stale"
+	end
+	local key = inventoryCatalogKey(playerNum, payload.networkId)
+	local cache = (GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {})[key]
+	local state = (GlobalStorageSiK.Client.terminalStateByPlayer or {})[playerNum]
+	if cache and cache.catalogScope == payload.catalogScope
+		and cache.inventoryRevision >= payload.inventoryRevision then return true end
+	if not cache or cache.catalogScope ~= payload.catalogScope
+		or cache.inventoryRevision ~= payload.baseRevision
+		or not state or state.networkId ~= payload.networkId
+		or state.catalogScope ~= payload.catalogScope then return false, "catalog_revision" end
+	local codec = require "GS_CatalogCodec"
+	local wireSize = codec.size(payload)
+	if not wireSize or wireSize + 128 > codec.FRAME_BYTES then return false, "catalog_budget" end
+	local replacements, removed = {}, {}
+	for i = 1, #payload.changedRows do
+		local row = payload.changedRows[i]
+		if type(row) ~= "table" or type(row.rowKey) ~= "string" or row.rowKey == ""
+			or replacements[row.rowKey] then return false, "catalog_schema" end
+		replacements[row.rowKey] = row
+	end
+	for i = 1, #payload.removedRowKeys do
+		local rowKey = payload.removedRowKeys[i]
+		if type(rowKey) ~= "string" or rowKey == "" or removed[rowKey]
+			or replacements[rowKey] then return false, "catalog_schema" end
+		removed[rowKey] = true
+	end
+	local nextRows, consumed = {}, {}
+	for i = 1, #(cache.items or {}) do
+		local row = cache.items[i]
+		local rowKey = type(row) == "table" and row.rowKey or nil
+		if type(rowKey) ~= "string" or rowKey == "" then return false, "catalog_schema" end
+		if not removed[rowKey] then
+			nextRows[#nextRows + 1] = replacements[rowKey] or row
+			consumed[rowKey] = true
+		end
+	end
+	for i = 1, #payload.changedRows do
+		local row = payload.changedRows[i]
+		if not consumed[row.rowKey] then nextRows[#nextRows + 1] = row end
+	end
+	if tonumber(payload.itemTypeCount) ~= #nextRows then return false, "catalog_incomplete" end
+	cache.items, cache.itemTypeCount = nextRows, #nextRows
+	cache.inventoryRevision = payload.inventoryRevision
+	cache.cachedAt = getTimestampMs and getTimestampMs() or 0
+	state.items, state.itemTypeCount = nextRows, #nextRows
+	state.inventoryRevision = payload.inventoryRevision
+	state._gsAppliedCatalogRevision = payload.inventoryRevision
+	state.snapshotRevision = payload.snapshotRevision
+	state.snapshotCertified = payload.snapshotCertified == true
+	state.reconcilePending = payload.reconcilePending == true
+	if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = state end
+	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
+		GlobalStorageSiK.RemoteItemDetail.invalidateNetwork(payload.networkId)
+	end
+	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
+		GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(payload.networkId, playerNum)
+	end
+	if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.applyCatalogRows then
+		GlobalStorageSiK.TerminalSync.applyCatalogRows(payload.networkId, nextRows,
+			payload.inventoryRevision, playerNum)
+	end
+	return true
+end
+
 local function safeRequire(name)
 	local ok, err = pcall(require, name)
 	if not ok then
@@ -203,6 +278,7 @@ local function onServerCommand(module, command, args)
 	if command == "terminalOpenAck" then GlobalStorageSiK.CatalogClient.ack(args); return end
 	if command == "terminalCatalogChunk" then GlobalStorageSiK.CatalogClient.receive(args); return end
 	if command == "terminalCatalogError" then GlobalStorageSiK.CatalogClient.error(args); return end
+	if command == "terminalCatalogDelta" then GlobalStorageSiK.CatalogClient.delta(args); return end
 
 	if command == "terminalAccessResult" then
 		if GlobalStorageSiK.TerminalAccessGuard then
@@ -218,6 +294,10 @@ local function onServerCommand(module, command, args)
 			ui.terminalState.scanActive = args.state == "RUNNING" or args.state == "STALE_RETRY"
 			ui.terminalState.scanStatus = args
 			if args.snapshotAgeMs ~= nil then ui.terminalState.snapshotAgeMs = args.snapshotAgeMs end
+			if args.inventoryRevision ~= nil then ui.terminalState.inventoryRevision = args.inventoryRevision end
+			if args.snapshotRevision ~= nil then ui.terminalState.snapshotRevision = args.snapshotRevision end
+			if args.snapshotCertified ~= nil then ui.terminalState.snapshotCertified = args.snapshotCertified == true end
+			if args.reconcilePending ~= nil then ui.terminalState.reconcilePending = args.reconcilePending == true end
 			if ui.syncHeaderChrome then ui:syncHeaderChrome() end
 			local now = getTimestampMs and getTimestampMs() or 0
 			local panel = ui.networkPanel
@@ -1109,6 +1189,13 @@ GlobalStorageSiK.CatalogClient.configure({
 		GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 	end,
 	apply=function(payload) return onServerCommand(GlobalStorageSiK.MOD_ID, "terminalState", payload) == true end,
+	applyDelta=function(payload) return applyCatalogDelta(payload) end,
+	recover=function(payload)
+		if GlobalStorageSiK.TerminalSync then
+			GlobalStorageSiK.TerminalSync.scheduleInventoryPull(nil,
+				payload.inventoryRevision, payload.playerNum)
+		end
+	end,
 	receipt=function(meta)
 		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
 			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,

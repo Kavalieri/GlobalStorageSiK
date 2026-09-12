@@ -19,6 +19,7 @@ local function release(player)
 end
 function Server.configure(value) context = value end
 function Server.isOpening(player) return sessions[player] and sessions[player].openUi == true end
+function Server.hasJob(player) return jobs[player] ~= nil end
 function Server.clear(player)
 	release(player)
 	sessions[player] = nil
@@ -113,6 +114,25 @@ function Server.queue(player, payload)
 		.. " parts=" .. tostring(#encoded.chunks) .. " bytes=" .. tostring(encoded.totalBytes)
 		.. " encodeMs=" .. tostring(now() - encodeStarted))
 	return true
+end
+
+--- Sends one bounded catalog delta inside the already authorized terminal
+--- session. Oversized deltas return false so the caller can use the normal
+--- fragmented full-catalog transport without truncating any row.
+function Server.delta(player, payload)
+	local session = sessions[player]
+	if not session or session.networkId ~= payload.networkId then return false, "catalog_session" end
+	local valid, invalidReason = context.valid(player, session, payload)
+	if not valid then return false, invalidReason or "catalog_access_changed" end
+	payload.protocol = 1
+	payload.playerNum, payload.openSeq = session.playerNum, session.openSeq
+	local sent, reason = send(player, "terminalCatalogDelta", payload)
+	log(sent and "delta_sent" or "delta_fallback", "base=" .. tostring(payload.baseRevision)
+		.. " revision=" .. tostring(payload.inventoryRevision)
+		.. " changed=" .. tostring(#(payload.changedRows or {}))
+		.. " removed=" .. tostring(#(payload.removedRowKeys or {}))
+		.. " reason=" .. tostring(reason))
+	return sent, reason
 end
 function Server.receipt(player, payload)
 	local session, job = sessions[player], jobs[player]

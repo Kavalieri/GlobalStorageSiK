@@ -162,6 +162,8 @@ end
 ---@return number movedUnits
 
 ---@return string|nil reason
+---@return boolean|nil snapshotsUpdated
+---@return string|nil targetNodeId
 
 ---@return number[] movedItemIds
 
@@ -542,7 +544,7 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 		-- red (hasta 64 nodos) solo para volver a encontrar este mismo nodo.
 		local snapshotsUpdated = GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container) == true
 
-		return true, nil, snapshotsUpdated
+		return true, nil, snapshotsUpdated, targetId and tostring(targetId) or nil
 
 	end
 

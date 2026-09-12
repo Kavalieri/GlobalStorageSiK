@@ -200,7 +200,7 @@ local function commitStaged(job)
 		if staged.loaded then staged.zone.everScanLoaded = true end
 		local summary = GlobalStorageSiK.ZoneRefresh.mergeScanResults(
 			registry, staged.zone, staged.results, staged.area, staged.loaded,
-			staged.excludedEntryIds)
+			staged.excludedEntryIds, job.preciseMutationEntryIds)
 		job.totals.added = job.totals.added + (summary.added or 0)
 		job.totals.updated = job.totals.updated + (summary.updated or 0)
 		job.totals.offline = job.totals.offline + (summary.offline or 0)
@@ -413,6 +413,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		watchers = {},
 		distinctTypeSet = {},
 		stagedZones = {},
+		preciseMutationEntryIds = {},
 		totals = {
 			added = 0, updated = 0, offline = 0, outOfRange = 0,
 			removedIneligible = 0, cookingContainersExcluded = 0,
@@ -434,6 +435,23 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 	GlobalStorageSiK.Log.info("ZoneScanJob", "start network=" .. tostring(networkId)
 		.. " zones=" .. tostring(#zones) .. " scope=" .. tostring(opts.zoneId or "network"))
 	return true, nil
+end
+
+--- Preserva un scan activo cuando una transferencia ya refrescó exactamente
+--- sus nodos. El commit ignora esos resultados anteriores y adopta la revisión
+--- nueva; cualquier otra mutación mantiene la invalidación estricta existente.
+function GlobalStorageSiK.ZoneScanJob.notePreciseMutation(networkId, nodeIds, revision)
+	local job = jobs[networkId]
+	if not job or type(nodeIds) ~= "table" or #nodeIds == 0 then return false end
+	local current = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	if tonumber(revision) ~= current or current < (job.startRevision or 0) then return false end
+	for i = 1, #nodeIds do
+		local id = nodeIds[i]
+		if type(id) == "string" and id ~= "" then job.preciseMutationEntryIds[id] = true end
+	end
+	job.startRevision = current
+	job.startContentSignature = GlobalStorageSiK.Index.contentSignature(networkId)
+	return true
 end
 
 ---@param player IsoPlayer

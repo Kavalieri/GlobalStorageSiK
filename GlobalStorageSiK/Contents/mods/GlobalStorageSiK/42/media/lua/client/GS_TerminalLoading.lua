@@ -58,7 +58,14 @@ function Loading.set(ui, phase, sequence, done, total)
 	local previous = ui._gsCatalogLoad
 	ui._gsCatalogLoad = {phase=phase, sequence=sequence, done=done, total=total,
 		started=previous and previous.sequence == sequence and previous.started or now()}
-	Loading.lock(ui)
+	-- Only an opening without a confirmed catalog blocks interaction. Background
+	-- reconciliation keeps the last authoritative image usable while the header
+	-- reports progress; it must never disable or repaint the terminal body.
+	if phase == "checking" or phase == "loading" or phase == "validating" then
+		Loading.lock(ui)
+	else
+		Loading.unlock(ui)
+	end
 	if ui.syncHeaderChrome then ui:syncHeaderChrome() end
 end
 function Loading.header(load)

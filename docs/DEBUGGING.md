@@ -420,3 +420,12 @@ rendered frame) and `ui_ready` with `waitMs` from that opening to successful UI
 refresh. For a cold open and ten consecutive warm opens, preserve both events
 with player/openSeq, plus built/queued/applied/completed. Compare PZ frame/input
 observations separately; no timing here certifies FPS or renderer latency.
+
+Core 1.5.3-dev1.2 adds `delta_sent`, `delta_applied`, `delta_fallback` and
+`delta_recovery` under the same focused category. They report only revisions and
+changed/removed row counts. A normal one-item transfer must show its independent
+`actionResult` ACK and a bounded delta; it must not show a new full `queued`
+catalog or a restarted `ZoneScanJob`. `delta_fallback` followed by `queued` is
+valid only when there is no exact cached base or the complete delta exceeds the
+safe frame budget. Preserve the same client/server logs; no detail category is
+needed.

@@ -199,16 +199,20 @@ function sync.finishManagedTransfer(owner, searchQuery, expectedRevision, operat
 	local pendingIsFresh = managed.pendingState
 		and (not expectedRevision or pendingInventoryRevision >= expectedRevision)
 	if pendingIsFresh and uiVisible and sameNetwork and GlobalStorageSiK.TerminalUI
-		and type(GlobalStorageSiK.TerminalUI.show) == "function" then
+		and type(managed.pendingState.items) == "table" then
 		markRevision(managed.networkId or managed.pendingState.networkId, pendingSnapshotRevision)
 		if managed.networkId then _requiredSnapshotRevision[managed.networkId] = nil end
-		GlobalStorageSiK.TerminalUI.show(managed.pendingState)
-	elseif uiVisible and sameNetwork then
-		if managed.dirty and ui.refreshItemsTab then
-			ui:refreshItemsTab()
+		ui.terminalState = managed.pendingState
+		if GlobalStorageSiK.Client then
+			GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = managed.pendingState
+			if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = managed.pendingState end
 		end
-		if managed.dirty and ui.refreshNetworkPanel then
-			ui:refreshNetworkPanel()
+		sync.applyCatalogRows(managed.pendingState.networkId, managed.pendingState.items,
+			managed.pendingState.inventoryRevision)
+	elseif uiVisible and sameNetwork then
+		if managed.dirty and ui.terminalState and type(ui.terminalState.items) == "table" then
+			sync.applyCatalogRows(ui.terminalState.networkId, ui.terminalState.items,
+				ui.terminalState.inventoryRevision)
 		end
 	end
 	-- No pedir inmediatamente searchItems: mientras el snapshot incremental de
@@ -257,6 +261,11 @@ function sync.scheduleInventoryPull(searchQuery, expectedRevision)
 	end
 	_pullDueTick = _tickCounter + PULL_DEBOUNCE_TICKS
 	ui._gsPendingInventorySearch = searchQuery or currentSearchQuery()
+	if GlobalStorageSiK.TerminalLoading and GlobalStorageSiK.TerminalLoading.set then
+		local sequence = GlobalStorageSiK.Client and GlobalStorageSiK.Client.terminalOpenSeqByPlayer
+			and GlobalStorageSiK.Client.terminalOpenSeqByPlayer[playerNum]
+		GlobalStorageSiK.TerminalLoading.set(ui, "updating", sequence)
+	end
 	if not _tickInstalled and Events and Events.OnTick then
 		_tickInstalled = true
 		Events.OnTick.Add(sync.onTick)
@@ -321,12 +330,8 @@ function sync.applyWithdrawDelta(networkId, fullType, moved)
 				_managedTransfer.dirty = true
 				return
 			end
-			if ui.refreshItemsTab then
-				ui:refreshItemsTab()
-			end
-			if ui.refreshNetworkPanel then
-				ui:refreshNetworkPanel()
-			end
+			sync.applyCatalogRows(stateNid, items,
+				ui.terminalState._gsAppliedCatalogRevision or ui.terminalState.inventoryRevision)
 			return
 		end
 	end
@@ -341,6 +346,28 @@ function sync.refreshVisibleItemsTab()
 	if ui.refreshItemsTab then
 		ui:refreshItemsTab()
 	end
+end
+
+--- Actualiza exclusivamente el modelo de filas de la tabla existente. No
+--- refresca Surface/Block/Window ni cambia pestañas; Table conserva posición,
+--- selección y expansión mediante las claves semánticas ya validadas.
+function sync.applyCatalogRows(networkId, items, revision)
+	local ui = currentUI()
+	if not ui or not ui.terminalState or ui.terminalState.networkId ~= networkId then return false end
+	if isManagedTransferNetwork(networkId) then
+		_managedTransfer.dirty = true
+		return true
+	end
+	local panel = ui.itemsListPanel
+	if not panel or not panel.itemTable then return true end
+	local filtered = ui.applyItemsFilter and ui:applyItemsFilter(items) or items
+	local model = GlobalStorageSiK.TerminalItems.presentationModel(panel, ui, filtered)
+	if not model then return false end
+	panel.itemTable:setRows(model.rows, true)
+	if panel.itemTable.setEmptyText then panel.itemTable:setEmptyText(model.emptyText or "") end
+	markRevision(networkId, revision)
+	if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+	return true
 end
 
 ---@param state table|nil
@@ -460,6 +487,10 @@ end
 function Sync.refreshVisibleItemsTab(playerNum)
 	local sync = forPlayer(playerNum)
 	if sync then return sync.refreshVisibleItemsTab() end
+end
+function Sync.applyCatalogRows(networkId, items, revision, playerNum)
+	local sync = forPlayer(playerNum)
+	return sync and sync.applyCatalogRows(networkId, items, revision) or false
 end
 function Sync.onTerminalState(state, inventorySync)
 	if not state then return false end

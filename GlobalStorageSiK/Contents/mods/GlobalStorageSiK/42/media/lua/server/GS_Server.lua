@@ -234,11 +234,9 @@ local function catalogCacheKey(player, networkId, scopeSignature)
 end
 
 local function invalidateCatalogCache(networkId)
-	local remove = {}
-	for key, entry in pairs(inventoryCatalogCache) do
-		if entry.networkId == networkId then remove[#remove + 1] = key end
+	for _, entry in pairs(inventoryCatalogCache) do
+		if entry.networkId == networkId then entry.invalidated = true end
 	end
-	for i = 1, #remove do inventoryCatalogCache[remove[i]] = nil end
 end
 
 local function pruneCatalogCache()
@@ -257,7 +255,7 @@ local function getCatalogRows(player, networkId, scopeSignature)
 	local now = serverNowMs()
 	local key = catalogCacheKey(player, networkId, scopeSignature)
 	local cached = inventoryCatalogCache[key]
-	if now > 0 and cached and cached.revision == revision
+	if now > 0 and cached and cached.invalidated ~= true and cached.revision == revision
 		and now >= (cached.builtAtMs or 0)
 		and now - (cached.builtAtMs or 0) <= CATALOG_CACHE_TTL_MS then
 		return cached.rows, true
@@ -269,6 +267,42 @@ local function getCatalogRows(player, networkId, scopeSignature)
 		rows = rows, builtAtMs = now,
 	}
 	return rows, false
+end
+
+local function getCatalogDelta(player, networkId, scopeSignature)
+	local key = catalogCacheKey(player, networkId, scopeSignature)
+	local previous = inventoryCatalogCache[key]
+	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	if not previous or previous.revision == nil or previous.revision >= currentRevision then return nil end
+	local rows = getCatalogRows(player, networkId, scopeSignature)
+	local oldByKey, newByKey = {}, {}
+	for i = 1, #(previous.rows or {}) do
+		local row = previous.rows[i]
+		if type(row) ~= "table" or type(row.rowKey) ~= "string" or row.rowKey == "" then return nil end
+		oldByKey[row.rowKey] = row
+	end
+	local changed, removed = {}, {}
+	for i = 1, #rows do
+		local row = rows[i]
+		if type(row) ~= "table" or type(row.rowKey) ~= "string" or row.rowKey == "" then return nil end
+		newByKey[row.rowKey] = true
+		local old = oldByKey[row.rowKey]
+		if not old or GlobalStorageSiK.Index.snapshotSignature({old})
+			~= GlobalStorageSiK.Index.snapshotSignature({row}) then changed[#changed + 1] = row end
+	end
+	for rowKey in pairs(oldByKey) do
+		if not newByKey[rowKey] then removed[#removed + 1] = rowKey end
+	end
+	table.sort(removed)
+	local snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+	return {networkId=networkId, catalogScope=scopeSignature,
+		baseRevision=previous.revision, inventoryRevision=currentRevision,
+		changedRows=changed, removedRowKeys=removed, itemTypeCount=#rows,
+		snapshotRevision=snapshotRevision,
+		snapshotCertified=inventorySnapshotMeta[networkId] ~= nil
+			and snapshotRevision == currentRevision,
+		reconcilePending=pendingSnapshotSync[networkId] ~= nil
+			or GlobalStorageSiK.ZoneScanJob.isActive(networkId)}
 end
 
 local function snapshotStatus(networkId)
@@ -371,7 +405,7 @@ end
 --- Expuesto solo para jobs server (p. ej. auto-ordenar), no es API de addons.
 ---@param networkId string|nil
 ---@param player IsoPlayer|nil
----@param options table|nil { scheduleSnapshot=boolean, snapshotsUpdated=boolean }
+---@param options table|nil { scheduleSnapshot=boolean, snapshotsUpdated=boolean, touchedNodeIds=string[] }
 function GlobalStorageSiK.Server.markInventoryDirty(networkId, player, options)
 	if not networkId then
 		return
@@ -384,12 +418,18 @@ function GlobalStorageSiK.Server.markInventoryDirty(networkId, player, options)
 		revision = 0
 	end
 	invalidateCatalogCache(networkId)
+	local preciseReconciled = ok and options and options.snapshotsUpdated == true
+		and GlobalStorageSiK.ZoneScanJob.notePreciseMutation(networkId,
+			options.touchedNodeIds or {}, revision) == true
 	-- Transfer ya sincroniza el snapshot del nodo exacto dentro de
 	-- GS_Transfer. No convertir cada deposito/retiro en un scan mundial de
 	-- 12-14 s. Jobs que muten muchos nodos (p.ej. redistribucion) conservan el
 	-- comportamiento por defecto y coalescen una unica captura posterior.
 	if not options or options.scheduleSnapshot ~= false then
 		scheduleSnapshotSync(networkId, player, revision)
+	elseif preciseReconciled then
+		-- The active scan retains its budget and will certify this revision while
+		-- preserving the exact node snapshots already refreshed by Transfer.
 	elseif (GlobalStorageSiK.ZoneScanJob and GlobalStorageSiK.ZoneScanJob.isActive(networkId))
 		or pendingSnapshotSync[networkId] then
 		-- Si ya hay un scan, cada mutación desplaza la recaptura hasta que la red
@@ -1868,35 +1908,6 @@ local function runLockedTransfer(player, networkId, op, fn, resultMeta)
 	return true
 end
 
---- Cuenta tipos por nodo accesible a partir del snapshot persistido. No lee
---- InventoryItem: el GS_ZoneScanJob actualiza la captura con presupuesto y
---- después se envía el estado dirigido. Usado para que la columna "Tipos" del
---- listado de nodos se actualice tras depositar/retirar (BUG REAL reportado
---- 2026-08-16: "la lista
---- de nodos no actualiza su cantidad de tipos distintos... retiré los items,
---- debería poner 0 pero no actualiza si no cierro y abro o cambio de
---- pestaña" - pushTerminalInventorySync solo mandaba agregados de red, nunca
---- por-nodo, y el cliente (refreshFromState) no tocaba terminalState.nodes
---- en absoluto en la rama inventorySync).
----@param networkId string
----@return table<string, number>
-local function buildLiveNodeTypeCounts(networkId, player)
-	local counts = {}
-	local registry = GlobalStorageSiK.Zones.getRegistry()
-	if not registry or not registry.nodes then
-		return counts
-	end
-	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
-		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
-	for i = 1, #live do
-		local entry = live[i].entry
-		if entry and entry.id and registry.nodes[entry.id] then
-			counts[entry.id] = countSnapshotTypes(registry.nodes[entry.id].itemSnapshot)
-		end
-	end
-	return counts
-end
-
 --- Refresca inventario del terminal a otros jugadores con acceso a la red.
 ---@param player IsoPlayer|nil
 ---@param networkId string|nil
@@ -1910,32 +1921,14 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 	end
 	local ok, err = pcall(function()
 		local scopeSignature = catalogScopeSignature(player, networkId)
-		local rows = getCatalogRows(player, networkId, scopeSignature)
-		local snapshotMeta, snapshotAgeMs = snapshotStatus(networkId)
-		local inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-		local snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
-		local payload = {
-			networkId = networkId,
-			items = rows,
-			catalogScope = scopeSignature,
-			notModified = false,
-			searchQuery = searchQuery or "",
-			inventoryRevision = inventoryRevision,
-			snapshotRevision = snapshotRevision,
-			snapshotAgeMs = snapshotAgeMs,
-			snapshotCertified = snapshotMeta ~= nil and snapshotRevision == inventoryRevision,
-			reconcilePending = pendingSnapshotSync[networkId] ~= nil
-				or GlobalStorageSiK.ZoneScanJob.isActive(networkId),
-			redistributeActive = GlobalStorageSiK.RedistributeJob.isActive(networkId),
-			itemTypeCount = #rows,
-			nodeTypeCounts = buildLiveNodeTypeCounts(networkId, player),
-			capacity = GlobalStorageSiK.NetworkCapacity.serialize(
-				GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
-			),
-			inventorySync = true,
-			openUi = false,
-		}
-		gsSendServerCommand(player, "terminalState", payload)
+		local delta = getCatalogDelta(player, networkId, scopeSignature)
+		if delta then
+			local sent = GlobalStorageSiK.CatalogServer.delta(player, delta)
+			if sent then return end
+		end
+		-- No valid base (cold observer/scope change) or the bounded delta does not
+		-- fit one safe frame: retain every row and use the fragmented transport.
+		return GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, searchQuery)
 	end)
 	if not ok and GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.error("Server", "pushTerminalInventorySync", tostring(err))
@@ -2042,7 +2035,7 @@ local pushNodeChangeToNetworkWatchers
 ---@param actor IsoPlayer
 ---@param networkId string|nil
 ---@param searchQuery string|nil
----@param options table|nil { suppressUi = boolean, snapshotsUpdated = boolean }
+---@param options table|nil { suppressUi = boolean, snapshotsUpdated = boolean, touchedNodeIds=string[] }
 local function afterTransferSync(actor, networkId, searchQuery, options)
 	if not networkId then
 		return
@@ -2057,6 +2050,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	GlobalStorageSiK.Server.markInventoryDirty(networkId, actor, {
 		scheduleSnapshot = options.snapshotsUpdated ~= true,
 		snapshotsUpdated = options.snapshotsUpdated == true,
+		touchedNodeIds = options.touchedNodeIds,
 	})
 	if options.suppressUi == true then
 		-- Una linea por microlote solo resulta util al diagnosticar la
@@ -2102,7 +2096,10 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 		-- tiene entry+container resueltos (GlobalStorageSiK.Index.
 		-- syncNodeSnapshot), sin ningun barrido adicional. Aqui ya no hace
 		-- falta refrescar nada, solo empujar el estado ya actualizado.
-		pushTerminalInventorySync(actor, networkId, searchQuery)
+		-- Queue the actor too: actionResult is emitted by the caller immediately
+		-- after this function, before any catalog rebuild/serialization. Multiple
+		-- gestures arriving before the next flush collapse to the newest revision.
+		queueTerminalRefresh(actor, networkId, searchQuery, false)
 	end
 	-- Other players who are already looking at the same network receive one
 	-- coalesced inventory sync on the existing refresh queue. This keeps
@@ -2546,6 +2543,10 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		-- Evitar una segunda pasada idéntica al vencer la cola de snapshots.
 		pendingSnapshotSync[networkId] = nil
 	end
+	-- Completion is header chrome first. Existing views retain their last
+	-- confirmed rows until the bounded delta below applies atomically.
+	GlobalStorageSiK.Server.onNetworkScanProgress(networkId,
+		GlobalStorageSiK.ZoneScanJob.getStatus(networkId), requestedWatchers)
 	forEachOnlinePlayer(function(player)
 		local username = player.getUsername and player:getUsername() or ""
 		local explicitlyRequested = requestedWatchers and requestedWatchers[username] ~= nil
@@ -2555,7 +2556,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 			local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
 			if allowed then
 				local query = explicitlyRequested and requestedWatchers[username] or ""
-				pushTerminalState(player, networkId, summary, query)
+				if contentChanged then pushTerminalInventorySync(player, networkId, query) end
 				if summary._background ~= true then
 					summary.networkId = networkId
 					local payload = scanResult(networkId, "COMPLETED", "IGUI_GS_ScanCompleteMetrics", "complete", summary)
@@ -2573,6 +2574,12 @@ end
 --- Actualizacion pequena de cabecera: nunca reconstruye ni reenvia el catalogo.
 function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
 	status.snapshotAgeMs = select(2, snapshotStatus(networkId))
+	status.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	status.snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+	status.snapshotCertified = inventorySnapshotMeta[networkId] ~= nil
+		and status.snapshotRevision == status.inventoryRevision
+	status.reconcilePending = pendingSnapshotSync[networkId] ~= nil
+		or GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 	forEachOnlinePlayer(function(player)
 		-- Requesting a scan does not grant a subscription after access is lost.
 		-- The global job remains alive independently of all UI watchers.
@@ -2674,9 +2681,14 @@ flushPendingTerminalRefreshes = function()
 	local selectedKey = nil
 	local job = nil
 	for key, candidate in pairs(pendingTerminalRefreshes) do
-		selectedKey = key
-		job = candidate
-		break
+		-- Do not supersede a fragmented snapshot already in flight. Keep the
+		-- coalesced live refresh pending; once its receipt releases the job, the
+		-- next tick derives one delta from the exact base the client received.
+		if not GlobalStorageSiK.CatalogServer.hasJob(candidate.player) then
+			selectedKey = key
+			job = candidate
+			break
+		end
 	end
 	if not selectedKey or not job then
 		return
@@ -3607,7 +3619,10 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 			.. " pacingId=" .. tostring(pacingId)
 			.. " withdrawId=" .. tostring(withdrawId))
 		if (moved or 0) > 0 or floorReconcile then
-			afterTransferSync(player, networkId, searchQuery, { snapshotsUpdated = snapshotsUpdated })
+			afterTransferSync(player, networkId, searchQuery, {
+				snapshotsUpdated = snapshotsUpdated,
+				touchedNodeIds = sourceNodeIds,
+			})
 		end
 		local msg = ok
 			and GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(moved or 0))
@@ -3619,6 +3634,7 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 				requested = requested, moved = moved or 0,
 				inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 				reason = reason, selectionMode = selectionMode,
+				deferInventoryPull = true,
 				selectionTicket = not ticketComplete and ticketId or nil,
 				reconcile = floorReconcile == true,
 				selectionSequence = ticketBatch and ticketBatch.ticket.sequence or nil,
@@ -4488,8 +4504,10 @@ local function onClientCommand(module, command, player, args)
 				afterTransferSync(player, networkId, searchQuery, {
 					suppressUi = summary.reason == "limit",
 					snapshotsUpdated = summary.snapshotsUpdated,
+					touchedNodeIds = summary.touchedNodeIds,
 				})
 			end
+			summary.touchedNodeIds = nil
 			gsSendServerCommand(player, "actionResult", {
 				ok = summary.moved > 0,
 				message = msg,
@@ -4501,6 +4519,7 @@ local function onClientCommand(module, command, player, args)
 					skipped = summary.skipped or 0,
 					failed = summary.failed or 0,
 					inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
+					deferInventoryPull = true,
 				},
 			})
 		end)
@@ -4611,8 +4630,10 @@ local function onClientCommand(module, command, player, args)
 				afterTransferSync(player, networkId, searchQuery, {
 					suppressUi = summary.reason == "limit",
 					snapshotsUpdated = summary.snapshotsUpdated,
+					touchedNodeIds = summary.touchedNodeIds,
 				})
 			end
+			summary.touchedNodeIds = nil
 			gsSendServerCommand(player, "actionResult", {
 				ok = (summary.moved or 0) > 0 and summary.reconcile ~= true,
 				message = msg,
@@ -4628,6 +4649,7 @@ local function onClientCommand(module, command, player, args)
 					operationId = operationId,
 					inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
 					reason = summary.reason,
+					deferInventoryPull = true,
 				},
 			})
 		end, depositMeta)

@@ -32,9 +32,10 @@ end
 ---@param zoneAreaTiles number|nil
 ---@param zoneHadLoadedSquares boolean|nil false si la zona no tenía chunks cargados (no marcar offline)
 ---@param excludedEntryIds table<string, boolean>|nil cámaras de cocción detectadas y no elegibles
+---@param protectedEntryIds table<string, boolean>|nil nodos actualizados autoritativamente durante el scan
 ---@return table summary
 function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected, zoneAreaTiles,
-	zoneHadLoadedSquares, excludedEntryIds)
+	zoneHadLoadedSquares, excludedEntryIds, protectedEntryIds)
 	local scanMs = getTimestampMs and getTimestampMs() or 0
 	registry.nodes = registry.nodes or {}
 	local summary = {
@@ -77,13 +78,14 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 	-- fantasma/offline: se elimina solo su metadata GS. Su inventario físico no
 	-- se toca y un futuro addon de cocina podrá integrarlo mediante otra API.
 	for id in pairs(excludedEntryIds or {}) do
-		if registry.nodes[id] then
+		if not (protectedEntryIds and protectedEntryIds[id]) and registry.nodes[id] then
 			registry.nodes[id] = nil
 			summary.removedIneligible = summary.removedIneligible + 1
 		end
 	end
 
 	for id, entry in pairs(detectedById) do
+		if not (protectedEntryIds and protectedEntryIds[id]) then
 		local existing = registry.nodes[id]
 		if not existing then
 			if existingCount + summary.added >= maxNodes then
@@ -140,11 +142,13 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 				summary.updated = summary.updated + 1
 			end
 		end
+		end
 	end
 
 	if zoneHadLoadedSquares ~= false then
 		for id, node in pairs(registry.nodes) do
-			if node.zoneId == zone.id and not detectedById[id] then
+			if node.zoneId == zone.id and not detectedById[id]
+				and not (protectedEntryIds and protectedEntryIds[id]) then
 				node.offline = true
 				summary.offline = summary.offline + 1
 			end

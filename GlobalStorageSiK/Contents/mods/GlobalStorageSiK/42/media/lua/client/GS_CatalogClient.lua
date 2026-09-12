@@ -153,6 +153,36 @@ function Client.error(payload)
 	if type(payload.batchId) == "number" and payload.batchId < slot.latest then return end
 	fail(payload.playerNum, payload.reason or "catalog_send")
 end
+
+--- Applies a bounded live delta only over its exact catalog base. Missing or
+--- out-of-order bases retain the visible image and request one coalesced full
+--- recovery through the existing fragmented transport.
+function Client.delta(payload)
+	local slot = slotFor(payload)
+	if not slot or type(payload) ~= "table" then return end
+	if payload.protocol ~= 1 or not Codec.integer(payload.baseRevision, 0, 9007199254740991)
+		or not Codec.integer(payload.inventoryRevision, payload.baseRevision + 1, 9007199254740991)
+		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
+		or type(payload.changedRows) ~= "table" or type(payload.removedRowKeys) ~= "table" then return end
+	local size = Codec.size(payload)
+	if not size or size + 128 > Codec.FRAME_BYTES then return end
+	if slot.completedRevision and payload.inventoryRevision <= slot.completedRevision then return end
+	if slot.confirmed and slot.confirmed.networkId ~= payload.networkId then return end
+	local ok, accepted, reason = pcall(context.applyDelta, payload)
+	if ok and accepted == true then
+		slot.completedRevision = payload.inventoryRevision
+		if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", "delta_applied",
+			"base=" .. tostring(payload.baseRevision) .. " revision=" .. tostring(payload.inventoryRevision)
+				.. " changed=" .. tostring(#payload.changedRows)
+				.. " removed=" .. tostring(#payload.removedRowKeys)) end
+		return
+	end
+	if reason == "catalog_revision" and context.recover then
+		if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", "delta_recovery",
+			"base=" .. tostring(payload.baseRevision) .. " revision=" .. tostring(payload.inventoryRevision)) end
+		context.recover(payload)
+	end
+end
 function Client.update(timestamp)
 	local active = false
 	for playerNum = 0, 3 do
