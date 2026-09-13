@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.4-dev1.3
+# Catalog transport — Core 1.5.4
 
 This private protocol carries complete catalog states, revisioned deltas and
 on-demand detail pages. It does not change the public addon API. Server and
@@ -175,7 +175,7 @@ once. Transfer action ACKs remain independent from catalog ACKs.
 
 ## Incremental presentation
 
-Core 1.5.4-dev1.3 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
+Core 1.5.4 uses Framework 1.0.3 `Table:patchRows` for catalog deltas,
 detail pages and managed transfer completion. The initial image uses `setRows`;
 deltas reuse unchanged root descriptors, semantic entries, projected blocks and
 the viewport pool. Selection, focus, expansion, child page and scroll survive
