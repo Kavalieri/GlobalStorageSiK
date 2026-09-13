@@ -360,6 +360,7 @@ local function onServerCommand(module, command, args)
 	if GlobalStorageSiK.NativeWorldSync and GlobalStorageSiK.NativeWorldSync.onCommand(command, args) then return end
 	if command == "terminalOpenAck" then GlobalStorageSiK.CatalogClient.ack(args); return end
 	if command == "terminalCatalogChunk" then GlobalStorageSiK.CatalogClient.receive(args); return end
+	if command == "terminalCatalogPending" then GlobalStorageSiK.CatalogClient.waiting(args); return end
 	if command == "terminalCatalogError" then GlobalStorageSiK.CatalogClient.error(args); return end
 	if command == "terminalCatalogDelta" then GlobalStorageSiK.CatalogClient.delta(args); return end
 

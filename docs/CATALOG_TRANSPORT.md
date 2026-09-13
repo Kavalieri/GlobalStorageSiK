@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.4-dev1.1
+# Catalog transport — Core 1.5.4-dev1.2
 
 This private protocol carries complete catalog states, revisioned deltas and
 on-demand detail pages. It does not change the public addon API. Server and
@@ -114,9 +114,20 @@ premature and stale ACKs cannot advance the base. Exact duplicate fragments do
 not extend deadlines. Conflicting fragments, malformed schema, capacity failure
 and timeout fail the affected batch.
 A builder only renews its progress deadline when it actually advances or finishes.
-Preparation and encoding additionally have an absolute 10-second deadline that
-cannot be renewed by progress or reopen. A causal timeout is failure, not evidence
-of meeting the dedicated requirement of a usable cold catalog within 10 seconds.
+The 10-second response target is separate from the lifetime of shared work.
+While preparation or encoding progresses, terminalCatalogPending reports a
+recoverable request_timeout and renews the pre-fragment client response lease
+only for increasing work under the current authorized session and batch.
+It neither cancels preparation nor extends fragment inactivity deadlines.
+No progress for 60 seconds produces catalog_stalled. Detached work receives a
+bounded background slice and remains reusable for 30 seconds after detachment.
+The dedicated requirement remains usable cold rows within 10 seconds; a pending
+notification is not evidence of meeting that requirement.
+Cold node contributions are not canonically serialized. Changed nodes compare
+their affected parent contributions lazily; parent construction uses an inverted
+contribution list rather than scanning every node for every parent. Snapshot
+capture maintains exact minimum representatives; legacy snapshots cache a
+bounded incremental first lookup without mutating the published snapshot.
 Events distinguish state_envelope_built, catalog_rows_built, encoded and completed;
 elapsed time includes queued work. Progress reports phase, node/total, remaining
 work and retained base at a global maximum of one sample every two seconds.
@@ -151,7 +162,7 @@ once. Transfer action ACKs remain independent from catalog ACKs.
 
 ## Incremental presentation
 
-Core 1.5.4-dev1.1 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
+Core 1.5.4-dev1.2 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
 detail pages and managed transfer completion. The initial image uses `setRows`;
 deltas reuse unchanged root descriptors, semantic entries, projected blocks and
 the viewport pool. Selection, focus, expansion, child page and scroll survive

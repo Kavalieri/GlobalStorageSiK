@@ -8,7 +8,7 @@ local context
 local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
 local TIMEOUT_MS = 60000
-local BUILD_DEADLINE_MS = 10000
+local RESPONSE_DEADLINE_MS = 10000
 local counters = {full=0, delta=0, notModified=0, details=0, completed=0, discarded=0, rejected=0, coalesced=0}
 local lastDiscardLog = 0
 local lastProgressLog = 0
@@ -118,6 +118,8 @@ function Server.begin(player, confirmation)
     -- Retarget only a not-yet-encoded full. Old fragments/ACKs remain fenced by
     -- openSeq. Deltas have a recipient base and cannot be rebound blindly.
     local resume=compatible and active and active.builder and active.kind=="full"
+        and active.envelope.inventoryRevision==confirmation.inventoryRevision
+        and (not active.builder.classificationStamp or active.builder.classificationStamp==GlobalStorageSiK.Index.getClassificationStamp())
     if resume then jobs[player]=nil end
     Server.clear(player)
     if #order>=SESSION_LIMIT then
@@ -316,6 +318,7 @@ local function buildStep(player,job,session,budget,millis)
     job.bytes=reservation
     if done or (tonumber(stats.workLastStep) or 0)>0 then job.lastProgressAt=now() end
     job.buildMs=(job.buildMs or 0)+math.max(0,now()-started)
+    job.buildUnits=stats.workTotal or job.buildUnits or 0
     if done then
         -- The builder mutates only the copied metadata envelope owned by this
         -- job. The captured content revision never changes during construction.
@@ -367,11 +370,7 @@ function Server.update()
             if timestamp<job.lastProgressAt then job.lastProgressAt=timestamp end
             if not valid then
                 if reason then failure(player,reason,job.envelope.batchId) else Server.clear(player) end
-            elseif (job.builder or job.encoder) and timestamp-job.startedAt>=BUILD_DEADLINE_MS then
-                log("deadline",description(job.envelope).." phase="..(job.builder and "preparation" or "encoding")
-                    .." elapsedMs="..tostring(timestamp-job.startedAt).." validationMs="..tostring(job.validationMs))
-                failure(player,"catalog_timeout",job.envelope.batchId)
-            elseif timestamp-job.lastProgressAt>=TIMEOUT_MS then failure(player,"catalog_timeout",job.envelope.batchId)
+            elseif timestamp-job.lastProgressAt>=TIMEOUT_MS then failure(player,"catalog_stalled",job.envelope.batchId)
             elseif job.builder then
                 if buildWork<4096 then
                     local slice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
@@ -396,6 +395,22 @@ function Server.update()
                 if not ok then failure(player,sendReason,frame.batchId) end
             end
             computeMs=computeMs+math.max(0,now()-workStarted)
+            -- The response target is not a lifetime for shared catalog work.
+            -- Report a recoverable wait while keeping this batch attached.
+            if jobs[player]==job and now()-job.startedAt>=RESPONSE_DEADLINE_MS
+                and now()-(job.pendingAt or 0)>=2000 then
+                local progress=(job.buildUnits or 0)+(job.encoder and job.encoder.tokenCount or 0)
+                if not job.pendingWork or progress>job.pendingWork then
+                    local pending={}
+                    for key,value in pairs(job.envelope) do pending[key]=value end
+                    pending.reason,pending.recoverable,pending.work="request_timeout",true,progress
+                    pending.phase=job.builder and "preparation" or (job.encoder and "encoding" or "sending")
+                    local ok=send(player,"terminalCatalogPending",pending)
+                    if not ok then failure(player,"catalog_send",job.envelope.batchId)
+                    else job.pendingAt,job.pendingWork=now(),progress end
+                    log("request_timeout",description(job.envelope).." recoverable=true phase="..pending.phase.." work="..tostring(progress))
+                end
+            end
             if now()<lastProgressLog then lastProgressLog=now() end
             if jobs[player]==job and now()-job.lastDiagnosticAt>=2000 and now()-lastProgressLog>=2000 then
                 job.lastDiagnosticAt=now()

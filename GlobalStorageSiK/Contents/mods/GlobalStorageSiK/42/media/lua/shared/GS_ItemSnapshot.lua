@@ -574,6 +574,9 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	if type(fluidCapacity) == "number" then row.totalFluidCapacity = (row.totalFluidCapacity or 0) + fluidCapacity end
 	if itemId ~= nil then
 		row.itemIds[#row.itemIds + 1] = itemId
+		if type(itemId)=="number" and itemId>=0 and itemId<math.huge and itemId==math.floor(itemId)
+			and (not row.representativeItemId or itemId<row.representativeItemId) then row.representativeItemId=itemId end
+		row.catalogRepresentativeReady=true
 		-- No persistir una tabla vacia por cada unidad fungible. El mapa por ID
 		-- solo existe cuando una futura fila hija necesita estado de instancia.
 		if mediaIndex ~= nil or mediaTitle ~= nil or dynamicSignature ~= nil or foodStateKey ~= nil
@@ -651,6 +654,8 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				detailKind = row.detailKind,
 				variantKey = row.variantKey,
 				itemIds = itemIds,
+				representativeItemId = row.representativeItemId,
+				catalogRepresentativeReady = row.catalogRepresentativeReady,
 				unitDetails = unitDetails,
 				totalWeight = row.totalWeight or 0,
 				totalFluidAmount = row.totalFluidAmount or 0,
@@ -667,6 +672,10 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 		else
 			existing.count = (existing.count or 0) + (row.count or 0)
 			existing.itemIds = existing.itemIds or {}
+			if existing.catalogRepresentativeReady and row.catalogRepresentativeReady then
+				local id=row.representativeItemId
+				if id and (not existing.representativeItemId or id<existing.representativeItemId) then existing.representativeItemId=id end
+			else existing.catalogRepresentativeReady=nil;existing.representativeItemId=nil end
 			for i = 1, #(row.itemIds or {}) do existing.itemIds[#existing.itemIds + 1] = row.itemIds[i] end
 			for itemId, detail in pairs(row.unitDetails or {}) do
 				existing.unitDetails = existing.unitDetails or {}

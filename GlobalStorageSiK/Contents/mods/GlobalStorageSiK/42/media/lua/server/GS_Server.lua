@@ -6188,7 +6188,7 @@ if Events and Events.OnTick then
 			end
 		end
 		GlobalStorageSiK.CatalogServer.update()
-		GlobalStorageSiK.CatalogPreparation.prune()
+		GlobalStorageSiK.CatalogPreparation.update()
 		GlobalStorageSiK.CatalogReconciler.update()
 		flushCatalogDetails()
 	end)

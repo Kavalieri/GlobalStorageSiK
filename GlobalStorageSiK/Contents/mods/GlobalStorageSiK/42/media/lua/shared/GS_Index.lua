@@ -454,6 +454,7 @@ local BUILD_CACHE_LIMIT = 64
 local BUILD_CACHE_BYTES = 32 * 1024 * 1024
 local BUILD_ENTRY_BYTES = 16 * 1024 * 1024
 local buildCache = {}
+local representativeCache = setmetatable({}, {__mode="k"})
 local buildCacheClock = 0
 local buildCacheBytes = 0
 local buildGeneration = 0
@@ -908,6 +909,13 @@ local function stepNode(job)
 			-- Only one representative is needed by an ordinary parent. The exact
 			-- IDs and unit details remain in the authoritative snapshot for paging.
 			local ids=work.detailSource.itemIds or {}
+			-- Producers maintain the minimum once while capturing physical items.
+			-- Old persisted snapshots are upgraded lazily, once per row.
+			local representative=representativeCache[work.detailSource]
+			if work.detailSource.catalogRepresentativeReady or representative then
+				work.detailMinId=representative and representative.itemId or work.detailSource.representativeItemId
+				work.detailIdIndex=#ids+1
+			end
 			local stop=math.min(#ids,work.detailIdIndex+31)
 			for i=work.detailIdIndex,stop do
 				local id=ids[i]
@@ -916,6 +924,7 @@ local function stepNode(job)
 			end
 			work.detailIdIndex=stop+1
 			if work.detailIdIndex<=#ids then return end
+			representativeCache[work.detailSource]={itemId=work.detailMinId}
 			work.detail.itemIds=work.detailMinId and {work.detailMinId} or {}
 			work.detail.rowKey=work.detail.rowKey or work.detailGroupKey
 			local parentKey=parentKeyForRow(work.detail)
@@ -934,24 +943,41 @@ local function stepNode(job)
 			work.detailSource,work.detailGroupKey,work.detailIdIndex=row,groupKey,1
 			return
 		end
-		work.parentIter,work.parentState,work.parentKey=pairs(work.byParent)
-		work.phase="contributionStart"
+		-- Snapshot identity is already the node revision. Recompute its affected
+		-- parents; do not serialize every physical contribution to compare it.
+		work.compareIter,work.compareState,work.compareKey=pairs(work.previous and work.previous.byParent or {})
+		work.phase="compareOld"
+		if work.previous then
+			work.parentIter,work.parentState,work.parentKey=pairs(work.byParent)
+			work.phase="changedContribution"
+		end
 		return
 	end
-	if work.phase=="contributionStart" then
-		local key,contribution=work.parentIter(work.parentState,work.parentKey); work.parentKey=key
+	if work.phase=="changedContribution" then
+		local key,value=work.parentIter(work.parentState,work.parentKey);work.parentKey=key
 		if key~=nil then
-			work.contribution=contribution; work.contributionCanonical=beginCanonical(contribution.rows)
-			work.phase="contributionSignature"; return
+			work.contribution=value
+			work.oldContribution=work.previous.byParent[key]
+			work.contributionCanonical=beginCanonical(value.rows)
+			work.phase="changedSignature";return
 		end
-		work.compareIter,work.compareState,work.compareKey=pairs(work.previous and work.previous.byParent or {})
-		work.phase="compareOld"; return
+		work.phase="compareOld";return
 	end
-	if work.phase=="contributionSignature" then
+	if work.phase=="changedSignature" then
 		if not stepCanonical(work.contributionCanonical) then return end
 		work.contribution.signature=work.contributionCanonical.result
 		job.stats.retainedBytes=job.stats.retainedBytes+#work.contribution.signature
-		work.contribution,work.contributionCanonical=nil,nil; work.phase="contributionStart"; return
+		if work.oldContribution and not work.oldContribution.signature then
+			work.contributionCanonical=beginCanonical(work.oldContribution.rows)
+			work.phase="previousSignature"
+		else work.phase="changedContribution" end
+		return
+	end
+	if work.phase=="previousSignature" then
+		if not stepCanonical(work.contributionCanonical) then return end
+		work.oldContribution.signature=work.contributionCanonical.result
+		job.stats.retainedBytes=job.stats.retainedBytes+#work.oldContribution.signature
+		work.phase="changedContribution";return
 	end
 	if work.phase=="compareOld" then
 		local key,old=work.compareIter(work.compareState,work.compareKey); work.compareKey=key
@@ -1106,7 +1132,7 @@ local function classifyAsync(row)
 end
 
 local function beginParent(job,parentKey)
-	job.parentWork={key=parentKey,row=newParent(parentKey),nodeIndex=1,detailIndex=1,phase="gather"}
+	job.parentWork={key=parentKey,row=newParent(parentKey),sources=job.parentSources[parentKey] or {},nodeIndex=1,detailIndex=1,phase="gather"}
 end
 
 local ASYNC_SEARCH_FIELDS = {"key","displayName","mediaTitle","mediaIndex","dynamicStateKey","nativePath"}
@@ -1123,8 +1149,8 @@ local function stepParent(job)
 			if stepDetail(work.row,work.detail) then work.detail=nil; work.detailIndex=work.detailIndex+1 end
 			return
 		end
-		local captured=job.captured[work.nodeIndex]
-		if not captured then
+		local contribution=work.sources[work.nodeIndex]
+		if not contribution then
 			if not work.hadDetail then
 				job.parentChanges[work.key]=false
 				job.stats.parentsProcessed=job.stats.parentsProcessed+1
@@ -1135,8 +1161,6 @@ local function stepParent(job)
 			work.fullSort=beginMergeSort(work.row.fullTypes,function(a,b)return a<b end)
 			work.phase="sortPaths"; return
 		end
-		local node=finalNode(job,captured.id)
-		local contribution=node and node.byParent and node.byParent[work.key]
 		local detail=contribution and contribution.rows[work.detailIndex]
 		if detail then work.hadDetail=true; work.detail=beginDetail(work.row,detail)
 		else work.nodeIndex=work.nodeIndex+1; work.detailIndex=1 end
@@ -1350,7 +1374,26 @@ local function advanceAsync(job)
 	elseif job.phase=="collectParentKeys" then
 		local key=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
 		if key~=nil then job.parentKeys[#job.parentKeys+1]=key
-		else job.parentIndex=1; job.phase="parents" end
+		else job.sourceIndex=1; job.parentSources={}; job.phase="parentSources" end
+	elseif job.phase=="parentSources" then
+		-- Inverted node contributions avoid scanning every node for every parent.
+		-- Only parents affected by replaced/removed nodes enter this index.
+		if job.sourceIter then
+			local key,value=job.sourceIter(job.sourceState,job.sourceKey);job.sourceKey=key
+			if key~=nil then
+				if job.affected[key] then
+					local list=job.parentSources[key] or {};job.parentSources[key]=list
+					list[#list+1]=value
+				end
+				return
+			end
+			job.sourceIter=nil;job.sourceIndex=job.sourceIndex+1
+		end
+		local captured=job.captured[job.sourceIndex]
+		if captured then
+			local node=finalNode(job,captured.id)
+			job.sourceIter,job.sourceState,job.sourceKey=pairs(node and node.byParent or {})
+		else job.parentIndex=1;job.phase="parents" end
 	elseif job.phase=="parents" then stepParent(job)
 	elseif job.phase=="materialKeys" then
 		job.materialSet={}; job.materialKeys={}
@@ -1448,7 +1491,7 @@ function GlobalStorageSiK.Index.stepCatalogBuild(job,maxWork,maxMillis)
 	local started=type(getTimestampMs)=="function" and getTimestampMs() or 0
 	local work=0
 	while not job.done and not job.error and work<budget do
-		if millis>0 and type(getTimestampMs)=="function" and getTimestampMs()-started>=millis then break end
+		if work>0 and millis>0 and type(getTimestampMs)=="function" and getTimestampMs()-started>=millis then break end
 		advanceAsync(job); work=work+1
 		if job.stats.retainedBytes>ASYNC_MAX_RETAINED then
 			job.error={stage="memory",cause="catalog_budget"}

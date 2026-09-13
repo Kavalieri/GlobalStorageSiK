@@ -273,6 +273,20 @@ function Client.delta(payload)
 	if ok and reason == "catalog_revision" then return end
 	consumerFailure(payload.playerNum,slot,payload,ok,accepted,reason,stage or "terminalCatalogDelta")
 end
+function Client.waiting(payload)
+	local slot=slotFor(payload)
+	if not slot or not slot.confirmed or not context.allowed(slot.confirmed)
+		or payload.networkId~=slot.confirmed.networkId or payload.catalogScope~=slot.confirmed.catalogScope
+		or not Codec.integer(payload.batchId,1,9007199254740991)
+		or not Codec.integer(payload.work,0,9007199254740991)
+		or payload.batchId<=slot.latest or (slot.batch and payload.batchId~=slot.batch.meta.batchId) then return end
+	local previous=slot.waiting
+	if previous and (payload.batchId<previous.batchId or (payload.batchId==previous.batchId and payload.work<=previous.work)) then return end
+	slot.waiting={batchId=payload.batchId,work=payload.work}
+	slot.started=now()
+	if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport","request_timeout",
+		"recoverable=true phase="..tostring(payload.phase).." work="..tostring(payload.work)) end
+end
 function Client.update(timestamp)
 	local active = false
 	local started, work = now(), 0

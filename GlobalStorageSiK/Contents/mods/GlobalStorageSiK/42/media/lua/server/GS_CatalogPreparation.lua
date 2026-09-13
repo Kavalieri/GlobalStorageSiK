@@ -23,6 +23,58 @@ function Preparation.prune()
     for i=1,#retired do local key=retired[i];remove(key,shared[key],"retention_expired") end
     return total
 end
+local function advanceShared(build,maxWork,maxMillis)
+    local Index=GlobalStorageSiK.Index
+    local start,used=now(),0
+    local stats=build.stats
+    stats.workLastStep=0
+    if build.error then return 0 end
+    if Index.getClassificationStamp()~=build.classificationStamp then
+        build.error=errorFor("catalog_build.categories","catalog_stale_classification");return 0
+    end
+    if build.phase=="index" then
+        local done,rows,indexStats=Index.stepCatalogBuild(build.index,maxWork,maxMillis)
+        stats=indexStats or stats;build.stats=stats
+        used=math.min(maxWork,stats.workLastStep or maxWork)
+        if build.index.error then build.error=build.index.error;return used end
+        if not done then return used end
+        build.rows=rows;build.phase="categories"
+    end
+    while used<maxWork and (used==0 or now()-start<maxMillis) and build.phase=="categories" do
+        local row=build.rows[build.at]
+        if row then
+            local category=row.vanillaKey or row.category
+            if type(category)=="string" and category~="" and not build.seenCategories[category]
+                and GlobalStorageSiK.CategoryResolution.isVanillaKey(category) then
+                build.seenCategories[category]=true;build.categories[#build.categories+1]=category
+            end
+            build.at=build.at+1
+        else
+            build.catalogCategories=GlobalStorageSiK.Categories.buildCatalog(build.networkId,{},build.categories)
+            if Index.getClassificationStamp()~=build.classificationStamp then
+                build.error=errorFor("catalog_build.categories","catalog_stale_classification");return used
+            end
+            build.phase="ready"
+            if build.publish then build.publish(build.rows,build.categories,build.catalogCategories,stats) end
+        end
+        used=used+1
+    end
+    stats.workLastStep=used
+    return used
+end
+function Preparation.update()
+    Preparation.prune()
+    local selected
+    for _,build in pairs(shared) do
+        if build.refs==0 and build.phase~="ready" and not build.error
+            and (not selected or (build.backgroundAt or 0)<(selected.backgroundAt or 0)) then selected=build end
+    end
+    if selected then
+        selected.backgroundAt=now()
+        local ok,reason=pcall(advanceShared,selected,256,1)
+        if not ok then selected.error=errorFor("catalog_build.background",reason) end
+    end
+end
 function Preparation.create(player,networkId,scope,revision,base,notModified,cached,publish)
     local retained=Preparation.prune()
     local Index=GlobalStorageSiK.Index
@@ -31,7 +83,7 @@ function Preparation.create(player,networkId,scope,revision,base,notModified,cac
         .."\30"..tostring(classificationStamp)
     local build=shared[key]
     if not build then
-        build={refs=0,networkId=networkId,classificationStamp=classificationStamp,createdAt=now(),usedAt=now(),
+        build={refs=0,networkId=networkId,revision=revision,classificationStamp=classificationStamp,publish=publish,createdAt=now(),usedAt=now(),
             phase="index",at=1,categories={},seenCategories={},
             stats={workLastStep=0,retainedBytes=4096}}
         if count>=64 or retained>=MAX_BYTES then
@@ -51,7 +103,8 @@ function Preparation.create(player,networkId,scope,revision,base,notModified,cac
     build.refs=build.refs+1
     local localState={phase="base",at=1,old={},new={},changed={},removed={},released=false}
     local wrapper={}
-    wrapper.startedAt=build.phase=="ready" and now() or build.createdAt
+    wrapper.startedAt=now()
+    wrapper.classificationStamp=classificationStamp
     local function release(reason)
         if localState.released then return end
         localState.released=true
@@ -60,7 +113,7 @@ function Preparation.create(player,networkId,scope,revision,base,notModified,cac
         if build.refs==0 then
             -- Session closures only detach. Immutable preparation survives a
             -- compatible reopen; retention is bounded independently of players.
-            if build.error or reason=="catalog_timeout" then remove(key,build,reason or "failed") end
+            if build.error then remove(key,build,reason or "failed") end
         end
     end
     wrapper.cancel=release
@@ -85,34 +138,8 @@ function Preparation.create(player,networkId,scope,revision,base,notModified,cac
         if localState.released then localState.error=errorFor("catalog_build.session","cancelled"); return false end
         if build.error or not classificationValid() then return false end
         if Preparation.prune()>MAX_BYTES then build.error=errorFor("catalog_build.memory","catalog_busy");return false end
-        if build.phase=="index" then
-            local done,rows,indexStats=Index.stepCatalogBuild(build.index,maxWork,maxMillis)
-            stats=indexStats or stats; build.stats=stats
-            used=math.min(maxWork,stats.workLastStep or maxWork)
-            if build.index.error then build.error=build.index.error; return false,nil,nil,stats end
-            if not done then return false,nil,nil,stats end
-            build.rows=rows; build.phase="categories"
-        end
-        if not classificationValid() then return false,nil,nil,stats end
-        while used<maxWork and now()-start<maxMillis and build.phase=="categories" do
-            local row=build.rows[build.at]
-            if row then
-                local category=row.vanillaKey or row.category
-                local resolution=GlobalStorageSiK.CategoryResolution
-                if type(category)=="string" and category~="" and not build.seenCategories[category]
-                    and resolution.isVanillaKey(category) then
-                    build.seenCategories[category]=true
-                    build.categories[#build.categories+1]=category
-                end
-                build.at=build.at+1
-            else
-                build.catalogCategories=GlobalStorageSiK.Categories.buildCatalog(networkId,{},build.categories)
-                if not classificationValid() then return false,nil,nil,stats end
-                build.phase="ready"
-                if publish then publish(build.rows,build.categories,build.catalogCategories,stats) end
-            end
-            used=used+1
-        end
+        used=advanceShared(build,maxWork,maxMillis);stats=build.stats
+        if build.error then return false,nil,nil,stats end
         if build.phase~="ready" then stats.workLastStep=used; return false,nil,nil,stats end
         if not base or notModified then
             stats.workLastStep=used
