@@ -168,13 +168,19 @@ local function encodeAction(state)
 					frame.phase = "finalFragment"
 				else frame.phase = "short" end
 			else
-				local following, cost = codepoint(frame.value, frame.at)
-				if frame.bytes + cost > PART_BYTES then
-					frame.pending = string.sub(frame.value, frame.startAt, frame.at - 1)
-					frame.pendingBytes, frame.startAt, frame.bytes = frame.bytes, frame.at, 0
-					if not frame.long then frame.long, frame.phase = true, "startMarker"
-					else frame.phase = "fragment" end
-				else frame.at, frame.bytes = following, frame.bytes + cost end
+				-- UTF validation stays exact, but one ASCII/codepoint must not
+				-- consume an entire scheduler work slot. Fragment boundaries yield.
+				for i=1,32 do
+					if frame.at>#frame.value then break end
+					local following, cost = codepoint(frame.value, frame.at)
+					if frame.bytes + cost > PART_BYTES then
+						frame.pending = string.sub(frame.value, frame.startAt, frame.at - 1)
+						frame.pendingBytes, frame.startAt, frame.bytes = frame.bytes, frame.at, 0
+						if not frame.long then frame.long, frame.phase = true, "startMarker"
+						else frame.phase = "fragment" end
+						break
+					else frame.at, frame.bytes = following, frame.bytes + cost end
+				end
 			end
 		elseif frame.phase == "startMarker" then
 			emit(state, "S", 1); frame.phase = "fragment"

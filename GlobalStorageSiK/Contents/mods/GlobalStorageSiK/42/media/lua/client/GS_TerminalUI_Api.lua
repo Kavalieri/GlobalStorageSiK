@@ -586,12 +586,13 @@ function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 	if first and done == 0 then
 		-- ACK is already authorized by CatalogClient. Reuse only data matching
 		-- this player's confirmed network/scope; no permission comes from cache.
-		local cache = GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
+		local cache = GlobalStorageSiK.Client.getInventoryCatalogPreview(payload,true)
 		local preview = {}
 		if cache and cache.state then for k, v in pairs(cache.state) do preview[k] = v end end
 		for k, v in pairs(payload) do preview[k] = v end
 		if cache then
 			preview.items, preview.itemTypeCount = cache.items, cache.itemTypeCount
+			preview.inventoryRevision=cache.inventoryRevision
 			preview._gsAppliedCatalogRevision = cache.inventoryRevision
 		end
 		local client = GlobalStorageSiK.Client

@@ -1349,11 +1349,16 @@ function GlobalStorageSiK.Client.clearInventoryCatalog(playerNum, networkId)
 	for i = 1, #remove do cache[remove[i]] = nil end
 end
 
-function GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
+function GlobalStorageSiK.Client.getInventoryCatalogPreview(payload,allowRetained)
 	local entry = (GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {})[
 		inventoryCatalogKey(payload.playerNum, payload.networkId)]
+	local timestamp=getTimestampMs and getTimestampMs() or 0
+	local retained=allowRetained and entry and timestamp>0 and timestamp>=(entry.cachedAt or 0)
+		and timestamp-(entry.cachedAt or 0)<120000
+		and type(entry.inventoryRevision)=="number" and type(payload.inventoryRevision)=="number"
+		and entry.inventoryRevision<=payload.inventoryRevision
 	if entry and entry.catalogScope == payload.catalogScope
-		and entry.inventoryRevision == payload.inventoryRevision then return entry end
+		and (entry.inventoryRevision == payload.inventoryRevision or retained) then return entry end
 end
 
 --- Registro neutral y acotado para que addons limpien UI/callbacks efímeros
@@ -1444,6 +1449,7 @@ GlobalStorageSiK.CatalogClient.configure({
 		local entry = cache[inventoryCatalogKey(payload.playerNum, payload.networkId)]
 		return entry and entry.inventoryRevision == payload.inventoryRevision and entry.catalogScope == payload.catalogScope
 	end,
+	hasPreview=function(payload) return GlobalStorageSiK.Client.getInventoryCatalogPreview(payload,true)~=nil end,
 	progress=function(payload, done, total)
 		GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 	end,

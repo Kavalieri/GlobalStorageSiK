@@ -136,7 +136,7 @@ function Client.ack(payload)
 	if slots[payload.playerNum] ~= slot then return end
 	slot.confirmed = payload
 	slot.started = now()
-	if context.hasCache(payload) then slot.applied = true end
+	if context.hasCache(payload) or (context.hasPreview and context.hasPreview(payload)) then slot.applied = true end
 	if context.progress then
 		local ok, accepted, reason, stage = pcall(context.progress, payload, 0, nil)
 		if not ok or accepted == false then consumerFailure(payload.playerNum, slot, payload, ok, accepted, reason, stage or "catalogPreview"); return end

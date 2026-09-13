@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.4-dev1
+# Catalog transport — Core 1.5.4-dev1.1
 
 This private protocol carries complete catalog states, revisioned deltas and
 on-demand detail pages. It does not change the public addon API. Server and
@@ -44,13 +44,19 @@ Index outputs and acknowledged rows remain immutable.
 ## Incremental work and cache
 
 A hot opening with the same network, scope and revision keeps the known catalog
-usable after the access ACK. A notModified batch carries metadata rather than
-another full catalog. Age alone neither expires a valid catalog nor advances
-its inventory revision.
+usable after the access ACK. A same-scope confirmed client view from the preceding
+120 seconds can also remain visible while a newer revision is prepared. Actions
+still carry the applied view's revision and are revalidated by the server.
+A notModified batch carries metadata rather than another full catalog.
 
 Published node snapshots provide per-node contributions. Changed parents are
 recomputed from changed contributions; unchanged snapshots and parents are
 reused. Initial construction and sorting use explicit budgeted phases.
+Snapshot producers replace node tables atomically; table identity is the in-memory
+node revision. Ordinary contributions copy visible fields and find one minimum
+representative ID in bounded blocks; they do not canonicalize unitDetails or the
+complete physical ID arrays. Initial rendering uses published snapshots and does
+not wait for a full physical reconciliation cycle.
 Categories consume the same prepared rows instead of rebuilding the index.
 The classification stamp is checked again between index completion and category
 publication. A changed stamp aborts that preparation without publishing mixed
@@ -72,6 +78,11 @@ work units, each with a 4 ms soft tick budget. Codec work has an 8,192-token,
 4 ms soft budget. These cooperative
 budgets are checked between operations, not a guarantee that each engine call
 takes less than 4 ms. Sending is limited to four frames per server update.
+An authorization call that already exhausts the wall budget permits one useful
+1 ms preparation/encoding slice, then stops further recipients for that update.
+The cursor rotates fairly; authorization wall time is reported independently.
+Comparison cursors batch at most 128 primitives, signature cursors 32, and UTF
+encoding scans at most 32 codepoints per primitive. Wire/schema checks are unchanged.
 Engine latency and end-to-end percentiles require runtime measurement.
 Sorting up to 64 entries is a bounded synchronous primitive; larger collections
 retain the incremental merge cursor. This preserves exact canonical signatures.
@@ -89,7 +100,11 @@ globally, including retained bases and conservative transient estimates. The
 server admits at most 256 sessions. Capacity failure is explicit; rows are not
 silently truncated to fit.
 The prepared-row cache separately caps 128 entries, 16 MiB per entry and 32 MiB
-globally; it evicts by use order and releases invalidated network entries.
+globally; it evicts by use order and expires entries after 120 seconds. Invalidated
+images and historical revisions remain available only as exact authorized delta
+bases, under the same limits. Shared preparation retains detached work for 30
+seconds, with 64 entries and a 32 MiB budget. A compatible reopen retargets an
+unencoded full to the new openSeq without restarting its work or deadline.
 Index has its own 32 MiB cache budget. Each codec job may memoize at most 2,048
 validated short strings within 256 KiB, included in transport reservations.
 Memoization changes work cost without changing wire tokens or Unicode checks.
@@ -99,6 +114,20 @@ premature and stale ACKs cannot advance the base. Exact duplicate fragments do
 not extend deadlines. Conflicting fragments, malformed schema, capacity failure
 and timeout fail the affected batch.
 A builder only renews its progress deadline when it actually advances or finishes.
+Preparation and encoding additionally have an absolute 10-second deadline that
+cannot be renewed by progress or reopen. A causal timeout is failure, not evidence
+of meeting the dedicated requirement of a usable cold catalog within 10 seconds.
+Events distinguish state_envelope_built, catalog_rows_built, encoded and completed;
+elapsed time includes queued work. Progress reports phase, node/total, remaining
+work and retained base at a global maximum of one sample every two seconds.
+
+Ordinary variantSummary entries group visible/searchable semantics, including
+book title, media identity, native path and visible food states. variantCount
+still counts distinct physical snapshot variants; it need not equal summary length.
+Each semantic summary keeps a minimum exact representative for sequential reading.
+Condition, exact fluid/food state and other physical detail remain in revisioned
+detail pages. Parent search indexes visible semantics rather than physical keys;
+there is no silent row or search-string truncation.
 
 ## Consumer commit and recovery
 
@@ -122,7 +151,7 @@ once. Transfer action ACKs remain independent from catalog ACKs.
 
 ## Incremental presentation
 
-Core 1.5.4-dev1 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
+Core 1.5.4-dev1.1 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
 detail pages and managed transfer completion. The initial image uses `setRows`;
 deltas reuse unchanged root descriptors, semantic entries, projected blocks and
 the viewport pool. Selection, focus, expansion, child page and scroll survive
@@ -147,6 +176,9 @@ descriptor queue is bounded to 64 per player and coalesces repeated row
 requests. A busy queue rejects that request explicitly.
 
 Detail consumers require matching player, network and applied catalog revision.
+The existing detail-page producer still scans and sorts the selected parent's
+physical units before slicing its output. It is separate from cold parent loading;
+its peak cost on very large expanded groups remains a dedicated runtime check.
 Late pages cannot satisfy a new network/revision request. Duplicate physical
 IDs are reported as ItemIdentity duplicate_physical_id separately from transport
 errors, and exact selection is rejected. Authoritative transfer validation still

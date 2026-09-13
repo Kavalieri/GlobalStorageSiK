@@ -4,46 +4,74 @@ GlobalStorageSiK.CatalogPreparation = Preparation
 local shared, count = {}, 0
 local function now() return getTimestampMs and getTimestampMs() or 0 end
 local function errorFor(stage,cause) return {stage=stage,cause=tostring(cause)} end
+local RETAIN_MS,MAX_BYTES=30000,32*1024*1024
+local function remove(key,build,reason)
+    if build.index and build.phase~="ready" and GlobalStorageSiK.Index.cancelCatalogBuild then
+        GlobalStorageSiK.Index.cancelCatalogBuild(build.index)
+    end
+    if shared[key]==build then shared[key]=nil;count=count-1 end
+    if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport","preparation_retired",
+        "network="..tostring(build.networkId).." phase="..tostring(build.phase).." reason="..reason) end
+end
+function Preparation.prune()
+    local retired,total={},0
+    for key,build in pairs(shared) do
+        if build.refs==0 and (now()<build.usedAt or now()-build.usedAt>=RETAIN_MS or build.error) then
+            retired[#retired+1]=key
+        else total=total+math.max(4096,build.stats.retainedBytes or 0) end
+    end
+    for i=1,#retired do local key=retired[i];remove(key,shared[key],"retention_expired") end
+    return total
+end
 function Preparation.create(player,networkId,scope,revision,base,notModified,cached,publish)
+    local retained=Preparation.prune()
     local Index=GlobalStorageSiK.Index
     local classificationStamp=Index.getClassificationStamp()
     local key=tostring(networkId).."\30"..tostring(scope).."\30"..tostring(revision)
         .."\30"..tostring(classificationStamp)
     local build=shared[key]
     if not build then
-        build={refs=0,networkId=networkId,classificationStamp=classificationStamp,
+        build={refs=0,networkId=networkId,classificationStamp=classificationStamp,createdAt=now(),usedAt=now(),
             phase="index",at=1,categories={},seenCategories={},
             stats={workLastStep=0,retainedBytes=4096}}
-        if cached then
+        if count>=64 or retained>=MAX_BYTES then
+            build.error=errorFor("catalog_build.capacity","catalog_busy")
+        elseif cached then
             build.rows,build.categories=cached.rows,cached.categories or {}
             build.catalogCategories=cached.catalogCategories
             build.phase=build.catalogCategories and "ready" or "categories"
-        elseif count>=64 then
-            build.error=errorFor("catalog_build.capacity","catalog_busy")
         else
             local ok,job=pcall(Index.beginCatalogBuild,networkId,player,nil,revision)
             if ok and job then build.index=job
             else build.error=errorFor("catalog_build.begin",job) end
         end
-        shared[key]=build; count=count+1
+        -- Rejected requests must not consume a retained slot themselves.
+        if not build.error then shared[key]=build; count=count+1 end
     end
     build.refs=build.refs+1
     local localState={phase="base",at=1,old={},new={},changed={},removed={},released=false}
     local wrapper={}
-    local function release()
+    wrapper.startedAt=build.phase=="ready" and now() or build.createdAt
+    local function release(reason)
         if localState.released then return end
         localState.released=true
         build.refs=build.refs-1
+        build.usedAt=now()
         if build.refs==0 then
-            if build.index and build.phase~="ready" then
-                if Index.cancelCatalogBuild then Index.cancelCatalogBuild(build.index)
-                else build.index.cancelled=true end
-            end
-            if shared[key]==build then shared[key]=nil; count=count-1 end
+            -- Session closures only detach. Immutable preparation survives a
+            -- compatible reopen; retention is bounded independently of players.
+            if build.error or reason=="catalog_timeout" then remove(key,build,reason or "failed") end
         end
     end
     wrapper.cancel=release
     wrapper.error=function() return build.error or localState.error end
+    wrapper.diagnostics=function()
+        local job=build.index
+        return {phase=job and (job.nodeWork and job.nodeWork.phase or job.phase) or build.phase,
+            nodeIndex=job and job.nodeIndex,totalNodes=job and #(job.captured or {}),
+            remaining=job and math.max(0,#(job.captured or {})-(job.nodeIndex or 1)+1),
+            work=build.stats.workTotal or 0,baseRetained=base~=nil}
+    end
     local function classificationValid()
         if Index.getClassificationStamp()==build.classificationStamp then return true end
         build.error=errorFor("catalog_build.categories","catalog_stale_classification")
@@ -51,10 +79,12 @@ function Preparation.create(player,networkId,scope,revision,base,notModified,cac
     end
     wrapper.step=function(maxWork,maxMillis)
         local start,used=now(),0
+        build.usedAt=start
         local stats=build.stats
         stats.workLastStep=0
         if localState.released then localState.error=errorFor("catalog_build.session","cancelled"); return false end
         if build.error or not classificationValid() then return false end
+        if Preparation.prune()>MAX_BYTES then build.error=errorFor("catalog_build.memory","catalog_busy");return false end
         if build.phase=="index" then
             local done,rows,indexStats=Index.stepCatalogBuild(build.index,maxWork,maxMillis)
             stats=indexStats or stats; build.stats=stats

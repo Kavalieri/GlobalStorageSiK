@@ -8,8 +8,10 @@ local context
 local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
 local TIMEOUT_MS = 60000
+local BUILD_DEADLINE_MS = 10000
 local counters = {full=0, delta=0, notModified=0, details=0, completed=0, discarded=0, rejected=0, coalesced=0}
 local lastDiscardLog = 0
+local lastProgressLog = 0
 local function now() return getTimestampMs and getTimestampMs() or 0 end
 local function log(event, data)
     if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", event, data) end
@@ -20,10 +22,13 @@ local function description(meta)
         .. " source=" .. tostring(meta.catalogSource) .. " base=" .. tostring(meta.baseRevision)
         .. " revision=" .. tostring(meta.inventoryRevision) .. " scope=" .. tostring(meta.catalogScope)
 end
-local function release(player)
+local function release(player, reason)
     local job = jobs[player]
     if job then
-        if job.builder and job.builder.cancel then job.builder.cancel() end
+        if job.builder and job.builder.cancel then
+            log("detached",description(job.envelope).." phase=preparation reason="..tostring(reason or "recipient_detached"))
+            job.builder.cancel(reason or "recipient_detached")
+        end
         retainedBytes = math.max(0, retainedBytes-job.bytes); jobs[player] = nil
     end
 end
@@ -33,6 +38,19 @@ function Server.hasJob(player) return jobs[player] ~= nil end
 function Server.base(player)
     local session = sessions[player]
     return session and not session.forceFull and session.confirmed or nil
+end
+function Server.restoreBase(player,entry,knownRevision,knownScope)
+    local session=sessions[player]
+    if not session or not entry or entry.networkId~=session.networkId
+        or entry.scopeSignature~=session.catalogScope or knownScope~=session.catalogScope
+        or entry.revision~=knownRevision or session.confirmed then return false end
+    local valid=context.valid(player,session,{catalogScope=session.catalogScope})
+    local bytes=entry.bytes or #(entry.rows or {})*1024
+    if not valid or retainedBytes+bytes>GLOBAL_BYTES or bytes>PLAYER_BYTES then return false end
+    session.confirmed={rows=entry.rows,revision=entry.revision,scope=entry.scopeSignature}
+    session.baseBytes=bytes;retainedBytes=retainedBytes+bytes
+    log("base_restored","network="..tostring(session.networkId).." revision="..tostring(entry.revision))
+    return true
 end
 function Server.diagnostics()
     local result = {retainedBytes=retainedBytes, sessions=#order, jobs=0}
@@ -67,8 +85,9 @@ local function failure(player, reason, batchId)
     if active and active.envelope then batchId=active.envelope.batchId
     else serial=serial+1; batchId=serial end
     local recoverable = session.confirmed ~= nil and reason ~= "catalog_access_changed"
-    if recoverable then release(player); session.forceFull=true
+    if recoverable then release(player,reason); session.forceFull=true
     else
+        release(player,reason)
         Server.clear(player)
         if context.abort then context.abort(player) end
     end
@@ -90,6 +109,16 @@ end
 function Server.begin(player, confirmation)
     if not context then return false end
     prune()
+    local previous,active=sessions[player],jobs[player]
+    local oldAnchor=previous and previous.terminalAnchor or {}
+    local anchor=confirmation.terminalAnchor or {}
+    local compatible=previous and previous.networkId==confirmation.networkId
+        and previous.catalogScope==confirmation.catalogScope and previous.accessMode==confirmation.accessMode
+        and oldAnchor.x==anchor.x and oldAnchor.y==anchor.y and oldAnchor.z==anchor.z
+    -- Retarget only a not-yet-encoded full. Old fragments/ACKs remain fenced by
+    -- openSeq. Deltas have a recipient base and cannot be rebound blindly.
+    local resume=compatible and active and active.builder and active.kind=="full"
+    if resume then jobs[player]=nil end
     Server.clear(player)
     if #order>=SESSION_LIMIT then
         if context.abort then context.abort(player) end
@@ -101,6 +130,13 @@ function Server.begin(player, confirmation)
     confirmation.openUi=true
     sessions[player]=confirmation
     order[#order+1]=player
+    if resume then
+        active.envelope.openSeq=confirmation.openSeq
+        active.payload.openSeq=confirmation.openSeq
+        active.payload.openUi=true
+        jobs[player]=active
+        log("resumed",description(active.envelope).." phase=preparation reason=reopen")
+    end
     local ok=send(player,"terminalOpenAck",confirmation)
     if not ok then
         Server.clear(player)
@@ -159,7 +195,7 @@ local function queue(player, payload, rows, builder)
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
-        frameBudget=Codec.FRAME_BYTES-overhead-128,bytes=4096,nextPart=1,lastProgressAt=now(),
+        frameBudget=Codec.FRAME_BYTES-overhead-128,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
@@ -224,7 +260,8 @@ function Server.receipt(player,payload)
     end
     counters.completed=counters.completed+1
     log("completed",description(meta) .. " kind=" .. tostring(job.kind) .. " rows=" .. tostring(job.rows)
-        .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs))
+        .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs)
+        .. " elapsedMs=" .. tostring(now()-job.startedAt))
     release(player)
 end
 local function encodeStep(player,job,session)
@@ -252,7 +289,8 @@ local function encodeStep(player,job,session)
         job.envelope.tokenCount=encoded.tokenCount
         job.baseEstimate=job.detail and 0 or math.min(reservation,encoded.totalBytes*2+job.rows*256)
         log("encoded",description(job.envelope) .. " bytes=" .. tostring(encoded.totalBytes)
-            .. " parts=" .. tostring(#encoded.chunks) .. " encodeMs=" .. tostring(job.encodeMs))
+            .. " parts=" .. tostring(#encoded.chunks) .. " encodeMs=" .. tostring(job.encodeMs)
+            .. " elapsedMs=" .. tostring(now()-job.startedAt))
     end
 end
 local function buildStep(player,job,session,budget,millis)
@@ -291,38 +329,61 @@ local function buildStep(player,job,session,budget,millis)
         if not encoder then failure(player,reason,job.envelope.batchId); return used end
         job.encoder=encoder
         job.encodeStarted=now()
-        log("built",description(job.envelope) .. " buildMs=" .. tostring(job.buildMs)
+        log("catalog_rows_built",description(job.envelope) .. " buildMs=" .. tostring(job.buildMs)
             .. " rows=" .. tostring(job.rows) .. " nodesProcessed=" .. tostring(stats.nodesProcessed)
             .. " parentsProcessed=" .. tostring(stats.parentsProcessed)
-            .. " work=" .. tostring(stats.work or stats.totalWork))
+            .. " work=" .. tostring(stats.workTotal or stats.work or stats.totalWork)
+            .. " elapsedMs=" .. tostring(now()-job.startedAt))
     end
     return used
 end
 function Server.update()
     if not context or #order==0 then return end
     local timestamp,visited,sent,work=now(),0,0,0
-    local buildWork=0
+    local buildWork,computeMs=0,0
+    local validations={}
     if timestamp<lastPrune or timestamp-lastPrune>=1000 then lastPrune=timestamp; prune() end
     local visitBudget=math.max(#order*4,8)
-    while #order>0 and visited<visitBudget and sent<4 do
+    -- Always permit one useful visit: validation may itself cross 4 ms. Stop
+    -- afterwards on wall time, so expensive observers cannot multiply the tick.
+    while #order>0 and visited<visitBudget and sent<4 and computeMs<4
+        and (visited==0 or now()-timestamp<4) do
         cursor=cursor%#order+1
         local player=order[cursor]
         local job,session=jobs[player],sessions[player]
         visited=visited+1
         if job and session then
-            local valid,reason=context.valid(player,session,job.envelope)
+            local validationStarted=now()
+            local cached=validations[player]
+            local valid,reason
+            if cached and cached.job==job and cached.session==session and (job.builder or job.encoder) then
+                valid,reason=cached.valid,cached.reason
+            else
+                valid,reason=context.valid(player,session,job.envelope)
+                validations[player]={job=job,session=session,valid=valid,reason=reason}
+            end
+            job.validationMs=(job.validationMs or 0)+math.max(0,now()-validationStarted)
+            local workStarted=now()
             if timestamp<job.lastProgressAt then job.lastProgressAt=timestamp end
-            if timestamp-job.lastProgressAt>=TIMEOUT_MS then failure(player,"catalog_timeout",job.envelope.batchId)
-            elseif not valid then
+            if not valid then
                 if reason then failure(player,reason,job.envelope.batchId) else Server.clear(player) end
+            elseif (job.builder or job.encoder) and timestamp-job.startedAt>=BUILD_DEADLINE_MS then
+                log("deadline",description(job.envelope).." phase="..(job.builder and "preparation" or "encoding")
+                    .." elapsedMs="..tostring(timestamp-job.startedAt).." validationMs="..tostring(job.validationMs))
+                failure(player,"catalog_timeout",job.envelope.batchId)
+            elseif timestamp-job.lastProgressAt>=TIMEOUT_MS then failure(player,"catalog_timeout",job.envelope.batchId)
             elseif job.builder then
-                if buildWork<4096 and now()-timestamp<4 then
-                    buildWork=buildWork+buildStep(player,job,session,4096-buildWork,4-(now()-timestamp))
+                if buildWork<4096 then
+                    local slice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
+                    buildWork=buildWork+buildStep(player,job,session,4096-buildWork,slice)
                 end
             elseif job.encoder then
-                if work<8192 and now()-timestamp<4 then
-                    encodeStep(player,job,session)
-                    work=work+1024
+                if work<8192 then
+                    local encodeSlice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
+                    repeat
+                        encodeStep(player,job,session)
+                        work=work+1024
+                    until work>=8192 or jobs[player]~=job or not job.encoder or now()-workStarted>=encodeSlice
                 end
             elseif job.nextPart<=job.envelope.total then
                 local frame={}
@@ -333,6 +394,17 @@ function Server.update()
                 if ok then job.lastProgressAt=timestamp end
                 sent=sent+1
                 if not ok then failure(player,sendReason,frame.batchId) end
+            end
+            computeMs=computeMs+math.max(0,now()-workStarted)
+            if now()<lastProgressLog then lastProgressLog=now() end
+            if jobs[player]==job and now()-job.lastDiagnosticAt>=2000 and now()-lastProgressLog>=2000 then
+                job.lastDiagnosticAt=now()
+                lastProgressLog=now()
+                local stats=job.builder and job.builder.diagnostics and job.builder.diagnostics() or {}
+                log("progress",description(job.envelope).." phase="..tostring(stats.phase or (job.encoder and "encoding" or "sending"))
+                    .." node="..tostring(stats.nodeIndex).." nodes="..tostring(stats.totalNodes)
+                    .." remaining="..tostring(stats.remaining).." work="..tostring(stats.work)
+                    .." baseRetained="..tostring(session.confirmed~=nil).." validationMs="..tostring(job.validationMs))
             end
         end
     end

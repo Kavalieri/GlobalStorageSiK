@@ -87,6 +87,7 @@ local function compareOne(state)
 	local frame = state.stack[#state.stack]
 	if not frame then return true end
 	if frame.phase == 0 then
+		if frame.a==frame.b then state.stack[#state.stack]=nil;return true end
 		local kind = type(frame.a)
 		if kind ~= type(frame.b) then state.equal = false return true end
 		if kind ~= "table" then
@@ -177,8 +178,15 @@ local function captureOne(capture)
 end
 
 local function compareStep(capture)
-	compareOne(capture.comparison)
-	job.stats.compared = job.stats.compared + 1
+	-- Comparison fields are much cheaper than capturing an InventoryItem. Do
+	-- not charge one whole item slot per primitive/table cursor transition.
+	-- The same 4 ms wall budget still bounds the entire update.
+	for i=1,128 do
+		if not capture.comparison.equal or #capture.comparison.stack==0 then break end
+		if nowMs()-job.tickStarted>=MAX_TICK_MS then break end
+		compareOne(capture.comparison)
+		job.stats.compared = job.stats.compared + 1
+	end
 	if not capture.comparison.equal then
 		capture.equal = false
 		capture.phase, capture.index = "verify", 0
@@ -289,6 +297,7 @@ function Reconciler.update()
 		job.networkSet = networkSet
 	end
 	local started, work = nowMs(), 0
+	job.tickStarted=started
 	while job and work < MAX_TICK_UNITS do
 		if nowMs() - started >= MAX_TICK_MS then break end
 		if job.phase == "abort" then
@@ -313,9 +322,12 @@ function Reconciler.update()
 		end
 		work = work + 1
 	end
-	if job and nowMs()-job.lastProgress>=250 then
+	if job and nowMs()-job.lastProgress>=2000 then
 		job.lastProgress=nowMs()
 		job.stats.totalNodes=job.phase~="collect" and #job.nodes or nil
+		job.stats.nodeIndex=job.nodeIndex
+		job.stats.phase=job.capture and job.capture.phase or job.phase
+		job.stats.remaining=job.phase~="collect" and math.max(0,#job.nodes-job.nodeIndex+1) or nil
 		for i=1,#job.networkList do report(job.networkList[i],"cycle_progress",job.stats) end
 	end
 end

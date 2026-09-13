@@ -410,16 +410,26 @@ the common `[CLI]`, `[SRV]`, `[HOST]` or `[SP]` logger context. Do not enable un
 categories or high-volume detail for this test. The trace describes transport,
 not permission acceptance or persistence success. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md).
 
-Core 1.5.3-dev1.1 adds bounded phase timings under the same category:
-`built` reports `buildMs` and `notModified`; `queued` adds `encodeMs`;
+Core 1.5.4-dev1.1 distinguishes bounded phase timings under the same category:
+`state_envelope_built` is only the early state envelope; `catalog_rows_built`
+confirms real rows and reports build work and elapsed time. `encoded` confirms
+wire preparation; `completed` confirms the exact client receipt. `queued` alone
+does not mean that rows have been built.
 `applied` reports `receiveMs` (first accepted fragment to decoding) and
 `decodeApplyMs` (decode plus consumer dispatch). These are not button-to-frame
 or rendered-UI readiness timings; deferred UI work is outside consumer dispatch.
 The same category also records `shell_visible` (shell registered, not proof of a
 rendered frame) and `ui_ready` with `waitMs` from that opening to successful UI
 refresh. For a cold open and ten consecutive warm opens, preserve both events
-with player/openSeq, plus built/queued/applied/completed. Compare PZ frame/input
+with player/openSeq, plus state_envelope_built/catalog_rows_built/queued/applied/completed. Compare PZ frame/input
 observations separately; no timing here certifies FPS or renderer latency.
+
+`progress` is globally sampled at most once every two seconds and includes phase,
+current/total node, remaining work, retained base and authorization time.
+`resumed`, `detached`, `preparation_retired`, `base_restored` and `deadline` explain
+reopen/retention/cancellation. Reconciliation is a separate sampled phase. A
+10-second preparation/encoding deadline produces a causal error even if work is
+still advancing; it is a failed opening, not a performance pass.
 
 Core 1.5.3-dev1.2 adds `delta_sent`, `delta_applied`, `delta_fallback` and
 `delta_recovery` under the same focused category. They report only revisions and

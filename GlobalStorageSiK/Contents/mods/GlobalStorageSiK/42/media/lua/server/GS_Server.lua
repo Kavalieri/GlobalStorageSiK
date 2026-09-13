@@ -257,6 +257,9 @@ end
 
 local function queuePreparedCatalog(player,payload,base)
     local networkId,scope,revision=payload.networkId,payload.catalogScope,payload.inventoryRevision
+    base=base or GlobalStorageSiK.CatalogServer.base(player)
+    if base and (base.scope~=scope or base.revision>revision) then base=nil end
+    if base and base.revision==revision then payload.notModified=true end
     local key=catalogCacheKey(player,networkId,scope)
     local stamp=GlobalStorageSiK.Index.getClassificationStamp()
     local cached=inventoryCatalogCache.get(key)
@@ -2139,6 +2142,11 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 			confirmedWirelessRange=GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(player, networkId, terminalAnchor),
 		}
 		if not GlobalStorageSiK.CatalogServer.begin(player, confirmed) then return end
+		if meta and meta.knownCatalogNetworkId==networkId then
+			GlobalStorageSiK.CatalogServer.restoreBase(player,
+				inventoryCatalogCache.get(catalogCacheKey(player,networkId,confirmed.catalogScope),meta.knownInventoryRevision),
+				meta.knownInventoryRevision,meta.knownCatalogScope)
+		end
 	end
 	local requestMeta = meta and {
 		knownCatalogNetworkId = meta.knownCatalogNetworkId,
@@ -2154,7 +2162,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 	local buildStarted = getTimestampMs and getTimestampMs() or 0
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player, requestMeta)
 	payload.catalogSource = openUi == true and "openTerminal" or "terminalState_refresh"
-	GlobalStorageSiK.Log.debug("CatalogTransport", "built", "openSeq=" .. tostring(meta and meta.openSeq)
+	GlobalStorageSiK.Log.debug("CatalogTransport", "state_envelope_built", "openSeq=" .. tostring(meta and meta.openSeq)
 		.. " buildMs=" .. tostring((getTimestampMs and getTimestampMs() or 0) - buildStarted)
 		.. " notModified=" .. tostring(payload.notModified == true))
 	payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
@@ -6153,10 +6161,13 @@ GlobalStorageSiK.CatalogReconciler.configure({
 		-- through the changed callback; explicit scans retain their own channel.
 		GlobalStorageSiK.Log.debug("CatalogTransport", "reconcile", "network=" .. tostring(networkId)
 			.. " phase=" .. tostring(phase) .. " nodes=" .. tostring(stats and stats.nodes)
+			.. " stage=" .. tostring(stats and stats.phase).." node="..tostring(stats and stats.nodeIndex)
+			.. " totalNodes="..tostring(stats and stats.totalNodes).." remaining="..tostring(stats and stats.remaining)
 			.. " units=" .. tostring(stats and stats.units)
 			.. " compared=" .. tostring(stats and stats.compared)
 			.. " changed=" .. tostring(stats and stats.changed)
 			.. " discarded=" .. tostring(stats and stats.discarded))
+		-- Phase counters describe only this reconciler, never catalog build work.
 	end,
 })
 Events.OnClientCommand.Add(onClientCommand)
@@ -6177,6 +6188,7 @@ if Events and Events.OnTick then
 			end
 		end
 		GlobalStorageSiK.CatalogServer.update()
+		GlobalStorageSiK.CatalogPreparation.prune()
 		GlobalStorageSiK.CatalogReconciler.update()
 		flushCatalogDetails()
 	end)

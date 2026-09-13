@@ -249,6 +249,32 @@ local function detailKindForRow(row)
 	return nil
 end
 
+local SUMMARY_IDENTITY_FIELDS={"fullType","worldSprite","displayName","literatureTitle","mediaIndex","mediaTitle","nativePath","dynamicStateKey"}
+local SUMMARY_FOOD_FIELDS={"fresh","rotten","cooked","burnt","frozen","iconVariant"}
+local function visibleVariantKey(detail,kind)
+	local parts={tostring(kind or "")}
+	local function add(value)
+		local text=tostring(value)
+		parts[#parts+1]=type(value)..":"..#text..":"..text
+	end
+	for i=1,#SUMMARY_IDENTITY_FIELDS do add(detail[SUMMARY_IDENTITY_FIELDS[i]]) end
+	for i=1,#SUMMARY_FOOD_FIELDS do add(detail.foodState and detail.foodState[SUMMARY_FOOD_FIELDS[i]]) end
+	return table.concat(parts,"|")
+end
+local function visibleFoodState(food)
+	if not food then return nil end
+	local result={}
+	for i=1,#SUMMARY_FOOD_FIELDS do local key=SUMMARY_FOOD_FIELDS[i];result[key]=food[key] end
+	return result
+end
+local function countPhysicalVariant(parent,detail)
+	parent._physicalVariants=parent._physicalVariants or {}
+	local key=tostring(detail.fullType).."\31"..tostring(detail.variantKey or detail.rowKey or "fungible")
+	if not parent._physicalVariants[key] then
+		parent._physicalVariants[key]=true;parent.variantCount=(parent.variantCount or 0)+1
+	end
+end
+
 local function compactParentRows(detailRows)
 	local byParent = {}
 	for i = 1, #detailRows do
@@ -310,7 +336,8 @@ local function compactParentRows(detailRows)
 			addLocation(parent, detail.nodeId, detail.count or 0)
 		end
 		local detailKind = detailKindForRow(detail)
-		local variantKey = tostring(detail.fullType) .. "\31" .. tostring(detail.variantKey or detail.rowKey or "fungible")
+		countPhysicalVariant(parent,detail)
+		local variantKey = visibleVariantKey(detail,detailKind)
 		local summary = parent._variantSeen[variantKey]
 		if not summary then
 			summary = {
@@ -319,15 +346,8 @@ local function compactParentRows(detailRows)
 				literatureTitle = detail.literatureTitle,
 				mediaIndex = detail.mediaIndex, mediaTitle = detail.mediaTitle,
 				mediaCodes = detail.mediaCodes,
-				dynamicSignature = detail.dynamicSignature,
 				dynamicStateKey = detail.dynamicStateKey,
-				dynamicPercent = detail.dynamicPercent,
-				fluidState = detail.fluidState,
-				foodState = detail.foodState,
-				shapeFamily = detail.shapeFamily,
-				productFamilyKey = detail.productFamilyKey,
-				shapeKey = detail.shapeKey,
-				condition = detail.condition, conditionMax = detail.conditionMax,
+				foodState = visibleFoodState(detail.foodState),
 				nativePath = detail.nativePath,
 			}
 			parent._variantSeen[variantKey] = summary
@@ -365,7 +385,7 @@ local function compactParentRows(detailRows)
 		for _ in pairs(parent._pathSeen) do pathCount = pathCount + 1 end
 		for _ in pairs(parent._detailKinds) do kindCount = kindCount + 1 end
 		for _ in pairs(parent._fullTypeSeen) do fullTypeCount = fullTypeCount + 1 end
-		parent.variantCount = variantCount
+		parent._physicalVariants = nil
 		parent.categoryCount = pathCount
 		parent.nativePaths = {}
 		for nativePath in pairs(parent._pathSeen) do
@@ -771,7 +791,7 @@ local function finishCanonicalFrame(state, result)
 	parent.pendingPrefix = nil
 end
 
-local function stepCanonical(state)
+local function stepCanonicalPrimitive(state)
 	local frame = state.stack[#state.stack]
 	if not frame then return true end
 	if frame.phase == "start" then
@@ -830,6 +850,17 @@ local function stepCanonical(state)
 	return false
 end
 
+local function stepCanonical(state)
+	-- Field cursor transitions are cheap primitives, not physical item captures.
+	-- Batch a bounded number while retaining a one-millisecond yield boundary.
+	local started=getTimestampMs and getTimestampMs() or 0
+	for i=1,32 do
+		if stepCanonicalPrimitive(state) then return true end
+		if getTimestampMs and getTimestampMs()-started>=1 then break end
+	end
+	return false
+end
+
 local DETAIL_FIELDS = {"rowKey","fullType","displayName","worldSprite","category","subCategory",
 	"gsSubKeys","gsSubKeysStr","learnedRecipeNames","numberOfPages","literatureTitle","mediaIndex",
 	"mediaTitle","mediaCodes","dynamicSignature","dynamicStateKey","dynamicPercent","fluidState",
@@ -849,8 +880,12 @@ end
 
 local function startNode(job,captured)
 	local previous=job.previous and job.previous.nodes and job.previous.nodes[captured.id] or nil
-	job.nodeWork={captured=captured,previous=previous,canonical=beginCanonical(captured.snapshot),phase="signature"}
-	job.stats.snapshotSignaturesComputed=job.stats.snapshotSignaturesComputed+1
+	-- Published node snapshots are replaced atomically by their producers. Their
+	-- identity is the node revision: never serialize physical IDs/unit details to
+	-- discover that a first-time node has no previous contribution.
+	local iter,state,key=pairs(captured.snapshot)
+	job.nodeWork={captured=captured,previous=previous,byParent={},iter=iter,
+		iterState=state,key=key,phase="rows"}
 end
 
 local function stepNode(job)
@@ -867,43 +902,35 @@ local function stepNode(job)
 		startNode(job,captured)
 		return
 	end
-	if work.phase=="signature" then
-		if not stepCanonical(work.canonical) then return end
-		work.signature=work.canonical.result
-		job.stats.retainedBytes=job.stats.retainedBytes+#work.signature*2
-		work.canonical=nil
-		if work.previous and work.previous.signature==work.signature then
-			job.nodeChanges[work.captured.id]={snapshot=work.captured.snapshot,
-				signature=work.signature,byParent=work.previous.byParent}
-			job.nodeWork=nil; job.nodeIndex=job.nodeIndex+1
-			return
-		end
-		work.byParent={}
-		work.iter,work.iterState,work.key=pairs(work.captured.snapshot)
-		work.phase="rows"
-		return
-	end
 	if work.phase=="rows" then
 		if work.detail then
-			local field=DETAIL_FIELDS[work.detailFieldIndex]
-			if field then
-				work.detail[field]=work.detailSource[field]
-				work.detailFieldIndex=work.detailFieldIndex+1; return
+			-- Only one representative is needed by an ordinary parent. The exact
+			-- IDs and unit details remain in the authoritative snapshot for paging.
+			local ids=work.detailSource.itemIds or {}
+			local stop=math.min(#ids,work.detailIdIndex+31)
+			for i=work.detailIdIndex,stop do
+				local id=ids[i]
+				if type(id)=="number" and id>=0 and id<math.huge and id==math.floor(id)
+					and (not work.detailMinId or id<work.detailMinId) then work.detailMinId=id end
 			end
+			work.detailIdIndex=stop+1
+			if work.detailIdIndex<=#ids then return end
+			work.detail.itemIds=work.detailMinId and {work.detailMinId} or {}
 			work.detail.rowKey=work.detail.rowKey or work.detailGroupKey
 			local parentKey=parentKeyForRow(work.detail)
 			local contribution=work.byParent[parentKey]
 			if not contribution then contribution={rows={}}; work.byParent[parentKey]=contribution end
 			contribution.rows[#contribution.rows+1]=work.detail
 			job.stats.retainedBytes=job.stats.retainedBytes+320+#(work.detail.itemIds or {})*16
-			work.detail,work.detailSource,work.detailGroupKey=nil,nil,nil
+			work.detail,work.detailSource,work.detailGroupKey,work.detailMinId=nil,nil,nil,nil
 			return
 		end
 		local groupKey,row=work.iter(work.iterState,work.key)
 		work.key=groupKey
 		if groupKey ~= nil then
-			work.detail={nodeId=work.captured.id,count=row.count or 0,itemIds=row.itemIds or {},unitDetails=row.unitDetails}
-			work.detailSource,work.detailGroupKey,work.detailFieldIndex=row,groupKey,1
+			work.detail={nodeId=work.captured.id,count=row.count or 0}
+			for i=1,#DETAIL_FIELDS do local field=DETAIL_FIELDS[i]; work.detail[field]=row[field] end
+			work.detailSource,work.detailGroupKey,work.detailIdIndex=row,groupKey,1
 			return
 		end
 		work.parentIter,work.parentState,work.parentKey=pairs(work.byParent)
@@ -984,15 +1011,14 @@ local function aggregateDetail(parent,state)
 	if detail.nativePath and not parent._pathSeen[detail.nativePath] then
 		parent._pathSeen[detail.nativePath]=true; parent.nativePaths[#parent.nativePaths+1]=detail.nativePath
 	end
-	local variantKey=tostring(detail.fullType).."\31"..tostring(detail.variantKey or detail.rowKey or "fungible")
+	countPhysicalVariant(parent,detail)
+	local variantKey=visibleVariantKey(detail,kind)
 	local summary=parent._variantSeen[variantKey]
 	if not summary then
 		summary={key=variantKey,count=0,detailKind=kind,fullType=detail.fullType,displayName=detail.displayName,
 			literatureTitle=detail.literatureTitle,mediaIndex=detail.mediaIndex,mediaTitle=detail.mediaTitle,
-			mediaCodes=detail.mediaCodes,dynamicSignature=detail.dynamicSignature,dynamicStateKey=detail.dynamicStateKey,
-			dynamicPercent=detail.dynamicPercent,fluidState=detail.fluidState,foodState=detail.foodState,
-			shapeFamily=detail.shapeFamily,productFamilyKey=detail.productFamilyKey,shapeKey=detail.shapeKey,
-			condition=detail.condition,conditionMax=detail.conditionMax,nativePath=detail.nativePath}
+			mediaCodes=detail.mediaCodes,dynamicStateKey=detail.dynamicStateKey,
+			foodState=visibleFoodState(detail.foodState),nativePath=detail.nativePath}
 		parent._variantSeen[variantKey]=summary; parent.variantSummary[#parent.variantSummary+1]=summary
 	end
 	state.summary=summary
@@ -1006,8 +1032,7 @@ end
 local function stepDetail(parent,state)
 	local detail=state.detail
 	if state.phase=="copy" then
-		local field=PARENT_COPY_FIELDS[state.copyIndex]
-		if field then parent[field]=detail[field]; state.copyIndex=state.copyIndex+1; return false end
+		for i=1,#PARENT_COPY_FIELDS do local field=PARENT_COPY_FIELDS[i]; parent[field]=detail[field] end
 		state.phase="aggregate"; return false
 	end
 	if state.phase=="aggregate" then aggregateDetail(parent,state); state.phase="items"; return false end
@@ -1051,7 +1076,7 @@ end
 
 local function classifyAsync(row)
 	local pathCount=#row.nativePaths
-	row.variantCount=#row.variantSummary; row.categoryCount=pathCount; row.locationCount=#row.locations
+	row._physicalVariants=nil; row.categoryCount=pathCount; row.locationCount=#row.locations
 	row.cosmeticVariants=#row.fullTypes>1
 	if row.cosmeticVariants then
 		row.fullType=variantFamilyKey(row.fullType); row.displayName=GlobalStorageSiK.I18n.typeDisplayName(row.fullType)
