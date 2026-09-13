@@ -403,6 +403,7 @@ local function compactParentRows(detailRows)
 			variantSearchParts[#variantSearchParts + 1] = tostring(summary.key or "")
 			if summary.displayName then variantSearchParts[#variantSearchParts + 1] = summary.displayName end
 			if summary.mediaTitle then variantSearchParts[#variantSearchParts + 1] = summary.mediaTitle end
+			if summary.mediaIndex ~= nil then variantSearchParts[#variantSearchParts + 1] = "media:" .. tostring(summary.mediaIndex) end
 			if summary.dynamicStateKey then variantSearchParts[#variantSearchParts + 1] = summary.dynamicStateKey end
 			if summary.nativePath then variantSearchParts[#variantSearchParts + 1] = summary.nativePath end
 		end
@@ -1108,7 +1109,7 @@ local function beginParent(job,parentKey)
 	job.parentWork={key=parentKey,row=newParent(parentKey),nodeIndex=1,detailIndex=1,phase="gather"}
 end
 
-local ASYNC_SEARCH_FIELDS = {"key","displayName","mediaTitle","dynamicStateKey","nativePath"}
+local ASYNC_SEARCH_FIELDS = {"key","displayName","mediaTitle","mediaIndex","dynamicStateKey","nativePath"}
 
 local function stepParent(job)
 	local work=job.parentWork
@@ -1154,6 +1155,7 @@ local function stepParent(job)
 			local field=ASYNC_SEARCH_FIELDS[work.searchField]
 			if field then
 				local value=summary[field]
+				if field=="mediaIndex" and value~=nil then value="media:"..tostring(value) end
 				if value then
 					local prefix=#work.searchParts==0 and "" or " "
 					work.searchParts[#work.searchParts+1]=prefix..tostring(value)
