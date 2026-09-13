@@ -48,9 +48,17 @@ local function terminalForPlayer(playerNum)
 	return nil
 end
 
-local function detailPagesByRowKey()
+local function detailPagesByRowKey(playerNum, networkId, inventoryRevision)
 	local client = GlobalStorageSiK.Client
-	return client and client.itemDetailsCache or nil
+	local pages = {}
+	for _, page in pairs(client and client.itemDetailsCache or {}) do
+		if (tonumber(page.playerNum) or 0) == (tonumber(playerNum) or 0)
+			and page.networkId == networkId
+			and tonumber(page.inventoryRevision) == tonumber(inventoryRevision) then
+			pages[page.rowKey]=page
+		end
+	end
+	return pages
 end
 
 -- Una cabecera agregada no lleva itemIds por contrato: antes de retirarla se
@@ -88,7 +96,7 @@ function GlobalStorageSiK.TerminalItems.requestDetails(terminal, row, page)
 		inventoryRevision = state.inventoryRevision,
 		page = math.max(1, math.floor(tonumber(page) or 1)),
 		pageSize = 15,
-	})
+	}, terminal.playerNum or 0)
 	return sent
 end
 
@@ -97,15 +105,167 @@ function GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted)
 	local terminal = terminalForPlayer(args.playerNum)
 	if terminal and terminal.itemsListPanel and terminal.refreshItemsTab then
 		local panel = terminal.itemsListPanel
+		local callbackSnapshot = GlobalStorageSiK.TerminalItems.captureCatalogPresentation(args.playerNum)
 		panel._detailPending = panel._detailPending or {}
 		panel._detailPending[args.rowKey] = nil
+		local itemTable = panel.itemTable
+		local state = terminal.terminalState
+		local source = nil
+		for index = 1, #(state and state.items or {}) do
+			if state.items[index].rowKey == args.rowKey then source = state.items[index] break end
+		end
+		if itemTable and itemTable.patchRows and source
+			and GlobalStorageSiK.TerminalItems.presentationPatch then
+			local model, modelReason = GlobalStorageSiK.TerminalItems.presentationPatch(panel, terminal,
+				state.items, {source}, {})
+			if not model then
+				if callbackSnapshot then GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(callbackSnapshot) end
+				error({stage="TerminalItems.detailPatch", cause=modelReason or "false"}, 0)
+			end
+			local ok, reason = GlobalStorageSiK.TerminalItems.applyPresentationPatch(
+				panel, terminal, model, "TerminalTable.detailPatch", nil, callbackSnapshot)
+			if ok then return end
+			error({stage="TerminalTable.detailPatch", cause=reason or "false"}, 0)
+		end
+		if panel._gsKeyedPresentation then
+			if not source then return end
+			error({stage="TerminalTable.detailPatch", cause="missing_patch_api"}, 0)
+		end
 		terminal:refreshItemsTab()
 	end
 end
 
-function GlobalStorageSiK.TerminalItems.getDetails(rowKey, panel)
-	local pages = panel and panel._detailPages or detailPagesByRowKey()
+local function clearDetailCache(playerNum, networkId)
+	local client = GlobalStorageSiK.Client
+	if client and client.clearItemDetails then client.clearItemDetails(playerNum, networkId) end
+end
+
+function GlobalStorageSiK.TerminalItems.getDetails(rowKey, panel, terminal)
+	terminal = terminal or (panel and panel.terminal)
+	local state = terminal and terminal.terminalState
+	local pages = panel and panel._detailPages or detailPagesByRowKey(
+		terminal and terminal.playerNum, state and state.networkId, state and state.inventoryRevision)
 	return rowKey and pages and pages[rowKey] or nil
+end
+
+local PRESENTATION_TRANSACTION_FIELDS = {
+	"_detailPages", "_detailPending", "_detailVisualPages", "_detailVisualNetwork",
+	"_detailVisualScope", "_detailRendered", "_detailPageByKey", "_expandedKeys",
+	"_withdrawExpectedRevision", "_withdrawExpectedNetwork", "_lastItems",
+	"_lastItemRoots", "_itemsCatalog", "_gsKeyedPresentation", "_deferredRefresh",
+}
+local NIL_PRESENTATION_VALUE = {}
+
+local function captureMutableRows(panel)
+	local captured, seen = {}, {}
+	local function visit(row)
+		if type(row) ~= "table" or seen[row] then return end
+		seen[row] = true
+		captured[row] = {
+			_gsStale = row._gsStale == nil and NIL_PRESENTATION_VALUE or row._gsStale,
+			selectionRevision = row.selectionRevision == nil and NIL_PRESENTATION_VALUE or row.selectionRevision,
+			representativeRevision = row.representativeRevision == nil and NIL_PRESENTATION_VALUE or row.representativeRevision,
+		}
+		for index = 1, #(row.variantSummary or {}) do visit(row.variantSummary[index]) end
+		for index = 1, #(row._sikChildren or {}) do visit(row._sikChildren[index]) end
+	end
+	for index = 1, #(panel._lastItems or {}) do visit(panel._lastItems[index]) end
+	for _, row in pairs(panel._gsKeyedPresentation and panel._gsKeyedPresentation.rootsByKey or {}) do visit(row) end
+	return captured
+end
+
+local function capturePanelPresentation(terminal, panel)
+	if not terminal or not panel then return nil end
+	local values = {}
+	for index = 1, #PRESENTATION_TRANSACTION_FIELDS do
+		local field = PRESENTATION_TRANSACTION_FIELDS[index]
+		values[field] = panel[field] == nil and NIL_PRESENTATION_VALUE or panel[field]
+	end
+	return { terminal=terminal, panel=panel, values=values, mutableRows=captureMutableRows(panel) }
+end
+
+--- Captures the mutable warehouse presentation before a catalog consumer chain.
+--- The snapshot is private and may only be restored to the same live panel.
+function GlobalStorageSiK.TerminalItems.captureCatalogPresentation(playerNum)
+	local terminal = terminalForPlayer(playerNum)
+	local panel = terminal and terminal.itemsListPanel
+	return capturePanelPresentation(terminal, panel)
+end
+
+function GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(snapshot)
+	if type(snapshot) ~= "table" or not snapshot.panel
+		or snapshot.terminal.itemsListPanel ~= snapshot.panel then return false end
+	local panel = snapshot.panel
+	for index = 1, #PRESENTATION_TRANSACTION_FIELDS do
+		local field = PRESENTATION_TRANSACTION_FIELDS[index]
+		local value = snapshot.values[field]
+		if value == NIL_PRESENTATION_VALUE then panel[field] = nil else panel[field] = value end
+	end
+	for row, values in pairs(snapshot.mutableRows or {}) do
+		for field, value in pairs(values) do
+			if value == NIL_PRESENTATION_VALUE then row[field] = nil else row[field] = value end
+		end
+	end
+	return true
+end
+
+--- Applies and commits a keyed presentation as one reversible operation.
+--- During a catalog transaction the Table undo remains live until every later
+--- consumer accepts the same session image.
+function GlobalStorageSiK.TerminalItems.applyPresentationPatch(panel, terminal, model, stage, finalizer, rollbackSnapshot)
+	stage = stage or "TerminalTable.patchRows"
+	if not panel or not panel.itemTable or type(panel.itemTable.patchRows) ~= "function" then
+		return nil, "missing_patch_api"
+	end
+	if type(model) ~= "table" or type(model.patch) ~= "table" or type(model.commit) ~= "function" then
+		return nil, "invalid_presentation_model"
+	end
+	local client = GlobalStorageSiK.Client
+	local snapshot = rollbackSnapshot or client and client.getCatalogPresentationSnapshot
+		and client.getCatalogPresentationSnapshot(terminal) or capturePanelPresentation(terminal, panel)
+	local called, accepted, reason, undo, undoGuard = pcall(panel.itemTable.patchRows, panel.itemTable, model.patch)
+	if not called or accepted == false or accepted == nil then
+		if snapshot then GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(snapshot) end
+		return nil, called and (reason or "false") or accepted
+	end
+	local committed, commitResult, commitReason = pcall(model.commit)
+	if not committed and not (type(commitResult) == "table" and commitResult.stage) then
+		commitResult = {stage="TerminalItems.presentationCommit", cause=commitResult}
+	elseif committed and commitResult == false then
+		commitReason = {stage="TerminalItems.presentationCommit", cause=commitReason or "false", rejected=true}
+	end
+	if committed and commitResult ~= false and panel.itemTable.setEmptyText then
+		committed, commitResult, commitReason = pcall(panel.itemTable.setEmptyText,
+			panel.itemTable, model.emptyText or "")
+		if not committed and not (type(commitResult) == "table" and commitResult.stage) then
+			commitResult = {stage="TerminalTable.setEmptyText", cause=commitResult}
+		elseif committed and commitResult == false then
+			commitReason = {stage="TerminalTable.setEmptyText", cause=commitReason or "false", rejected=true}
+		end
+	end
+	if committed and commitResult ~= false and type(finalizer) == "function" then
+		committed, commitResult, commitReason = pcall(finalizer)
+	end
+	if not committed or commitResult == false then
+		local superseded = false
+		if type(undo) == "function" then
+			local undoOk, undone, undoReason = pcall(undo)
+			superseded = undoOk and undone == false and undoReason == "image_superseded"
+		end
+		if snapshot and not superseded then
+			GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(snapshot)
+		end
+		if superseded and client and client.registerCatalogUndo then
+			-- Preserve the supersession fence even when commit fails before the
+			-- normal journal registration. The outer chain must not restore B1.
+			client.registerCatalogUndo(undo, terminal, stage, undoGuard)
+		end
+		return nil, committed and (commitReason or "false") or commitResult
+	end
+	if type(undo) == "function" and client and client.registerCatalogUndo then
+		client.registerCatalogUndo(undo, terminal, stage, undoGuard)
+	end
+	return true, nil, undo
 end
 
 --- Contrato común para tooltips de filas virtualizadas: son ornamentales y
@@ -262,8 +422,11 @@ function GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(networkId, pl
 	-- inert until a matching detail page replaces them; getDetails never sees
 	-- those copies. Keep the requested page stable across inventory revisions.
 	panel._detailPages, panel._detailPending = nil, {}
-	for i = 1, #(panel._lastItems or {}) do panel._lastItems[i]._gsStale = true end
-	if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
+	for i = 1, #(panel._lastItems or {}) do
+		local row = panel._lastItems[i]
+		if row._gsRowKind ~= "parent" then row._gsStale = true end
+	end
+	clearDetailCache(playerNum, activeNetwork)
 	local dragging = GlobalStorageSiK.TerminalWithdrawDrag
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive
 		and GlobalStorageSiK.TerminalWithdrawDrag.isActive()
@@ -280,6 +443,7 @@ end
 -- retiran inmediatamente filas exactas que ya no son seguras para interactuar.
 function GlobalStorageSiK.TerminalItems.onWithdrawCompleted(panel, terminal, ok, result)
 	if not panel then return end
+	local callbackSnapshot = capturePanelPresentation(terminal, panel)
 	local revision = result and tonumber(result.inventoryRevision)
 	local state = terminal and terminal.terminalState
 	-- An ACK is not a catalog. Never attach its revision to older items, nor
@@ -290,11 +454,31 @@ function GlobalStorageSiK.TerminalItems.onWithdrawCompleted(panel, terminal, ok,
 		panel._withdrawExpectedRevision = math.max(panel._withdrawExpectedRevision or 0, revision)
 		panel._withdrawExpectedNetwork = state.networkId
 		panel._detailPages, panel._detailPending = nil, {}
-		for i = 1, #(panel._lastItems or {}) do panel._lastItems[i]._gsStale = true end
-		if GlobalStorageSiK.Client then GlobalStorageSiK.Client.itemDetailsCache = {} end
+		for i = 1, #(panel._lastItems or {}) do
+			local row=panel._lastItems[i]
+			if row._gsRowKind ~= "parent" then row._gsStale = true end
+		end
+		clearDetailCache(terminal and terminal.playerNum, state.networkId)
 	end
 	GlobalStorageSiK.TerminalItems.resetVirtualInteraction(panel)
-	if terminal and terminal.refreshItemsTab then terminal:refreshItemsTab() end
+	if terminal and terminal.terminalState and panel.itemTable and panel.itemTable.patchRows
+		and GlobalStorageSiK.TerminalItems.presentationPatch then
+		local model, modelReason = GlobalStorageSiK.TerminalItems.presentationPatch(panel, terminal,
+			terminal.terminalState.items or {}, {}, {})
+		if not model then
+			if callbackSnapshot then GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(callbackSnapshot) end
+			error({stage="TerminalItems.withdrawPatch", cause=modelReason or "false"}, 0)
+		end
+		local accepted, reason = GlobalStorageSiK.TerminalItems.applyPresentationPatch(
+			panel, terminal, model, "TerminalTable.withdrawPatch", nil, callbackSnapshot)
+		if not accepted then
+			error({stage="TerminalTable.withdrawPatch", cause=reason or "false"}, 0)
+		end
+	elseif panel._gsKeyedPresentation then
+		error({stage="TerminalTable.withdrawPatch", cause="missing_patch_api"}, 0)
+	elseif terminal and terminal.refreshItemsTab then
+		terminal:refreshItemsTab()
+	end
 	GlobalStorageSiK.Log.debug("ExactWithdraw", "detail-cache invalidated surface=warehouse"
 		.. " ok=" .. tostring(ok == true) .. " revision=" .. tostring(revision))
 end
@@ -1194,7 +1378,9 @@ local function sortRows(rows, sortKey, ascending, terminal)
 		local av = values[a]
 		local bv = values[b]
 		if av == bv then
-			return (a.fullType or "") < (b.fullType or "")
+			local af, bf = a.fullType or "", b.fullType or ""
+			if af == bf then return tostring(rowIdentity(a) or "") < tostring(rowIdentity(b) or "") end
+			return af < bf
 		end
 		if ascending then
 			return av < bv
@@ -1204,7 +1390,7 @@ local function sortRows(rows, sortKey, ascending, terminal)
 	return sorted
 end
 
-local function buildDisplayRows(panel, terminal, parents)
+local function buildDisplayRows(panel, terminal, parents, preserveUnseen, pendingRequests)
 	panel._expandedKeys = panel._expandedKeys or {}
 	panel._detailPageByKey = panel._detailPageByKey or {}
 	panel._detailPending = panel._detailPending or {}
@@ -1227,6 +1413,7 @@ local function buildDisplayRows(panel, terminal, parents)
 	local catalogPending = panel._withdrawExpectedRevision ~= nil
 	local previousVisual = panel._detailVisualPages or {}
 	local nextVisual = {}
+	if preserveUnseen then for key, value in pairs(previousVisual) do nextVisual[key] = value end end
 	for i = 1, #parents do
 		local parent = parents[i]
 		if catalogPending then
@@ -1234,7 +1421,9 @@ local function buildDisplayRows(panel, terminal, parents)
 			for field, value in pairs(parent) do copy[field] = value end
 			parent = copy
 		end
-		parent._gsStale = catalogPending
+		-- A known parent remains safe through server revision revalidation.
+		-- Only a row with a confirmed withdrawal awaiting B2 is fenced locally.
+		parent._gsStale = parent._gsConfirmedPending == true
 		local key = rowIdentity(parent)
 		liveParents[key] = true
 		-- Every aggregate is a hierarchy root, including aggregates with one
@@ -1246,14 +1435,19 @@ local function buildDisplayRows(panel, terminal, parents)
 		out[#out + 1] = parent
 		if parent.expandable and panel._expandedKeys[key] then
 			local wantedPage = panel._detailPageByKey[key] or 1
-			local pages = panel._detailPages or detailPagesByRowKey()
+			local pages = panel._detailPages or detailPagesByRowKey(terminal and terminal.playerNum,
+				networkId, revision)
 			local detailPage = pages and pages[key] or nil
 			local stale = not detailPage or detailPage.page ~= wantedPage
 				or detailPage.networkId ~= networkId
 				or tonumber(detailPage.inventoryRevision or -1) ~= tonumber(revision)
 			if stale and not catalogPending and not panel._detailPending[key] then
 				panel._detailPending[key] = true
-				GlobalStorageSiK.TerminalItems.requestDetails(terminal, parent, wantedPage)
+				if pendingRequests then
+					pendingRequests[#pendingRequests + 1] = { parent=parent, page=wantedPage, key=key }
+				else
+					GlobalStorageSiK.TerminalItems.requestDetails(terminal, parent, wantedPage)
+				end
 			end
 			local displayable = detailPage and detailPage.page == wantedPage
 				and detailPage.networkId == networkId
@@ -1270,7 +1464,9 @@ local function buildDisplayRows(panel, terminal, parents)
 				local visual = { page = wantedPage, items = {} }
 				nextVisual[key] = visual
 				for j = 1, #(detailPage.items or {}) do
-					local child = detailPage.items[j]
+				local sourceChild = detailPage.items[j]
+				local child = {}
+				for field, value in pairs(sourceChild) do child[field] = value end
 					-- Las unidades llegan bajo demanda: no pasan por la localización
 					-- inicial de padres. Resolver aquí hace que el título de VHS que
 					-- ya conoce la instancia se pinte también en la fila hija.
@@ -1302,11 +1498,13 @@ local function buildDisplayRows(panel, terminal, parents)
 			end
 		end
 	end
-	local expandedKeys = {}
-	for key in pairs(panel._expandedKeys) do
-		if liveParents[key] then expandedKeys[key] = true end
+	if not preserveUnseen then
+		local expandedKeys = {}
+		for key in pairs(panel._expandedKeys) do
+			if liveParents[key] then expandedKeys[key] = true end
+		end
+		panel._expandedKeys = expandedKeys
 	end
-	panel._expandedKeys = expandedKeys
 	panel._detailVisualPages = nextVisual
 	return out
 end
@@ -1904,7 +2102,9 @@ local function updateRemoteMediaTitle(row, detail, listPanel, terminal)
 		end
 		applyToRows(listPanel and listPanel._itemsCatalog)
 		applyToRows(listPanel and listPanel._lastItems)
-		local pages = listPanel and listPanel._detailPages or detailPagesByRowKey()
+		local state = terminal and terminal.terminalState
+		local pages = listPanel and listPanel._detailPages or detailPagesByRowKey(
+			terminal and terminal.playerNum, state and state.networkId, state and state.inventoryRevision)
 		for _, page in pairs(pages or {}) do applyToRows(page.items) end
 		if mediaIndex then
 			MEDIA_TITLE_CACHE[recordedMediaCacheKey(row.itemData,
@@ -2049,9 +2249,11 @@ local function itemRowAdapter(listPanel, terminal)
 			local multi = #selection > 1 and isRowSelected(listPanel, rowIdentity(data))
 			local dragState = GlobalStorageSiK.TerminalItems.buildDragState(
 				listPanel, data, multi and selection or nil)
-			-- `begin` recibe cantidad, no playerNum. Pasar el jugador 0 producía un
-			-- payload de retirada de cero unidades aunque el ghost fuese correcto.
-			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, 1,
+			-- Arrastrar una cabecera significa mover el grupo completo que representa.
+			-- Los hijos siguen identificando una sola unidad fisica. El worker divide
+			-- el grupo en microlotes y conserva todos los limites autoritativos.
+			local dragAmount = data._gsRowKind == "parent" and 0 or 1
+			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, dragAmount,
 				dragState.payloadRows, dragState.visualRows, row)
 			return true
 		end,
@@ -2121,6 +2323,22 @@ local function splitDisplayRows(rows)
 	return roots
 end
 
+local function patchOnePresentationParent(panel, terminal, key, rollbackSnapshot)
+	if not panel._gsKeyedPresentation then return false, "presentation_uninitialized" end
+	if not panel.itemTable or type(panel.itemTable.patchRows) ~= "function" then return false, "missing_patch_api" end
+	local state = terminal and terminal.terminalState
+	local source = nil
+	for index = 1, #(state and state.items or {}) do
+		if rowIdentity(state.items[index]) == key then source = state.items[index] break end
+	end
+	if not source then return false, "unknown_parent" end
+	local model, modelReason = GlobalStorageSiK.TerminalItems.presentationPatch(panel, terminal,
+		state.items, {source}, {})
+	if not model then return false, modelReason end
+	return GlobalStorageSiK.TerminalItems.applyPresentationPatch(
+		panel, terminal, model, "TerminalTable.parentPatch", nil, rollbackSnapshot)
+end
+
 local function itemTableOptions(panel, terminal)
 	return {
 		rowHeight = ROW_H, headerHeight = HEADER_H,
@@ -2144,7 +2362,7 @@ local function itemTableOptions(panel, terminal)
 					tostring(state.totalRows or state.total), tostring(state.totalUnits or 0))
 			end,
 			stateOf = function(parent, key)
-				local detailPage = GlobalStorageSiK.TerminalItems.getDetails(key, panel)
+				local detailPage = GlobalStorageSiK.TerminalItems.getDetails(key, panel, terminal)
 				local wantedPage = panel._detailPageByKey and panel._detailPageByKey[key] or 1
 				local revision = terminal and terminal.terminalState
 					and terminal.terminalState.inventoryRevision or 0
@@ -2169,6 +2387,7 @@ local function itemTableOptions(panel, terminal)
 				}
 			end,
 			onPageChange = function(context)
+				local callbackSnapshot = capturePanelPresentation(terminal, panel)
 				panel._detailPageByKey = panel._detailPageByKey or {}
 				panel._detailPending = panel._detailPending or {}
 				panel._detailPageByKey[context.parentKey] = context.page
@@ -2176,23 +2395,34 @@ local function itemTableOptions(panel, terminal)
 				local sent = GlobalStorageSiK.TerminalItems.requestDetails(
 					terminal, context.parent, context.page)
 				if not sent then panel._detailPending[context.parentKey] = nil end
-				if terminal.refreshItemsTab then terminal:refreshItemsTab() end
+				local patched, patchReason = patchOnePresentationParent(panel, terminal,
+					context.parentKey, callbackSnapshot)
+				if not patched then
+					GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(callbackSnapshot)
+					error({stage="TerminalTable.pagePatch", cause=patchReason}, 0)
+				end
 				return sent
 			end,
 		},
 		onExpansionChange = function(context)
+			local callbackSnapshot = capturePanelPresentation(terminal, panel)
 			panel._expandedKeys = panel._expandedKeys or {}
 			panel._expandedKeys[context.key] = context.expanded and true or nil
 			if context.expanded then
 				local page = panel._detailPageByKey and panel._detailPageByKey[context.key] or 1
-				local cached = GlobalStorageSiK.TerminalItems.getDetails(context.key, panel)
+				local cached = GlobalStorageSiK.TerminalItems.getDetails(context.key, panel, terminal)
 				if not cached and not (panel._detailPending and panel._detailPending[context.key]) then
 					panel._detailPending = panel._detailPending or {}
 					panel._detailPending[context.key] = true
 					GlobalStorageSiK.TerminalItems.requestDetails(terminal, context.item, page)
 				end
 			end
-			if terminal.refreshItemsTab then terminal:refreshItemsTab() end
+			local patched, patchReason = patchOnePresentationParent(panel, terminal,
+				context.key, callbackSnapshot)
+			if not patched then
+				GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(callbackSnapshot)
+				error({stage="TerminalTable.expansionPatch", cause=patchReason}, 0)
+			end
 		end,
 		onSort = function(context)
 			panel.itemsSortKey, panel.itemsSortAsc = context.key, context.ascending
@@ -2261,6 +2491,7 @@ local function releaseWarehouse(panel, terminal)
 	panel._gsItemTooltip, panel._gsItemTooltipOwner = nil, nil
 	panel._detailVisualPages, panel._detailVisualNetwork, panel._detailVisualScope = nil, nil, nil
 	panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork = nil, nil
+	panel._gsKeyedPresentation = nil
 	local released = false
 	if GlobalStorageSiK.TerminalDrop and GlobalStorageSiK.TerminalDrop.disposePanel then
 		GlobalStorageSiK.TerminalDrop.disposePanel(panel, terminal)
@@ -2406,19 +2637,235 @@ function GlobalStorageSiK.TerminalItems.getDepositSelection(combo)
 	return combo.selected or 1
 end
 
+local function copyPresentationMap(source)
+	local result = {}
+	for key, value in pairs(source or {}) do result[key] = value end
+	return result
+end
+
+local function cloneCatalogRow(source)
+	local row = {}
+	for key, value in pairs(source or {}) do row[key] = value end
+	if type(source and source.variantSummary) == "table" then
+		row.variantSummary = {}
+		for index = 1, #source.variantSummary do
+			local variant = {}
+			for key, value in pairs(source.variantSummary[index]) do variant[key] = value end
+			row.variantSummary[index] = variant
+		end
+	end
+	return row
+end
+
+local function cloneCatalogRows(rows)
+	local result = {}
+	for index = 1, #(rows or {}) do result[index] = cloneCatalogRow(rows[index]) end
+	return result
+end
+GlobalStorageSiK.TerminalItems.copyRowsForPresentation = cloneCatalogRows
+
+local function presentationBefore(left, right, panel, terminal)
+	local av = sortKeyValue(left, panel.itemsSortKey, terminal)
+	local bv = sortKeyValue(right, panel.itemsSortKey, terminal)
+	if av == bv then
+		local lf, rf = left.fullType or "", right.fullType or ""
+		if lf == rf then return tostring(rowIdentity(left) or "") < tostring(rowIdentity(right) or "") end
+		return lf < rf
+	end
+	if panel.itemsSortAsc then return av < bv end
+	return av > bv
+end
+
+local function presentationEmptyText(terminal)
+	local state = terminal and terminal.terminalState or nil
+	local allItems = state and state.items or {}
+	local hasSnapshot = type(state) == "table" and type(state.items) == "table"
+	local scanState = state and type(state.scanStatus) == "table" and state.scanStatus.state or nil
+	local capturePending = state and (state.scanActive == true or state.reconcilePending == true
+		or scanState == "RUNNING" or scanState == "STALE_RETRY")
+	if not hasSnapshot or capturePending and #allItems == 0 then return "" end
+	return T(#allItems > 0 and "IGUI_GS_NoFilterMatches" or "IGUI_GS_NoItems")
+end
+
+local REVISION_ONLY_FIELDS = { selectionRevision=true, representativeRevision=true }
+local function catalogContentEqual(left, right, seen)
+	if left == right then return true end
+	if type(left) ~= type(right) then return false end
+	if type(left) ~= "table" then return left == right end
+	seen = seen or {}
+	if seen[left] == right then return true end
+	seen[left] = right
+	for key, value in pairs(left) do
+		if not REVISION_ONLY_FIELDS[key] and (type(key) ~= "string" or key:sub(1,3) ~= "_gs")
+			and not catalogContentEqual(value, right[key], seen) then return false end
+	end
+	for key in pairs(right) do
+		if not REVISION_ONLY_FIELDS[key] and (type(key) ~= "string" or key:sub(1,3) ~= "_gs")
+			and left[key] == nil then return false end
+	end
+	return true
+end
+
+--- Builds a keyed presentation delta. The returned commit is invoked only
+--- after Framework Table accepts the matching patch.
+function GlobalStorageSiK.TerminalItems.presentationPatch(panel, terminal, items, changedRows, removedRowKeys, deriveChanges)
+	if not panel or not terminal or type(items) ~= "table" then return nil, "invalid_presentation_patch" end
+	local previous = panel._gsKeyedPresentation
+	if type(previous) ~= "table" then return nil, "presentation_uninitialized" end
+	panel.itemsSortKey = panel.itemsSortKey or "category"
+	panel.itemsSortAsc = panel.itemsSortAsc ~= false
+	local sourceByKey, affected = {}, {}
+	for index = 1, #items do
+		local row = items[index]
+		local key = rowIdentity(row)
+		if not key or sourceByKey[key] then return nil, "invalid_catalog_keys" end
+		sourceByKey[key] = row
+	end
+	for index = 1, #(changedRows or {}) do
+		local key = rowIdentity(changedRows[index])
+		if not key then return nil, "invalid_changed_key" end
+		affected[key] = true
+	end
+	for index = 1, #(removedRowKeys or {}) do affected[removedRowKeys[index]] = true end
+	for key in pairs(panel._expandedKeys or {}) do affected[key] = true end
+	local overlay = GlobalStorageSiK.CatalogOverlay
+	local catalogState = terminal.terminalState or {}
+	if overlay and overlay.pendingKeys then
+		for key in pairs(overlay.pendingKeys(tonumber(terminal.playerNum) or 0,
+			catalogState.networkId, tonumber(catalogState._gsAppliedCatalogRevision
+				or catalogState.inventoryRevision) or 0)) do affected[key] = true end
+	end
+	for key, root in pairs(previous.rootsByKey) do
+		if root._gsConfirmedPending == true then affected[key] = true end
+	end
+	if deriveChanges == true then
+		for key, source in pairs(sourceByKey) do
+			if not previous.sourceByKey or not catalogContentEqual(source, previous.sourceByKey[key]) then affected[key] = true end
+		end
+		for key in pairs(previous.sourceByKey or {}) do
+			if not sourceByKey[key] then affected[key] = true end
+		end
+	end
+
+	local rootsByKey, orderedKeys = copyPresentationMap(previous.rootsByKey), {}
+	for index = 1, #previous.orderedKeys do
+		local key = previous.orderedKeys[index]
+		if not affected[key] then orderedKeys[#orderedKeys + 1] = key end
+	end
+	local oldExpanded, oldPages = panel._expandedKeys, panel._detailPageByKey
+	local oldPending, oldVisual = panel._detailPending, panel._detailVisualPages
+	local oldLastItems, oldLastRoots, oldCatalog = panel._lastItems, panel._lastItemRoots, panel._itemsCatalog
+	local oldVisualNetwork, oldVisualScope = panel._detailVisualNetwork, panel._detailVisualScope
+	local oldWithdrawRevision, oldWithdrawNetwork = panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork
+	panel._expandedKeys, panel._detailPageByKey = copyPresentationMap(oldExpanded), copyPresentationMap(oldPages)
+	panel._detailPending, panel._detailVisualPages = copyPresentationMap(oldPending), copyPresentationMap(oldVisual)
+	local upserts, removeKeys, pendingRequests = {}, {}, {}
+	local function computeAffected()
+	for key in pairs(affected) do
+		local source = sourceByKey[key]
+		local visibleRoot = nil
+		if source then
+			local candidate = cloneCatalogRow(source)
+			if GlobalStorageSiK.CatalogOverlay and terminal.terminalState then
+				local state = terminal.terminalState
+				candidate = GlobalStorageSiK.CatalogOverlay.project({candidate}, tonumber(terminal.playerNum) or 0,
+					state.networkId, tonumber(state._gsAppliedCatalogRevision or state.inventoryRevision) or 0)[1]
+			end
+			local filtered
+			if terminal.applyItemsFilter then filtered = terminal:applyItemsFilter({candidate})
+			else localizeRecordedMediaRows({candidate}, terminal.playerNum or 0); filtered = {candidate} end
+			if #filtered == 1 then
+				local display = buildDisplayRows(panel, terminal, filtered, true, pendingRequests)
+				visibleRoot = splitDisplayRows(display)[1]
+			end
+		end
+		if visibleRoot then
+			rootsByKey[key] = visibleRoot
+			upserts[#upserts + 1] = visibleRoot
+			local inserted = false
+			for index = 1, #orderedKeys do
+				if presentationBefore(visibleRoot, rootsByKey[orderedKeys[index]], panel, terminal) then
+					table.insert(orderedKeys, index, key)
+					inserted = true
+					break
+				end
+			end
+			if not inserted then orderedKeys[#orderedKeys + 1] = key end
+		else
+			rootsByKey[key] = nil
+			if previous.rootsByKey[key] then removeKeys[#removeKeys + 1] = key end
+		end
+	end
+	end
+	local computed, computeReason = pcall(computeAffected)
+	local stagedExpanded, stagedPages = panel._expandedKeys, panel._detailPageByKey
+	local stagedPending, stagedVisual = panel._detailPending, panel._detailVisualPages
+	local stagedVisualNetwork, stagedVisualScope = panel._detailVisualNetwork, panel._detailVisualScope
+	local stagedWithdrawRevision, stagedWithdrawNetwork = panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork
+	panel._expandedKeys, panel._detailPageByKey = oldExpanded, oldPages
+	panel._detailPending, panel._detailVisualPages = oldPending, oldVisual
+	panel._detailVisualNetwork, panel._detailVisualScope = oldVisualNetwork, oldVisualScope
+	panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork = oldWithdrawRevision, oldWithdrawNetwork
+	panel._lastItems, panel._lastItemRoots, panel._itemsCatalog = oldLastItems, oldLastRoots, oldCatalog
+	if not computed then return nil, computeReason end
+
+	local orderedRoots, flatRows = {}, {}
+	for index = 1, #orderedKeys do
+		local root = rootsByKey[orderedKeys[index]]
+		orderedRoots[index], flatRows[#flatRows + 1] = root, root
+		for childIndex = 1, #(root._sikChildren or {}) do flatRows[#flatRows + 1] = root._sikChildren[childIndex] end
+	end
+	local revision = terminal.terminalState and terminal.terminalState.inventoryRevision
+	return {
+		patch = { upserts=upserts, removeKeys=removeKeys, order=orderedKeys },
+		emptyText = presentationEmptyText(terminal),
+		commit = function()
+			for key, root in pairs(rootsByKey) do
+				if not affected[key] then
+					root.selectionRevision, root.representativeRevision = revision, revision
+					for index = 1, #(root.variantSummary or {}) do
+						local variant = root.variantSummary[index]
+						if variant.representativeItemId then variant.representativeRevision = revision end
+					end
+				end
+			end
+			panel._expandedKeys, panel._detailPageByKey = stagedExpanded, stagedPages
+			panel._detailPending, panel._detailVisualPages = stagedPending, stagedVisual
+			panel._detailVisualNetwork, panel._detailVisualScope = stagedVisualNetwork, stagedVisualScope
+			panel._withdrawExpectedRevision, panel._withdrawExpectedNetwork = stagedWithdrawRevision, stagedWithdrawNetwork
+			panel._lastItemRoots, panel._itemsCatalog = orderedRoots, orderedRoots
+			panel._lastItems = flatRows
+			panel._gsKeyedPresentation = { rootsByKey=rootsByKey, orderedKeys=orderedKeys, sourceByKey=sourceByKey }
+			for index = 1, #pendingRequests do
+				local request = pendingRequests[index]
+				local sent = GlobalStorageSiK.TerminalItems.requestDetails(terminal, request.parent, request.page)
+				if not sent then panel._detailPending[request.key] = nil end
+			end
+		end,
+	}
+end
+
 --- Refresca la única tabla pública de Almacén.
 ---@param panel ISPanel
 ---@param terminal GS_TerminalUI
 ---@param items table[]
 function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items)
 	if not panel then return end
-	if GlobalStorageSiK.TerminalItems.isInteractionActive(panel) then
+	if GlobalStorageSiK.TerminalItems.isInteractionActive(panel)
+		and not (terminal and (terminal._gsCatalogApplying
+			or terminal.terminalState and terminal.terminalState._gsCatalogApply)) then
 		GlobalStorageSiK.TerminalItems.deferRefresh(panel, terminal)
 		return { rows = panel._lastItemRoots or {}, emptyText = "" }
 	end
 	panel._deferredRefresh = nil
 	hideVirtualRowTooltips(panel)
-	items = items or {}
+	local sourceItems = items or {}
+	items = cloneCatalogRows(sourceItems)
+	if GlobalStorageSiK.CatalogOverlay and terminal and terminal.terminalState then
+		local state=terminal.terminalState
+		items=GlobalStorageSiK.CatalogOverlay.project(items, tonumber(terminal.playerNum) or 0,
+			state.networkId, tonumber(state._gsAppliedCatalogRevision or state.inventoryRevision) or 0)
+	end
 	localizeRecordedMediaRows(items, terminal and terminal.playerNum or 0)
 	panel._itemsCatalog = items
 	panel.itemsSortKey = panel.itemsSortKey or "category"
@@ -2429,6 +2876,14 @@ function GlobalStorageSiK.TerminalItems.presentationModel(panel, terminal, items
 	panel._lastItems = displayRows
 	local roots = splitDisplayRows(displayRows)
 	panel._lastItemRoots = roots
+	local rootsByKey, orderedKeys = {}, {}
+	for index = 1, #roots do
+		local key = rowIdentity(roots[index])
+		rootsByKey[key], orderedKeys[index] = roots[index], key
+	end
+	local sourceByKey = {}
+	for index = 1, #sourceItems do sourceByKey[rowIdentity(sourceItems[index])] = sourceItems[index] end
+	panel._gsKeyedPresentation = { rootsByKey=rootsByKey, orderedKeys=orderedKeys, sourceByKey=sourceByKey }
 	local state = terminal and terminal.terminalState or nil
 	local allItems = state and state.items or {}
 	-- An absent item snapshot is not an empty inventory.  The terminal opens

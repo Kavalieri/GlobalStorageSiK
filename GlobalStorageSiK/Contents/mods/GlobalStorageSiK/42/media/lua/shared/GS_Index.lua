@@ -425,6 +425,221 @@ local function compactParentRows(detailRows)
 	return rows
 end
 
+-- Capturas ya publicadas en registry.nodes se sustituyen de forma atomica. La
+-- caché conserva esas referencias inmutables y solo vuelve a inspeccionar el
+-- nodo cuya referencia cambia. Los escaneos incrementales construyen su tabla
+-- privada antes de publicarla en GS_ZoneRefresh.
+local BUILD_CACHE_LIMIT = 64
+local BUILD_CACHE_BYTES = 32 * 1024 * 1024
+local BUILD_ENTRY_BYTES = 16 * 1024 * 1024
+local buildCache = {}
+local buildCacheClock = 0
+local buildCacheBytes = 0
+local buildGeneration = 0
+local immutableSignatureCache = setmetatable({}, { __mode = "k" })
+local rowSignatureCache = setmetatable({}, { __mode = "k" })
+local scopedRowSignatureCache = setmetatable({}, { __mode = "k" })
+local computeRowSignature
+local stableScalar
+local function classificationStamp()
+	local manager, world = GlobalStorageSiK.CatalogManager, GlobalStorageSiK.NativeWorldOverrides
+	return tostring(manager and manager.getEpoch and manager.getEpoch() or 0) .. "\31"
+		.. tostring(world and world.getRevision and world.getRevision() or 0)
+end
+GlobalStorageSiK.Index.getClassificationStamp = classificationStamp
+
+local function immutableSnapshotSignature(snapshot)
+	if type(snapshot) ~= "table" then return "snapshot:nil" end
+	local signature = immutableSignatureCache[snapshot]
+	if signature == nil then
+		signature = GlobalStorageSiK.Index.snapshotSignature(snapshot)
+		immutableSignatureCache[snapshot] = signature
+	end
+	return signature
+end
+
+local function scopeKeyFor(registry, networkId, player, sourceNodeId)
+	local zones = {}
+	if player then
+		for zoneId, zone in pairs(registry.zones or {}) do
+			if zone and zone.networkId == networkId
+				and GlobalStorageSiK.Permissions.canAccessZone(player, networkId, zoneId) then
+				zones[#zones + 1] = tostring(zoneId)
+			end
+		end
+		table.sort(zones)
+	else
+		zones[1] = "*"
+	end
+	return tostring(networkId) .. "\30" .. tostring(sourceNodeId or "*")
+		.. "\30" .. table.concat(zones, "\31")
+end
+
+local function cacheEntryFor(key)
+	buildCacheClock = buildCacheClock + 1
+	local entry = buildCache[key]
+	if entry then
+		entry.usedAt = buildCacheClock
+		return entry, true
+	end
+	local count, oldestKey, oldestAt = 0, nil, nil
+	for cachedKey, cached in pairs(buildCache) do
+		count = count + 1
+		if oldestAt == nil or cached.usedAt < oldestAt then
+			oldestKey, oldestAt = cachedKey, cached.usedAt
+		end
+	end
+	if count >= BUILD_CACHE_LIMIT and oldestKey then
+		buildCacheBytes = math.max(0, buildCacheBytes - (buildCache[oldestKey].bytes or 0))
+		buildCache[oldestKey] = nil
+	end
+	entry = { nodes = {}, parents = {}, usedAt = buildCacheClock }
+	buildCache[key] = entry
+	return entry, false
+end
+
+local function trimBuildCache(protectedKey)
+	while true do
+		local count,oldestKey,oldestAt=0,nil,nil
+		for key,entry in pairs(buildCache) do
+			count=count+1
+			if key~=protectedKey and (oldestAt==nil or entry.usedAt<oldestAt) then
+				oldestKey,oldestAt=key,entry.usedAt
+			end
+		end
+		if count<=BUILD_CACHE_LIMIT and buildCacheBytes<=BUILD_CACHE_BYTES then return end
+		if not oldestKey then return end
+		buildCacheBytes=math.max(0,buildCacheBytes-(buildCache[oldestKey].bytes or 0))
+		buildCache[oldestKey]=nil
+	end
+end
+
+local function collectVisibleNodes(registry, networkId, player, sourceNodeId)
+	local visible, liveIds = {}, {}
+	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
+		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
+	for i = 1, #live do
+		local liveEntry = live[i]
+		local nodeId = liveEntry.entry and liveEntry.entry.id or ("node_" .. i)
+		if sourceNodeId == nil or sourceNodeId == nodeId then
+			liveIds[nodeId] = true
+			local node = registry.nodes and registry.nodes[nodeId]
+			local snapshot = node and node.itemSnapshot
+			if not snapshot then
+				snapshot = GlobalStorageSiK.ItemSnapshot.fromContainer(liveEntry.container)
+			end
+			visible[nodeId] = { id = nodeId, zoneId = node and node.zoneId, snapshot = snapshot }
+		end
+	end
+	for _, node in pairs(registry.nodes or {}) do
+		local zone = registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId == networkId and node.membership ~= "excluded"
+			and node.enabled ~= false and node.offline ~= true
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId))
+			and not liveIds[node.id] and (sourceNodeId == nil or sourceNodeId == node.id) then
+			visible[node.id] = { id = node.id, zoneId = node.zoneId, snapshot = node.itemSnapshot }
+		end
+	end
+	return visible
+end
+
+local function contributionForNode(nodeId, snapshot)
+	local byType = {}
+	mergeNodeSnapshot(byType, { id = nodeId, itemSnapshot = snapshot })
+	local byParent = {}
+	for _, detail in ipairs(GlobalStorageSiK.ItemSnapshot.toRows(byType)) do
+		local parentKey = parentKeyForRow(detail)
+		local contribution = byParent[parentKey]
+		if not contribution then
+			contribution = { rows = {} }
+			byParent[parentKey] = contribution
+		end
+		contribution.rows[#contribution.rows + 1] = detail
+	end
+	for _, contribution in pairs(byParent) do
+		contribution.signature = GlobalStorageSiK.Index.snapshotSignature(contribution.rows)
+	end
+	return byParent
+end
+
+local function markChangedParents(changed, previous, current)
+	for parentKey, old in pairs(previous or {}) do
+		local replacement = current and current[parentKey]
+		if not replacement or replacement.signature ~= old.signature then changed[parentKey] = true end
+	end
+	for parentKey, replacement in pairs(current or {}) do
+		local old = previous and previous[parentKey]
+		if not old or old.signature ~= replacement.signature then changed[parentKey] = true end
+	end
+end
+
+local function classifyParent(row)
+	local resolution = nil
+	if not row.mixedVariants or row.nativePath then
+		resolution = GlobalStorageSiK.CategoryResolution.resolve(row.fullType, row, nil)
+		row.nativePath = resolution.nativePath
+		row.nativeStatus = resolution.nativeStatus
+		row.vanillaKey = resolution.vanillaKey
+		row.effective = resolution.effective
+		row.categoryEffective = resolution.effective
+		row.routingIdentity = resolution.routingIdentity
+		row.categorySource = resolution.categorySource
+	else
+		row.nativeStatus = "variants"
+		row.effective = "variants"
+		row.categoryEffective = "variants"
+		row.routingIdentity = "variants:" .. tostring(row.rowKey)
+	end
+	row.itemIds = nil
+	row.unitDetails = nil
+	row.unitNodeIds = nil
+	rowSignatureCache[row] = computeRowSignature(row)
+	GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", row.fullType, row.nativePath)
+	return row
+end
+
+local function rebuildChangedParents(entry, changed, stats)
+	for parentKey in pairs(changed) do
+		local details = {}
+		for _, cachedNode in pairs(entry.nodes) do
+			local contribution = cachedNode.byParent and cachedNode.byParent[parentKey]
+			for i = 1, #(contribution and contribution.rows or {}) do
+				details[#details + 1] = contribution.rows[i]
+			end
+		end
+		local parents = compactParentRows(details)
+		entry.parents[parentKey] = parents[1] and classifyParent(parents[1]) or nil
+		stats.parentsProcessed = stats.parentsProcessed + 1
+	end
+end
+
+local function copyCatalogRow(row, selectionRevision, sourceNodeId)
+	local out = {}
+	for key, value in pairs(row) do out[key] = value end
+	out.selectionRevision = selectionRevision
+	out.representativeRevision = selectionRevision
+	out.sourceNodeId = sourceNodeId
+	if row.variantSummary then
+		out.variantSummary = {}
+		for i = 1, #row.variantSummary do
+			local source = row.variantSummary[i]
+			local variant = {}
+			for key, value in pairs(source) do variant[key] = value end
+			if variant.representativeItemId then variant.representativeRevision = selectionRevision end
+			out.variantSummary[i] = variant
+		end
+	end
+	local signature = rowSignatureCache[row]
+	if sourceNodeId ~= nil then
+		local scoped = scopedRowSignatureCache[row] or {}
+		scopedRowSignatureCache[row] = scoped
+		signature = scoped[sourceNodeId]
+		if not signature then signature=computeRowSignature(out); scoped[sourceNodeId]=signature end
+	end
+	rowSignatureCache[out] = signature or computeRowSignature(out)
+	return out
+end
+
 --- Construye índice serializable para el cliente.
 ---@param networkId string|nil
 ---@param player IsoPlayer|nil limita el indice a sus zonas autorizadas
@@ -433,79 +648,787 @@ end
 function GlobalStorageSiK.Index.buildRows(networkId, player, freshSnapshotScope, sourceNodeId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
-	local byType = {}
-	local liveIds = {}
-
-	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
-		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
-	for i = 1, #live do
-		local liveEntry = live[i]
-		local nodeId = liveEntry.entry and liveEntry.entry.id or ("node_" .. i)
-		if sourceNodeId == nil or sourceNodeId == nodeId then
-		liveIds[nodeId] = true
-		local node = registry.nodes and registry.nodes[nodeId]
-		local snapshotAvailable = node and node.itemSnapshot
-		if snapshotAvailable then
-			-- El snapshot persistido es la fuente de lectura del terminal. Abrir,
-			-- buscar o editar configuración no debe volver a recorrer miles de
-			-- InventoryItem. Un reescaneo incremental actualiza esta captura y al
-			-- terminar envía el estado fresco solo a observadores de la red.
-			mergeNodeSnapshot(byType, node)
-		else
-			-- Compatibilidad inicial/legacy: solo un nodo que aún no tenga captura
-			-- paga una lectura viva. El siguiente scan lo deja cacheado.
-			mergeLiveContainer(byType, liveEntry.container, nodeId)
-		end
-		end
-	end
-
-	for _, node in pairs(registry.nodes or {}) do
-		local zone = registry.zones and registry.zones[node.zoneId]
-		if zone and zone.networkId == networkId and node.membership ~= "excluded" and node.enabled ~= false and node.offline ~= true
-			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId)) then
-			if not liveIds[node.id] and (sourceNodeId == nil or sourceNodeId == node.id) then
-				mergeNodeSnapshot(byType, node)
+	local key = scopeKeyFor(registry, networkId, player, sourceNodeId)
+	local entry, cacheHit = cacheEntryFor(key)
+	local visible = collectVisibleNodes(registry, networkId, player, sourceNodeId)
+	local changed = {}
+	local stats = { cacheHit = cacheHit, nodesVisited = 0, nodesProcessed = 0,
+		parentsProcessed = 0, snapshotSignaturesComputed = 0 }
+	for nodeId, current in pairs(visible) do
+		stats.nodesVisited = stats.nodesVisited + 1
+		local previous = entry.nodes[nodeId]
+		if not previous or previous.snapshot ~= current.snapshot then
+			stats.snapshotSignaturesComputed = stats.snapshotSignaturesComputed + 1
+			local signature = immutableSnapshotSignature(current.snapshot)
+			if previous and previous.signature == signature then
+				previous.snapshot = current.snapshot
+			else
+				local byParent = contributionForNode(nodeId, current.snapshot)
+				markChangedParents(changed, previous and previous.byParent, byParent)
+				entry.nodes[nodeId] = { snapshot = current.snapshot,
+					signature = signature, byParent = byParent }
+				stats.nodesProcessed = stats.nodesProcessed + 1
 			end
 		end
 	end
-
-	local rows = compactParentRows(GlobalStorageSiK.ItemSnapshot.toRows(byType))
+	local retired = {}
+	for nodeId, previous in pairs(entry.nodes) do
+		if not visible[nodeId] then
+			markChangedParents(changed, previous.byParent, nil)
+			retired[#retired+1] = nodeId
+			stats.nodesProcessed = stats.nodesProcessed + 1
+		end
+	end
+	for i=1,#retired do entry.nodes[retired[i]]=nil end
+	local stamp = classificationStamp()
+	if entry.classificationStamp ~= stamp then
+		for _,cachedNode in pairs(entry.nodes) do
+			for parentKey in pairs(cachedNode.byParent or {}) do changed[parentKey]=true end
+		end
+		entry.classificationStamp = stamp
+		stats.classificationInvalidated = true
+	end
+	rebuildChangedParents(entry, changed, stats)
+	local rows = {}
 	local selectionRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	-- La clasificación se resuelve en el proceso autoritativo al construir el
-	-- snapshot serializable, nunca desde refresh/search/sort del cliente. El
-	-- propio NativeProduct conserva una referencia por fullType/epoch, por lo
-	-- que snapshots posteriores no vuelven a invocar al clasificador.
-	for i = 1, #rows do
-		rows[i].selectionRevision = selectionRevision
-		rows[i].representativeRevision = selectionRevision
-		for j = 1, #(rows[i].variantSummary or {}) do
-			if rows[i].variantSummary[j].representativeItemId then
-				rows[i].variantSummary[j].representativeRevision = selectionRevision
+	local unitEstimate = 0
+	for _, parent in pairs(entry.parents) do
+		rows[#rows + 1] = copyCatalogRow(parent, selectionRevision, sourceNodeId)
+		unitEstimate = unitEstimate + (parent.count or 0)
+	end
+	table.sort(rows, function(a, b)
+		local an, bn = tostring(a.displayName or ""), tostring(b.displayName or "")
+		if an == bn then return tostring(a.rowKey) < tostring(b.rowKey) end
+		return an < bn
+	end)
+	buildCacheBytes = math.max(0, buildCacheBytes - (entry.bytes or 0))
+	entry.revision = selectionRevision
+	entry.bytes = stats.nodesVisited * 160 + #rows * 640 + unitEstimate * 24
+	if entry.bytes <= BUILD_ENTRY_BYTES then
+		buildCacheBytes = buildCacheBytes + entry.bytes; trimBuildCache(key)
+	else buildCache[key] = nil end
+	return rows, stats
+end
+
+-- Incremental catalog builder. It reads only atomically published snapshots;
+-- live containers remain the responsibility of the scanner/reconciler.
+local ASYNC_MAX_NODES = 8192
+local ASYNC_MAX_RETAINED = 32 * 1024 * 1024
+local EMPTY_ASYNC_SNAPSHOT = {}
+local REVISION_KEYS = { selectionRevision=true, representativeRevision=true }
+
+local function beginMergeSort(values, less)
+	return {values=values,less=less,width=1,left=1,phase="prepare"}
+end
+
+local function stepMergeSort(sort)
+	local values, count = sort.values, #sort.values
+	if count < 2 or sort.width >= count then return true end
+	-- A bounded primitive avoids hundreds of cursor transitions for the small
+	-- field lists in every row signature. Larger collections still yield.
+	if sort.width==1 and sort.left==1 and sort.phase=="prepare" and count<=64 then
+		table.sort(values,sort.less);sort.width=count
+		return true
+	end
+	if sort.phase == "prepare" then
+		if sort.left > count then
+			sort.width, sort.left = sort.width * 2, 1
+			return sort.width >= count
+		end
+		sort.middle = math.min(sort.left + sort.width - 1, count)
+		sort.right = math.min(sort.left + sort.width * 2 - 1, count)
+		sort.i, sort.j, sort.temp, sort.copy = sort.left, sort.middle + 1, {}, 1
+		sort.phase = "merge"
+		return false
+	end
+	if sort.phase == "merge" then
+		local takeLeft = sort.j > sort.right or (sort.i <= sort.middle
+			and not sort.less(values[sort.j], values[sort.i]))
+		if takeLeft and sort.i <= sort.middle then
+			sort.temp[#sort.temp+1], sort.i = values[sort.i], sort.i+1
+		elseif sort.j <= sort.right then
+			sort.temp[#sort.temp+1], sort.j = values[sort.j], sort.j+1
+		else sort.phase = "copy" end
+		return false
+	end
+	values[sort.left + sort.copy - 1] = sort.temp[sort.copy]
+	sort.copy = sort.copy + 1
+	if sort.copy > #sort.temp then
+		sort.left, sort.phase = sort.right + 1, "prepare"
+	end
+	return false
+end
+
+local function beginCanonical(value)
+	return {stack={{value=value,depth=0,phase="start"}}, result=nil}
+end
+
+local function finishCanonicalFrame(state, result)
+	table.remove(state.stack)
+	local parent = state.stack[#state.stack]
+	if not parent then state.result=result return end
+	parent.entries[#parent.entries+1] = parent.pendingPrefix .. result
+	parent.pendingPrefix = nil
+end
+
+local function stepCanonical(state)
+	local frame = state.stack[#state.stack]
+	if not frame then return true end
+	if frame.phase == "start" then
+		if type(frame.value) ~= "table" or frame.depth >= 8 then
+			finishCanonicalFrame(state, type(frame.value)=="table" and "t0:" or stableScalar(frame.value))
+			return state.result ~= nil
+		end
+		frame.entries={}
+		frame.iter,frame.iterState,frame.key=pairs(frame.value)
+		frame.phase="enumerate"
+		return false
+	end
+	if frame.phase == "enumerate" then
+		local key, child=frame.iter(frame.iterState,frame.key)
+		frame.key=key
+		if key ~= nil then
+			if not REVISION_KEYS[key] then
+				frame.pendingPrefix=stableScalar(key).."="
+				state.stack[#state.stack+1]={value=child,depth=frame.depth+1,phase="start"}
+			end
+			return false
+		end
+		frame.sort=beginMergeSort(frame.entries,function(a,b) return a<b end)
+		frame.phase="sort"
+		return false
+	end
+	if frame.phase == "sort" then
+		if not stepMergeSort(frame.sort) then return false end
+		frame.parts={}; frame.partIndex=1; frame.phase="parts"
+		return false
+	end
+	if frame.phase == "parts" then
+		local entry=frame.entries[frame.partIndex]
+		if entry then
+			local prefix=frame.partIndex==1 and ("t"..tostring(#frame.entries)..":") or ";"
+			frame.parts[#frame.parts+1]=prefix..entry; frame.partIndex=frame.partIndex+1
+			return false
+		end
+		if #frame.parts==0 then frame.parts[1]="t0:" end
+		frame.joinSource,frame.joinDest,frame.joinIndex=frame.parts,{},1
+		frame.phase="join"
+		return false
+	end
+	if #frame.joinSource <= 1 then
+		finishCanonicalFrame(state,frame.joinSource[1] or "")
+		return state.result ~= nil
+	end
+	local left=frame.joinSource[frame.joinIndex]
+	local right=frame.joinSource[frame.joinIndex+1]
+	if left then
+		frame.joinDest[#frame.joinDest+1]=right and (left..right) or left
+		frame.joinIndex=frame.joinIndex+2
+		return false
+	end
+	frame.joinSource,frame.joinDest,frame.joinIndex=frame.joinDest,{},1
+	return false
+end
+
+local DETAIL_FIELDS = {"rowKey","fullType","displayName","worldSprite","category","subCategory",
+	"gsSubKeys","gsSubKeysStr","learnedRecipeNames","numberOfPages","literatureTitle","mediaIndex",
+	"mediaTitle","mediaCodes","dynamicSignature","dynamicStateKey","dynamicPercent","fluidState",
+	"foodState","shapeFamily","productFamilyKey","shapeKey","conditionSignature","condition",
+	"conditionMax","detailKind","variantKey","totalWeight","totalFluidAmount","totalFluidCapacity",
+	"nativePath","nativeStatus","vanillaKey","effective","categoryEffective","routingIdentity","categorySource"}
+
+local function markAsyncParent(job,key)
+	if not job.affected[key] then job.affected[key]=true; job.stats.affectedParents=job.stats.affectedParents+1 end
+end
+
+local function finalNode(job,nodeId)
+	local changed=job.nodeChanges[nodeId]
+	if changed ~= nil then return changed ~= false and changed or nil end
+	return job.previous and job.previous.nodes and job.previous.nodes[nodeId] or nil
+end
+
+local function startNode(job,captured)
+	local previous=job.previous and job.previous.nodes and job.previous.nodes[captured.id] or nil
+	job.nodeWork={captured=captured,previous=previous,canonical=beginCanonical(captured.snapshot),phase="signature"}
+	job.stats.snapshotSignaturesComputed=job.stats.snapshotSignaturesComputed+1
+end
+
+local function stepNode(job)
+	local work=job.nodeWork
+	if not work then
+		local captured=job.captured[job.nodeIndex]
+		if not captured then job.phase="retire" return end
+		job.stats.nodesVisited=job.stats.nodesVisited+1
+		local previous=job.previous and job.previous.nodes and job.previous.nodes[captured.id] or nil
+		if previous and previous.snapshot==captured.snapshot then
+			job.nodeIndex=job.nodeIndex+1
+			return
+		end
+		startNode(job,captured)
+		return
+	end
+	if work.phase=="signature" then
+		if not stepCanonical(work.canonical) then return end
+		work.signature=work.canonical.result
+		job.stats.retainedBytes=job.stats.retainedBytes+#work.signature*2
+		work.canonical=nil
+		if work.previous and work.previous.signature==work.signature then
+			job.nodeChanges[work.captured.id]={snapshot=work.captured.snapshot,
+				signature=work.signature,byParent=work.previous.byParent}
+			job.nodeWork=nil; job.nodeIndex=job.nodeIndex+1
+			return
+		end
+		work.byParent={}
+		work.iter,work.iterState,work.key=pairs(work.captured.snapshot)
+		work.phase="rows"
+		return
+	end
+	if work.phase=="rows" then
+		if work.detail then
+			local field=DETAIL_FIELDS[work.detailFieldIndex]
+			if field then
+				work.detail[field]=work.detailSource[field]
+				work.detailFieldIndex=work.detailFieldIndex+1; return
+			end
+			work.detail.rowKey=work.detail.rowKey or work.detailGroupKey
+			local parentKey=parentKeyForRow(work.detail)
+			local contribution=work.byParent[parentKey]
+			if not contribution then contribution={rows={}}; work.byParent[parentKey]=contribution end
+			contribution.rows[#contribution.rows+1]=work.detail
+			job.stats.retainedBytes=job.stats.retainedBytes+320+#(work.detail.itemIds or {})*16
+			work.detail,work.detailSource,work.detailGroupKey=nil,nil,nil
+			return
+		end
+		local groupKey,row=work.iter(work.iterState,work.key)
+		work.key=groupKey
+		if groupKey ~= nil then
+			work.detail={nodeId=work.captured.id,count=row.count or 0,itemIds=row.itemIds or {},unitDetails=row.unitDetails}
+			work.detailSource,work.detailGroupKey,work.detailFieldIndex=row,groupKey,1
+			return
+		end
+		work.parentIter,work.parentState,work.parentKey=pairs(work.byParent)
+		work.phase="contributionStart"
+		return
+	end
+	if work.phase=="contributionStart" then
+		local key,contribution=work.parentIter(work.parentState,work.parentKey); work.parentKey=key
+		if key~=nil then
+			work.contribution=contribution; work.contributionCanonical=beginCanonical(contribution.rows)
+			work.phase="contributionSignature"; return
+		end
+		work.compareIter,work.compareState,work.compareKey=pairs(work.previous and work.previous.byParent or {})
+		work.phase="compareOld"; return
+	end
+	if work.phase=="contributionSignature" then
+		if not stepCanonical(work.contributionCanonical) then return end
+		work.contribution.signature=work.contributionCanonical.result
+		job.stats.retainedBytes=job.stats.retainedBytes+#work.contribution.signature
+		work.contribution,work.contributionCanonical=nil,nil; work.phase="contributionStart"; return
+	end
+	if work.phase=="compareOld" then
+		local key,old=work.compareIter(work.compareState,work.compareKey); work.compareKey=key
+		if key~=nil then
+			local replacement=work.byParent[key]
+			if not replacement or replacement.signature~=old.signature then markAsyncParent(job,key) end
+			return
+		end
+		work.compareIter,work.compareState,work.compareKey=pairs(work.byParent)
+		work.phase="compareNew"; return
+	end
+	if work.phase=="compareNew" then
+		local key,replacement=work.compareIter(work.compareState,work.compareKey); work.compareKey=key
+		if key~=nil then
+			local old=work.previous and work.previous.byParent and work.previous.byParent[key]
+			if not old or old.signature~=replacement.signature then markAsyncParent(job,key) end
+			return
+		end
+	end
+	job.nodeChanges[work.captured.id]={snapshot=work.captured.snapshot,signature=work.signature,byParent=work.byParent}
+	job.stats.nodesProcessed=job.stats.nodesProcessed+1
+	job.nodeWork=nil; job.nodeIndex=job.nodeIndex+1
+end
+
+local function newParent(parentKey)
+	return {rowKey=parentKey,count=0,locations={},variantSummary={},totalWeight=0,foodSummary={},
+		totalFluidAmount=0,totalFluidCapacity=0,_variantSeen={},_pathSeen={},_detailKinds={},
+		_fullTypeSeen={},nativePaths={},fullTypes={},_locationSeen={}}
+end
+
+local PARENT_COPY_FIELDS = {"fullType","displayName","worldSprite","category","subCategory","gsSubKeys",
+	"gsSubKeysStr","learnedRecipeNames","numberOfPages","mediaIndex","mediaTitle","mediaCodes"}
+
+local function beginDetail(parent,detail)
+	local state={detail=detail,itemIndex=1,locationIndex=1,phase="aggregate"}
+	if not parent.fullType then state.copyIndex=1; state.phase="copy" end
+	return state
+end
+
+local function aggregateDetail(parent,state)
+	local detail=state.detail
+	parent.count=parent.count+(detail.count or 0)
+	parent.totalWeight=parent.totalWeight+(detail.totalWeight or 0)
+	parent.totalFluidAmount=parent.totalFluidAmount+(detail.totalFluidAmount or 0)
+	parent.totalFluidCapacity=parent.totalFluidCapacity+(detail.totalFluidCapacity or 0)
+	local food=detail.foodState
+	if food then
+		if food.rotten==true then parent.foodSummary.Rotten=true elseif food.fresh==true then parent.foodSummary.Fresh=true
+		elseif food.fresh==false then parent.foodSummary.Stale=true end
+		if food.burnt==true then parent.foodSummary.Burnt=true elseif food.cooked==true then parent.foodSummary.Cooked=true end
+		if food.frozen==true then parent.foodSummary.Frozen=true end
+	end
+	if not parent._fullTypeSeen[detail.fullType] then
+		parent._fullTypeSeen[detail.fullType]=true; parent.fullTypes[#parent.fullTypes+1]=detail.fullType
+	end
+	local kind=detailKindForRow(detail)
+	if kind and not parent._detailKinds[kind] then parent._detailKinds[kind]=true; parent.kindCount=(parent.kindCount or 0)+1 end
+	if detail.nativePath and not parent._pathSeen[detail.nativePath] then
+		parent._pathSeen[detail.nativePath]=true; parent.nativePaths[#parent.nativePaths+1]=detail.nativePath
+	end
+	local variantKey=tostring(detail.fullType).."\31"..tostring(detail.variantKey or detail.rowKey or "fungible")
+	local summary=parent._variantSeen[variantKey]
+	if not summary then
+		summary={key=variantKey,count=0,detailKind=kind,fullType=detail.fullType,displayName=detail.displayName,
+			literatureTitle=detail.literatureTitle,mediaIndex=detail.mediaIndex,mediaTitle=detail.mediaTitle,
+			mediaCodes=detail.mediaCodes,dynamicSignature=detail.dynamicSignature,dynamicStateKey=detail.dynamicStateKey,
+			dynamicPercent=detail.dynamicPercent,fluidState=detail.fluidState,foodState=detail.foodState,
+			shapeFamily=detail.shapeFamily,productFamilyKey=detail.productFamilyKey,shapeKey=detail.shapeKey,
+			condition=detail.condition,conditionMax=detail.conditionMax,nativePath=detail.nativePath}
+		parent._variantSeen[variantKey]=summary; parent.variantSummary[#parent.variantSummary+1]=summary
+	end
+	state.summary=summary
+end
+
+local function betterRepresentative(id,nodeId,currentId,currentNode)
+	return type(id)=="number" and id>=0 and id<math.huge and id==math.floor(id) and type(nodeId)=="string"
+		and (not currentId or id<currentId or (id==currentId and nodeId<currentNode))
+end
+
+local function stepDetail(parent,state)
+	local detail=state.detail
+	if state.phase=="copy" then
+		local field=PARENT_COPY_FIELDS[state.copyIndex]
+		if field then parent[field]=detail[field]; state.copyIndex=state.copyIndex+1; return false end
+		state.phase="aggregate"; return false
+	end
+	if state.phase=="aggregate" then aggregateDetail(parent,state); state.phase="items"; return false end
+	local summary=state.summary
+	local id=(detail.itemIds or {})[state.itemIndex]
+	if id ~= nil then
+		local nodeId=detail.unitNodeIds and detail.unitNodeIds[id] or detail.nodeId
+		if betterRepresentative(id,nodeId,parent.representativeItemId,parent.representativeNodeId) then
+			parent.representativeItemId,parent.representativeNodeId=id,nodeId
+			parent.representativeFullType,parent.representativeDynamicSignature=detail.fullType,detail.dynamicSignature
+		end
+		if betterRepresentative(id,nodeId,summary.representativeItemId,summary.representativeNodeId) then
+			summary.representativeItemId,summary.representativeNodeId=id,nodeId
+			summary.representativeFullType,summary.representativeDynamicSignature=detail.fullType,detail.dynamicSignature
+		end
+		state.itemIndex=state.itemIndex+1
+		return false
+	end
+	local location=(detail.locations or {})[state.locationIndex]
+	if location then
+		local existing=parent._locationSeen[location.nodeId]
+		if existing then existing.count=existing.count+(location.count or 0)
+		elseif location.nodeId and (location.count or 0)>0 then
+			existing={nodeId=location.nodeId,count=location.count}; parent._locationSeen[location.nodeId]=existing
+			parent.locations[#parent.locations+1]=existing
+		end
+		state.locationIndex=state.locationIndex+1
+		return false
+	end
+	if detail.nodeId and #(detail.locations or {})==0 then
+		local existing=parent._locationSeen[detail.nodeId]
+		if existing then existing.count=existing.count+(detail.count or 0)
+		elseif (detail.count or 0)>0 then
+			existing={nodeId=detail.nodeId,count=detail.count}; parent._locationSeen[detail.nodeId]=existing
+			parent.locations[#parent.locations+1]=existing
+		end
+	end
+	summary.count=summary.count+(detail.count or 0)
+	return true
+end
+
+local function classifyAsync(row)
+	local pathCount=#row.nativePaths
+	row.variantCount=#row.variantSummary; row.categoryCount=pathCount; row.locationCount=#row.locations
+	row.cosmeticVariants=#row.fullTypes>1
+	if row.cosmeticVariants then
+		row.fullType=variantFamilyKey(row.fullType); row.displayName=GlobalStorageSiK.I18n.typeDisplayName(row.fullType)
+	end
+	row.expandable=row.count>1
+	row.aggregateAllowed=row.count==1 or (row.kindCount or 0)==0
+		or (row._detailKinds.recorded_media and row.mediaIndex~=nil)
+	row.selectionMode=((row.kindCount or 0)>0 or row.cosmeticVariants) and "exact_group" or "aggregate"
+	row.detailMode=row.cosmeticVariants and (row.kindCount or 0)==0 and "variants" or "instances"
+	row.mixedVariants=pathCount>1
+	if not row.mixedVariants and #row.variantSummary>0 then row.nativePath=row.variantSummary[1].nativePath end
+	if row._detailKinds.recorded_media and row.mediaTitle then row.displayName=row.mediaTitle end
+	if not row.mixedVariants or row.nativePath then
+		local resolution=GlobalStorageSiK.CategoryResolution.resolve(row.fullType,row,nil)
+		row.nativePath=resolution.nativePath
+		row.nativeStatus,row.vanillaKey=resolution.nativeStatus,resolution.vanillaKey
+		row.effective,row.categoryEffective=resolution.effective,resolution.effective
+		row.routingIdentity,row.categorySource=resolution.routingIdentity,resolution.categorySource
+	else
+		row.nativeStatus,row.effective,row.categoryEffective="variants","variants","variants"
+		row.routingIdentity="variants:"..tostring(row.rowKey)
+	end
+	row.itemIds,row.unitDetails,row.unitNodeIds=nil,nil,nil
+	row.kindCount,row._variantSeen,row._pathSeen,row._detailKinds,row._fullTypeSeen,row._locationSeen=nil,nil,nil,nil,nil,nil
+	GlobalStorageSiK.NativeProduct.tracePathSample("buildRows",row.fullType,row.nativePath)
+end
+
+local function beginParent(job,parentKey)
+	job.parentWork={key=parentKey,row=newParent(parentKey),nodeIndex=1,detailIndex=1,phase="gather"}
+end
+
+local ASYNC_SEARCH_FIELDS = {"key","displayName","mediaTitle","dynamicStateKey","nativePath"}
+
+local function stepParent(job)
+	local work=job.parentWork
+	if not work then
+		local key=job.parentKeys[job.parentIndex]
+		if not key then job.phase="materialKeys" return end
+		beginParent(job,key); return
+	end
+	if work.phase=="gather" then
+		if work.detail then
+			if stepDetail(work.row,work.detail) then work.detail=nil; work.detailIndex=work.detailIndex+1 end
+			return
+		end
+		local captured=job.captured[work.nodeIndex]
+		if not captured then
+			if not work.hadDetail then
+				job.parentChanges[work.key]=false
+				job.stats.parentsProcessed=job.stats.parentsProcessed+1
+				job.parentWork=nil; job.parentIndex=job.parentIndex+1
+				return
+			end
+			work.pathSort=beginMergeSort(work.row.nativePaths,function(a,b)return a<b end)
+			work.fullSort=beginMergeSort(work.row.fullTypes,function(a,b)return a<b end)
+			work.phase="sortPaths"; return
+		end
+		local node=finalNode(job,captured.id)
+		local contribution=node and node.byParent and node.byParent[work.key]
+		local detail=contribution and contribution.rows[work.detailIndex]
+		if detail then work.hadDetail=true; work.detail=beginDetail(work.row,detail)
+		else work.nodeIndex=work.nodeIndex+1; work.detailIndex=1 end
+		return
+	end
+	if work.phase=="sortPaths" then
+		if stepMergeSort(work.pathSort) then work.phase="sortTypes" end; return
+	end
+	if work.phase=="sortTypes" then
+		if stepMergeSort(work.fullSort) then work.searchIndex=1; work.searchParts={}; work.phase="search" end; return
+	end
+	if work.phase=="search" then
+		local summary=work.row.variantSummary[work.searchIndex]
+		if summary then
+			work.searchField=work.searchField or 1
+			local field=ASYNC_SEARCH_FIELDS[work.searchField]
+			if field then
+				local value=summary[field]
+				if value then
+					local prefix=#work.searchParts==0 and "" or " "
+					work.searchParts[#work.searchParts+1]=prefix..tostring(value)
+				end
+				work.searchField=work.searchField+1; return
+			end
+			local icon=summary.foodState and summary.foodState.iconVariant
+			if work.searchIndex==1 then work.foodIcon=icon elseif icon~=work.foodIcon then work.foodAgree=false end
+			if work.foodAgree==nil then work.foodAgree=true end
+			work.searchIndex=work.searchIndex+1; work.searchField=1; return
+		end
+		if #work.searchParts==0 then work.searchParts[1]="" end
+		work.joinSource,work.joinDest,work.joinIndex=work.searchParts,{},1
+		work.phase="searchJoin"; return
+	end
+	if work.phase=="searchJoin" then
+		if #work.joinSource>1 then
+			local left=work.joinSource[work.joinIndex]
+			local right=work.joinSource[work.joinIndex+1]
+			if left then
+				work.joinDest[#work.joinDest+1]=right and (left..right) or left
+				work.joinIndex=work.joinIndex+2; return
+			end
+			work.joinSource,work.joinDest,work.joinIndex=work.joinDest,{},1; return
+		end
+		work.row.variantSearchText=work.joinSource[1] or ""
+		work.row.foodIconVariant=work.foodAgree and work.foodIcon or nil
+		if classificationStamp()~=job.classificationStamp then
+			job.error={stage="classification",cause="catalog_stale_classification"}; return
+		end
+		classifyAsync(work.row)
+		work.canonical=beginCanonical(work.row); work.phase="signature"; return
+	end
+	if not stepCanonical(work.canonical) then return end
+	rowSignatureCache[work.row]=work.canonical.result
+	job.parentChanges[work.key]=work.row
+	job.stats.parentsProcessed=job.stats.parentsProcessed+1
+	job.stats.retainedBytes=job.stats.retainedBytes+640+(work.row.count or 0)*24
+	job.parentWork=nil; job.parentIndex=job.parentIndex+1
+end
+
+local function stepMaterial(job)
+	local work=job.materialWork
+	if not work then
+		local key=job.materialKeys[job.materialIndex]
+		if not key then
+			job.rowSort=beginMergeSort(job.rows,function(a,b)
+				local an,bn=tostring(a.displayName or ""),tostring(b.displayName or "")
+				return an==bn and tostring(a.rowKey)<tostring(b.rowKey) or an<bn
+			end)
+			job.phase="sortRows"; return
+		end
+		local parent=job.parentChanges[key]
+		if parent==nil then parent=job.previous and job.previous.parents and job.previous.parents[key] end
+		if parent==false or not parent then job.materialIndex=job.materialIndex+1; return end
+		local iter,state,key0=pairs(parent)
+		job.materialWork={parent=parent,row={},iter=iter,iterState=state,key=key0,phase="fields"}
+		return
+	end
+	if work.phase=="fields" then
+		local key,value=work.iter(work.iterState,work.key); work.key=key
+		if key~=nil then
+			if key~="variantSummary" then work.row[key]=value end
+			return
+		end
+		work.row.variantSummary={}; work.variantIndex=1; work.phase="variants"; return
+	end
+	if work.phase=="variants" then
+		local variant=work.parent.variantSummary and work.parent.variantSummary[work.variantIndex]
+		if variant then
+			work.variantSource,work.variantCopy=variant,{}
+			work.variantIter,work.variantState,work.variantKey=pairs(variant)
+			work.phase="variantFields"; return
+		end
+		work.row.selectionRevision,work.row.representativeRevision=job.revision,job.revision
+		work.row.sourceNodeId=job.sourceNodeId
+		local signature=rowSignatureCache[work.parent]
+		if job.sourceNodeId~=nil then
+			local scoped=scopedRowSignatureCache[work.parent] or {}
+			scopedRowSignatureCache[work.parent]=scoped; signature=scoped[job.sourceNodeId]
+			if not signature then work.canonical=beginCanonical(work.row); work.phase="signature"; return end
+		end
+		rowSignatureCache[work.row]=signature
+		job.rows[#job.rows+1]=work.row
+		job.stats.outputUnits=job.stats.outputUnits+(work.row.count or 0)
+		job.stats.retainedBytes=job.stats.retainedBytes+640
+		job.materialWork=nil; job.materialIndex=job.materialIndex+1
+		return
+	end
+	if work.phase=="variantFields" then
+		local key,value=work.variantIter(work.variantState,work.variantKey); work.variantKey=key
+		if key~=nil then work.variantCopy[key]=value; return end
+		if work.variantCopy.representativeItemId then work.variantCopy.representativeRevision=job.revision end
+		work.row.variantSummary[work.variantIndex]=work.variantCopy
+		work.variantIndex=work.variantIndex+1; work.phase="variants"; return
+	end
+	if not stepCanonical(work.canonical) then return end
+	local scoped=scopedRowSignatureCache[work.parent]
+	scoped[job.sourceNodeId]=work.canonical.result
+	rowSignatureCache[work.row]=work.canonical.result
+	job.rows[#job.rows+1]=work.row
+	job.stats.outputUnits=job.stats.outputUnits+(work.row.count or 0)
+	job.stats.retainedBytes=job.stats.retainedBytes+640+#work.canonical.result
+	job.materialWork=nil; job.materialIndex=job.materialIndex+1
+end
+
+function GlobalStorageSiK.Index.beginCatalogBuild(networkId,player,sourceNodeId,inventoryRevision)
+	local registry=GlobalStorageSiK.Zones.getRegistry()
+	networkId=networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
+	buildGeneration=buildGeneration+1
+	local job={networkId=networkId,player=player,sourceNodeId=sourceNodeId,
+		revision=tonumber(inventoryRevision) or GlobalStorageSiK.Index.getInventoryRevision(networkId),
+		classificationStamp=classificationStamp(),generation=buildGeneration,captured={},visible={},
+		nodeChanges={},parentChanges={},affected={},nodeIndex=1,phase="nodes",rows={},cancelled=false,
+		stats={nodesVisited=0,nodesProcessed=0,parentsProcessed=0,snapshotSignaturesComputed=0,
+			affectedParents=0,workTotal=0,workLastStep=0,sortWork=0,retainedBytes=1024,
+			outputUnits=0,beginNodesCaptured=0}}
+	job.cacheKey=scopeKeyFor(registry,networkId,player,sourceNodeId)
+	job.previous=buildCache[job.cacheKey]
+	local scanned=0
+	for nodeId,node in pairs(registry.nodes or {}) do
+		scanned=scanned+1
+		if scanned>ASYNC_MAX_NODES then
+			job.error={stage="begin",cause="catalog_nodes_limit"}; break
+		end
+		local zone=registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId==networkId and node.membership~="excluded" and node.enabled~=false
+			and node.offline~=true and (sourceNodeId==nil or sourceNodeId==node.id)
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player,networkId,node.zoneId)) then
+			if #job.captured>=ASYNC_MAX_NODES then
+				job.error={stage="begin",cause="catalog_nodes_limit"}; break
+			end
+			local id=node.id or nodeId
+			job.captured[#job.captured+1]={id=id,zoneId=node.zoneId,snapshot=node.itemSnapshot or EMPTY_ASYNC_SNAPSHOT}
+			job.visible[id]=true
+		end
+	end
+	job.stats.beginNodesCaptured=#job.captured
+	job.stats.beginNodesScanned=scanned
+	job.stats.retainedBytes=job.stats.retainedBytes+#job.captured*96
+	return job
+end
+
+function GlobalStorageSiK.Index.cancelCatalogBuild(job)
+	if type(job)=="table" then
+		job.cancelled=true; job.nodeWork=nil; job.parentWork=nil; job.materialWork=nil
+		job.rows=nil; job.captured=nil; job.visible=nil; job.nodeChanges=nil; job.parentChanges=nil
+		return true
+	end
+	return false
+end
+
+local function advanceAsync(job)
+	if job.phase=="nodes" then stepNode(job)
+	elseif job.phase=="retire" then
+		if job.retireParentIter then
+			local parentKey=job.retireParentIter(job.retireParentState,job.retireParentKey)
+			job.retireParentKey=parentKey
+			if parentKey~=nil then markAsyncParent(job,parentKey)
+			else job.retireParentIter,job.retireParentState,job.retireParentKey=nil,nil,nil end
+			return
+		end
+		if not job.retireIter then
+			local nodes=job.previous and job.previous.nodes or {}
+			job.retireIter,job.retireState,job.retireKey=pairs(nodes)
+		end
+		local key,node=job.retireIter(job.retireState,job.retireKey); job.retireKey=key
+		if key~=nil then
+			if not job.visible[key] then
+				job.nodeChanges[key]=false
+				job.retireParentIter,job.retireParentState,job.retireParentKey=pairs(node.byParent or {})
+				job.stats.nodesProcessed=job.stats.nodesProcessed+1
+			end
+		else
+			if not job.previous or job.previous.classificationStamp~=job.classificationStamp then
+				job.stats.classificationInvalidated=true
+				job.phase="invalidateParents"
+				job.phaseIter,job.phaseState,job.phaseKey=pairs(job.previous and job.previous.parents or {})
+			else
+				job.phase="collectParentKeys"
+				job.phaseIter,job.phaseState,job.phaseKey=pairs(job.affected)
+				job.parentKeys={}
 			end
 		end
-		rows[i].sourceNodeId = sourceNodeId
-		local resolution = nil
-		if not rows[i].mixedVariants or rows[i].nativePath then
-			resolution = GlobalStorageSiK.CategoryResolution.resolve(rows[i].fullType, rows[i], nil)
-			rows[i].nativePath = resolution.nativePath
-			rows[i].nativeStatus = resolution.nativeStatus
-			rows[i].vanillaKey = resolution.vanillaKey
-			rows[i].effective = resolution.effective
-			rows[i].categoryEffective = resolution.effective
-			rows[i].routingIdentity = resolution.routingIdentity
-			rows[i].categorySource = resolution.categorySource
+	elseif job.phase=="invalidateParents" then
+		local key=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then markAsyncParent(job,key)
 		else
-			rows[i].nativeStatus = "variants"
-			rows[i].effective = "variants"
-			rows[i].categoryEffective = "variants"
-			rows[i].routingIdentity = "variants:" .. tostring(rows[i].rowKey)
+			job.phase="collectParentKeys"; job.parentKeys={}
+			job.phaseIter,job.phaseState,job.phaseKey=pairs(job.affected)
 		end
-		-- El snapshot ordinario nunca transporta todos los IDs físicos.
-		rows[i].itemIds = nil
-		rows[i].unitNodeIds = nil
-		GlobalStorageSiK.NativeProduct.tracePathSample("buildRows", rows[i].fullType, rows[i].nativePath)
+	elseif job.phase=="collectParentKeys" then
+		local key=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then job.parentKeys[#job.parentKeys+1]=key
+		else job.parentIndex=1; job.phase="parents" end
+	elseif job.phase=="parents" then stepParent(job)
+	elseif job.phase=="materialKeys" then
+		job.materialSet={}; job.materialKeys={}
+		job.phaseIter,job.phaseState,job.phaseKey=pairs(job.previous and job.previous.parents or {})
+		job.phase="materialPrevious"
+	elseif job.phase=="materialPrevious" then
+		local key=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then job.materialSet[key]=true
+		else
+			job.phaseIter,job.phaseState,job.phaseKey=pairs(job.parentChanges)
+			job.phase="materialChanges"
+		end
+	elseif job.phase=="materialChanges" then
+		local key,value=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then job.materialSet[key]=value~=false or nil
+		else
+			job.phaseIter,job.phaseState,job.phaseKey=pairs(job.materialSet)
+			job.phase="materialCollect"
+		end
+	elseif job.phase=="materialCollect" then
+		local key=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then job.materialKeys[#job.materialKeys+1]=key
+		else job.materialSet=nil; job.materialIndex=1; job.phase="material" end
+	elseif job.phase=="material" then stepMaterial(job)
+	elseif job.phase=="sortRows" then
+		job.stats.sortWork=job.stats.sortWork+1
+		if stepMergeSort(job.rowSort) then
+			job.commitEntry={nodes={},parents={},classificationStamp=job.classificationStamp,
+				revision=job.revision,generation=job.generation}
+			job.commitIndex=1; job.phase="commitNodes"
+		end
+	elseif job.phase=="commitNodes" then
+		local captured=job.captured[job.commitIndex]
+		if captured then
+			job.commitEntry.nodes[captured.id]=finalNode(job,captured.id); job.commitIndex=job.commitIndex+1
+		else job.commitIndex=1; job.phase="commitParents" end
+	elseif job.phase=="commitParents" then
+		local key=job.materialKeys[job.commitIndex]
+		if key then
+			local value=job.parentChanges[key]
+			if value==nil then value=job.previous and job.previous.parents and job.previous.parents[key] end
+			if value and value~=false then job.commitEntry.parents[key]=value end
+			job.commitIndex=job.commitIndex+1
+		else
+			local bytes=#job.captured*160+#job.rows*640+job.stats.outputUnits*24
+			job.stats.cacheBytes=bytes; job.commitEntry.bytes=bytes
+			if bytes>BUILD_ENTRY_BYTES then job.error={stage="cache",cause="catalog_budget"}; return end
+			job.phase="commitPublish"
+		end
+	elseif job.phase=="commitPublish" then
+		local current=buildCache[job.cacheKey]
+		if classificationStamp()~=job.classificationStamp then
+			job.error={stage="classification",cause="catalog_stale_classification"}; return
+		end
+		local sameClass=not current or current.classificationStamp==job.classificationStamp
+		local currentRevision=tonumber(current and current.revision) or -1
+		local publish=sameClass and (not current
+			or currentRevision<job.revision or (currentRevision==job.revision and (current.generation or 0)<=job.generation))
+		if publish then
+			buildCacheClock=buildCacheClock+1; job.commitEntry.usedAt=buildCacheClock
+			buildCacheBytes=math.max(0,buildCacheBytes-(current and current.bytes or 0))+job.commitEntry.bytes
+			buildCache[job.cacheKey]=job.commitEntry
+		end
+		job.trimProtected=publish and job.cacheKey or nil; job.trimCount=0
+		job.phaseIter,job.phaseState,job.phaseKey=pairs(buildCache)
+		job.phase="trimScan"
+	elseif job.phase=="trimScan" then
+		local key,entry=job.phaseIter(job.phaseState,job.phaseKey); job.phaseKey=key
+		if key~=nil then
+			job.trimCount=job.trimCount+1
+			if key~=job.trimProtected and (not job.trimOldestAt or entry.usedAt<job.trimOldestAt) then
+				job.trimOldestKey,job.trimOldestAt=key,entry.usedAt
+			end
+		else
+			if (buildCacheBytes>BUILD_CACHE_BYTES or job.trimCount>BUILD_CACHE_LIMIT) and job.trimOldestKey then
+				local old=buildCache[job.trimOldestKey]
+				buildCacheBytes=math.max(0,buildCacheBytes-(old and old.bytes or 0)); buildCache[job.trimOldestKey]=nil
+				job.trimCount,job.trimOldestKey,job.trimOldestAt=0,nil,nil
+				job.phaseIter,job.phaseState,job.phaseKey=pairs(buildCache)
+			else job.done=true end
+		end
 	end
-	return rows
+end
+
+function GlobalStorageSiK.Index.stepCatalogBuild(job,maxWork,maxMillis)
+	if type(job)~="table" then return true,nil,nil end
+	if job.cancelled then
+		job.error=job.error or {stage="cancel",cause="catalog_cancelled"}
+		if job.stats then job.stats.workLastStep=0 end
+		return true,nil,job.stats
+	end
+	if job.done or job.error then return true,job.done and job.rows or nil,job.stats end
+	local budget=math.max(1,math.floor(tonumber(maxWork) or 32))
+	local millis=tonumber(maxMillis); if millis==nil then millis=4 end
+	local started=type(getTimestampMs)=="function" and getTimestampMs() or 0
+	local work=0
+	while not job.done and not job.error and work<budget do
+		if millis>0 and type(getTimestampMs)=="function" and getTimestampMs()-started>=millis then break end
+		advanceAsync(job); work=work+1
+		if job.stats.retainedBytes>ASYNC_MAX_RETAINED then
+			job.error={stage="memory",cause="catalog_budget"}
+		end
+	end
+	job.stats.workLastStep=work; job.stats.workTotal=job.stats.workTotal+work
+	return job.done or job.error~=nil,job.done and job.rows or nil,job.stats
 end
 
 ---@param networkId string
@@ -518,6 +1441,7 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 	page = math.max(1, math.floor(tonumber(page) or 1))
 	pageSize = math.max(1, math.min(25, math.floor(tonumber(pageSize) or 15)))
 	local details = {}
+	local seenPhysicalIds = {}
 	local hasStateful = false
 	local detailFullTypes = {}
 	local registry = GlobalStorageSiK.Zones.getRegistry()
@@ -534,6 +1458,13 @@ function GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, page,
 					detailFullTypes[row.fullType] = true
 					for i = 1, #(row.itemIds or {}) do
 						local itemId = row.itemIds[i]
+						if seenPhysicalIds[itemId] then
+							if GlobalStorageSiK.Log then GlobalStorageSiK.Log.warn("ItemIdentity",
+								"duplicate_physical_id network=" .. tostring(networkId) .. " source=itemDetails") end
+							return {rowKey=rowKey, page=page, pageSize=pageSize,
+								items={}, reason="item_id_duplicate", invalidIdentity=true}
+						end
+						seenPhysicalIds[itemId] = true
 						local unit = row.unitDetails and row.unitDetails[itemId] or nil
 							details[#details + 1] = {
 							rowKey = rowKey .. "\31item:" .. tostring(itemId),
@@ -736,19 +1667,7 @@ function GlobalStorageSiK.Index.syncLiveSnapshots(networkId)
 	end
 end
 
--- Serializa solo el estado fisico que determina el catalogo. No incluye
--- nombres traducidos, categorias de presentacion ni ninguna referencia Java.
--- La cadena puede ser grande, pero solo se construye al principio y al final
--- de un escaneo fisico, y permite una comparacion exacta sin colisiones.
-local CONTENT_FIELDS = {
-	"fullType", "worldSprite", "count", "mediaIndex", "mediaTitle", "mediaCodes",
-	"dynamicSignature", "dynamicStateKey", "dynamicPercent", "fluidState", "foodState", "foodIconVariant",
-	"shapeFamily", "productFamilyKey", "shapeKey", "conditionSignature", "condition",
-	"conditionMax", "variantKey", "totalWeight", "totalFluidAmount", "totalFluidCapacity",
-	"itemIds", "unitDetails",
-}
-
-local function stableScalar(value)
+stableScalar = function(value)
 	local kind = type(value)
 	if kind == "nil" then return "n" end
 	if kind == "boolean" then return value and "b1" or "b0" end
@@ -757,37 +1676,34 @@ local function stableScalar(value)
 	return "s" .. tostring(#text) .. ":" .. text
 end
 
-local function stableValue(value, depth)
+-- Delta de catálogo: incluye recursivamente todo campo observable de cada fila.
+-- Solo los sellos de revisión se excluyen porque cambian sin alterar contenido.
+local REVISION_STAMPS = { selectionRevision = true, representativeRevision = true }
+local function stableVisibleValue(value, depth)
 	if type(value) ~= "table" then return stableScalar(value) end
-	if depth >= 6 then return "t0:" end
+	if depth >= 8 then return "t0:" end
 	local entries = {}
 	for key, child in pairs(value) do
-		local encodedKey = stableScalar(key)
-		entries[#entries + 1] = encodedKey .. "=" .. stableValue(child, depth + 1)
+		if not REVISION_STAMPS[key] then
+			entries[#entries + 1] = stableScalar(key) .. "=" .. stableVisibleValue(child, depth + 1)
+		end
 	end
 	table.sort(entries)
 	return "t" .. tostring(#entries) .. ":" .. table.concat(entries, ";")
 end
 
-local function stableSet(value)
-	if type(value) ~= "table" then return stableScalar(value) end
-	local entries = {}
-	for _, child in pairs(value) do entries[#entries + 1] = stableValue(child, 0) end
-	table.sort(entries)
-	return "u" .. tostring(#entries) .. ":" .. table.concat(entries, ";")
+computeRowSignature = function(row) return stableVisibleValue(row, 0) end
+function GlobalStorageSiK.Index.rowSignature(row)
+	if type(row) ~= "table" then return nil, "catalog_schema" end
+	local signature = rowSignatureCache[row]
+	if not signature then signature=computeRowSignature(row); rowSignatureCache[row]=signature end
+	return signature
 end
 
 function GlobalStorageSiK.Index.snapshotSignature(snapshot)
 	local rows = {}
 	for _, row in pairs(snapshot or {}) do
-		local encoded = { stableScalar(row.rowKey or row.fullType) }
-		for i = 1, #CONTENT_FIELDS do
-			local field = CONTENT_FIELDS[i]
-			local value = (field == "itemIds" or field == "mediaCodes")
-				and stableSet(row[field]) or stableValue(row[field], 0)
-			encoded[#encoded + 1] = field .. "=" .. value
-		end
-		rows[#rows + 1] = table.concat(encoded, ";")
+		rows[#rows + 1] = stableVisibleValue(row, 0)
 	end
 	table.sort(rows)
 	return table.concat(rows, ";")
@@ -813,20 +1729,7 @@ function GlobalStorageSiK.Index.contentSignature(networkId)
 		local node = nodes[i]
 		parts[#parts + 1] = ";node=" .. stableScalar(node.id)
 		parts[#parts + 1] = ";zone=" .. stableScalar(node.zoneId)
-		local rows = {}
-		for _, row in pairs(node.itemSnapshot or {}) do
-			local encoded = { "row=", stableScalar(row.rowKey or row.fullType) }
-			for k = 1, #CONTENT_FIELDS do
-				local field = CONTENT_FIELDS[k]
-				local value = (field == "itemIds" or field == "mediaCodes")
-					and stableSet(row[field]) or stableValue(row[field], 0)
-				encoded[#encoded + 1] = ";" .. field .. "=" .. value
-			end
-			rows[#rows + 1] = table.concat(encoded)
-		end
-		table.sort(rows)
-		parts[#parts + 1] = ";rows=" .. tostring(#rows)
-		for j = 1, #rows do parts[#parts + 1] = ";" .. rows[j] end
+		parts[#parts + 1] = ";snapshot=" .. immutableSnapshotSignature(node.itemSnapshot)
 	end
 	return table.concat(parts)
 end
@@ -922,6 +1825,11 @@ function GlobalStorageSiK.Index.resolveExactGroup(networkId, player, rowKey, sel
 					end
 					for i = 1, #(row.itemIds or {}) do
 						local itemId = tonumber(row.itemIds[i])
+						if itemId and seen[itemId] then
+							if GlobalStorageSiK.Log then GlobalStorageSiK.Log.warn("ItemIdentity",
+								"duplicate_physical_id network=" .. tostring(networkId) .. " source=exactGroup") end
+							return nil, "item_id_duplicate"
+						end
 						if itemId and itemId >= 0 and itemId == math.floor(itemId) and not seen[itemId] then
 							seen[itemId] = true
 							refs[#refs + 1] = { itemId = itemId, fullType = row.fullType }

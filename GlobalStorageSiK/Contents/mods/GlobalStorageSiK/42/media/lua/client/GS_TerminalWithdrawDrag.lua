@@ -193,6 +193,11 @@ end
 ---@param sourceWidget ISPanel|nil
 function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRows, visualRows, sourceWidget)
 	if not rowData or not rowData.fullType then return false end
+	local numericAmount = tonumber(amount)
+	if numericAmount == nil then numericAmount = 1 end
+	if numericAmount ~= numericAmount or numericAmount == math.huge
+		or numericAmount == -math.huge or numericAmount < 0
+		or numericAmount ~= math.floor(numericAmount) then return false end
 	-- Un nuevo drag nunca hereda ghost/captura/Escape de una selección anterior.
 	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel("replaced") end
 	payloadRows = normalizePayloadRows(payloadRows, rowData)
@@ -202,7 +207,7 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 		payloadRows = payloadRows,
 		visualRows = visualRows,
 		rowData = rowData,
-		amount = math.max(1, math.floor(tonumber(amount) or 1)),
+		amount = numericAmount,
                 sourceWidget = sourceWidget,
                 captureOwner = captureOwner,
 		playerNum = (captureOwner and captureOwner.playerNum) or 0,

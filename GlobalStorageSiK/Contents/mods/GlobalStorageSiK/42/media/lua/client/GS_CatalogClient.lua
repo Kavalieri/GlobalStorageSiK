@@ -6,6 +6,7 @@ local slots = {}
 local context
 local TIMEOUT_MS = 60000
 local IDLE_MS = 10000
+local PLAYER_BYTES, GLOBAL_BYTES = 32*1024*1024, 64*1024*1024
 local function now() return getTimestampMs and getTimestampMs() or 0 end
 function Client.configure(value) context = value end
 function Client.clear(playerNum, sequence)
@@ -24,18 +25,41 @@ local function slotFor(payload)
 		or not context.current(payload.playerNum, payload.openSeq) then return end
 	return slot
 end
-local function fail(playerNum, reason)
+local function fail(playerNum, reason, serverError)
 	local slot = slots[playerNum]
 	if not slot then return end
-	slots[playerNum] = nil -- Fence before callbacks/close to avoid reentrancy.
+	local recoverable = slot.applied == true and reason ~= "catalog_access_changed"
+	local rejected = slot.batch and slot.batch.meta
+	if recoverable then slot.batch = nil else slots[playerNum] = nil end
+	if rejected and not serverError and reason ~= "catalog_access_changed" and context.reject then context.reject(rejected, reason) end
+	if recoverable and slots[playerNum] ~= slot then return end
 	if GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.debug("CatalogTransport", "failed", "player=" .. tostring(playerNum)
 			.. " openSeq=" .. tostring(slot.sequence) .. " reason=" .. tostring(reason))
 	end
-	context.failure(playerNum, slot.sequence, reason, slot.confirmed ~= nil)
+	context.failure(playerNum, slot.sequence, reason, slot.confirmed ~= nil, recoverable)
+	if recoverable and not rejected and not serverError and slots[playerNum] == slot and not slot.recoveryUsed then
+		slot.recoveryUsed = true
+		local recover = context.recover or context.stale
+		if recover then recover(rejected or slot.confirmed, reason) end
+	end
+end
+local function consumerFailure(playerNum, slot, meta, ok, result, reason, stage)
+	if slots[playerNum] ~= slot then return end
+	local cause = ok and reason or result
+	if type(cause) == "table" then ok = cause.rejected == true or ok; stage, cause = cause.stage or stage, cause.cause end
+	if GlobalStorageSiK.Log then
+		GlobalStorageSiK.Log.debug("CatalogTransport", "consumer_failed",
+			"stage=" .. tostring(stage or "terminalState") .. " outcome=" .. (ok and "rejected" or "exception")
+			.. " cause=" .. tostring(cause or "false"):gsub("[%c]", " "):sub(1,240)
+			.. " batch=" .. tostring(meta.batchId) .. " openSeq=" .. tostring(slot.sequence)
+			.. " revision=" .. tostring(meta.inventoryRevision) .. " scope=" .. tostring(meta.catalogScope):sub(1,120)
+			.. " source=" .. tostring(meta.catalogSource))
+	end
+	fail(playerNum, cause == "catalog_access_changed" and cause or "catalog_apply")
 end
 local function same(a, b)
-	return a.batchId == b.batchId and a.networkId == b.networkId and a.openSeq == b.openSeq
+	return a.protocol == b.protocol and a.batchId == b.batchId and a.networkId == b.networkId and a.openSeq == b.openSeq
 		and a.playerNum == b.playerNum and a.inventoryRevision == b.inventoryRevision
 		and a.catalogScope == b.catalogScope and a.total == b.total
 		and a.tokenCount == b.tokenCount and a.totalBytes == b.totalBytes
@@ -47,29 +71,47 @@ local function applyReady(playerNum, slot)
 	if batch.bytes ~= batch.meta.totalBytes or batch.tokens ~= batch.meta.tokenCount then
 		fail(playerNum, "catalog_incomplete"); return
 	end
-	local decodeStarted = now()
-	local value, reason = Codec.decode(batch.parts, batch.meta.tokenCount)
-	if not value then fail(playerNum, reason); return end
+	-- Receiving the last fragment only schedules decode. The existing update
+	-- watcher performs bounded codec work; no callback decodes a whole catalog.
+	if not batch.decoded then
+		if not batch.decoder then
+			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount)
+			if not decoder then fail(playerNum, reason); return end
+			batch.decoder, batch.decodeStarted = decoder, now()
+		end
+		return
+	end
+	local decodeStarted = batch.decodeStarted
+	local value = batch.decoded
 	if value.networkId ~= batch.meta.networkId or value.openSeq ~= batch.meta.openSeq
 		or value.playerNum ~= playerNum or value.inventoryRevision ~= batch.meta.inventoryRevision
 		or value.catalogScope ~= batch.meta.catalogScope then fail(playerNum, "catalog_schema"); return end
-	if value.notModified ~= true and (type(value.items) ~= "table"
+	if value.catalogDetail ~= true and value.catalogDelta ~= true and value.notModified ~= true and (type(value.items) ~= "table"
 		or value.itemTypeCount ~= #value.items) then fail(playerNum, "catalog_incomplete"); return end
 	-- A queued refresh may replace the first snapshot before its receipt. Only
 	-- the client's live opening intent decides whether completion opens a view.
-	value.openUi = context.pending(playerNum) == true
+	value.openUi = value.catalogDetail ~= true and context.pending(playerNum) == true
 	value.accessProbeId = nil
 	if not context.allowed(slot.confirmed) then fail(playerNum, "catalog_access_changed"); return end
 	if value.notModified == true and not context.hasCache(value) then
 		fail(playerNum, "catalog_cache_miss"); return
 	end
-	slot.batch = nil
-	slot.completedRevision = value.inventoryRevision
-	local ok, accepted = pcall(context.apply, value)
+	local consumer = value.catalogDetail == true and context.applyDetail
+		or value.catalogDelta == true and context.applyDelta or context.apply
+	local ok, accepted, applyReason, stage = pcall(consumer, value)
 	-- Consumer callbacks may close/reopen synchronously (including SP).
 	-- Completion of the old request cannot fail or acknowledge its replacement.
 	if slots[playerNum] ~= slot then return end
-	if not ok or accepted == false then fail(playerNum, "catalog_apply"); return end
+	if not ok or accepted == false then
+		consumerFailure(playerNum, slot, batch.meta, ok, accepted, applyReason, stage)
+		return
+	end
+	slot.batch = nil
+	if value.catalogDetail ~= true then
+		slot.completedRevision, slot.applied = value.inventoryRevision, true
+		slot.recoveryUsed = nil
+		if value.catalogDelta ~= true then slot.retainedBytes = batch.bytes*2 end
+	end
 	if GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.debug("CatalogTransport", "applied", "player=" .. tostring(playerNum)
 			.. " openSeq=" .. tostring(slot.sequence) .. " batch=" .. tostring(batch.meta.batchId)
@@ -84,17 +126,28 @@ function Client.ack(payload)
 	if type(payload.networkId) ~= "string" or not context.allowed(payload) then
 		fail(payload.playerNum, "catalog_access_changed"); return
 	end
-	if not context.confirm(payload) then return end
+	local confirmed,accepted,reason=pcall(context.confirm,payload)
+	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
+	if accepted == false then
+		if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport","consumer_failed",
+			"stage=catalogAccessConfirm outcome=rejected cause=" .. tostring(reason or "false")) end
+		fail(payload.playerNum,"catalog_access_changed"); return
+	end
+	if slots[payload.playerNum] ~= slot then return end
 	slot.confirmed = payload
 	slot.started = now()
-	if context.progress then context.progress(payload, 0, nil) end
+	if context.hasCache(payload) then slot.applied = true end
+	if context.progress then
+		local ok, accepted, reason, stage = pcall(context.progress, payload, 0, nil)
+		if not ok or accepted == false then consumerFailure(payload.playerNum, slot, payload, ok, accepted, reason, stage or "catalogPreview"); return end
+	end
 	if slots[payload.playerNum] ~= slot then return end
 	applyReady(payload.playerNum, slot)
 end
 function Client.receive(payload)
 	local slot = slotFor(payload)
 	if not slot then return end
-	if payload.protocol ~= 1 or not Codec.integer(payload.batchId, 1, 9007199254740991)
+	if (payload.protocol ~= 1 and payload.protocol ~= 2) or not Codec.integer(payload.batchId, 1, 9007199254740991)
 		or not Codec.integer(payload.total, 1, Codec.MAX_CHUNKS)
 		or not Codec.integer(payload.part, 1, payload.total)
 		or not Codec.integer(payload.tokenCount, 1, Codec.MAX_TOKENS)
@@ -109,7 +162,9 @@ function Client.receive(payload)
 	if not size or size + 128 > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
 	if payload.batchId == slot.latest and not slot.batch then return end -- completed duplicate
 	if payload.batchId > slot.latest then
-		if slot.batch and payload.inventoryRevision < slot.batch.meta.inventoryRevision then return end
+		-- A later producer job cannot evict an incomplete accepted batch. Only
+		-- completion, failure or an explicit session fence may replace it.
+		if slot.batch then return end
 		slot.latest = payload.batchId
 		slot.batch = {meta=payload, parts={}, count=0, bytes=0, tokens=0, started=now(), progress=now()}
 	end
@@ -135,6 +190,19 @@ function Client.receive(payload)
 	batch.parts[payload.part] = payload.data
 	batch.count, batch.tokens = batch.count + 1, batch.tokens + count
 	batch.bytes = batch.bytes + (Codec.size(payload.data) or Codec.MAX_BATCH_BYTES + 1)
+	local reservation = batch.bytes*2 + batch.tokens*64 + Codec.STRING_CACHE_BYTES + (slot.retainedBytes or 0)
+	local globalReservation = reservation
+	for n=0,3 do
+		local other = slots[n]
+		if other and other ~= slot then
+			local pending = other.batch
+			globalReservation = globalReservation + (other.retainedBytes or 0)
+				+ (pending and (pending.bytes*2 + pending.tokens*64 + Codec.STRING_CACHE_BYTES) or 0)
+		end
+	end
+	if reservation > PLAYER_BYTES or globalReservation > GLOBAL_BYTES then
+		fail(payload.playerNum, "catalog_budget"); return
+	end
 	batch.progress = now()
 	slot.started = batch.progress
 	if batch.tokens > batch.meta.tokenCount or batch.bytes > batch.meta.totalBytes then
@@ -142,7 +210,10 @@ function Client.receive(payload)
 	end
 	-- Only accepted, unique fragments advance presentation. A complete batch
 	-- still remains non-operable until decoding and the consumer apply finish.
-	if slot.confirmed and context.progress then context.progress(batch.meta, batch.count, batch.meta.total) end
+	if slot.confirmed and context.progress then
+		local ok, accepted, reason, stage = pcall(context.progress, batch.meta, batch.count, batch.meta.total)
+		if not ok or accepted == false then consumerFailure(payload.playerNum, slot, batch.meta, ok, accepted, reason, stage or "catalogProgress"); return end
+	end
 	if slots[payload.playerNum] ~= slot then return end
 	applyReady(payload.playerNum, slot)
 end
@@ -150,8 +221,16 @@ function Client.error(payload)
 	local slot = slotFor(payload)
 	if not slot then return end
 	if slot.confirmed and payload.networkId ~= slot.confirmed.networkId then return end
-	if type(payload.batchId) == "number" and payload.batchId < slot.latest then return end
-	fail(payload.playerNum, payload.reason or "catalog_send")
+	if not Codec.integer(payload.batchId, 1, 9007199254740991) then return end
+	if payload.reason == "catalog_access_changed" and slot.confirmed then
+		fail(payload.playerNum, payload.reason, true)
+		return
+	end
+	if slot.batch then
+		if payload.batchId ~= slot.batch.meta.batchId then return end
+	elseif payload.batchId <= slot.latest then return
+	else slot.latest = payload.batchId end
+	fail(payload.playerNum, payload.reason or "catalog_send", true)
 end
 
 --- Applies a bounded live delta only over its exact catalog base. Missing or
@@ -160,7 +239,8 @@ end
 function Client.delta(payload)
 	local slot = slotFor(payload)
 	if not slot or type(payload) ~= "table" then return end
-	if payload.protocol ~= 1 or not Codec.integer(payload.baseRevision, 0, 9007199254740991)
+	if (payload.protocol ~= 1 and payload.protocol ~= 2)
+		or not Codec.integer(payload.baseRevision, 0, 9007199254740991)
 		or not Codec.integer(payload.inventoryRevision, payload.baseRevision + 1, 9007199254740991)
 		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
 		or type(payload.changedRows) ~= "table" or type(payload.removedRowKeys) ~= "table" then return end
@@ -168,23 +248,34 @@ function Client.delta(payload)
 	if not size or size + 128 > Codec.FRAME_BYTES then return end
 	if slot.completedRevision and payload.inventoryRevision <= slot.completedRevision then return end
 	if slot.confirmed and slot.confirmed.networkId ~= payload.networkId then return end
-	local ok, accepted, reason = pcall(context.applyDelta, payload)
+	if not slot.confirmed or not context.allowed(slot.confirmed) then
+		fail(payload.playerNum, "catalog_access_changed"); return
+	end
+	if slot.batch then return end -- Preserve an accepted fragmented B1.
+	local ok, accepted, reason, stage = pcall(context.applyDelta, payload)
+	if slots[payload.playerNum] ~= slot then return end
 	if ok and accepted == true then
 		slot.completedRevision = payload.inventoryRevision
+		slot.recoveryUsed = nil
 		if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", "delta_applied",
 			"base=" .. tostring(payload.baseRevision) .. " revision=" .. tostring(payload.inventoryRevision)
 				.. " changed=" .. tostring(#payload.changedRows)
 				.. " removed=" .. tostring(#payload.removedRowKeys)) end
 		return
 	end
-	if reason == "catalog_revision" and context.recover then
+	if reason == "catalog_revision" and context.recover and not slot.recoveryUsed then
+		slot.recoveryUsed = true
 		if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", "delta_recovery",
 			"base=" .. tostring(payload.baseRevision) .. " revision=" .. tostring(payload.inventoryRevision)) end
 		context.recover(payload)
+		return
 	end
+	if ok and reason == "catalog_revision" then return end
+	consumerFailure(payload.playerNum,slot,payload,ok,accepted,reason,stage or "terminalCatalogDelta")
 end
 function Client.update(timestamp)
 	local active = false
+	local started, work = now(), 0
 	for playerNum = 0, 3 do
 		local slot = slots[playerNum]
 		if slot then
@@ -200,6 +291,19 @@ function Client.update(timestamp)
 						fail(playerNum, "catalog_timeout")
 					elseif slot.confirmed and not context.allowed(slot.confirmed) then
 						fail(playerNum, "catalog_access_changed")
+					elseif batch and batch.decoder then
+						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
+							and work < 8192 and now() - started < 4 do
+							local value, reason, done = Codec.stepDecode(batch.decoder, 1024)
+							work = work + 1024
+							if reason then fail(playerNum, reason); break end
+							batch.progress = timestamp
+							if done then
+								batch.decoded, batch.decoder = value, nil
+								applyReady(playerNum, slot)
+								break
+							end
+						end
 					end
 				end
 			end

@@ -26,7 +26,7 @@ local PULL_DEBOUNCE_TICKS = 4
 local _pullDueTick = 0
 local _tickCounter = 0
 local _lastAppliedRevision = {}
-local _requiredSnapshotRevision = {}
+local _requiredInventoryRevision = {}
 local _tickInstalled = false
 local _managedTransfer = nil
 local _revisionOrder = {}
@@ -41,7 +41,7 @@ local function touchRevisionNetwork(networkId)
 		local oldest = table.remove(_revisionOrder, 1)
 		if oldest then
 			_lastAppliedRevision[oldest] = nil
-			_requiredSnapshotRevision[oldest] = nil
+			_requiredInventoryRevision[oldest] = nil
 		end
 	end
 end
@@ -68,14 +68,14 @@ end
 function sync.clearRevisionState(networkId)
 	if networkId then
 		_lastAppliedRevision[networkId] = nil
-		_requiredSnapshotRevision[networkId] = nil
+		_requiredInventoryRevision[networkId] = nil
 		for i = #_revisionOrder, 1, -1 do
 			if _revisionOrder[i] == networkId then table.remove(_revisionOrder, i) end
 		end
 		return
 	end
 	_lastAppliedRevision = {}
-	_requiredSnapshotRevision = {}
+	_requiredInventoryRevision = {}
 	_revisionOrder = {}
 	_managedTransfer = nil
 	_pullDueTick = 0
@@ -133,6 +133,8 @@ function sync.beginManagedTransfer(owner, networkId, searchQuery, operationId)
 		searchQuery = searchQuery or currentSearchQuery(),
 		pendingState = nil,
 		dirty = false,
+		changedRows = {},
+		removedRowKeys = {},
 	}
 	if ui then
 		ui._gsManagedTransferActive = true
@@ -159,41 +161,12 @@ function sync.finishManagedTransfer(owner, searchQuery, expectedRevision, operat
 	local uiVisible = ui and (not ui.isVisible or ui:isVisible())
 	local uiNetworkId = ui and ui.terminalState and ui.terminalState.networkId
 	local sameNetwork = not managed.networkId or not uiNetworkId or managed.networkId == uiNetworkId
-	-- BUG REAL (2026-08-21, reportado: "pulso F9 y el terminal ya no abre,
-	-- el servidor confirma acceso una y otra vez pero el cliente nunca
-	-- muestra nada"): este flag SOLO se limpia mas abajo dentro de la rama
-	-- "pendingIsFresh and uiVisible" - pero se ESCRIBIA aqui de forma
-	-- incondicional, sin importar si habia UI visible que proteger. Si una
-	-- transferencia gestionada terminaba con el terminal CERRADO (p.ej. leer
-	-- una revista de red sin tener el terminal abierto, o cerrarlo mientras
-	-- un deposito seguia en cola), el flag quedaba escrito y NUNCA se
-	-- limpiaba - onTerminalState() lo comprueba en CUALQUIER terminalState
-	-- futuro (linea ~263), incluida una apertura normal por F9, y la
-	-- descarta indefinidamente hasta que el snapshotRevision del siguiente
-	-- ZoneScanJob completo alcance ese valor por pura casualidad. El
-	-- proposito real de este flag es proteger una UI QUE YA ESTA ABIERTA de
-	-- un envio tardio con datos viejos - si no hay UI abierta no hay nada
-	-- que proteger, asi que ahora solo se escribe cuando uiVisible es
-	-- cierto, evitando dejarlo huerfano para siempre.
+	-- A transfer result carries inventoryRevision; never compare it with the snapshot counter.
 	if managed.networkId and expectedRevision and uiVisible and sameNetwork then
-		_requiredSnapshotRevision[managed.networkId] = math.max(
-			_requiredSnapshotRevision[managed.networkId] or 0, expectedRevision)
+		_requiredInventoryRevision[managed.networkId] = math.max(
+			_requiredInventoryRevision[managed.networkId] or 0, expectedRevision)
 		touchRevisionNetwork(managed.networkId)
 	end
-	-- BUG REAL (2026-08-21): expectedRevision viene de operation.lastRevision,
-	-- que se rellena con inventoryRevision (sube en CADA transferencia). Antes
-	-- se comparaba contra pendingState.snapshotRevision - un contador DISTINTO
-	-- que solo avanza al terminar el ZoneScanJob completo (~12s). Al ser
-	-- incompatibles, pendingIsFresh daba practicamente siempre false: el
-	-- estado fresco que pushTerminalInventorySync ya entregaba correctamente
-	-- (ver GS_Server.lua/GS_Transfer.lua, fix "-dev11" del snapshot preciso
-	-- por nodo) se descartaba sin aplicarse, y solo se repintaba el
-	-- ui.terminalState VIEJO via refreshItemsTab() - de ahi que pareciera que
-	-- el deposito/retorno "no refrescaba" hasta el siguiente scan de 12s.
-	-- Fix: comparar inventoryRevision contra inventoryRevision (misma
-	-- familia de contador que expectedRevision), conservando snapshotRevision
-	-- solo para markRevision/_requiredSnapshotRevision, que SI son sobre el
-	-- contador de snapshot y no deben mezclarse con este.
 	local pendingInventoryRevision = managed.pendingState and managed.pendingState.inventoryRevision or 0
 	local pendingSnapshotRevision = managed.pendingState and managed.pendingState.snapshotRevision or 0
 	local pendingIsFresh = managed.pendingState
@@ -201,18 +174,18 @@ function sync.finishManagedTransfer(owner, searchQuery, expectedRevision, operat
 	if pendingIsFresh and uiVisible and sameNetwork and GlobalStorageSiK.TerminalUI
 		and type(managed.pendingState.items) == "table" then
 		markRevision(managed.networkId or managed.pendingState.networkId, pendingSnapshotRevision)
-		if managed.networkId then _requiredSnapshotRevision[managed.networkId] = nil end
+		if managed.networkId then _requiredInventoryRevision[managed.networkId] = nil end
 		ui.terminalState = managed.pendingState
 		if GlobalStorageSiK.Client then
 			GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = managed.pendingState
 			if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = managed.pendingState end
 		end
 		sync.applyCatalogRows(managed.pendingState.networkId, managed.pendingState.items,
-			managed.pendingState.inventoryRevision)
+			managed.pendingState.inventoryRevision, true, managed.changedRows, managed.removedRowKeys, true)
 	elseif uiVisible and sameNetwork then
 		if managed.dirty and ui.terminalState and type(ui.terminalState.items) == "table" then
 			sync.applyCatalogRows(ui.terminalState.networkId, ui.terminalState.items,
-				ui.terminalState.inventoryRevision)
+				ui.terminalState.inventoryRevision, true, managed.changedRows, managed.removedRowKeys, true)
 		end
 	end
 	-- No pedir inmediatamente searchItems: mientras el snapshot incremental de
@@ -315,11 +288,13 @@ function sync.applyWithdrawDelta(networkId, fullType, moved)
 			-- A family root can combine several fullTypes. A fullType delta
 			-- cannot identify that root or its children; await the real catalog.
 			if items[i].rowKey or items[i].mixedVariants then return end
-			local nextCount = (items[i].count or 0) - moved
+			local changedRow = items[i]
+			local changedKey = changedRow.rowKey or changedRow.fullType
+			local nextCount = (changedRow.count or 0) - moved
 			if nextCount <= 0 then
 				table.remove(items, i)
 			else
-				items[i].count = nextCount
+				changedRow.count = nextCount
 			end
 			if GlobalStorageSiK.Client then
 				GlobalStorageSiK.Client.cachedTerminalStateByPlayer = GlobalStorageSiK.Client.cachedTerminalStateByPlayer or {}
@@ -328,6 +303,11 @@ function sync.applyWithdrawDelta(networkId, fullType, moved)
 			end
 			if isManagedTransferNetwork(networkId) then
 				_managedTransfer.dirty = true
+				if nextCount <= 0 then
+					_managedTransfer.removedRowKeys[#_managedTransfer.removedRowKeys + 1] = changedKey
+				else
+					_managedTransfer.changedRows[#_managedTransfer.changedRows + 1] = changedRow
+				end
 				return
 			end
 			sync.applyCatalogRows(stateNid, items,
@@ -351,19 +331,65 @@ end
 --- Actualiza exclusivamente el modelo de filas de la tabla existente. No
 --- refresca Surface/Block/Window ni cambia pestañas; Table conserva posición,
 --- selección y expansión mediante las claves semánticas ya validadas.
-function sync.applyCatalogRows(networkId, items, revision)
+function sync.applyCatalogRows(networkId, items, revision, catalogApply, changedRows, removedRowKeys, deriveChanges)
 	local ui = currentUI()
 	if not ui or not ui.terminalState or ui.terminalState.networkId ~= networkId then return false end
-	if isManagedTransferNetwork(networkId) then
+	if isManagedTransferNetwork(networkId) and catalogApply ~= true then
 		_managedTransfer.dirty = true
 		return true
 	end
 	local panel = ui.itemsListPanel
 	if not panel or not panel.itemTable then return true end
-	local filtered = ui.applyItemsFilter and ui:applyItemsFilter(items) or items
+	if changedRows ~= nil or removedRowKeys ~= nil then
+		if type(panel.itemTable.patchRows) ~= "function"
+			or type(GlobalStorageSiK.TerminalItems.presentationPatch) ~= "function"
+			or type(GlobalStorageSiK.TerminalItems.applyPresentationPatch) ~= "function" then
+			error({stage="TerminalTable.patchRows", cause="missing_patch_api", rejected=true}, 0)
+		end
+		local model, modelReason = GlobalStorageSiK.TerminalItems.presentationPatch(panel, ui,
+			items, changedRows or {}, removedRowKeys or {}, deriveChanges)
+		if not model then
+			error({stage="TerminalItems.presentationPatch", cause=modelReason or "false", rejected=true}, 0)
+		end
+		local accepted, reason = GlobalStorageSiK.TerminalItems.applyPresentationPatch(
+			panel, ui, model, "TerminalTable.patchRows", ui.syncHeaderChrome and function()
+				local headerOk, result, headerReason = pcall(ui.syncHeaderChrome, ui)
+				if not headerOk then
+					error({stage="TerminalUI.syncHeaderChrome", cause=result}, 0)
+				end
+				if result == false then
+					error({stage="TerminalUI.syncHeaderChrome", cause=headerReason or "false", rejected=true}, 0)
+				end
+				return result
+			end or nil)
+		if not accepted then
+			if type(reason) == "table" and reason.stage then error(reason, 0) end
+			error({stage="TerminalTable.patchRows", cause=reason or "false", rejected=true}, 0)
+		end
+		local previousRevision = _lastAppliedRevision[networkId]
+		local previousOrder = {}
+		for index = 1, #_revisionOrder do previousOrder[index] = _revisionOrder[index] end
+		markRevision(networkId, revision)
+		local markedRevision = _lastAppliedRevision[networkId]
+		if GlobalStorageSiK.Client and GlobalStorageSiK.Client.registerCatalogUndo then
+			GlobalStorageSiK.Client.registerCatalogUndo(function()
+				if _lastAppliedRevision[networkId] ~= markedRevision then return false, "revision_superseded" end
+				_lastAppliedRevision[networkId] = previousRevision
+				_revisionOrder = previousOrder
+				return true
+			end, ui, "TerminalSync.markRevision")
+		end
+		return true
+	end
+	local presentationItems = GlobalStorageSiK.TerminalItems.copyRowsForPresentation
+		and GlobalStorageSiK.TerminalItems.copyRowsForPresentation(items) or items
+	local filtered = ui.applyItemsFilter and ui:applyItemsFilter(presentationItems) or presentationItems
 	local model = GlobalStorageSiK.TerminalItems.presentationModel(panel, ui, filtered)
 	if not model then return false end
-	panel.itemTable:setRows(model.rows, true)
+	local accepted, reason = panel.itemTable:setRows(model.rows, true)
+	if accepted == false then
+		error({stage="TerminalTable.setRows", cause=reason or "false", rejected=true}, 0)
+	end
 	if panel.itemTable.setEmptyText then panel.itemTable:setEmptyText(model.emptyText or "") end
 	markRevision(networkId, revision)
 	if ui.syncHeaderChrome then ui:syncHeaderChrome() end
@@ -377,6 +403,9 @@ function sync.onTerminalState(state, inventorySync)
 	if not state then
 		return false
 	end
+	-- Catalog batches own their ACK. A transfer cannot defer their renderer:
+	-- B2 is waiting for B1, and confirmed withdrawals use a separate projection.
+	if state._gsCatalogApply == true then return false end
 	local networkId = state.networkId
 	local snapshotRevision = state.snapshotRevision or 0
 	if inventorySync == true and state.openUi ~= true and isManagedTransferNetwork(networkId) then
@@ -384,7 +413,7 @@ function sync.onTerminalState(state, inventorySync)
 		_managedTransfer.dirty = true
 		return true
 	end
-	local requiredRevision = (networkId and _requiredSnapshotRevision[networkId]) or 0
+	local requiredRevision = (networkId and _requiredInventoryRevision[networkId]) or 0
 	-- Cinturon de seguridad ademas del fix de arriba (finishManagedTransfer ya
 	-- no deja este flag huerfano si no habia UI visible al terminar) - una
 	-- apertura EXPLICITA del terminal (F9/interaccion directa del jugador,
@@ -394,15 +423,15 @@ function sync.onTerminalState(state, inventorySync)
 	-- no prevista, esto evita que bloquee indefinidamente el propio boton
 	-- de abrir - la sincronizacion fina de cantidades ya la cubre el push
 	-- normal nada mas abrir.
-	if requiredRevision > 0 and snapshotRevision < requiredRevision and state.openUi ~= true then
+	if requiredRevision > 0 and (tonumber(state.inventoryRevision) or 0) < requiredRevision and state.openUi ~= true then
 		-- Una búsqueda o reapertura puede responder antes que el escaneo de fondo.
 		-- No permitir que ese snapshot anterior restaure cantidades confirmadas.
 		return true
 	end
 	if networkId then
 		markRevision(networkId, snapshotRevision)
-		if requiredRevision > 0 and snapshotRevision >= requiredRevision then
-			_requiredSnapshotRevision[networkId] = nil
+		if requiredRevision > 0 and (tonumber(state.inventoryRevision) or 0) >= requiredRevision then
+			_requiredInventoryRevision[networkId] = nil
 		end
 	end
 	return false
@@ -488,9 +517,10 @@ function Sync.refreshVisibleItemsTab(playerNum)
 	local sync = forPlayer(playerNum)
 	if sync then return sync.refreshVisibleItemsTab() end
 end
-function Sync.applyCatalogRows(networkId, items, revision, playerNum)
+function Sync.applyCatalogRows(networkId, items, revision, playerNum, catalogApply, changedRows, removedRowKeys, deriveChanges)
 	local sync = forPlayer(playerNum)
-	return sync and sync.applyCatalogRows(networkId, items, revision) or false
+	return sync and sync.applyCatalogRows(networkId, items, revision, catalogApply,
+		changedRows, removedRowKeys, deriveChanges) or false
 end
 function Sync.onTerminalState(state, inventorySync)
 	if not state then return false end

@@ -10,7 +10,8 @@ local function now() return getTimestampMs and getTimestampMs() or 0 end
 function Loading.busy(playerNum)
 	local api = GlobalStorageSiK.TerminalUI
 	local ui = api and api.getInstanceForPlayer and api.getInstanceForPlayer(playerNum)
-	return ui and ui._gsCatalogLoad ~= nil or false
+	local load = ui and ui._gsCatalogLoad
+	return load and (load.phase == "checking" or load.phase == "loading") or false
 end
 local function lockWidget(ui, widget)
 	if not widget then return end
@@ -61,7 +62,7 @@ function Loading.set(ui, phase, sequence, done, total)
 	-- Only an opening without a confirmed catalog blocks interaction. Background
 	-- reconciliation keeps the last authoritative image usable while the header
 	-- reports progress; it must never disable or repaint the terminal body.
-	if phase == "checking" or phase == "loading" or phase == "validating" then
+	if phase == "checking" or phase == "loading" then
 		Loading.lock(ui)
 	else
 		Loading.unlock(ui)

@@ -164,6 +164,7 @@ end
 -- multiplicaba el trafico por el numero de jugadores conectados.
 local terminalWatchNetworkByPlayer = {}
 local pendingTerminalRefreshes = {}
+local pendingCatalogDetails = {}
 local flushPendingTerminalRefreshes
 
 -- networkId -> { dueMs, forceMs, username }. Tras una transferencia no se
@@ -175,12 +176,10 @@ local SNAPSHOT_FORCE_MS = 10000
 
 -- Cache de catalogos agregados: datos Lua planos, nunca InventoryItem,
 -- contenedores ni jugadores. La clave incorpora identidad y alcance de zonas.
-local inventoryCatalogCache = {}
+local inventoryCatalogCache = require "GS_CatalogCache"
 local inventorySnapshotMeta = {}
 local inventoryTopologySignatures = {}
-local CATALOG_CACHE_TTL_MS = 30000
-local SNAPSHOT_MAX_AGE_MS = 30000
-local CATALOG_CACHE_MAX = 128
+local inventoryClassificationStamps = {}
 
 local function serverNowMs()
 	if getTimestampMs then return tonumber(getTimestampMs()) or 0 end
@@ -194,6 +193,18 @@ local function catalogPlayerKey(player)
 	local ok, username = pcall(function() return player and player:getUsername() end)
 	if ok and username and username ~= "" then return "account:" .. tostring(username) end
 	return "anonymous"
+end
+
+local function authorizedCatalogScope(player, networkId)
+	local zoneIds = {}
+	for zoneId, zone in pairs(GlobalStorageSiK.Zones.getRegistry().zones or {}) do
+		if zone.networkId == networkId
+			and (not player or GlobalStorageSiK.Permissions.canAccessZone(player, networkId, zoneId)) then
+			zoneIds[#zoneIds+1] = tostring(zoneId)
+		end
+	end
+	table.sort(zoneIds)
+	return table.concat(zoneIds, "\31")
 end
 
 local function catalogScopeSignature(player, networkId)
@@ -225,84 +236,38 @@ local function catalogScopeSignature(player, networkId)
 		if inventorySnapshotMeta[networkId] then inventorySnapshotMeta[networkId].potentiallyStale = true end
 	end
 	inventoryTopologySignatures[networkId] = signature
+	local stamp = GlobalStorageSiK.Index.getClassificationStamp()
+	if inventoryClassificationStamps[networkId] and inventoryClassificationStamps[networkId] ~= stamp then
+		GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+	end
+	inventoryClassificationStamps[networkId] = stamp
 	table.sort(zoneIds)
 	return table.concat(zoneIds, "\31")
 end
 
 local function catalogCacheKey(player, networkId, scopeSignature)
-	return catalogPlayerKey(player) .. "\30" .. tostring(networkId) .. "\30" .. tostring(scopeSignature)
+	-- Rows only depend on network and authorized zone scope. Recipients with
+	-- identical authority share immutable rows, never session/configuration data.
+	return tostring(networkId) .. "\30" .. tostring(scopeSignature)
 end
 
 local function invalidateCatalogCache(networkId)
-	for _, entry in pairs(inventoryCatalogCache) do
-		if entry.networkId == networkId then entry.invalidated = true end
-	end
+	inventoryCatalogCache.invalidate(networkId)
 end
 
-local function pruneCatalogCache()
-	local count, oldestKey, oldestAt = 0, nil, math.huge
-	for key, entry in pairs(inventoryCatalogCache) do
-		count = count + 1
-		if (entry.builtAtMs or 0) < oldestAt then
-			oldestKey, oldestAt = key, entry.builtAtMs or 0
-		end
-	end
-	if count >= CATALOG_CACHE_MAX and oldestKey then inventoryCatalogCache[oldestKey] = nil end
-end
-
-local function getCatalogRows(player, networkId, scopeSignature)
-	local revision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	local now = serverNowMs()
-	local key = catalogCacheKey(player, networkId, scopeSignature)
-	local cached = inventoryCatalogCache[key]
-	if now > 0 and cached and cached.invalidated ~= true and cached.revision == revision
-		and now >= (cached.builtAtMs or 0)
-		and now - (cached.builtAtMs or 0) <= CATALOG_CACHE_TTL_MS then
-		return cached.rows, true
-	end
-	local rows = GlobalStorageSiK.Index.buildRows(networkId, player)
-	pruneCatalogCache()
-	inventoryCatalogCache[key] = {
-		networkId = networkId, revision = revision, scopeSignature = scopeSignature,
-		rows = rows, builtAtMs = now,
-	}
-	return rows, false
-end
-
-local function getCatalogDelta(player, networkId, scopeSignature)
-	local key = catalogCacheKey(player, networkId, scopeSignature)
-	local previous = inventoryCatalogCache[key]
-	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	if not previous or previous.revision == nil or previous.revision >= currentRevision then return nil end
-	local rows = getCatalogRows(player, networkId, scopeSignature)
-	local oldByKey, newByKey = {}, {}
-	for i = 1, #(previous.rows or {}) do
-		local row = previous.rows[i]
-		if type(row) ~= "table" or type(row.rowKey) ~= "string" or row.rowKey == "" then return nil end
-		oldByKey[row.rowKey] = row
-	end
-	local changed, removed = {}, {}
-	for i = 1, #rows do
-		local row = rows[i]
-		if type(row) ~= "table" or type(row.rowKey) ~= "string" or row.rowKey == "" then return nil end
-		newByKey[row.rowKey] = true
-		local old = oldByKey[row.rowKey]
-		if not old or GlobalStorageSiK.Index.snapshotSignature({old})
-			~= GlobalStorageSiK.Index.snapshotSignature({row}) then changed[#changed + 1] = row end
-	end
-	for rowKey in pairs(oldByKey) do
-		if not newByKey[rowKey] then removed[#removed + 1] = rowKey end
-	end
-	table.sort(removed)
-	local snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
-	return {networkId=networkId, catalogScope=scopeSignature,
-		baseRevision=previous.revision, inventoryRevision=currentRevision,
-		changedRows=changed, removedRowKeys=removed, itemTypeCount=#rows,
-		snapshotRevision=snapshotRevision,
-		snapshotCertified=inventorySnapshotMeta[networkId] ~= nil
-			and snapshotRevision == currentRevision,
-		reconcilePending=pendingSnapshotSync[networkId] ~= nil
-			or GlobalStorageSiK.ZoneScanJob.isActive(networkId)}
+local function queuePreparedCatalog(player,payload,base)
+    local networkId,scope,revision=payload.networkId,payload.catalogScope,payload.inventoryRevision
+    local key=catalogCacheKey(player,networkId,scope)
+    local stamp=GlobalStorageSiK.Index.getClassificationStamp()
+    local cached=inventoryCatalogCache.get(key)
+    if cached and (cached.invalidated or cached.revision~=revision or cached.classificationStamp~=stamp) then cached=nil end
+    local builder=GlobalStorageSiK.CatalogPreparation.create(player,networkId,scope,revision,
+        base,payload.notModified==true,cached,function(rows,categories,catalogCategories,stats)
+            inventoryCatalogCache.put(key,{networkId=networkId,revision=revision,scopeSignature=scope,
+                rows=rows,categories=categories,catalogCategories=catalogCategories,stats=stats,
+                builtAtMs=serverNowMs(),classificationStamp=stamp})
+        end)
+    return GlobalStorageSiK.CatalogServer.queueBuild(player,payload,builder)
 end
 
 local function snapshotStatus(networkId)
@@ -319,8 +284,7 @@ local function shouldScanOnOpen(networkId)
 	if hasAny and not complete then return true, "incomplete_snapshot" end
 	if not meta then return true, "unknown_age" end
 	if meta.potentiallyStale == true then return true, "potentially_stale" end
-	if age == nil or age >= SNAPSHOT_MAX_AGE_MS then return true, "max_age" end
-	return false, "recent"
+	return false, "confirmed_snapshot"
 end
 
 local function scheduleSnapshotSync(networkId, player, revision, reason)
@@ -469,6 +433,7 @@ local function setTerminalWatcher(player, networkId)
 end
 
 local function clearTerminalWatcher(player)
+	pendingCatalogDetails[player] = nil
 	if GlobalStorageSiK.CatalogServer then GlobalStorageSiK.CatalogServer.clear(player) end
 	local key = terminalWatcherKey(player)
 	if key then
@@ -542,13 +507,18 @@ local function gsSendServerCommand(player, command, payload)
 				GlobalStorageSiK.NativeProduct.tracePathSample("preSend", row.fullType, row.nativePath)
 			end
 		end
-		return GlobalStorageSiK.CatalogServer.queue(player, payload)
+		if payload and payload.items then return GlobalStorageSiK.CatalogServer.queue(player,payload,payload.items) end
+		return queuePreparedCatalog(player,payload,nil)
 	end
 	-- Derive the local-player slot from the authoritative recipient, never from
 	-- a client payload. Success and early failures need the same ACK routing.
 	if command == "actionResult" then
 		payload = payload or {}
 		payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+		if payload.jobType == "zoneScan" and player and payload.networkId then
+			payload.openSeq = GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)
+			payload.catalogScope = catalogScopeSignature(player, payload.networkId)
+		end
 	end
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logServerSend then
 		GlobalStorageSiK.NetTrace.logServerSend(player, command, payload)
@@ -832,13 +802,10 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	local scanNeeded = shouldScanOnOpen(networkId)
 	local notModified = requestMeta and requestMeta.allowNotModified == true
 		and (requestMeta.knownCatalogNetworkId == nil or requestMeta.knownCatalogNetworkId == networkId)
-		and not scanNeeded and pendingSnapshotSync[networkId] == nil
-		and not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
-		and GlobalStorageSiK.Index.getSnapshotRevision(networkId) == inventoryRevision
 		and knownRevision ~= nil and math.floor(knownRevision) == inventoryRevision
 		and type(knownScope) == "string" and knownScope == scopeSignature
 	local rows = nil
-	if not notModified then rows = getCatalogRows(player, networkId, scopeSignature) end
+	-- Rows and categories are attached by the reserved, budgeted catalog job.
 	-- Los campos con prefijo "_" coordinan servidor/indice y no forman parte
 	-- del contrato MP. No mutar scanSummary: el mismo resultado se reutiliza
 	-- para todos los observadores de la red al completar un job incremental.
@@ -911,7 +878,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		searchQuery = searchQuery or "",
 
-		categories = GlobalStorageSiK.Categories.serialize(networkId),
+		categories = nil, -- Prepared from the same captured, authorized index.
 
 		permissions = GlobalStorageSiK.Permissions.serialize(networkId, player),
 
@@ -1916,16 +1883,27 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
 	if not player or not networkId then
 		return
 	end
+	if GlobalStorageSiK.CatalogServer.hasJob(player) then
+		return queueTerminalRefresh(player, networkId, searchQuery, false)
+	end
 	if GlobalStorageSiK.CatalogServer.isOpening(player) then
 		return GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, searchQuery)
 	end
 	local ok, err = pcall(function()
 		local scopeSignature = catalogScopeSignature(player, networkId)
-		local delta = getCatalogDelta(player, networkId, scopeSignature)
-		if delta then
-			local sent = GlobalStorageSiK.CatalogServer.delta(player, delta)
-			if sent then return end
-		end
+		local base = GlobalStorageSiK.CatalogServer.base(player)
+		if base and base.scope == scopeSignature
+			and base.revision == GlobalStorageSiK.Index.getInventoryRevision(networkId) then return end
+        local revision=GlobalStorageSiK.Index.getInventoryRevision(networkId)
+        if base and base.scope==scopeSignature and base.rows and base.revision<revision then
+            local snapshotRevision=GlobalStorageSiK.Index.getSnapshotRevision(networkId)
+            return queuePreparedCatalog(player,{networkId=networkId,catalogScope=scopeSignature,
+                inventoryRevision=revision,baseRevision=base.revision,catalogDelta=true,
+                catalogSource="inventory_delta",snapshotRevision=snapshotRevision,
+                snapshotCertified=inventorySnapshotMeta[networkId]~=nil and snapshotRevision==revision,
+                reconcilePending=pendingSnapshotSync[networkId]~=nil
+                    or GlobalStorageSiK.ZoneScanJob.isActive(networkId)},base)
+        end
 		-- No valid base (cold observer/scope change) or the bounded delta does not
 		-- fit one safe frame: retain every row and use the fragmented transport.
 		return GlobalStorageSiK.Server.pushTerminalState(player, networkId, nil, searchQuery)
@@ -2118,6 +2096,9 @@ end
 ---@param terminalAnchor table|nil { x, y, z } terminal usado en el servidor
 ---@param meta table|nil { openSeq = number }
 local function pushTerminalState(player, networkId, scanSummary, searchQuery, craftProbe, openUi, accessMode, terminalAnchor, meta)
+	if openUi ~= true and GlobalStorageSiK.CatalogServer.hasJob(player) then
+		return queueTerminalRefresh(player, networkId, searchQuery, true)
+	end
 	if player and GlobalStorageSiK.RedistributeJob.isActive(networkId) then
 		GlobalStorageSiK.RedistributeJob.addWatcher(player, networkId)
 	end
@@ -2165,8 +2146,14 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		knownCatalogScope = meta.knownCatalogScope,
 		allowNotModified = meta.allowNotModified,
 	} or nil
+	if not requestMeta then
+		local base = GlobalStorageSiK.CatalogServer.base(player)
+		if base then requestMeta = {knownCatalogNetworkId=networkId,
+			knownInventoryRevision=base.revision, knownCatalogScope=base.scope, allowNotModified=true} end
+	end
 	local buildStarted = getTimestampMs and getTimestampMs() or 0
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player, requestMeta)
+	payload.catalogSource = openUi == true and "openTerminal" or "terminalState_refresh"
 	GlobalStorageSiK.Log.debug("CatalogTransport", "built", "openSeq=" .. tostring(meta and meta.openSeq)
 		.. " buildMs=" .. tostring((getTimestampMs and getTimestampMs() or 0) - buildStarted)
 		.. " notModified=" .. tostring(payload.notModified == true))
@@ -2556,7 +2543,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 			local allowed = select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId))
 			if allowed then
 				local query = explicitlyRequested and requestedWatchers[username] or ""
-				if contentChanged then pushTerminalInventorySync(player, networkId, query) end
+				if contentChanged then queueTerminalRefresh(player, networkId, query, false) end
 				if summary._background ~= true then
 					summary.networkId = networkId
 					local payload = scanResult(networkId, "COMPLETED", "IGUI_GS_ScanCompleteMetrics", "complete", summary)
@@ -2573,12 +2560,15 @@ end
 
 --- Actualizacion pequena de cabecera: nunca reconstruye ni reenvia el catalogo.
 function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
+	local original=status
+	status={}
+	for key,value in pairs(original or {}) do status[key]=value end
 	status.snapshotAgeMs = select(2, snapshotStatus(networkId))
 	status.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	status.snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
 	status.snapshotCertified = inventorySnapshotMeta[networkId] ~= nil
 		and status.snapshotRevision == status.inventoryRevision
-	status.reconcilePending = pendingSnapshotSync[networkId] ~= nil
+	status.reconcilePending = status.reconcilePending == true or pendingSnapshotSync[networkId] ~= nil
 		or GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 	forEachOnlinePlayer(function(player)
 		-- Requesting a scan does not grant a subscription after access is lost.
@@ -2589,9 +2579,13 @@ function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, reques
 				GlobalStorageSiK.TerminalAccess.getSessionAnchor(player),
 				{ sessionLock = true, strictDistance = true })
 			if access then
-				status.networkId = networkId
-				status.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
-				gsSendServerCommand(player, "scanProgress", status)
+				local recipient={}
+				for key,value in pairs(status) do recipient[key]=value end
+				recipient.networkId = networkId
+				recipient.playerNum = player.getPlayerNum and player:getPlayerNum() or 0
+				recipient.openSeq = GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)
+				recipient.catalogScope = catalogScopeSignature(player, networkId)
+				gsSendServerCommand(player, "scanProgress", recipient)
 			else
 				clearTerminalWatcher(player)
 			end
@@ -3351,31 +3345,72 @@ local function runIdentityBootstrap(player, reason)
 end
 
 local function handleGetItemDetails(player, args, networkId)
-	if not requireTerminalAccess(player, networkId) then return end
-	local rowKey = type(args.rowKey) == "string" and string.sub(args.rowKey, 1, 240) or nil
+	if not requireTerminalAccess(player, networkId) or not isTerminalWatcher(player, networkId) then return end
+	local rowKey = type(args.rowKey) == "string" and args.rowKey or nil
+	if not rowKey or rowKey == "" or #rowKey > 4096 then return end
+	local requestedRevision = tonumber(args.inventoryRevision)
+	local codec = require "GS_CatalogCodec"
+	if not codec.integer(requestedRevision, 0, 9007199254740991) then return end
+	if not codec.integer(args.page or 1, 1, 1000000)
+		or not codec.integer(args.pageSize or 15, 1, 25) then return end
+	local base = GlobalStorageSiK.CatalogServer.base(player)
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	local requestedRevision = math.floor(tonumber(args.inventoryRevision) or -1)
-	if requestedRevision ~= currentRevision then
-		gsSendServerCommand(player, "itemDetails", {
-			networkId = networkId, rowKey = rowKey, page = 1, pageSize = 15,
-			total = 0, hasPrevious = false, hasNext = false, items = {},
-			inventoryRevision = currentRevision, reason = "revision_mismatch",
-		})
-		pushTerminalState(player, networkId, nil, "")
+	if GlobalStorageSiK.CatalogServer.hasJob(player) or not base
+		or base.revision ~= currentRevision or requestedRevision ~= currentRevision then
+		-- Bounded descriptors, not payloads. Multiple expanded rows must not
+		-- overwrite each other's request while a catalog is awaiting its ACK.
+		local pending = pendingCatalogDetails[player] or {}
+		local replaced = false
+		for i=1,#pending do
+			if pending[i].rowKey == rowKey then
+				pending[i]={networkId=networkId,rowKey=rowKey,inventoryRevision=currentRevision,
+					page=args.page,pageSize=args.pageSize}
+				replaced=true; break
+			end
+		end
+		if not replaced then
+			if #pending >= 64 then
+				gsSendServerCommand(player,"itemDetailsRejected",{playerNum=player:getPlayerNum(),
+					networkId=networkId,rowKey=rowKey,inventoryRevision=requestedRevision,reason="catalog_busy"})
+				return
+			end
+			pending[#pending+1]={networkId=networkId,rowKey=rowKey,inventoryRevision=currentRevision,
+				page=args.page,pageSize=args.pageSize}
+		end
+		pendingCatalogDetails[player]=pending
+		if (not base and not GlobalStorageSiK.CatalogServer.hasJob(player))
+			or (base and base.revision ~= currentRevision) or requestedRevision ~= currentRevision then
+			queueTerminalRefresh(player, networkId, nil, true)
+		end
 		return
 	end
-	if not rowKey or rowKey == "" then
-		gsSendServerCommand(player, "itemDetails", {
-			networkId = networkId, rowKey = rowKey, page = 1, pageSize = 15,
-			total = 0, hasPrevious = false, hasNext = false, items = {}, reason = "invalid_row",
-		})
-		return
+	local detailPage = GlobalStorageSiK.Index.buildDetailPage(networkId, player, rowKey, args.page, args.pageSize)
+	detailPage.networkId, detailPage.inventoryRevision = networkId, currentRevision
+	detailPage.catalogScope = authorizedCatalogScope(player, networkId)
+	detailPage.catalogDetail, detailPage.catalogSource, detailPage.protocol = true, "itemDetails", 2
+	GlobalStorageSiK.CatalogServer.queue(player, detailPage)
+end
+
+local function flushCatalogDetails()
+	local selected, retired = nil, {}
+	local recipients = {}
+	for player in pairs(pendingCatalogDetails) do recipients[#recipients+1]=player end
+	for i=1,#recipients do
+		local player = recipients[i]
+		local pending = pendingCatalogDetails[player]
+		local descriptor = pending and pending[1]
+		if descriptor then
+			if not isTerminalWatcher(player, descriptor.networkId) then retired[#retired+1]=player
+			elseif not selected and not GlobalStorageSiK.CatalogServer.hasJob(player) then selected=player end
+		end
 	end
-	local detailPage = GlobalStorageSiK.Index.buildDetailPage(
-		networkId, player, rowKey, args.page, args.pageSize)
-	detailPage.networkId = networkId
-	detailPage.inventoryRevision = currentRevision
-	gsSendServerCommand(player, "itemDetails", detailPage)
+	for i=1,#retired do pendingCatalogDetails[retired[i]]=nil end
+	if selected then
+		local pending=pendingCatalogDetails[selected]
+		local descriptor=table.remove(pending,1)
+		if #pending==0 then pendingCatalogDetails[selected]=nil end
+		if descriptor then handleGetItemDetails(selected, descriptor, descriptor.networkId) end
+	end
 end
 
 local function sendWithdrawFailure(player, networkId, withdrawId, fullType, requested,
@@ -6060,6 +6095,7 @@ end
 
 
 
+require "GS_CatalogPreparation"
 require "GS_CatalogServer"
 GlobalStorageSiK.CatalogServer.configure({
 	send=gsSendServerCommand,
@@ -6079,16 +6115,48 @@ GlobalStorageSiK.CatalogServer.configure({
 		if not access then return false, "catalog_access_changed" end
 		if terminal and GlobalStorageSiK.Network.findNetworkIdAtTerminal(terminal.x, terminal.y,
 			terminal.z or 0, {activeOnly=true}) ~= session.networkId then return false, "catalog_access_changed" end
-		local scope = catalogScopeSignature(player, session.networkId)
-		return payload.inventoryRevision == GlobalStorageSiK.Index.getInventoryRevision(session.networkId)
-			and payload.catalogScope == scope
+		local scope = authorizedCatalogScope(player, session.networkId)
+		-- Revisions describe immutable content, not authorization. A newer world
+		-- revision queues reconciliation after ACK; a changed scope revokes data.
+		if payload.catalogScope ~= scope or session.catalogScope ~= scope then return false, "catalog_access_changed" end
+		return true
+	end,
+	recover=function(player, networkId)
+		if isTerminalWatcher(player, networkId) then queueTerminalRefresh(player, networkId, nil, true) end
 	end,
 	stale=function(player, networkId)
 		if not GlobalStorageSiK.Permissions.canAccess(player, networkId) then
 			clearTerminalWatcher(player)
 			return
 		end
-		queueTerminalRefresh(player, networkId, nil, true)
+		queueTerminalRefresh(player, networkId, nil, false)
+	end,
+})
+require "GS_CatalogReconciler"
+GlobalStorageSiK.CatalogReconciler.configure({
+	visitNetworks=function(visit)
+		forEachOnlinePlayer(function(player)
+			local key = terminalWatcherKey(player)
+			local networkId = key and terminalWatchNetworkByPlayer[key]
+			if networkId and isTerminalWatcher(player, networkId) then visit(networkId) end
+		end)
+	end,
+	changed=function(networkId, nodeId)
+		GlobalStorageSiK.Server.markInventoryDirty(networkId, nil, {
+			scheduleSnapshot=false, snapshotsUpdated=true, touchedNodeIds={nodeId}})
+		pushTerminalStateToNetworkWatchers(nil, networkId)
+	end,
+	status=function(networkId, phase, stats)
+		-- Periodic reconciliation is diagnostic background work. Broadcasting
+		-- it as scanProgress overwrites the manual scan state and repaints every
+		-- watcher at 4 Hz even when nothing changes. Real changes still publish
+		-- through the changed callback; explicit scans retain their own channel.
+		GlobalStorageSiK.Log.debug("CatalogTransport", "reconcile", "network=" .. tostring(networkId)
+			.. " phase=" .. tostring(phase) .. " nodes=" .. tostring(stats and stats.nodes)
+			.. " units=" .. tostring(stats and stats.units)
+			.. " compared=" .. tostring(stats and stats.compared)
+			.. " changed=" .. tostring(stats and stats.changed)
+			.. " discarded=" .. tostring(stats and stats.discarded))
 	end,
 })
 Events.OnClientCommand.Add(onClientCommand)
@@ -6109,6 +6177,8 @@ if Events and Events.OnTick then
 			end
 		end
 		GlobalStorageSiK.CatalogServer.update()
+		GlobalStorageSiK.CatalogReconciler.update()
+		flushCatalogDetails()
 	end)
 end
 

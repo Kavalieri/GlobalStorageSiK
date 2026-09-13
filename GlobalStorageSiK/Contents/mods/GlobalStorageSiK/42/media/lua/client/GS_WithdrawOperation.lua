@@ -756,6 +756,10 @@ function worker.onActionResult(args)
 	-- Solo contabilizar después de validar que cada unidad movida pertenece al
 	-- microlote y a la operación/red que siguen en vuelo.
 	current.totalMoved = (current.totalMoved or 0) + moved
+	if GlobalStorageSiK.CatalogOverlay and moved > 0 then
+		GlobalStorageSiK.CatalogOverlay.record(context.playerNum, current.networkId,
+			current.rowData.rowKey, tonumber(transfer.inventoryRevision), moved, current.requestId)
+	end
 	if operation then
 		operation.totalMoved = (operation.totalMoved or 0) + moved
 		operation.inspected = (operation.inspected or 0) + moved

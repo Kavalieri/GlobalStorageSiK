@@ -207,7 +207,9 @@ local function buildHeaderSpec(state, activeOperation, load)
 				progress.checked, progress.total, true), value = value, mode = mode,
 			status = "warning", tone = "warning", showProgress = true,
 		}
-	elseif state.scanActive == true or state.reconcilePending == true
+	-- Pending background snapshot work does not change connection readiness.
+	-- Only an actual scan owns the existing scan presentation.
+	elseif state.scanActive == true
 		or (state.scanStatus and (state.scanStatus.state == "RUNNING"
 			or state.scanStatus.state == "STALE_RETRY")) then
 		local scan = state.scanStatus or {}
@@ -219,10 +221,6 @@ local function buildHeaderSpec(state, activeOperation, load)
 			value = value, mode = mode,
 			status = "warning", tone = "warning", showProgress = true,
 		}
-		statusLabel, statusTone = T("IGUI_GS_ScanRunningShort"), "warning"
-	end
-	if state.scanActive == true or state.reconcilePending == true
-		or (state.scanStatus and (state.scanStatus.state == "RUNNING" or state.scanStatus.state == "STALE_RETRY")) then
 		statusLabel, statusTone = T("IGUI_GS_ScanRunningShort"), "warning"
 	end
 	if load then
@@ -1027,7 +1025,7 @@ function GS_TerminalUI:onClose()
 end
 
 function GS_TerminalUI:sendCommand(command, payload)
-	if self._gsCatalogLoad then return false end
+	if self._gsCatalogLoad and (self._gsCatalogLoad.phase == "checking" or self._gsCatalogLoad.phase == "loading") then return false end
 	return GlobalStorageSiK.NetClient.sendCommand(command, payload or {}, self.playerNum)
 end
 

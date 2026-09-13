@@ -16,6 +16,7 @@ require "GS_Debug"
 require "GS_NetTrace"
 require "GS_Sandbox"
 require "GS_CatalogClient"
+require "GS_CatalogOverlay"
 
 require "GS_NodeNaming"
 require "GS_I18n"
@@ -23,6 +24,7 @@ require "GS_I18n"
 local itemDetailsOrder = {}
 local nodeContentsOrder = {}
 local transientCleanupHandlers = {}
+local activeCatalogTransaction = nil
 local MAX_ITEM_DETAIL_PAGES = 128
 local MAX_NODE_CONTENT_ENTRIES = 128
 
@@ -118,6 +120,10 @@ local function applyInventoryCatalog(incoming, playerNum)
 			incoming.itemTypeCount = cached.itemTypeCount
 			incoming.catalogRestored = true
 			incoming._gsAppliedCatalogRevision = incoming.inventoryRevision
+			local restored={}
+			for field,value in pairs(cached) do restored[field]=value end
+			restored.state=incoming
+			GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key]=restored
 		end
 	elseif type(incoming.items) == "table" and incoming.inventoryRevision ~= nil
 		and type(incoming.catalogScope) == "string" then
@@ -131,14 +137,59 @@ local function applyInventoryCatalog(incoming, playerNum)
 			itemTypeCount = incoming.itemTypeCount or #incoming.items,
 			inventoryRevision = incoming.inventoryRevision,
 			catalogScope = incoming.catalogScope,
+			state = incoming,
 		}
 		incoming._gsAppliedCatalogRevision = incoming.inventoryRevision
 	end
 	return incoming
 end
 
+-- Observer booleans (no pending gesture / deferred refresh) are not rejects.
+-- Consumers with an acceptance contract retain their original false/exception.
+local function catalogConsumer(stage, observer, callback, ...)
+	local ok, result, reason = pcall(callback, ...)
+	if not ok then
+		if type(result) == "table" and result.stage then error(result, 0) end
+		error({stage=stage, cause=result}, 0)
+	end
+	if result == false then
+		if not observer then error({stage=stage, cause=reason or "false", rejected=true}, 0) end
+		GlobalStorageSiK.Log.detail("CatalogTransport", "observer_result", "stage=" .. stage .. " outcome=false")
+	end
+	return result, reason
+end
+
+local function newerScanStatus(candidate, previous)
+	if type(candidate) ~= "table" or type(previous) ~= "table" then return false end
+	local started, oldStarted = tonumber(candidate.startedMs) or 0, tonumber(previous.startedMs) or 0
+	if started ~= oldStarted then return started > oldStarted end
+	local finished, oldFinished = tonumber(candidate.finishedMs) or 0, tonumber(previous.finishedMs) or 0
+	if (finished > 0) ~= (oldFinished > 0) then return finished > 0 end
+	return math.max(finished, tonumber(candidate.lastProgressMs) or 0)
+		> math.max(oldFinished, tonumber(previous.lastProgressMs) or 0)
+end
+
+local function preserveLiveScan(incoming, playerNum)
+	local ui = terminalUiForPlayer(playerNum)
+	local live = ui and ui.terminalState
+	if not live or incoming.openSeq == nil or live.openSeq ~= incoming.openSeq
+		or live.networkId ~= incoming.networkId or live.catalogScope ~= incoming.catalogScope
+		or staleTerminalOpen(incoming) or not newerScanStatus(live.scanStatus, incoming.scanStatus) then return end
+	-- Catalog serialization spans ticks. Its scan metadata may predate a live
+	-- completion already received in this opening; inventory revisions stay untouched.
+	incoming.scanActive = live.scanActive
+	incoming.scanStatus = {}
+	for key, value in pairs(live.scanStatus) do incoming.scanStatus[key] = value end
+end
+
+local function copyArray(source)
+	local result = {}
+	for index = 1, #(source or {}) do result[index] = source[index] end
+	return result
+end
+
 local function applyCatalogDelta(payload)
-	if type(payload) ~= "table" or payload.protocol ~= 1
+	if type(payload) ~= "table" or (payload.protocol ~= 1 and payload.protocol ~= 2)
 		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
 		or type(payload.changedRows) ~= "table" or type(payload.removedRowKeys) ~= "table"
 		or type(payload.baseRevision) ~= "number" or type(payload.inventoryRevision) ~= "number"
@@ -159,8 +210,10 @@ local function applyCatalogDelta(payload)
 		or not state or state.networkId ~= payload.networkId
 		or state.catalogScope ~= payload.catalogScope then return false, "catalog_revision" end
 	local codec = require "GS_CatalogCodec"
-	local wireSize = codec.size(payload)
-	if not wireSize or wireSize + 128 > codec.FRAME_BYTES then return false, "catalog_budget" end
+	if payload.catalogDelta ~= true then
+		local wireSize = codec.size(payload)
+		if not wireSize or wireSize + 128 > codec.FRAME_BYTES then return false, "catalog_budget" end
+	end -- Fragmented payload was already admitted and validated by the codec.
 	local replacements, removed = {}, {}
 	for i = 1, #payload.changedRows do
 		local row = payload.changedRows[i]
@@ -180,7 +233,22 @@ local function applyCatalogDelta(payload)
 		local rowKey = type(row) == "table" and row.rowKey or nil
 		if type(rowKey) ~= "string" or rowKey == "" then return false, "catalog_schema" end
 		if not removed[rowKey] then
-			nextRows[#nextRows + 1] = replacements[rowKey] or row
+			local replacement = replacements[rowKey]
+			if not replacement then
+				replacement = {}
+				for k,v in pairs(row) do replacement[k]=v end
+				replacement.selectionRevision, replacement.representativeRevision = payload.inventoryRevision, payload.inventoryRevision
+				if row.variantSummary then
+					replacement.variantSummary = {}
+					for j=1,#row.variantSummary do
+						local variant = {}
+						for k,v in pairs(row.variantSummary[j]) do variant[k]=v end
+						if variant.representativeItemId then variant.representativeRevision=payload.inventoryRevision end
+						replacement.variantSummary[j]=variant
+					end
+				end
+			end
+			nextRows[#nextRows + 1] = replacement
 			consumed[rowKey] = true
 		end
 	end
@@ -189,6 +257,10 @@ local function applyCatalogDelta(payload)
 		if not consumed[row.rowKey] then nextRows[#nextRows + 1] = row end
 	end
 	if tonumber(payload.itemTypeCount) ~= #nextRows then return false, "catalog_incomplete" end
+	local nextCache, nextState = {}, {}
+	for k,v in pairs(cache) do nextCache[k]=v end
+	for k,v in pairs(state) do nextState[k]=v end
+	cache, state = nextCache, nextState
 	cache.items, cache.itemTypeCount = nextRows, #nextRows
 	cache.inventoryRevision = payload.inventoryRevision
 	cache.cachedAt = getTimestampMs and getTimestampMs() or 0
@@ -198,16 +270,27 @@ local function applyCatalogDelta(payload)
 	state.snapshotRevision = payload.snapshotRevision
 	state.snapshotCertified = payload.snapshotCertified == true
 	state.reconcilePending = payload.reconcilePending == true
+	cache.state = state
+	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = cache
+	GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = state
+	local ui = terminalUiForPlayer(playerNum)
+	if ui and ui.terminalState and ui.terminalState.networkId == payload.networkId then ui.terminalState=state end
 	if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = state end
 	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
-		GlobalStorageSiK.RemoteItemDetail.invalidateNetwork(payload.networkId)
+		catalogConsumer("RemoteItemDetail.invalidateNetwork", false, GlobalStorageSiK.RemoteItemDetail.invalidateNetwork, payload.networkId)
 	end
 	if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
-		GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(payload.networkId, playerNum)
+		catalogConsumer("TerminalItems.onInventoryRevisionChanged", false, GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged, payload.networkId, playerNum)
 	end
-	if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.applyCatalogRows then
-		GlobalStorageSiK.TerminalSync.applyCatalogRows(payload.networkId, nextRows,
-			payload.inventoryRevision, playerNum)
+	local matchingUi = ui and ui.terminalState and ui.terminalState.networkId == payload.networkId
+	if matchingUi and GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.applyCatalogRows then
+		catalogConsumer("TerminalSync.applyCatalogRows", false, GlobalStorageSiK.TerminalSync.applyCatalogRows,
+			payload.networkId, nextRows, payload.inventoryRevision, playerNum, true,
+			payload.changedRows, payload.removedRowKeys)
+	end
+	if matchingUi and GlobalStorageSiK.TerminalLoading then
+		catalogConsumer("TerminalLoading.finish", false, GlobalStorageSiK.TerminalLoading.finish,
+			ui, ui._gsCatalogLoad)
 	end
 	return true
 end
@@ -290,11 +373,14 @@ local function onServerCommand(module, command, args)
 		if ui and ui.accessMode ~= "blocked" and (not ui.isVisible or ui:isVisible())
 			and ui._gsAccessState ~= "revoking" and ui._gsAccessState ~= "revalidating"
 			and ui.terminalState and args
-			and ui.terminalState.networkId == args.networkId then
+			and ui.terminalState.networkId == args.networkId
+			and not staleTerminalOpen(args)
+			and (args.catalogScope == nil or args.catalogScope == ui.terminalState.catalogScope)
+			and not newerScanStatus(ui.terminalState.scanStatus, args) then
 			ui.terminalState.scanActive = args.state == "RUNNING" or args.state == "STALE_RETRY"
 			ui.terminalState.scanStatus = args
 			if args.snapshotAgeMs ~= nil then ui.terminalState.snapshotAgeMs = args.snapshotAgeMs end
-			if args.inventoryRevision ~= nil then ui.terminalState.inventoryRevision = args.inventoryRevision end
+			if args.inventoryRevision ~= nil then ui.terminalState._gsTargetInventoryRevision = args.inventoryRevision end
 			if args.snapshotRevision ~= nil then ui.terminalState.snapshotRevision = args.snapshotRevision end
 			if args.snapshotCertified ~= nil then ui.terminalState.snapshotCertified = args.snapshotCertified == true end
 			if args.reconcilePending ~= nil then ui.terminalState.reconcilePending = args.reconcilePending == true end
@@ -368,7 +454,10 @@ local function onServerCommand(module, command, args)
 		end
 		if args and args.jobType == "zoneScan" then
 			local ui = terminalUiForPlayer(tonumber(args.playerNum) or 0)
-			if ui and ui.terminalState and ui.terminalState.networkId == args.networkId then
+			if ui and ui.terminalState and ui.terminalState.networkId == args.networkId
+				and not staleTerminalOpen(args)
+				and (args.catalogScope == nil or args.catalogScope == ui.terminalState.catalogScope)
+				and not newerScanStatus(ui.terminalState.scanStatus, args.scanStatus) then
 				local scanState = args.jobState or "IDLE"
 				local running = scanState == "RUNNING" or scanState == "STALE_RETRY"
 					or scanState == "INVALIDATED_BY_MUTATION"
@@ -494,7 +583,7 @@ local function onServerCommand(module, command, args)
 			end
 		end
 	elseif command == "terminalState" then
-		if staleTerminalOpen(args) then return false end
+		if staleTerminalOpen(args) then return false, "catalog_stale", "openSequence" end
 		-- A confirmation can arrive after movement. Check geometry only, before
 		-- applying catalogs; do not re-read stale local terminal/antenna caches.
 		if args and args.openUi == true and GlobalStorageSiK.Sandbox.requireTerminalAccess()
@@ -525,12 +614,16 @@ local function onServerCommand(module, command, args)
 					GlobalStorageSiK.TerminalUI.showBlocked({playerNum=n, networkId=args.networkId,
 						reason=reason or "terminal_out_of_range"})
 				end
-				return
+				return false, "catalog_access_changed", "TerminalAccess.evaluateConfirmedAnchor"
 			end
 		end
 		if GlobalStorageSiK.TerminalAccessGuard
-			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(args, true) then return false end
+			and catalogConsumer("TerminalAccessGuard.acceptResponse", true,
+				GlobalStorageSiK.TerminalAccessGuard.acceptResponse, args, true) == false then
+			return false, "catalog_access_changed", "TerminalAccessGuard.acceptResponse"
+		end
 		local playerNum = tonumber(args and args.playerNum) or 0
+		preserveLiveScan(args, playerNum)
 		args = applyInventoryCatalog(args, playerNum)
 		GlobalStorageSiK.Client.terminalStateByPlayer =
 			GlobalStorageSiK.Client.terminalStateByPlayer or {}
@@ -538,15 +631,16 @@ local function onServerCommand(module, command, args)
 		local itemCount = args and args.items and #args.items or 0
 		for i = 1, math.min(itemCount, 3) do
 			local row = args.items[i]
-			GlobalStorageSiK.NativeProduct.tracePathSample("clientReceive", row.fullType, row.nativePath)
+			catalogConsumer("NativeProduct.tracePathSample", false,
+				GlobalStorageSiK.NativeProduct.tracePathSample, "clientReceive", row.fullType, row.nativePath)
 		end
 		local explicitOpen = args and args.openUi == true
 		local inventorySync = args and args.inventorySync == true
 		if explicitOpen and GlobalStorageSiK.TerminalUI
 			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult then
-			GlobalStorageSiK.TerminalUI.onRemoteOpenResult(args, true)
+			catalogConsumer("TerminalUI.onRemoteOpenResult", true, GlobalStorageSiK.TerminalUI.onRemoteOpenResult, args, true)
 		end
-		if staleTerminalOpen(args) then return false end
+		if staleTerminalOpen(args) then return false, "catalog_stale", "remoteOpenCallback" end
 		if inventorySync then
 			args = mergeInventorySyncState(args, previousState)
 		end
@@ -556,7 +650,7 @@ local function onServerCommand(module, command, args)
 		-- que la ventana llegue a repintarse.
 		if GlobalStorageSiK.WithdrawClient
 			and GlobalStorageSiK.WithdrawClient.onTerminalState then
-			GlobalStorageSiK.WithdrawClient.onTerminalState(args)
+			catalogConsumer("WithdrawClient.onTerminalState", true, GlobalStorageSiK.WithdrawClient.onTerminalState, args)
 		end
 		if args and args.networkId and args.inventoryRevision ~= nil
 			and (not previousState
@@ -564,7 +658,7 @@ local function onServerCommand(module, command, args)
 				or previousState.inventoryRevision ~= args.inventoryRevision)
 			and GlobalStorageSiK.RemoteItemDetail
 			and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
-			GlobalStorageSiK.RemoteItemDetail.invalidateNetwork(args.networkId)
+			catalogConsumer("RemoteItemDetail.invalidateNetwork", false, GlobalStorageSiK.RemoteItemDetail.invalidateNetwork, args.networkId)
 		end
 		if args and args.networkId and args.inventoryRevision ~= nil
 			and (not previousState
@@ -580,16 +674,22 @@ local function onServerCommand(module, command, args)
 			-- expandidos para una unica reconsulta.
 			if GlobalStorageSiK.TerminalItems
 				and GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged then
-				GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged(args.networkId, playerNum)
+				catalogConsumer("TerminalItems.onInventoryRevisionChanged", false, GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged, args.networkId, playerNum)
 			end
 		end
 		local deferVisibleRefresh = false
 		if GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.onTerminalState then
-			deferVisibleRefresh = GlobalStorageSiK.TerminalSync.onTerminalState(args, inventorySync) == true
+			deferVisibleRefresh = catalogConsumer("TerminalSync.onTerminalState", true,
+				GlobalStorageSiK.TerminalSync.onTerminalState, args, inventorySync) == true
+		end
+		if deferVisibleRefresh and args._gsCatalogApply then
+			error({stage="TerminalSync.onTerminalState", cause="catalog_deferred", rejected=true}, 0)
 		end
 		if not deferVisibleRefresh then
 			GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = args
-			if GlobalStorageSiK.ContainerInventory then GlobalStorageSiK.ContainerInventory.onTerminalState(args) end
+			if GlobalStorageSiK.ContainerInventory then
+				catalogConsumer("ContainerInventory.onTerminalState", false, GlobalStorageSiK.ContainerInventory.onTerminalState, args)
+			end
 			local currentUi = terminalUiForPlayer(playerNum)
 			local currentPlayerNum = currentUi and tonumber(currentUi.playerNum) or 0
 			if currentPlayerNum == playerNum then
@@ -642,10 +742,10 @@ local function onServerCommand(module, command, args)
 					if GlobalStorageSiK.TerminalUI.showBlocked then
 					GlobalStorageSiK.TerminalUI.showBlocked({
 						playerNum = playerNum,
-						reason = accessReason or "terminal_out_of_range",
-					})
+							reason = accessReason or "terminal_out_of_range",
+						})
 					end
-					return
+					return false, "catalog_access_changed", "TerminalAccess.validateServerOpen"
 				end
 			end
 		end
@@ -679,13 +779,17 @@ local function onServerCommand(module, command, args)
 				GlobalStorageSiK.TerminalUI.show(playerState)
 			end
 		elseif uiVisible then
+			if args._gsCatalogApply and (not GlobalStorageSiK.TerminalUI or type(GlobalStorageSiK.TerminalUI.show) ~= "function") then
+				return false, "consumer_unavailable", "TerminalUI.show"
+			end
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "refresh items=" .. tostring(itemCount))
 			if GlobalStorageSiK.TerminalUI and type(GlobalStorageSiK.TerminalUI.show) == "function" then
 				local ok, err = pcall(function()
-					GlobalStorageSiK.TerminalUI.show(args)
+					catalogConsumer("TerminalUI.show", false, GlobalStorageSiK.TerminalUI.show, args)
 				end)
 				if not ok then
 					GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
+					if args._gsCatalogApply then error(type(err)=="table" and err or {stage="TerminalUI.show", cause=err}, 0) end
 					showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalUpdateError"), true)
 				end
 			end
@@ -696,13 +800,15 @@ local function onServerCommand(module, command, args)
 			if not GlobalStorageSiK.TerminalUI or type(GlobalStorageSiK.TerminalUI.show) ~= "function" then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show no disponible")
 				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
+				if args._gsCatalogApply then return false, "consumer_unavailable", "TerminalUI.show" end
 				return
 			end
 			local ok, err = pcall(function()
-				GlobalStorageSiK.TerminalUI.show(args)
+				catalogConsumer("TerminalUI.show", false, GlobalStorageSiK.TerminalUI.show, args)
 			end)
 			if not ok then
 				GlobalStorageSiK.Log.error("Client", "TerminalUI.show", err)
+				if args._gsCatalogApply then error(type(err)=="table" and err or {stage="TerminalUI.show", cause=err}, 0) end
 				showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_ClientTerminalOpenError"), true)
 			elseif GlobalStorageSiK.Client and GlobalStorageSiK.Client.pendingInitialTab then
 				-- Ver terminalRegistered mas arriba: tras instalar un terminal
@@ -720,31 +826,46 @@ local function onServerCommand(module, command, args)
 			GlobalStorageSiK.Debug.log("Client", "terminalState", "cached items=" .. tostring(itemCount))
 		end
 		if explicitOpen and GlobalStorageSiK.NetworkReadAction then
-			GlobalStorageSiK.NetworkReadAction.onTerminalOpen(args)
+			catalogConsumer("NetworkReadAction.onTerminalOpen", false, GlobalStorageSiK.NetworkReadAction.onTerminalOpen, args)
 		end
 		return true
+	elseif command == "itemDetailsRejected" then
+		local n=tonumber(args and args.playerNum) or 0
+		local ui=terminalUiForPlayer(n)
+		local state=ui and ui.terminalState
+		if state and args and state.networkId==args.networkId
+			and state.inventoryRevision==args.inventoryRevision then
+			local panel=ui.itemsListPanel
+			if panel and panel._detailPending then panel._detailPending[args.rowKey]=nil end
+			if panel then
+				panel._expandedKeys=panel._expandedKeys or {}
+				panel._expandedKeys[args.rowKey]=nil
+			end
+			showMessage(GlobalStorageSiK.I18n.text("IGUI_GS_InventoryIncomplete"),true,n)
+			if ui.refreshItemsTab then ui:refreshItemsTab() end
+		end
 	elseif command == "itemDetails" then
 		GlobalStorageSiK.Client.itemDetailsCache = GlobalStorageSiK.Client.itemDetailsCache or {}
 		-- Durante una transferencia visible puede diferirse la sustitucion del
 		-- snapshot global. La ventana abierta es la autoridad para decidir si
 		-- esta pagina de instancias pertenece a SU revision; el cache global es
 		-- solo el fallback cuando no hay terminal visible.
-		local visibleTerminal = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+		local visibleTerminal = terminalUiForPlayer(tonumber(args and args.playerNum) or 0)
 		local activeState = visibleTerminal and visibleTerminal.terminalState
-			or GlobalStorageSiK.Client.cachedTerminalState
+			or GlobalStorageSiK.Client.terminalStateByPlayer[tonumber(args and args.playerNum) or 0]
 		local sameNetwork = not activeState or not args or not args.networkId
 			or activeState.networkId == args.networkId
 		local sameRevision = not activeState or not args or args.inventoryRevision == nil
-			or activeState.inventoryRevision == args.inventoryRevision
+			or (activeState._gsAppliedCatalogRevision or activeState.inventoryRevision) == args.inventoryRevision
 		local accepted = args and args.rowKey and sameNetwork and sameRevision
 		if accepted then
 			storeBounded(GlobalStorageSiK.Client.itemDetailsCache, itemDetailsOrder,
-				args.rowKey, args, MAX_ITEM_DETAIL_PAGES)
+				tostring(args.playerNum or 0) .. "\30" .. args.rowKey, args, MAX_ITEM_DETAIL_PAGES)
 		end
 		if GlobalStorageSiK.TerminalItems and GlobalStorageSiK.TerminalItems.onDetailsReceived then
 			-- Una respuesta stale no puede limpiar pending ni reconstruir la lista:
 			-- hacerlo reabre la misma consulta bajo demanda en un bucle de frames.
-			GlobalStorageSiK.TerminalItems.onDetailsReceived(args, accepted == true)
+			catalogConsumer("TerminalItems.onDetailsReceived", false, GlobalStorageSiK.TerminalItems.onDetailsReceived, args, accepted == true)
 		end
 	elseif command == "itemTooltipDetail" then
 		if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.onReceived then
@@ -1046,12 +1167,153 @@ local function onServerCommand(module, command, args)
 	end
 end
 
+local function applyCatalogDetail(payload)
+	local cache = GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
+	if not cache then return false, "catalog_revision", "itemDetails.revision" end
+	if payload.invalidIdentity then return false, payload.reason, "itemDetails.physicalIdentity" end
+	local ui = terminalUiForPlayer(payload.playerNum)
+	local load = ui and ui._gsCatalogLoad
+	local accepted = onServerCommand(GlobalStorageSiK.MOD_ID, "itemDetails", payload)
+	-- Details share fragmented progress with full catalogs. Retire their
+	-- load only after the detail consumer accepts, before the transport ACK.
+	-- A callback may synchronously replace the opening, window or load.
+	local state = ui and ui.terminalState
+	if accepted ~= false and load and load.sequence == payload.openSeq
+		and GlobalStorageSiK.Client.terminalOpenSeqByPlayer[payload.playerNum] == payload.openSeq
+		and terminalUiForPlayer(payload.playerNum) == ui
+		and state and state.networkId == payload.networkId and state.catalogScope == payload.catalogScope then
+		catalogConsumer("TerminalLoading.finish", false, GlobalStorageSiK.TerminalLoading.finish, ui, load)
+	end
+	return accepted
+end
+
+local function applyCatalogTransaction(payload, delta)
+	local client, n = GlobalStorageSiK.Client, payload.playerNum
+	local previousCache = {}
+	for k,v in pairs(client.inventoryCatalogByPlayerNetwork or {}) do
+		if v.playerNum == n then previousCache[k]=v end
+	end
+	local previousState = client.terminalStateByPlayer[n]
+	local previousGlobal = client.cachedTerminalState
+	local previousActive, previousPlayerActive = client.activeNetworkId, client.activeNetworkIdByPlayer[n]
+	local previousNetworks, previousMode = client.networkList, client.lastServerAccessMode
+	local previousPending, previousPlayerPending = client.pendingTerminalOpen, client.pendingTerminalOpenByPlayer[n]
+	local ui = terminalUiForPlayer(n)
+	local previousUi = ui and ui.terminalState
+	local previousPresentation = GlobalStorageSiK.TerminalItems
+		and GlobalStorageSiK.TerminalItems.captureCatalogPresentation
+		and GlobalStorageSiK.TerminalItems.captureCatalogPresentation(n) or nil
+	local previousDetails, previousDetailsOrder = {}, copyArray(itemDetailsOrder)
+	for key,value in pairs(client.itemDetailsCache or {}) do previousDetails[key]=value end
+	local previousApplying = ui and ui._gsCatalogApplying
+	if ui then ui._gsCatalogApplying = true end
+	payload._gsCatalogApply = true
+	local previousTransaction = activeCatalogTransaction
+	local transaction = { playerNum=n, openSeq=payload.openSeq, ui=ui,
+		presentation=previousPresentation, undos={} }
+	activeCatalogTransaction = transaction
+	local ok, accepted, reason, stage
+	if delta == "detail" then ok, accepted, reason, stage = pcall(applyCatalogDetail, payload)
+	elseif delta then ok, accepted, reason, stage = pcall(applyCatalogDelta, payload)
+	else ok, accepted, reason, stage = pcall(onServerCommand, GlobalStorageSiK.MOD_ID, "terminalState", payload) end
+	activeCatalogTransaction = previousTransaction
+	payload._gsCatalogApply = nil
+	if ui then ui._gsCatalogApplying = previousApplying end
+	local appliedState = client.terminalStateByPlayer[n]
+	if appliedState then appliedState._gsCatalogApply = nil end
+	for _,entry in pairs(client.inventoryCatalogByPlayerNetwork or {}) do
+		if entry.playerNum == n and entry.state then entry.state._gsCatalogApply = nil end
+	end
+	if not ok or accepted == false then
+		-- A callback may deliberately replace this opening. Never roll it back.
+		if client.terminalOpenSeqByPlayer[n] == payload.openSeq then
+			for index = #transaction.undos, 1, -1 do
+				local entry = transaction.undos[index]
+				if entry.guard then
+					local guardOk, current = pcall(entry.guard)
+					transaction.presentationSuperseded = not guardOk or current ~= true
+					break
+				end
+			end
+			if not transaction.presentationSuperseded then
+				for index = #transaction.undos, 1, -1 do pcall(transaction.undos[index].undo) end
+			end
+			if not transaction.presentationSuperseded then client.clearInventoryCatalog(n) end
+			if transaction.presentationSuperseded then
+				-- A newer image owns this UI now; rolling any part of B1 over it would
+				-- split client state from the visible catalog.
+			else
+			for k,v in pairs(previousCache) do client.inventoryCatalogByPlayerNetwork[k]=v end
+			client.terminalStateByPlayer[n] = previousState
+			client.itemDetailsCache, itemDetailsOrder = previousDetails, previousDetailsOrder
+			client.activeNetworkIdByPlayer[n] = previousPlayerActive
+			if n == 0 then client.activeNetworkId = previousActive end
+			client.networkList, client.lastServerAccessMode = previousNetworks, previousMode
+			client.pendingTerminalOpenByPlayer[n] = previousPlayerPending
+			if n == 0 then client.pendingTerminalOpen = previousPending end
+			if not client.cachedTerminalState or (tonumber(client.cachedTerminalState.playerNum) or 0) == n then
+				client.cachedTerminalState = previousGlobal
+			end
+			if ui and terminalUiForPlayer(n) == ui and previousUi then
+				ui.terminalState = previousUi
+				local restoredPresentation = not transaction.presentationSuperseded and previousPresentation
+					and GlobalStorageSiK.TerminalItems
+					and GlobalStorageSiK.TerminalItems.restoreCatalogPresentation
+					and GlobalStorageSiK.TerminalItems.restoreCatalogPresentation(previousPresentation) == true
+				-- A keyed delta already owns a transactional Table image. Rebuilding the
+				-- full surface here can overwrite its restored focus and selection.
+				if not transaction.presentationSuperseded
+					and (not delta or not restoredPresentation) and ui.refreshFromState then
+					pcall(ui.refreshFromState, ui, previousUi)
+				end
+			end
+			end
+		end
+		if not ok then error(accepted, 0) end
+		return false, reason, stage
+	end
+	if delta ~= "detail" then GlobalStorageSiK.CatalogOverlay.accept(n, payload.networkId, payload.inventoryRevision) end
+	return true
+end
+
 GlobalStorageSiK.Client = GlobalStorageSiK.Client or {}
+
+function GlobalStorageSiK.Client.registerCatalogUndo(undo, terminal, _, guard)
+	local transaction = activeCatalogTransaction
+	if type(undo) ~= "function" or not transaction or terminal ~= transaction.ui
+		or GlobalStorageSiK.Client.terminalOpenSeqByPlayer[transaction.playerNum] ~= transaction.openSeq then
+		return false
+	end
+	transaction.undos[#transaction.undos + 1] = { undo=undo,
+		guard=type(guard) == "function" and guard or nil }
+	return true
+end
+
+function GlobalStorageSiK.Client.getCatalogPresentationSnapshot(terminal)
+	local transaction = activeCatalogTransaction
+	if transaction and terminal == transaction.ui then return transaction.presentation end
+	return nil
+end
+
 GlobalStorageSiK.Client.lastItemIndex = {}
 GlobalStorageSiK.Client.cachedTerminalState = nil
 GlobalStorageSiK.Client.terminalStateByPlayer = {}
 GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork = {}
 GlobalStorageSiK.Client.nodeContentsCache = {}
+
+function GlobalStorageSiK.Client.clearItemDetails(playerNum, networkId)
+	local retained, retainedOrder = {}, {}
+	local cache = GlobalStorageSiK.Client.itemDetailsCache or {}
+	for index = 1, #itemDetailsOrder do
+		local key = itemDetailsOrder[index]
+		local page = cache[key]
+		if page and ((tonumber(page.playerNum) or 0) ~= (tonumber(playerNum) or 0)
+			or networkId and page.networkId ~= networkId) then
+			retained[key], retainedOrder[#retainedOrder + 1] = page, key
+		end
+	end
+	GlobalStorageSiK.Client.itemDetailsCache, itemDetailsOrder = retained, retainedOrder
+end
 GlobalStorageSiK.Client.pendingTerminalOpen = false
 GlobalStorageSiK.Client.pendingTerminalOpenByPlayer = {}
 GlobalStorageSiK.Client.terminalOpenSeq = 0
@@ -1068,11 +1330,6 @@ function GlobalStorageSiK.Client.addInventoryCatalogToken(payload, playerNum, ne
 	if not networkId then return payload end
 	local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
 	local entry = cache[inventoryCatalogKey(playerNum, networkId)]
-	local timestamp = getTimestampMs and getTimestampMs() or 0
-	if entry and entry.cachedAt and (timestamp < entry.cachedAt or timestamp - entry.cachedAt > 300000) then
-		cache[inventoryCatalogKey(playerNum, networkId)] = nil
-		entry = nil
-	end
 	if entry then
 		payload.knownCatalogNetworkId = networkId
 		payload.knownInventoryRevision = entry.inventoryRevision
@@ -1115,6 +1372,7 @@ if GlobalStorageSiK.UIFeedback and GlobalStorageSiK.UIFeedback.installCleanup th
 end
 
 function GlobalStorageSiK.Client.clearTransientCaches(playerNum)
+	GlobalStorageSiK.CatalogOverlay.clear(playerNum)
 	GlobalStorageSiK.CatalogClient.clear(playerNum)
 	if GlobalStorageSiK.CatalogFeedback then GlobalStorageSiK.CatalogFeedback.clear(playerNum) end
 	GlobalStorageSiK.Client.itemDetailsCache = {}
@@ -1177,8 +1435,9 @@ GlobalStorageSiK.CatalogClient.configure({
 	end,
 	confirm=function(payload)
 		if GlobalStorageSiK.TerminalAccessGuard
-			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(payload, true) then return false end
-		return GlobalStorageSiK.TerminalUI.confirmCatalogAccess(payload)
+			and catalogConsumer("TerminalAccessGuard.acceptResponse", true,
+				GlobalStorageSiK.TerminalAccessGuard.acceptResponse, payload, true) == false then return false end
+		return catalogConsumer("TerminalUI.confirmCatalogAccess", false, GlobalStorageSiK.TerminalUI.confirmCatalogAccess, payload)
 	end,
 	hasCache=function(payload)
 		local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}
@@ -1188,8 +1447,9 @@ GlobalStorageSiK.CatalogClient.configure({
 	progress=function(payload, done, total)
 		GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 	end,
-	apply=function(payload) return onServerCommand(GlobalStorageSiK.MOD_ID, "terminalState", payload) == true end,
-	applyDelta=function(payload) return applyCatalogDelta(payload) end,
+	apply=function(payload) return applyCatalogTransaction(payload, false) end,
+	applyDelta=function(payload) return applyCatalogTransaction(payload, true) end,
+	applyDetail=function(payload) return applyCatalogTransaction(payload, "detail") end,
 	recover=function(payload)
 		if GlobalStorageSiK.TerminalSync then
 			GlobalStorageSiK.TerminalSync.scheduleInventoryPull(nil,
@@ -1202,7 +1462,25 @@ GlobalStorageSiK.CatalogClient.configure({
 			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
 		}, meta.playerNum)
 	end,
-	failure=function(n, seq, reason, confirmed)
+	reject=function(meta)
+		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
+			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope, rejected=true,
+		}, meta.playerNum)
+	end,
+	failure=function(n, seq, reason, confirmed, recoverable)
+		if reason == "catalog_access_changed" then GlobalStorageSiK.Client.clearInventoryCatalog(n) end
+		local visible = terminalUiForPlayer(n)
+		if recoverable and visible then
+			GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n] = nil
+			if n == 0 then GlobalStorageSiK.Client.pendingTerminalOpen = false end
+			local loading = GlobalStorageSiK.TerminalLoading
+			loading.set(visible, "failed", seq)
+			visible._gsCatalogLoad.failureKey = "IGUI_GS_InventoryIncomplete"
+			loading.unlock(visible)
+			if visible.syncHeaderChrome then visible:syncHeaderChrome() end
+			return
+		end
 		local requests = GlobalStorageSiK.TerminalUI._remoteOpenRequests or {}
 		local request = requests[n]
 		GlobalStorageSiK.TerminalUI.cancelPendingOpen(n)

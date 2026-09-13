@@ -76,10 +76,10 @@ end
 --- Recoge categorías de ítems indexados en la red (solo DisplayCategory válidas).
 ---@param networkId string
 ---@return string[]
-function GlobalStorageSiK.Categories.collectFromNetworkItems(networkId)
+function GlobalStorageSiK.Categories.collectFromNetworkItems(networkId, preparedRows)
 	local found = {}
 	local seen = {}
-	local rows = GlobalStorageSiK.Index.buildRows(networkId)
+	local rows = preparedRows or GlobalStorageSiK.Index.buildRows(networkId)
 	for i = 1, #rows do
 		local row = rows[i]
 		-- BUG REAL cerrado (2026-08-22, spam confirmado en pruebas reales de
@@ -129,7 +129,7 @@ end
 --- Catálogo para desplegables de contenedores (defaults + red + ítems presentes).
 ---@param networkId string
 ---@return string[]
-function GlobalStorageSiK.Categories.buildCatalog(networkId)
+function GlobalStorageSiK.Categories.buildCatalog(networkId, preparedRows, detectedCategories)
 	local seen = {}
 	local catalog = {}
 
@@ -155,7 +155,7 @@ function GlobalStorageSiK.Categories.buildCatalog(networkId)
 	for _, cat in ipairs(GlobalStorageSiK.Categories.getList(networkId)) do
 		add(cat)
 	end
-	for _, cat in ipairs(GlobalStorageSiK.Categories.collectFromNetworkItems(networkId)) do
+	for _, cat in ipairs(detectedCategories or GlobalStorageSiK.Categories.collectFromNetworkItems(networkId, preparedRows)) do
 		add(cat)
 	end
 	for _, cat in ipairs(GlobalStorageSiK.Categories.collectFromNodeRules(networkId)) do

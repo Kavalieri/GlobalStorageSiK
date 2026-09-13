@@ -112,6 +112,7 @@ end
 ---@param state table|nil
 local function applyTerminalState(ui, state, forceDeferred)
 	if not ui or not ui.refreshFromState then
+		if state and state._gsCatalogApply then error({stage="TerminalUI.refreshFromState", cause="missing_consumer"}, 0) end
 		return
 	end
 	local itemCount = state and state.items and #state.items or 0
@@ -119,7 +120,7 @@ local function applyTerminalState(ui, state, forceDeferred)
 	ui._gsPendingTerminalLoad = ui._gsCatalogLoad
 	-- A queued callback owns the latest state even if a newer catalog is small.
 	-- Running it immediately would leave the old callback refreshing nil next tick.
-	if ui._gsTerminalRefreshQueued then return end
+	if ui._gsTerminalRefreshQueued and not (state and state._gsCatalogApply) then return end
 	local function runRefresh()
 		local startedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
 			and type(getTimestampMs) == "function" and getTimestampMs() or nil
@@ -137,12 +138,13 @@ local function applyTerminalState(ui, state, forceDeferred)
 			if panel and panel.setVisible then panel:setVisible(true) end
 			ui._gsCatalogBodyHidden = nil
 		end
-		local ok, err = pcall(ui.refreshFromState, ui, pendingState)
-		if not ok then
+		local ok, err, reason = pcall(ui.refreshFromState, ui, pendingState)
+		if not ok or err == false then
+			if pendingState._gsCatalogApply then
+				error({stage="TerminalUI.refreshFromState", cause=ok and (reason or "false") or err, rejected=ok}, 0)
+			end
 			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
-			Loading.lock(ui)
-			ui:onClose()
-			GlobalStorageSiK.TerminalUI.showCatalogFailure(ui.playerNum, "catalog_apply", true)
+			Loading.set(ui, "failed", load and load.sequence)
 		else
 			Loading.finish(ui, load)
 			local client = GlobalStorageSiK.Client
@@ -159,7 +161,7 @@ local function applyTerminalState(ui, state, forceDeferred)
 					.. " deferred=" .. tostring(forceDeferred == true))
 		end
 	end
-	if (forceDeferred or itemCount > DEFER_REFRESH_ITEM_COUNT) and Events and Events.OnTick then
+	if not (state and state._gsCatalogApply) and (forceDeferred or itemCount > DEFER_REFRESH_ITEM_COUNT) and Events and Events.OnTick then
 		ui._gsTerminalRefreshQueued = true
 		local function deferOnce()
 			Events.OnTick.Remove(deferOnce)
@@ -211,6 +213,9 @@ function GlobalStorageSiK.TerminalUI.show(state)
 			GlobalStorageSiK.TerminalUI.showBlocked({
 				playerNum = playerNum, reason = accessReason,
 			})
+			if state and state._gsCatalogApply then
+				error({stage="TerminalUI.show.access", cause="catalog_access_changed", rejected=true}, 0)
+			end
 			return
 		end
 	end
@@ -583,22 +588,52 @@ function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 		-- this player's confirmed network/scope; no permission comes from cache.
 		local cache = GlobalStorageSiK.Client.getInventoryCatalogPreview(payload)
 		local preview = {}
+		if cache and cache.state then for k, v in pairs(cache.state) do preview[k] = v end end
 		for k, v in pairs(payload) do preview[k] = v end
 		if cache then
 			preview.items, preview.itemTypeCount = cache.items, cache.itemTypeCount
 			preview._gsAppliedCatalogRevision = cache.inventoryRevision
 		end
-		ui.terminalState = preview
+		local client = GlobalStorageSiK.Client
+		local previousUiState = ui.terminalState
+		local previousPlayerState = client.terminalStateByPlayer[payload.playerNum]
+		local previousGlobalState = client.cachedTerminalState
+		local previousApplied = ui._gsHasAppliedState
+		local previousLoad = ui._gsCatalogLoad
+		local previousAccessMode, previousAccessReason = ui.accessMode, ui.accessReason
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 		else ui.accessMode = "full" end
 		Loading.set(ui, cache and "validating" or "loading", payload.openSeq, done, total)
 		if cache then
 			Loading.unlock(ui)
-			local ok, err = pcall(ui.refreshFromState, ui, preview)
-			Loading.lock(ui)
-			if not ok then GlobalStorageSiK.Log.error("TerminalUI", "catalog preview", tostring(err)) end
-		end
+			local ok, accepted, reason, stage = pcall(ui.refreshFromState, ui, preview)
+			if not ok or accepted == false then
+				local current = client.terminalOpenSeqByPlayer[payload.playerNum] == payload.openSeq
+					and GlobalStorageSiK.TerminalUI.getInstanceForPlayer(payload.playerNum) == ui
+				if current then
+					ui.terminalState = previousUiState
+					client.terminalStateByPlayer[payload.playerNum] = previousPlayerState
+					client.cachedTerminalState = previousGlobalState
+					ui._gsHasAppliedState = previousApplied
+					if previousUiState then pcall(ui.refreshFromState, ui, previousUiState) end
+					ui._gsHasAppliedState = previousApplied
+					if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
+						GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, previousAccessMode, previousAccessReason)
+					else ui.accessMode, ui.accessReason = previousAccessMode, previousAccessReason end
+					ui._gsCatalogLoad = previousLoad
+					if previousLoad and (previousLoad.phase == "checking" or previousLoad.phase == "loading") then
+						Loading.lock(ui)
+					else Loading.unlock(ui) end
+					if ui.syncHeaderChrome then ui:syncHeaderChrome() end
+				end
+				if not ok and type(accepted) == "table" and accepted.stage then error(accepted, 0) end
+				error({stage=stage or "TerminalUI.catalogPreview",
+					cause=ok and (reason or "false") or accepted, rejected=ok}, 0)
+			end
+			client.terminalStateByPlayer[payload.playerNum] = preview
+			if payload.playerNum == 0 then client.cachedTerminalState = preview end
+		else ui.terminalState = preview end
 	else
 		local previous = ui.terminalState or {}
 		local hasRows = type(previous.items) == "table"

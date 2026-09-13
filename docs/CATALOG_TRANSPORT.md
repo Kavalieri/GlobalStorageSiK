@@ -1,118 +1,180 @@
-# Catalog transport — Core 1.5.3-dev1
+# Catalog transport — Core 1.5.4-dev1
 
-## Core 1.5.3-dev1.2 live reconciliation
+This private protocol carries complete catalog states, revisioned deltas and
+on-demand detail pages. It does not change the public addon API. Server and
+client must use matching Core versions; compact protocol 2 tokens are not
+understood by an older Core client. The decoder retains protocol 1 support for
+bounded compatibility traffic.
 
-Opening and recovery continue to use the complete fragmented catalog described
-below. A confirmed transfer uses `terminalCatalogDelta` inside the same
-authorized, per-player opening session. The message declares `baseRevision`,
-`inventoryRevision`, complete replacement rows and removed row keys. The client
-applies it atomically only when its complete cached catalog matches the exact
-network, scope, opening sequence and base revision. Late and duplicate revisions
-are ignored; a missing base retains the visible catalog and coalesces one normal
-fragmented recovery. A delta that cannot fit the established safe frame budget
-falls back to the complete fragmented transport without truncation.
+## Session and publication
 
-Transfer `actionResult` remains the independent per-microbatch ACK. Catalog
-construction is queued after it, so it cannot delay or release the gesture
-queue. The warehouse updates only the existing table rows through stable
-`rowKey` values; it does not refresh or remount the window, tabs, Block or
-header. Background `updating` status changes are header-only and do not lock
-the body. Cold opening and cache validation remain read-only until the complete
-catalog is accepted, and only then may the header report the connected state.
+~~~mermaid
+stateDiagram-v2
+    [*] --> AccessCheck
+    AccessCheck --> AccessConfirmed: terminalOpenAck
+    AccessConfirmed --> Building: reserve B1
+    Building --> Encoding: immutable rows ready
+    Encoding --> Receiving: bounded terminalCatalogChunk
+    Receiving --> Applying: all fragments decoded
+    Applying --> Confirmed: consumer succeeds, terminalCatalogAck
+    Confirmed --> Building: coalesced change from exact ACK base
+    Applying --> Recovering: rejection or exception
+    Recovering --> Building: one full recovery
+    Receiving --> Closed: revoked or superseded
+    Confirmed --> Closed: close, death or revoked access
+~~~
 
-Exact transfers also report their touched node IDs internally. If a budgeted
-zone scan is active, its staging protects those newer node snapshots and adopts
-the new inventory revision instead of discarding the whole scan and scheduling
-a second pass. Unidentified or incomplete mutations retain the strict stale
-discard and full reconciliation path.
+Authorization is acknowledged before catalog construction. It cannot install an
+empty inventory or acknowledge catalog contents. Every batch binds the
+authoritative recipient, local-player slot, network, opening sequence, authorized
+zone scope, captured inventory revision and batch ID.
 
-The private terminal wire protocol uses `terminalOpenAck`,
-`terminalCatalogChunk`, `terminalCatalogAck` and `terminalCatalogError`.
-Consumers continue to receive a complete `terminalState`; partial chunks never
-enter inventory caches or addon callbacks. This is not a new addon API.
+One batch is immutable from reservation through consumer ACK. A scan, transfer
+or later inventory revision records one pending refresh intent; it never replaces
+unfinished B1. After B1 is acknowledged, B2 derives from exactly that observer's
+acknowledged rows and revision. A newer content revision does not revoke an
+older authorized snapshot. Changed permissions, scope, terminal binding, range,
+death or opening sequence do revoke it.
 
-Authorization produces a small ACK before building the inventory. It confirms
-access only, never an empty catalog. The pending opening remains until a
-complete catalog is assembled. Every frame is correlated by authoritative
-player, network, opening sequence, inventory revision, catalog scope and batch.
-The latest batch supersedes unfinished work. Exact duplicates do not extend
-deadlines; conflicting duplicates fail closed. A receipt only releases transient
-transport memory and cannot grant permission or mutate inventory.
+Rows and index contributions are shared only by network and authorized scope.
+Opening metadata, ACK state and recovery belong to each recipient. A shared
+publication never regresses when two revisions finish in a different order.
+Index outputs and acknowledged rows remain immutable.
 
-`GS_Server.gsSendServerCommand` routes every terminalState emitter through the
-same encoder: opening, inventorySync, scan completion, taxonomy, transfer and
-observer refresh. During opening, inventory-only refresh is promoted to a full
-state. Before each frame the server rechecks permission, the active opening,
-terminal link, strict physical/radio range, revision and scope. Revision changes
-coalesce a replacement snapshot; access loss aborts the session.
+## Incremental work and cache
 
-The exact TableNetworkUtils cost includes key/value types and UTF-8 bytes.
-Frames are capped at 24,000 bytes including a 128-byte envelope allowance.
-Strings use at most 4,096 UTF-8 bytes per token fragment, preserving UTF-16
-surrogate pairs in Kahlua. The native signed-short string limit is never raised.
-Primitive tables, strings, finite numbers and booleans are round-tripped without
-executable deserialization, truncation or replacement text.
+A hot opening with the same network, scope and revision keeps the known catalog
+usable after the access ACK. A notModified batch carries metadata rather than
+another full catalog. Age alone neither expires a valid catalog nor advances
+its inventory revision.
 
-Transient admission limits are 16 MiB encoded bytes, 500,000 tokens, 4,096 chunks
-and depth 32 per batch, 256 sessions and a 64 MiB conservative global reservation
-estimate (twice wire bytes + 64 bytes/token + 128 bytes/chunk). This estimate is
-not a guarantee about JVM heap. Oversized work fails explicitly; it does not
-truncate data or increase engine buffers. Existing ticks send at most four
-frames globally, round robin. A server job expires after 60 seconds without
-progress/receipt. The client expires incomplete work after 10 seconds without
-a new fragment; opening without a catalog has a 60-second inactivity deadline
-after its ACK. Ordinary access ACK timeout remains 10 seconds.
+Published node snapshots provide per-node contributions. Changed parents are
+recomputed from changed contributions; unchanged snapshots and parents are
+reused. Initial construction and sorting use explicit budgeted phases.
+Categories consume the same prepared rows instead of rebuilding the index.
+The classification stamp is checked again between index completion and category
+publication. A changed stamp aborts that preparation without publishing mixed
+taxonomy. A normal inventory revision advance still leaves captured B1 valid.
 
-Close, supersession, error, death and disconnection release transient work.
-The existing access watcher covers active/pending consumers and detaches when
-unused. Authorized scans continue independently of their observers. No change
-is made to persistence, quantities, item identity, permissions or taxonomy.
+The reconciler inspects registered, watched networks and yields between physical
+items and comparisons. A replacement node snapshot commits only after identity,
+membership, old snapshot reference and physical contents are revalidated.
+Unloaded or unrepresentable nodes retain their prior image without fabricated
+empty counts. Food, fluid and condition changes affect their actual node.
+A no-change cycle produces no content revision.
+Periodic cycles are diagnostic background work and do not broadcast manual
+scan progress. `CatalogTransport reconcile` records phase, nodes, units,
+compared steps, changed nodes and discarded captures. Actual changes still
+publish through the revisioned catalog path; manual scans keep their progress.
 
-Recovery uses the approved modal with separate unconfirmed-access and confirmed-
-access/catalog-failure copy. Its information control gives the specific failure
-(timeout, incomplete/conflicting data, encoding, budget, busy server, changed
-access, unavailable cache, send/apply failure). Close never retries or scans.
-ES and EN have dedicated copy; other locale files carry explicit English fallback.
+Construction uses 4,096 work units and reconciliation uses 32 physical/comparison
+work units, each with a 4 ms soft tick budget. Codec work has an 8,192-token,
+4 ms soft budget. These cooperative
+budgets are checked between operations, not a guarantee that each engine call
+takes less than 4 ms. Sending is limited to four frames per server update.
+Engine latency and end-to-end percentiles require runtime measurement.
+Sorting up to 64 entries is a bounded synchronous primitive; larger collections
+retain the incremental merge cursor. This preserves exact canonical signatures.
 
-## Validation scope
+## Wire and memory bounds
 
-Core 1.5.3-dev1.1 uses the existing four-frame global allowance across repeated
-round-robin visits, including a single busy recipient. Idle traversal is bounded
-by four times the starting session count, and synchronous SP removal is safe.
-The optional `knownCatalogNetworkId` identifies a cache token independently of
-the opening target. Physical opening still resolves the terminal on the server;
-only a matching network, revision and scope may reuse the cached inventory.
-Existing legacy tokens without this field retain their revision/scope checks.
-The private client `progress` callback receives an accepted access ACK with an
-unknown total, then counts only unique accepted fragments after confirmation.
-It does not install partial inventory or certify UI readiness.
+Frames use the native table serializer size model, including UTF-16 accounting
+for Unicode strings. The frame ceiling is 24,000 bytes with envelope margin.
+Protocol 2 uses typed scalar tokens, bounded string fragments and explicit table
+boundaries. Physical item arrays do not appear in ordinary parent rows.
 
-Authorial harnesses exercise the real codec and transport modules with at least
-1,500 rows, 64 nodes, UTF-8/CJK/emoji, ordering, duplicates, revision replacement
-and cleanup. Lua 5.1 and Kahlua compilation are development gates. These checks
-do not prove dedicated-server packet delivery or the rendered PZ modal; those
-remain explicit runtime checks for Sistemas/Kava on the frozen candidate.
+Codec limits are 16 MiB encoded batch, 500,000 tokens, 4,096 fragments and nesting
+depth 32. Transport reservation limits are 32 MiB per recipient and 64 MiB
+globally, including retained bases and conservative transient estimates. The
+server admits at most 256 sessions. Capacity failure is explicit; rows are not
+silently truncated to fit.
+The prepared-row cache separately caps 128 entries, 16 MiB per entry and 32 MiB
+globally; it evicts by use order and releases invalidated network entries.
+Index has its own 32 MiB cache budget. Each codec job may memoize at most 2,048
+validated short strings within 256 KiB, included in transport reservations.
+Memoization changes work cost without changing wire tokens or Unicode checks.
 
-## Core 1.5.3-dev1.1 opening readiness
+ACKs require the exact in-flight identity and all fragments sent. Duplicate,
+premature and stale ACKs cannot advance the base. Exact duplicate fragments do
+not extend deadlines. Conflicting fragments, malformed schema, capacity failure
+and timeout fail the affected batch.
+A builder only renews its progress deadline when it actually advances or finishes.
 
-`showPending` shows an empty shell before the opening command is dispatched on
-its next active tick. This separates shell visibility from server work; actual
-button-to-render latency remains a PZ measurement. Close and Escape remain usable.
-The navigation/body stays disabled while checking access, loading, validating or
-updating inventory. An access ACK alone never means Connected. The window clears
-its loading state only after the same generation's complete catalog refresh
-succeeds; a newer batch, denial or close invalidates a queued refresh.
+## Consumer commit and recovery
 
-Warm openings retain one complete data-only catalog per local player. Tokens
-expire after five minutes at the next request (including clock rollback); no
-rows are truncated. Preview requires confirmed player/network/scope/revision.
-A matching notModified snapshot reuses displayed rows instead of rebuilding them.
-Scope changes hide prior panels until authoritative refresh. Failed transport
-leaves an empty, disabled shell with an error header and the existing specific
-notice; it never leaves a Connected header or retries automatically.
+No partial fragment reaches catalog caches, UI or addon consumers. The actual
+client consumer must complete before ACK. Rejections and exceptions retain the
+original stage and bounded cause in CatalogTransport consumer_failed.
+The catalog_apply classification is not the sole diagnostic.
 
-Status and the existing progress bar share the same lifecycle: unknown totals
-are indeterminate, unique accepted fragments give real progress, scan says
-Scanning, and Connected is reserved for a ready, accessible view. Progress may
-reach 100 percent before decode/UI refresh completes, while the loading label
-and action lock remain active. Persistence, permissions and frame limits are unchanged.
+A recoverable failure retains the last valid catalog and requests one full
+recovery. Changed access fails closed. Recovery and legacy direct deltas use
+the same current-session fences. A detail ACK does not advance the catalog base.
+Detail acceptance also finishes its captured loading state before ACK, within
+the consumer rollback journal. A late detail cannot finish a newer load/window
+or opening sequence. Rejected details retain the prior image and show failure.
+
+B1 applies during managed transfers so its ACK can release B2. Confirmed
+microbatch withdrawals project a per-player overlay over B1 without changing
+acknowledged counts. Only affected rows await the new revision; unrelated safe
+rows remain usable. A later accepted catalog retires overlay events exactly
+once. Transfer action ACKs remain independent from catalog ACKs.
+
+## Incremental presentation
+
+Core 1.5.4-dev1 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
+detail pages and managed transfer completion. The initial image uses `setRows`;
+deltas reuse unchanged root descriptors, semantic entries, projected blocks and
+the viewport pool. Selection, focus, expansion, child page and scroll survive
+updates for retained keys. A missing patch API produces an explicit consumer
+failure instead of silently rebuilding the full table.
+
+Confirmed withdrawals contribute their pending keys immediately. A later
+catalog retires their overlay even when a concurrent deposit leaves the final
+count unchanged. Completing a managed transfer compares its final catalog with
+the previous source to include concurrent changes outside its action log.
+This comparison and ordering scan references/content across the catalog;
+only affected roots are localized, filtered and reprojected. It is not an
+O(1) operation. Detail caches and rollback state are scoped by player and network.
+
+## Exact detail pages
+
+Ordinary rows omit systematic itemIds, unitDetails and unitNodeIds.
+getItemDetails names a parent row and expected inventory revision. Pages are
+bounded to 25 detail rows and use the fragmented session transport. A grouped
+detail row may identify multiple physical units. The pending
+descriptor queue is bounded to 64 per player and coalesces repeated row
+requests. A busy queue rejects that request explicitly.
+
+Detail consumers require matching player, network and applied catalog revision.
+Late pages cannot satisfy a new network/revision request. Duplicate physical
+IDs are reported as ItemIdentity duplicate_physical_id separately from transport
+errors, and exact selection is rejected. Authoritative transfer validation still
+checks permissions, revision and physical objects.
+Dragging a parent requests its complete authoritative group regardless of
+expansion or visible page (`amount=0`). The withdrawal worker sends bounded
+microbatches and stops at capacity, access, range or cancellation limits.
+A child drag requests one unit; multiple selected children retain their exact
+selection. Selected children covered by a selected parent are not duplicated.
+
+## Audited producers and lifecycle
+
+All terminalState producers converge in GS_Server.gsSendServerCommand:
+initial opening, configuration refreshes, completed scans, redistribution and
+addon-triggered state refreshes. Inventory watchers enqueue revisioned intents.
+Transfer confirmations schedule catalog work after their action result.
+Detail pages and ACKs use the same player/session authority checks.
+
+Closing, replacing a sequence, revocation, death and player cleanup release
+transient jobs. Catalog and manual scan progress update header state; idle
+background reconciliation preserves Connected. Successful completion clears
+progress, including a completed detail page, instead of retaining 100%.
+Manual scan status is ordered by scan start and progress/completion timestamps
+within the same opening, player, network and scope. A delayed full catalog must
+not restore an older RUNNING state after live completion. This merge changes no
+inventory revisions or rows. The reconciler checks the live Java list size before
+each capture/verification read and discards interfered captures for a later cycle.
+
+Development evidence and the immutable QA result identify the tested candidate.
+Static Lua/Kahlua checks and engine doubles do not certify PZ dedicated, host,
+split-screen or in-game timing.
