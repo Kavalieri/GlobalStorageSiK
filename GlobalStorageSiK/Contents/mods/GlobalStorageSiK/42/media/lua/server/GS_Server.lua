@@ -259,7 +259,11 @@ local function queuePreparedCatalog(player,payload,base)
     local networkId,scope,revision=payload.networkId,payload.catalogScope,payload.inventoryRevision
     base=base or GlobalStorageSiK.CatalogServer.base(player)
     if base and (base.scope~=scope or base.revision>revision) then base=nil end
-    if base and base.revision==revision then payload.notModified=true end
+    if base then
+        payload.baseRevision=base.revision
+        payload.notModified=base.revision==revision
+        payload.catalogDelta=base.revision<revision
+    end
     local key=catalogCacheKey(player,networkId,scope)
     local stamp=GlobalStorageSiK.Index.getClassificationStamp()
     local cached=inventoryCatalogCache.get(key)

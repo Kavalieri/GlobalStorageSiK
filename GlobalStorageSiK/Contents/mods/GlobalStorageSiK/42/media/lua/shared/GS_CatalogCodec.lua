@@ -101,6 +101,66 @@ local function tokenCost(token, knownBytes)
 	error("catalog_schema", 0)
 end
 
+-- One wire-size contract for final framing and both transport endpoints.
+Codec.COMMAND_BYTES = 128
+function Codec.frameSize(frame)
+	local payloadBytes,reason=Codec.size(frame)
+	if not payloadBytes then return nil,reason end
+	local chunkBytes=frame.data and Codec.size(frame.data) or 0
+	if not chunkBytes then return nil,"catalog_schema" end
+	return payloadBytes+Codec.COMMAND_BYTES,nil,chunkBytes,payloadBytes
+end
+function Codec.frame(envelope,data,part)
+	local frame={}
+	for key,value in pairs(envelope) do frame[key]=value end
+	frame.data,frame.part=data,part
+	return frame
+end
+function Codec.beginFraming(encoded,envelope)
+	local empty=Codec.frame(envelope,{},1)
+	local bytes,reason=Codec.frameSize(empty)
+	if not bytes then return nil,reason end
+	local budget=Codec.FRAME_BYTES-bytes+4
+	if budget<=4 then return nil,"catalog_frame_envelope" end
+	local fits=encoded.chunkSizes and #encoded.chunkSizes==#encoded.chunks
+	if fits then
+		for i=1,#encoded.chunkSizes do if encoded.chunkSizes[i]>budget then fits=false;break end end
+	end
+	if fits then return {done=true,source={},chunks=encoded.chunks,totalBytes=encoded.totalBytes,
+		tokenCount=encoded.tokenCount,work=0,budget=budget} end
+	local chunk={}
+	return {source=encoded.chunks,sourcePart=1,sourceAt=1,chunks={chunk},chunk=chunk,
+		chunkBytes=4,totalBytes=4,tokenCount=0,budget=budget,work=0}
+end
+function Codec.stepFraming(state,maxWork)
+	if state.done then return {chunks=state.chunks,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
+	local ok,reason=pcall(function()
+		for i=1,maxWork do
+			local source=state.source[state.sourcePart]
+			if not source then state.done=true;return end
+			local token=source[state.sourceAt]
+			if token==nil then state.sourcePart=state.sourcePart+1;state.sourceAt=1
+			else
+				local cost=tokenCost(token)
+				if cost+4>state.budget then error("catalog_frame_token",0) end
+				if state.chunkBytes+cost>state.budget then
+					if #state.chunks>=Codec.MAX_CHUNKS then error("catalog_budget",0) end
+					state.chunk={};state.chunks[#state.chunks+1]=state.chunk
+					state.chunkBytes=4;state.totalBytes=state.totalBytes+4
+				end
+				state.chunk[#state.chunk+1]=token
+				state.chunkBytes=state.chunkBytes+cost;state.totalBytes=state.totalBytes+cost
+				state.tokenCount=state.tokenCount+1;state.sourceAt=state.sourceAt+1
+				if state.totalBytes>Codec.MAX_BATCH_BYTES then error("catalog_budget",0) end
+			end
+			state.work=state.work+1
+		end
+	end)
+	if not ok then return nil,reason,true end
+	if state.done then return {chunks=state.chunks,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
+	return nil,nil,false
+end
+
 local function emit(state, token, knownBytes)
 	local cost = tokenCost(token, knownBytes)
 	if cost + 4 > state.budget then error("catalog_budget", 0) end
@@ -109,10 +169,12 @@ local function emit(state, token, knownBytes)
 		state.chunk = {}
 		state.chunks[#state.chunks + 1] = state.chunk
 		state.chunkBytes = 4
+		state.chunkSizes[#state.chunks]=4
 		state.totalBytes = state.totalBytes + 4
 	end
 	state.chunk[#state.chunk + 1] = token
 	state.chunkBytes = state.chunkBytes + cost
+	state.chunkSizes[#state.chunks]=state.chunkBytes
 	state.totalBytes = state.totalBytes + cost
 	state.tokenCount = state.tokenCount + 1
 	if state.totalBytes > Codec.MAX_BATCH_BYTES or state.tokenCount > Codec.MAX_TOKENS then
@@ -206,7 +268,7 @@ function Codec.beginEncode(value, budget)
 	if not integer(budget, 4200, Codec.FRAME_BYTES) then return nil, "catalog_budget" end
 	local chunk = {}
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
-		chunkBytes = 4, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
+		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
 		memo={},memoCount=0,memoBytes=0 }
 	pushValue(state, value, 0)
 	return state
@@ -222,7 +284,7 @@ function Codec.stepEncode(state, maxWork)
 		while work < maxWork and not encodeAction(state) do work = work + 1 end
 		if #state.stack == 0 then
 			state.result = { chunks = state.chunks, totalBytes = state.totalBytes,
-				tokenCount = state.tokenCount }
+				tokenCount = state.tokenCount,chunkSizes=state.chunkSizes }
 		end
 	end)
 	if not ok then state.error = reason; return nil, reason, true end

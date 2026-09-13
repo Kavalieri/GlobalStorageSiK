@@ -67,8 +67,15 @@ function Server.clear(player)
     if cursor>#order then cursor=0 end
 end
 local function send(player, command, payload)
-    local size, reason = Codec.size(payload)
-    if not size or size+128>Codec.FRAME_BYTES then return false, reason or "catalog_budget" end
+    local size,reason,chunkBytes,payloadBytes=Codec.frameSize(payload)
+    if command=="terminalCatalogChunk" then
+        log("frame",description(payload).." part="..tostring(payload.part).." total="..tostring(payload.total)
+            .." frameBytes="..tostring(size).." frameBudget="..tostring(Codec.FRAME_BYTES)
+            .." payloadBytes="..tostring(payloadBytes).." chunkBytes="..tostring(chunkBytes)
+            .." overheadBytes="..tostring(size and chunkBytes and size-chunkBytes)
+            .." accepted="..tostring(size~=nil and size<=Codec.FRAME_BYTES))
+    end
+    if not size or size>Codec.FRAME_BYTES then return false, reason or "catalog_budget" end
     local ok, accepted = pcall(context.send, player, command, payload)
     return ok and accepted ~= false, (not ok or accepted == false) and "catalog_send" or nil
 end
@@ -190,14 +197,14 @@ local function queue(player, payload, rows, builder)
         catalogScope=payload.catalogScope,batchId=serial,part=1,total=1,
         tokenCount=1,totalBytes=1,data={},catalogSource=payload.catalogSource or "terminalState",
         baseRevision=payload.baseRevision}
-    local overhead=Codec.size(envelope)
+    local overhead=Codec.frameSize(Codec.frame(envelope,{},1))
     if not overhead then failure(player,"catalog_budget",serial); return false end
     local encoder, reason
-    if not builder then encoder,reason=Codec.beginEncode(payload,Codec.FRAME_BYTES-overhead-128) end
+    if not builder then encoder,reason=Codec.beginEncode(payload,Codec.FRAME_BYTES-overhead+4) end
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
-        frameBudget=Codec.FRAME_BYTES-overhead-128,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
+        frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
@@ -250,7 +257,7 @@ function Server.receipt(player,payload)
         recoverOnce(player,session,"catalog_consumer")
         return
     end
-    if job.builder or job.encoder or job.nextPart<=meta.total then discard("premature"); return end
+    if job.builder or job.encoder or job.framer or job.nextPart<=meta.total then discard("premature"); return end
     if not job.detail then
         retainedBytes=math.max(0,retainedBytes-(session.baseBytes or 0))
         session.baseBytes=job.baseEstimate or 0
@@ -289,10 +296,33 @@ local function encodeStep(player,job,session)
         job.envelope.total=#encoded.chunks
         job.envelope.totalBytes=encoded.totalBytes
         job.envelope.tokenCount=encoded.tokenCount
+        job.framer,reason=Codec.beginFraming(encoded,job.envelope)
+        if not job.framer then failure(player,reason,job.envelope.batchId);return end
+        job.framingBaseBytes=job.bytes
         job.baseEstimate=job.detail and 0 or math.min(reservation,encoded.totalBytes*2+job.rows*256)
         log("encoded",description(job.envelope) .. " bytes=" .. tostring(encoded.totalBytes)
             .. " parts=" .. tostring(#encoded.chunks) .. " encodeMs=" .. tostring(job.encodeMs)
             .. " elapsedMs=" .. tostring(now()-job.startedAt))
+    end
+end
+local function framingStep(player,job,session)
+    local framed,reason,done=Codec.stepFraming(job.framer,1024)
+    if reason then failure(player,reason,job.envelope.batchId);return end
+    -- Repartitioning temporarily retains both source and destination arrays.
+    local extra=job.framer.chunks==job.chunks and 0 or #job.framer.chunks*128
+    local reservation=job.framingBaseBytes+extra
+    if reservation+(session.baseBytes or 0)>PLAYER_BYTES or retainedBytes-job.bytes+reservation>GLOBAL_BYTES then
+        failure(player,"catalog_busy",job.envelope.batchId);return
+    end
+    retainedBytes=retainedBytes-job.bytes+reservation;job.bytes=reservation
+    job.lastProgressAt=now()
+    if done then
+        job.chunks=framed.chunks
+        job.envelope.total=#framed.chunks
+        job.envelope.totalBytes=framed.totalBytes
+        job.wireBytes=framed.totalBytes
+        job.framer=nil
+        log("framed",description(job.envelope).." bytes="..tostring(framed.totalBytes).." parts="..tostring(#framed.chunks))
     end
 end
 local function buildStep(player,job,session,budget,millis)
@@ -328,6 +358,9 @@ local function buildStep(player,job,session,budget,millis)
         job.confirmedRows=rows
         job.rows=#(rows or {})
         job.envelope.baseRevision=job.payload.baseRevision
+        local kind=job.payload.catalogDetail and "details" or job.payload.notModified and "notModified"
+            or job.payload.catalogDelta and "delta" or "full"
+        if kind~=job.kind then counters[job.kind]=counters[job.kind]-1;counters[kind]=counters[kind]+1;job.kind=kind end
         local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget)
         if not encoder then failure(player,reason,job.envelope.batchId); return used end
         job.encoder=encoder
@@ -359,7 +392,7 @@ function Server.update()
             local validationStarted=now()
             local cached=validations[player]
             local valid,reason
-            if cached and cached.job==job and cached.session==session and (job.builder or job.encoder) then
+            if cached and cached.job==job and cached.session==session and (job.builder or job.encoder or job.framer) then
                 valid,reason=cached.valid,cached.reason
             else
                 valid,reason=context.valid(player,session,job.envelope)
@@ -376,6 +409,8 @@ function Server.update()
                     local slice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
                     buildWork=buildWork+buildStep(player,job,session,4096-buildWork,slice)
                 end
+            elseif job.framer then
+                if work<8192 then framingStep(player,job,session);work=work+1024 end
             elseif job.encoder then
                 if work<8192 then
                     local encodeSlice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
@@ -385,9 +420,7 @@ function Server.update()
                     until work>=8192 or jobs[player]~=job or not job.encoder or now()-workStarted>=encodeSlice
                 end
             elseif job.nextPart<=job.envelope.total then
-                local frame={}
-                for key,value in pairs(job.envelope) do frame[key]=value end
-                frame.part,frame.data=job.nextPart,job.chunks[job.nextPart]
+                local frame=Codec.frame(job.envelope,job.chunks[job.nextPart],job.nextPart)
                 job.nextPart=job.nextPart+1 -- SP receipt can be synchronous.
                 local ok,sendReason=send(player,"terminalCatalogChunk",frame)
                 if ok then job.lastProgressAt=timestamp end
@@ -400,11 +433,12 @@ function Server.update()
             if jobs[player]==job and now()-job.startedAt>=RESPONSE_DEADLINE_MS
                 and now()-(job.pendingAt or 0)>=2000 then
                 local progress=(job.buildUnits or 0)+(job.encoder and job.encoder.tokenCount or 0)
+                    +(job.framer and job.envelope.tokenCount+job.framer.work or 0)
                 if not job.pendingWork or progress>job.pendingWork then
                     local pending={}
                     for key,value in pairs(job.envelope) do pending[key]=value end
                     pending.reason,pending.recoverable,pending.work="request_timeout",true,progress
-                    pending.phase=job.builder and "preparation" or (job.encoder and "encoding" or "sending")
+                    pending.phase=job.builder and "preparation" or (job.encoder and "encoding" or (job.framer and "framing" or "sending"))
                     local ok=send(player,"terminalCatalogPending",pending)
                     if not ok then failure(player,"catalog_send",job.envelope.batchId)
                     else job.pendingAt,job.pendingWork=now(),progress end
@@ -416,7 +450,7 @@ function Server.update()
                 job.lastDiagnosticAt=now()
                 lastProgressLog=now()
                 local stats=job.builder and job.builder.diagnostics and job.builder.diagnostics() or {}
-                log("progress",description(job.envelope).." phase="..tostring(stats.phase or (job.encoder and "encoding" or "sending"))
+                log("progress",description(job.envelope).." phase="..tostring(stats.phase or (job.encoder and "encoding" or (job.framer and "framing" or "sending")))
                     .." node="..tostring(stats.nodeIndex).." nodes="..tostring(stats.totalNodes)
                     .." remaining="..tostring(stats.remaining).." work="..tostring(stats.work)
                     .." baseRetained="..tostring(session.confirmed~=nil).." validationMs="..tostring(job.validationMs))

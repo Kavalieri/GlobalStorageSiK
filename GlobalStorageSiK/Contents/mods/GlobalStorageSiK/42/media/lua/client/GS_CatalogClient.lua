@@ -158,8 +158,8 @@ function Client.receive(payload)
 	if payload.batchId < slot.latest then return end
 	if slot.confirmed and slot.confirmed.networkId ~= payload.networkId then return end
 	if slot.completedRevision and payload.inventoryRevision < slot.completedRevision then return end
-	local size = Codec.size(payload)
-	if not size or size + 128 > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
+	local size = Codec.frameSize(payload)
+	if not size or size > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
 	if payload.batchId == slot.latest and not slot.batch then return end -- completed duplicate
 	if payload.batchId > slot.latest then
 		-- A later producer job cannot evict an incomplete accepted batch. Only

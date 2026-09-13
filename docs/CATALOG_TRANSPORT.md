@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.4-dev1.2
+# Catalog transport — Core 1.5.4-dev1.3
 
 This private protocol carries complete catalog states, revisioned deltas and
 on-demand detail pages. It does not change the public addon API. Server and
@@ -14,7 +14,8 @@ stateDiagram-v2
     AccessCheck --> AccessConfirmed: terminalOpenAck
     AccessConfirmed --> Building: reserve B1
     Building --> Encoding: immutable rows ready
-    Encoding --> Receiving: bounded terminalCatalogChunk
+    Encoding --> Framing: immutable encoded tokens
+    Framing --> Receiving: final envelope and bounded terminalCatalogChunk
     Receiving --> Applying: all fragments decoded
     Applying --> Confirmed: consumer succeeds, terminalCatalogAck
     Confirmed --> Building: coalesced change from exact ACK base
@@ -91,6 +92,18 @@ retain the incremental merge cursor. This preserves exact canonical signatures.
 
 Frames use the native table serializer size model, including UTF-16 accounting
 for Unicode strings. The frame ceiling is 24,000 bytes with envelope margin.
+Codec.frame builds the actual transport envelope; Codec.frameSize is shared by
+framing and both transport endpoints, including the unchanged 128-byte command
+reserve. Base revision and full/delta/notModified intent are established before
+queueing. A late builder result is also reflected in the final job classification.
+Before sending any fragment, the finalized envelope determines the exact token
+budget. Existing chunk sizes enable a zero-copy fast path; otherwise a bounded
+framing cursor repartitions the existing token stream without rebuilding rows,
+discarding the base, requesting a full or notifying a UI failure. Part count and
+total bytes are finalized before the first send; numeric values have fixed wire
+size. ACKs remain premature while framing. The frame event reports part, total,
+frameBytes, frameBudget, payloadBytes, chunkBytes and overheadBytes; framed reports
+the final batch dimensions. Validation still runs on the actual outgoing frame.
 Protocol 2 uses typed scalar tokens, bounded string fragments and explicit table
 boundaries. Physical item arrays do not appear in ordinary parent rows.
 
@@ -162,7 +175,7 @@ once. Transfer action ACKs remain independent from catalog ACKs.
 
 ## Incremental presentation
 
-Core 1.5.4-dev1.2 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
+Core 1.5.4-dev1.3 uses Framework 1.0.3-dev1 `Table:patchRows` for catalog deltas,
 detail pages and managed transfer completion. The initial image uses `setRows`;
 deltas reuse unchanged root descriptors, semantic entries, projected blocks and
 the viewport pool. Selection, focus, expansion, child page and scroll survive
