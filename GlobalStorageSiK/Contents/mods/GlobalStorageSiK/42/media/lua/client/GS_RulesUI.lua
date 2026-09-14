@@ -122,12 +122,15 @@ function GlobalStorageSiK.RulesUI.applyWhenIdle(editor, callback, kind)
 	end
 end
 
-function GlobalStorageSiK.RulesUI.refreshEditorRules(editor, rules)
+function GlobalStorageSiK.RulesUI.refreshEditorRules(editor, rules, affectedOps)
 	local signature = GlobalStorageSiK.RulesUI.stateSignature(rules)
 	if signature ~= nil and editor._rulesIdentityAtBuild == signature then return false end
-	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do editor:rebuildRuleChips(op) end
+	for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do
+		if not affectedOps or affectedOps[op] then editor:rebuildRuleChips(op) end
+	end
 	editor._rulesIdentityAtBuild = signature
 	editor._rulesLayoutAtBuild = GlobalStorageSiK.RulesUI.layoutSignature(rules)
+	if editor.refreshRulesSummary then editor:refreshRulesSummary() end
 	if editor.rulesBlock and editor.rulesBlock.refreshLayout then editor.rulesBlock:refreshLayout() end
 	editor._lastLayoutW = nil
 	editor:layoutForm()
@@ -225,6 +228,33 @@ function GlobalStorageSiK.RulesUI.cloneRules(source)
 		end
 	end
 	return result
+end
+
+-- Apply only a server-confirmed rule intent to an already visible model. The
+-- request callback is correlated by RoutingClient; removal still verifies the
+-- exact rule signature so a late ACK cannot delete a different chip.
+function GlobalStorageSiK.RulesUI.applyConfirmedIntent(target, args)
+	if type(target) ~= "table" or type(args) ~= "table" then return false end
+	local rules = GlobalStorageSiK.RulesUI.cloneRules(target.rules)
+	local affected = {}
+	if args.rules ~= nil then
+		rules = GlobalStorageSiK.RulesUI.cloneRules(args.rules)
+		for _, op in ipairs(GlobalStorageSiK.RulesUI.OPS) do affected[op] = true end
+	elseif args.addRule ~= nil then
+		local copy = GlobalStorageSiK.RulesUI.cloneRules({ args.addRule })[1]
+		if not copy then return false end
+		rules[#rules + 1] = copy
+		affected[copy.op or "OR"] = true
+	elseif args.removeRuleIndex ~= nil then
+		local index = tonumber(args.removeRuleIndex)
+		if not index or not GlobalStorageSiK.RuleIdentity.matches(rules, index, args.expectedRule) then return false end
+		affected[rules[index].op or "OR"] = true
+		table.remove(rules, index)
+	else
+		return false
+	end
+	target.rules = rules
+	return true, affected
 end
 
 --- Categoria legacy "basura": un codigo tecnico de una sola letra (B/F/W...)

@@ -196,6 +196,38 @@ function GS_ZoneEditorUI:createChildren()
 	-- como raíz al cerrar el editor.
 end
 
+function GS_ZoneEditorUI:sendRouting(command, args)
+	if not self.zone then return false end
+	args = args or {}
+	args.zoneId = self.zone.id
+	local state = self.terminal and self.terminal.terminalState
+	args.networkId = state and state.networkId
+	return GlobalStorageSiK.NetClient.sendCommand(command, args, self.playerNum, function(result)
+		self:applyConfirmedRouting(args, result)
+	end)
+end
+
+-- Apply an exact ACK to the open zone editor without rebuilding the modal or
+-- waiting for the next global terminal image.
+function GS_ZoneEditorUI:applyConfirmedRouting(args, result)
+	if not self.zone or not result or result.ok ~= true or args.zoneId ~= self.zone.id then return false end
+	local state = self.terminal and self.terminal.terminalState
+	if not state or result.networkId ~= state.networkId then return false end
+	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.zone, args)
+	if args.name ~= nil then self.zone.name = args.name end
+	if args.priority ~= nil then self.zone.priority = args.priority end
+	if args.enabled ~= nil then self.zone.enabled = args.enabled end
+	state.routingRevision = math.max(tonumber(state.routingRevision) or 0,
+		tonumber(result.routingRevision) or 0)
+	if rulesChanged then GlobalStorageSiK.RulesUI.refreshEditorRules(self, self.zone.rules, affected) end
+	if args.name ~= nil and self.setHeader then
+		self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = self.zone.name or "?",
+			separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
+	end
+	if args.enabled ~= nil then self:mountFixedActions() end
+	return true
+end
+
 --- Envia el cambio de prioridad al servidor y refleja el valor localmente.
 --- Los atajos Alta/Normal/Baja siguen aplicando de inmediato (accion
 --- explicita de un solo valor, no arriesgan perder otro campo pendiente).
@@ -206,9 +238,7 @@ function GS_ZoneEditorUI:applyPriority(n)
 	if self.priorityEntry then
 		self.priorityEntry:setText(tostring(n))
 	end
-	if self.terminal and self.terminal.onSetZonePriority and self.zone then
-		self.terminal:onSetZonePriority(self.zone.id, n)
-	end
+	if self.zone then self:sendRouting("setZonePriority", { priority = n }) end
 end
 
 --- Aplica TODOS los campos pendientes (nombre + prioridad) de una vez. Antes
@@ -227,7 +257,7 @@ function GS_ZoneEditorUI:applyAll()
 		if priority ~= (self.zone.priority or 50) then args.priority = priority end
 	end
 	if args.name == nil and args.priority == nil then return end
-	GlobalStorageSiK.NetClient.sendCommand("updateZoneConfig", args, self.playerNum)
+	self:sendRouting("updateZoneConfig", args)
 end
 
 
@@ -405,7 +435,7 @@ function GS_ZoneEditorUI:mountFixedActions()
         local excluded = self.zone and self.zone.enabled == false
         self.zoneMembBtn = action(T(excluded and "IGUI_GS_ZoneBtnInclude" or "IGUI_GS_ZoneBtnExclude"), function()
                 if self.zone and self.zone.enabled == false then
-                        GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = true })
+                        self:sendRouting("setZoneEnabled", { enabled = true })
                 else self:confirmExcludeZone() end
         end, not excluded, T("IGUI_GS_ZoneExcludeTooltip"))
         if self.rescanZoneBtn then
@@ -633,8 +663,8 @@ function GS_ZoneEditorUI:rebuildRuleChips(op)
 					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } } or nil,
 				onRemove = function()
 					if not self.zone or not capturedRule then return end
-					GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.zone.id,
-						removeRuleIndex = capturedIdx, expectedRule = capturedRule })
+					self:sendRouting("updateZoneRules", { removeRuleIndex = capturedIdx,
+						expectedRule = capturedRule })
 				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end
@@ -672,7 +702,7 @@ function GS_ZoneEditorUI:confirmExcludeZone()
 		T("IGUI_GS_ZoneExcludeQuestion", self.zone.name or "?"),
 		T("IGUI_GS_ZoneExcludeConsequences"), function()
 		if self.zone then
-			GlobalStorageSiK.NetClient.sendCommand("setZoneEnabled", { zoneId = self.zone.id, enabled = false })
+			self:sendRouting("setZoneEnabled", { enabled = false })
 		end
 	end)
 end

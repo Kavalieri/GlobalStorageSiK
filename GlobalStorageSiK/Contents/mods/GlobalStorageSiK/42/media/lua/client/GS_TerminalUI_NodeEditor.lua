@@ -205,11 +205,41 @@ function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts, owner)
 	if opts.categories  ~= nil then payload.categories  = opts.categories  end
 	if opts.filters     ~= nil then payload.filters     = opts.filters     end
 	if opts.rules       ~= nil then payload.rules       = opts.rules       end
+	if opts.addRule     ~= nil then payload.addRule     = opts.addRule     end
+	if opts.removeRuleIndex ~= nil then payload.removeRuleIndex = opts.removeRuleIndex end
+	if opts.expectedRule ~= nil then payload.expectedRule = opts.expectedRule end
 	if opts.enabled     ~= nil then payload.enabled     = opts.enabled     end
 	if opts.membership  ~= nil then payload.membership  = opts.membership end
 	if opts.priority    ~= nil then payload.priority    = opts.priority   end
 	if opts.notes       ~= nil then payload.notes       = opts.notes      end
-	GlobalStorageSiK.NetClient.sendCommand("updateNode", payload, owner and owner.playerNum or ui and ui.playerNum)
+	return GlobalStorageSiK.NetClient.sendCommand("updateNode", payload,
+		owner and owner.playerNum or ui and ui.playerNum, owner and function(result)
+			if owner.applyConfirmedRouting then owner:applyConfirmedRouting(payload, result) end
+		end or nil)
+end
+
+-- Reflect the exact accepted intent without waiting for a full terminal state.
+-- Text being edited remains untouched; only the authoritative model and its
+-- existing controls are refreshed.
+function GS_NodeEditorUI:applyConfirmedRouting(args, result)
+	if not self.node or not result or result.ok ~= true or args.nodeId ~= self.node.id then return false end
+	local state = self.terminal and self.terminal.terminalState
+	if not state or result.networkId ~= state.networkId then return false end
+	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.node, args)
+	for _, key in ipairs({ "displayName", "notes", "priority", "categories", "filters" }) do
+		if args[key] ~= nil then self.node[key] = type(args[key]) == "table"
+			and GlobalStorageSiK.RoutingProtocol.copy(args[key]) or args[key] end
+	end
+	if args.membership ~= nil then
+		self.node.membership = args.membership
+		self.node.enabled = args.membership == "active"
+	elseif args.enabled ~= nil then self.node.enabled = args.enabled end
+	state.routingRevision = math.max(tonumber(state.routingRevision) or 0,
+		tonumber(result.routingRevision) or 0)
+	if rulesChanged then GlobalStorageSiK.RulesUI.refreshEditorRules(self, self.node.rules, affected) end
+	self:syncTitleFromName()
+	self:syncFormButtons()
+	return true
 end
 
 --- Captura la configuracion visible del editor. El nombre, la etiqueta, la
@@ -640,7 +670,7 @@ function GS_NodeEditorUI:ensureForm()
 			if GlobalStorageSiK.NativeProduct.decodePath(suggested) then condition.nativePath = suggested end
 			local newRule = { op = op, condition = condition }
 			local function apply()
-				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = node.id, addRule = newRule }, self.playerNum)
+				GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { addRule = newRule }, self)
 			end
 			local conflict = GlobalStorageSiK.RulesUI.detectContradiction(node.rules, newRule)
 			if conflict then
@@ -882,8 +912,8 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 					g = labelColor[2], b = labelColor[3], a = labelColor[4] or 1 } } or nil,
 				onRemove = function()
 					if not self.node or not capturedRule then return end
-					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id,
-						removeRuleIndex = capturedIdx, expectedRule = capturedRule }, self.playerNum)
+					GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(self.node.id,
+						{ removeRuleIndex = capturedIdx, expectedRule = capturedRule }, self)
 				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end

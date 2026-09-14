@@ -2308,7 +2308,8 @@ local function itemRowAdapter(listPanel, terminal)
 			-- Arrastrar una cabecera significa mover el grupo completo que representa.
 			-- Los hijos siguen identificando una sola unidad fisica. El worker divide
 			-- el grupo en microlotes y conserva todos los limites autoritativos.
-			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, 1,
+			local amount = data._gsRowKind == "parent" and 0 or 1
+			GlobalStorageSiK.TerminalWithdrawDrag.begin(data, amount,
 				dragState.payloadRows, dragState.visualRows, row)
 			return true
 		end,

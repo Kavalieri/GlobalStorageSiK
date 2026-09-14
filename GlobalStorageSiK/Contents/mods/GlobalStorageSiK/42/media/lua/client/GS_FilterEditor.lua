@@ -585,7 +585,9 @@ function GS_FilterEditorUI:sendAddRule(newRule)
 				T("IGUI_GS_RoutingTimeout"), 235, 180, 90, 1200) end
 		end
 		if result.ok then
-			if self.onAdded then self.onAdded() end
+			local owner = self._sikModalOwner
+			if owner and owner.applyConfirmedRouting then owner:applyConfirmedRouting(args, result) end
+			if self.onAdded then self.onAdded(result) end
 			self:destroy()
 		elseif result.routingRevision then
 			-- Keep the draft; a subsequent explicit click can retry against the

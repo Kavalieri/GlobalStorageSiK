@@ -61,6 +61,24 @@ local function captureRow(row)
 	return result
 end
 
+-- Incremental presentation may replace a Lua table while preserving the same
+-- visible row. Compare the bounded transfer identity instead of table identity;
+-- changed count/variant/source still fences the gesture as stale.
+local function sameVisibleParent(previous, current)
+	if type(previous) ~= "table" or type(current) ~= "table"
+		or previous._gsRowKind ~= "parent" or current._gsRowKind ~= "parent"
+		or current._gsStale then return false end
+	for _, key in ipairs(fields) do
+		if key ~= "selectionRevision" and previous[key] ~= current[key] then return false end
+	end
+	for _, key in ipairs({ "itemIds", "fullTypes" }) do
+		local left, right = previous[key] or {}, current[key] or {}
+		if #left ~= #right then return false end
+		for i = 1, #left do if left[i] ~= right[i] then return false end end
+	end
+	return true
+end
+
 local function ensurePump()
 	if pumpInstalled or not Events or not Events.OnTick then return end
 	pumpInstalled = true
@@ -162,9 +180,12 @@ local function enqueue(rows, batch, amount, targetKey, searchQuery, options)
 				return reject(player,options,"selection_stale")
 			end
 			if presentation and presentation.incremental and row._gsRowKind=="parent" then
-				if presentation.rootsByKey[row.rowKey]~=row then return reject(player,options,"selection_stale") end
-				-- This parent survived the accepted delta unchanged. Capture the
-				-- current revision at the gesture, without retagging every row.
+				local current = presentation.rootsByKey[row.rowKey]
+				if not sameVisibleParent(row,current) then return reject(player,options,"selection_stale") end
+				-- Capture the canonical current row. The server receives a stable
+				-- semantic parent and the accepted revision, never a paged child set.
+				captured[i]=captureRow(current)
+				if not captured[i] then return reject(player,options,"invalid_row") end
 				captured[i].selectionRevision=revision
 			end
 		end

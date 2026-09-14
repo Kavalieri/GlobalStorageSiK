@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.5-dev1.1
+# Catalog transport — Core 1.5.5-dev1.2
 
 A container is the authoritative inventory unit. A network publishes a manifest
 of container revisions; the terminal catalog is a derived client view. Server

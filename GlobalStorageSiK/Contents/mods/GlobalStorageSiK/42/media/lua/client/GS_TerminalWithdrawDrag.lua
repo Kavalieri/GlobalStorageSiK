@@ -198,9 +198,8 @@ function GlobalStorageSiK.TerminalWithdrawDrag.begin(rowData, amount, payloadRow
 	if numericAmount ~= numericAmount or numericAmount == math.huge
 		or numericAmount == -math.huge or numericAmount < 0
 		or numericAmount ~= math.floor(numericAmount) then return false end
-	-- Cero era el playerNum posicional del contrato anterior. Nunca debe
-	-- convertirse en una retirada de cero unidades; el mínimo semántico es uno.
-	if numericAmount == 0 then numericAmount = 1 end
+	-- El contrato actual reserva cero para "todo el bloque". Los callers pasan
+	-- playerNum por el owner y nunca en esta posición.
 	-- Un nuevo drag nunca hereda ghost/captura/Escape de una selección anterior.
 	if activeDrag then GlobalStorageSiK.TerminalWithdrawDrag.cancel("replaced") end
 	payloadRows = normalizePayloadRows(payloadRows, rowData)
