@@ -5691,6 +5691,9 @@ GlobalStorageSiK.CatalogServer.configure({
 		local access, _, terminal = GlobalStorageSiK.TerminalAccess.evaluate(player, session.networkId,
 			GlobalStorageSiK.TerminalAccess.getSessionAnchor(player), {sessionLock=true, strictDistance=true})
 		if not access then return false, "catalog_access_changed" end
+		local anchor=session.terminalAnchor
+		if anchor and (not terminal or anchor.x~=terminal.x or anchor.y~=terminal.y
+			or (anchor.z or 0)~=(terminal.z or 0)) then return false,"catalog_access_changed" end
 		if terminal and GlobalStorageSiK.Network.findNetworkIdAtTerminal(terminal.x, terminal.y,
 			terminal.z or 0, {activeOnly=true}) ~= session.networkId then return false, "catalog_access_changed" end
 		local scope = authorizedCatalogScope(player, session.networkId)

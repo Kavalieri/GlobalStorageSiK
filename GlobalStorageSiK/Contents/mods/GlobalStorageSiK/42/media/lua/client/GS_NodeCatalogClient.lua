@@ -182,7 +182,7 @@ function Client.consume(value,retainedBytes)
 		end
 		if type(value.terminalMetadata)~="table" then return false,"manifest_metadata" end
 		local reason
-		entry,reason=cache.manifest(value)
+		entry,reason=cache.manifest(value,state.ack)
 		if not entry then return false,reason end
 		if context.topology then
 			local accepted,topologyReason=context.topology(value,value.terminalMetadata,false)

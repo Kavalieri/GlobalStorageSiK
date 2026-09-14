@@ -60,7 +60,9 @@ end
 function Floor.hasRoom(player, key, item)
 	local square, reason = Floor.resolveSquare(player, key)
 	if not square then return false, reason end
-	if not item or not item:CanBeDroppedOnFloor() then return false, "invalid_destination" end
+	if not item or (instanceof(item, "Moveable") and not item:CanBeDroppedOnFloor()) then
+		return false, "invalid_destination"
+	end
 	local weight = item:getUnequippedWeight()
 	local total = square:getTotalWeightOfItemsOnFloor()
 	if weight ~= weight or total ~= total or weight < 0 or total < 0

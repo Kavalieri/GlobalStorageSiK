@@ -764,6 +764,22 @@ function GS_TerminalUI:refreshNetworkPanel()
 	end
 end
 
+-- The catalog delta has already committed verified rows and authoritative metadata.
+-- Reuse the existing addon presenters without rebuilding inventory or topology.
+function GS_TerminalUI:refreshAddonMetadata()
+	if self.syncProgrammingTabVisibility then self:syncProgrammingTabVisibility() end
+	local extensions=GlobalStorageSiK.TerminalExtensions
+	if extensions and extensions.syncVisibilityAll then extensions.syncVisibilityAll(self) end
+	local tab=self.activeTabKey or "items"
+	if tab=="addons" and self.addonsPanel then
+		GlobalStorageSiK.TerminalAddons.refresh(self.addonsPanel,self)
+	elseif tab=="config" then
+		GlobalStorageSiK.TerminalOptions.refreshScroll(self,self.terminalState)
+	elseif tab~="items" and tab~="network" and extensions then
+		extensions.refreshActive(self,tab)
+	end
+end
+
 function GS_TerminalUI:refreshFromState(state)
 	local prev = self.terminalState or {}
 	local incoming = state

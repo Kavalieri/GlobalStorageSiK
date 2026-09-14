@@ -276,6 +276,15 @@ local function applyTopologyMetadata(payload,metadata,additive)
 	return true
 end
 
+-- Codec metadata is bounded and acyclic. Compare contents, not decoded table identity.
+local function sameAddonValue(a,b,depth)
+	if a==b then return true end
+	if type(a)~="table" or type(b)~="table" or depth>=16 then return false end
+	for key,value in pairs(a) do if not sameAddonValue(value,b[key],depth+1) then return false end end
+	for key in pairs(b) do if a[key]==nil then return false end end
+	return true
+end
+
 local function applyCatalogDelta(payload,replicaRows)
 	if type(payload) ~= "table" or (payload.protocol ~= 1 and payload.protocol ~= 2)
 		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
@@ -353,6 +362,8 @@ local function applyCatalogDelta(payload,replicaRows)
 	end
 	end
 	if tonumber(payload.itemTypeCount) ~= #nextRows then return false, "catalog_incomplete" end
+	local addonsChanged=replicaRows and (not sameAddonValue(state.installedAddons,payload.installedAddons,0)
+		or state.craftTabEnabled~=payload.craftTabEnabled or state.buildTabEnabled~=payload.buildTabEnabled)
 	local nextCache, nextState = {}, {}
 	for k,v in pairs(cache) do nextCache[k]=v end
 	for k,v in pairs(state) do nextState[k]=v end
@@ -395,6 +406,10 @@ local function applyCatalogDelta(payload,replicaRows)
 		catalogConsumer("TerminalSync.applyCatalogRows", false, GlobalStorageSiK.TerminalSync.applyCatalogRows,
 			payload.networkId, nextRows, payload.inventoryRevision, playerNum, true,
 			payload.changedRows, payload.removedRowKeys)
+	end
+	if matchingUi and addonsChanged and ui.refreshAddonMetadata then
+		if activeCatalogTransaction then activeCatalogTransaction.addonMetadataChanged=true end
+		catalogConsumer("TerminalUI.refreshAddonMetadata",false,ui.refreshAddonMetadata,ui)
 	end
 	if matchingUi and not state.replicaPartial and GlobalStorageSiK.TerminalLoading then
 		catalogConsumer("TerminalLoading.finish", false, GlobalStorageSiK.TerminalLoading.finish,
@@ -1376,6 +1391,9 @@ local function applyCatalogTransaction(payload, delta)
 			end
 			if ui and terminalUiForPlayer(n) == ui and previousUi then
 				ui.terminalState = previousUi
+				if transaction.addonMetadataChanged and ui.refreshAddonMetadata then
+					pcall(ui.refreshAddonMetadata,ui)
+				end
 				local restoredPresentation = not transaction.presentationSuperseded and previousPresentation
 					and GlobalStorageSiK.TerminalItems
 					and GlobalStorageSiK.TerminalItems.restoreCatalogPresentation
@@ -1651,12 +1669,14 @@ GlobalStorageSiK.CatalogClient.configure({
 	end,
 	receipt=function(meta)
 		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			topologySequence=meta.topologySequence,
 			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
 			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
 		}, meta.playerNum)
 	end,
 	reject=function(meta,reason,consumerRejected)
 		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			topologySequence=meta.topologySequence,
 			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
 			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope, rejected=true,
 			consumerRejected=consumerRejected==true,

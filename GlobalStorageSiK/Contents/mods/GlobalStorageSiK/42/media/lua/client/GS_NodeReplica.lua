@@ -3,6 +3,12 @@ local Protocol = require "GS_ManifestProtocol"
 local Replica = {}
 GlobalStorageSiK.NodeReplica = Replica
 
+local function sameTerminal(a,b)
+	a,b=a or {},b or {}
+	local aa,ba=a.terminalAnchor or {},b.terminalAnchor or {}
+	return a.accessMode==b.accessMode and aa.x==ba.x and aa.y==ba.y and aa.z==ba.z
+end
+
 function Replica.new(options)
 	options = options or {}
 	local entries, bytes, clock = {}, 0, 0
@@ -44,6 +50,9 @@ function Replica.new(options)
 		end
 		for i=1,#retired do remove(retired[i],"scope_or_epoch_changed") end
 		local entry=entries[key]
+		if entry and not sameTerminal(entry.authorization,meta) then
+			remove(key,"terminal_identity_changed");entry=nil
+		end
 		if entry then
 			touch(entry)
 		end
@@ -66,7 +75,8 @@ function Replica.new(options)
 		end
 		local source
 		for cachedKey,entry in pairs(entries) do
-			if entry.playerNum==meta.playerNum and entry.networkId==meta.networkId and entry.epoch==meta.replicaEpoch
+			if entry.confirmed and sameTerminal(entry.authorization,meta)
+				and entry.playerNum==meta.playerNum and entry.networkId==meta.networkId and entry.epoch==meta.replicaEpoch
 				and Protocol.transitionAccepts(meta,entry.scope,entry.topologySequence) then source=cachedKey;break end
 		end
 		if source and source~=key then
@@ -78,6 +88,7 @@ function Replica.new(options)
 			entries[key]=entry;touch(entry)
 		end
 		local entry=source and entries[key]
+		if not source and entries[key] then remove(key,"unconfirmed_transition") end
 		if entry then
 			local records={}
 			for _,record in ipairs(entry.records) do
@@ -93,7 +104,7 @@ function Replica.new(options)
 		end
 		return true
 	end
-	function api.manifest(meta)
+	function api.manifest(meta,authorization)
 		local key=api.identity(meta)
 		if not key or not Protocol.id(meta.manifestToken) or meta.manifestSchema~=Protocol.SCHEMA then
 			return nil,"manifest_schema"
@@ -101,11 +112,12 @@ function Replica.new(options)
 		local records,byId=Protocol.records(meta.nodeManifest)
 		if not records then return nil,"manifest_records" end
 		if entries[key] and (entries[key].topologySequence or 0)~=(meta.topologySequence or 0) then return nil,"manifest_identity" end
-		local old,reason=api.confirm(meta)
+		local old,reason=api.confirm(authorization or meta)
 		if reason then return nil,reason end
 		local entry={key=key,epoch=meta.replicaEpoch,playerNum=meta.playerNum,networkId=meta.networkId,
 			scope=meta.catalogScope,token=meta.manifestToken,records=records,byId=byId,blocks={},
-			changedNodeIds={},bytes=4096+#records*1024,topologySequence=meta.topologySequence}
+			changedNodeIds={},bytes=4096+#records*1024,topologySequence=meta.topologySequence,
+			authorization=authorization or meta}
 		-- A draft never replaces the token or rows of the last accepted image.
 		if old then
 			entry.topologySequence=old.topologySequence

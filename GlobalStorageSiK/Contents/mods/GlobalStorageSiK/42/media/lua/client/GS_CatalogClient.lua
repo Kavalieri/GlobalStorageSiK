@@ -85,6 +85,7 @@ end
 local function same(a, b)
 	return a.protocol == b.protocol and a.batchId == b.batchId and a.networkId == b.networkId and a.openSeq == b.openSeq
 		and a.playerNum == b.playerNum and a.inventoryRevision == b.inventoryRevision
+		and (a.topologySequence or 0)==(b.topologySequence or 0)
 		and a.catalogScope == b.catalogScope and a.total == b.total
 		and a.tokenCount == b.tokenCount and a.totalBytes == b.totalBytes
 end
@@ -92,6 +93,7 @@ local function applyReady(playerNum, slot)
 	local batch = slot.batch
 	if not slot.confirmed or not batch or batch.count ~= batch.meta.total then return end
 	if slot.confirmed.networkId ~= batch.meta.networkId
+		or (slot.confirmed.topologySequence or 0)~=(batch.meta.topologySequence or 0)
 		or slot.confirmed.catalogScope ~= batch.meta.catalogScope then fail(playerNum, "catalog_schema"); return end
 	if batch.bytes ~= batch.meta.totalBytes or batch.tokens ~= batch.meta.tokenCount then
 		fail(playerNum, "catalog_incomplete"); return
@@ -109,6 +111,7 @@ local function applyReady(playerNum, slot)
 	local decodeStarted = batch.decodeStarted
 	local value = batch.decoded
 	if value.networkId ~= batch.meta.networkId or value.openSeq ~= batch.meta.openSeq
+		or (value.topologySequence or 0)~=(batch.meta.topologySequence or 0)
 		or value.playerNum ~= playerNum or value.inventoryRevision ~= batch.meta.inventoryRevision
 		or value.catalogScope ~= batch.meta.catalogScope then fail(playerNum, "catalog_schema"); return end
 	if value.catalogManifest ~= true and value.catalogNode ~= true
@@ -188,6 +191,7 @@ function Client.receive(payload)
 	local slot = slotFor(payload)
 	if not slot then return end
 	if slot.consumerRejected then return end
+	if slot.confirmed and (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0) then return end
 	if (payload.protocol ~= 1 and payload.protocol ~= 2) or not Codec.integer(payload.batchId, 1, 9007199254740991)
 		or not Codec.integer(payload.total, 1, Codec.MAX_CHUNKS)
 		or not Codec.integer(payload.part, 1, payload.total)
@@ -262,6 +266,7 @@ end
 function Client.error(payload)
 	local slot = slotFor(payload)
 	if not slot then return end
+	if slot.confirmed and (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0) then return end
 	if slot.confirmed and payload.networkId ~= slot.confirmed.networkId then return end
 	if not Codec.integer(payload.batchId, 1, 9007199254740991) then return end
 	if payload.reason == "catalog_access_changed" and slot.confirmed then
@@ -281,6 +286,7 @@ end
 function Client.delta(payload)
 	local slot = slotFor(payload)
 	if not slot or type(payload) ~= "table" then return end
+	if slot.confirmed and (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0) then return end
 	if (payload.protocol ~= 1 and payload.protocol ~= 2)
 		or not Codec.integer(payload.baseRevision, 0, 9007199254740991)
 		or not Codec.integer(payload.inventoryRevision, payload.baseRevision + 1, 9007199254740991)
@@ -318,6 +324,7 @@ end
 function Client.waiting(payload)
 	local slot=slotFor(payload)
 	if not slot or not slot.confirmed or not context.allowed(slot.confirmed)
+		or (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0)
 		or payload.networkId~=slot.confirmed.networkId or payload.catalogScope~=slot.confirmed.catalogScope
 		or not Codec.integer(payload.batchId,1,9007199254740991)
 		or not Codec.integer(payload.work,0,9007199254740991)

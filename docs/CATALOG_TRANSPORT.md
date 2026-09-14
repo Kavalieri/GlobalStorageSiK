@@ -192,6 +192,21 @@ latest transition, even when a scope returns to the same string. Zone tombstones
 cover their nodes without enumerating containers in the ACK. Manifest/node bodies
 and client requests carry the session sequence as an additional identity fence.
 
+Every accepted topology mutation replaces the server catalog session object after
+fresh authority validation. `openSeq` continues to correlate the mounted UI opening;
+`topologySequence` identifies the renewed catalog authorization. It is checked in
+chunk envelopes, decoded bodies, receipts, errors and node requests as well as ACKs.
+Recovery remains bounded across these renewals. A later explicit UI opening rebases
+this generation only after its fresh access ACK. Cache confirmation also compares
+terminal coordinates and access mode; a different terminal cannot reuse the entry.
+Topology derivation requires a completely confirmed view, never a bootstrap draft.
+
+Verified replica deltas compare installed-addon descriptors and Craft/Builder flags
+by content. Changed metadata refreshes existing addon/option presenters and tab
+visibility using the accepted rows; ordinary inventory deltas keep their incremental
+path. Floor destination checks invoke `CanBeDroppedOnFloor` only for `Moveable`;
+ordinary inventory items retain the same capacity and transactional validation.
+
 The client immediately removes confirmed zone/node metadata from the mounted
 table, drops only affected immutable blocks and marks their derived contributions
 dirty. The next manifest reuses unaffected blocks and the existing incremental

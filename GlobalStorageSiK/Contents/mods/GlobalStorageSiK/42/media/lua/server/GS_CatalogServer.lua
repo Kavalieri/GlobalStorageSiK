@@ -121,6 +121,7 @@ local function failure(player, reason, batchId)
         if context.abort then context.abort(player) end
     end
     send(player, "terminalCatalogError", {playerNum=session.playerNum, openSeq=session.openSeq,
+		topologySequence=session.topologySequence,
         networkId=session.networkId, batchId=batchId, reason=reason, recoverable=recoverable})
     if recoverable and sessions[player]==session then recoverOnce(player,session,reason) end
     log("failed", "batch=" .. tostring(batchId) .. " reason=" .. tostring(reason)
@@ -160,6 +161,12 @@ local function completeTopology(prepared,zoneId,zoneMetadata,removedNodes,remove
                 else
                     -- Retire old frames/requests before exposing the new identity.
                     release(player,"topology_addition")
+					-- A fresh authorization object owns this generation. openSeq
+					-- still identifies the UI opening; topologySequence fences the
+					-- newly validated catalog session and every node request/body.
+					local renewed={}
+					for key,value in pairs(session) do renewed[key]=value end
+					session=renewed;sessions[player]=session
                     session.catalogScope=scope
                     session.topologyBaseScope=session.topologyBaseScope or ticket.scope
                     session.topologyBaseSequence=session.topologyBaseSequence or session.topologySequence or 0
@@ -307,7 +314,8 @@ local function queue(player, payload, rows, builder)
         payload.confirmedProximityRange=session.confirmedProximityRange
         payload.confirmedWirelessRange=session.confirmedWirelessRange
     end
-    local envelope={protocol=2,playerNum=session.playerNum,openSeq=session.openSeq,
+	payload.topologySequence=session.topologySequence
+    local envelope={protocol=2,playerNum=session.playerNum,openSeq=session.openSeq,topologySequence=session.topologySequence,
         networkId=payload.networkId,inventoryRevision=payload.inventoryRevision,
         catalogScope=payload.catalogScope,batchId=serial,part=1,total=1,
         tokenCount=1,totalBytes=1,data={},catalogSource=payload.catalogSource or "terminalState",
@@ -357,6 +365,7 @@ function Server.receipt(player,payload)
     if not session or not job or type(payload)~="table" then discard("no_matching_job"); return end
     local meta=job.envelope
     if payload.openSeq~=session.openSeq or payload.networkId~=session.networkId
+		or (payload.topologySequence or 0)~=(session.topologySequence or 0)
         or payload.batchId~=meta.batchId or payload.inventoryRevision~=meta.inventoryRevision
         or payload.catalogScope~=meta.catalogScope then discard("identity"); return end
     local valid,reason=context.valid(player,session,meta)
