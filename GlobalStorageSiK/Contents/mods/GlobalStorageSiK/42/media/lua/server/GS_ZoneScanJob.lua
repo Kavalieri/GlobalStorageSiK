@@ -15,10 +15,33 @@ require "GS_ZoneScanner"
 
 GlobalStorageSiK.ZoneScanJob = GlobalStorageSiK.ZoneScanJob or {}
 
-local STEP_DELAY_MS = 50
+local STEP_DELAY_MS = 0
 local BUSY_DELAY_MS = 250
-local MAX_UNITS_PER_STEP = 50
-local MAX_STEP_MS = 5
+local MAX_UNITS_PER_STEP = 512
+local MAX_STEP_MS = 6
+local MIN_STEP_MS = 3
+-- One global allowance, independent of active network/player count. The extra
+-- millisecond charged per step covers clock resolution, not additional work.
+local CPU_MS_PER_SECOND = 160
+local UNITS_PER_SECOND = 16384
+local cpuCredit, unitCredit = 8, 768
+local budgetStamp, tickStamp, tickInterval = nil, nil, 25
+local serviceSerial = 0
+
+local function scanBudget(now)
+	if budgetStamp then
+		local elapsed = math.max(0, now - budgetStamp)
+		cpuCredit = math.min(8, cpuCredit + elapsed * CPU_MS_PER_SECOND / 1000)
+		unitCredit = math.min(768, unitCredit + elapsed * UNITS_PER_SECOND / 1000)
+	end
+	budgetStamp = now
+	if tickStamp and now > tickStamp then
+		tickInterval = tickInterval * 0.75 + math.min(100, now - tickStamp) * 0.25
+	end
+	tickStamp = now
+	local millis = math.min(MAX_STEP_MS, math.max(MIN_STEP_MS, tickInterval * 0.20), cpuCredit)
+	return math.floor(math.min(MAX_UNITS_PER_STEP, unitCredit)), millis
+end
 local STALL_TIMEOUT_MS = 30000
 
 local jobs = {}
@@ -151,7 +174,7 @@ local function stateProgressToken(state)
 
 	if not state then return "none" end
 	return table.concat({
-		tostring(state.phase or ""), tostring(state.x or ""), tostring(state.y or ""),
+		tostring(state.workUnits or 0), tostring(state.phase or ""), tostring(state.x or ""), tostring(state.y or ""),
 		tostring(state.z or ""), tostring(state.taskIndex or ""),
 		tostring(state.itemIndex or ""), tostring(#(state.results or {})),
 	}, "|")
@@ -268,14 +291,16 @@ local function finishJob(networkId, job)
 		GlobalStorageSiK.RegistryStore.notifyChanged()
 	end
 	GlobalStorageSiK.Log.info("ZoneScanJob", string.format(
-		"complete network=%s state=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d failedZones=%d cookingExcluded=%d removedIneligible=%d limitHit=%s",
+		"complete network=%s state=%s durationMs=%d zones=%d nodes=%d instances=%d distinctTypes=%d snapshotRows=%d squares=%d loadedSquares=%d added=%d updated=%d offline=%d failedZones=%d cookingExcluded=%d removedIneligible=%d limitHit=%s scanSteps=%d scanUnits=%d scanCpuMs=%d scanChargedMs=%d scanPeakMs=%d",
 		tostring(networkId), state, job.totals.durationMs or 0, job.totals.zones or 0,
 		job.totals.nodesScanned or 0, job.totals.itemInstances or 0,
 		job.totals.distinctTypes or 0, job.totals.snapshotRows or 0,
 		job.totals.squaresVisited or 0, job.totals.loadedSquares or 0,
 		job.totals.added or 0, job.totals.updated or 0, job.totals.offline or 0, job.totals.failedZones or 0,
 		job.totals.cookingContainersExcluded or 0, job.totals.removedIneligible or 0,
-		tostring(job.totals.limitHit == true)))
+		tostring(job.totals.limitHit == true), job.totals.scanSteps or 0,
+		job.totals.scanWorkUnits or 0, job.totals.scanCpuMs or 0,
+		job.totals.scanChargedMs or 0, job.totals.scanPeakMs or 0))
 	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.onNetworkScanComplete then
 		GlobalStorageSiK.Server.onNetworkScanComplete(networkId, job.totals, job.watchers)
 	end
@@ -287,12 +312,14 @@ end
 
 local function onTick()
 	local now = nowMs()
+	local availableUnits, availableMs = scanBudget(now)
+	if availableUnits < 1 or availableMs < MIN_STEP_MS then return end
 	if now < nextGlobalRunMs then return end
 	local networkId, job, oldestDue = nil, nil, nil
 	local hasPending = false
 	for candidateId, candidate in pairs(jobs) do
 		hasPending = true
-		if now >= candidate.nextRunMs and (oldestDue == nil or candidate.nextRunMs < oldestDue) then
+		if now >= candidate.nextRunMs and (oldestDue == nil or candidate.nextRunMs < oldestDue or (candidate.nextRunMs == oldestDue and (candidate.serviceSerial or 0) < (job.serviceSerial or 0))) then
 			networkId, job, oldestDue = candidateId, candidate, candidate.nextRunMs
 		end
 	end
@@ -303,6 +330,8 @@ local function onTick()
 		end
 		return
 	end
+	serviceSerial = serviceSerial + 1
+	job.serviceSerial = serviceSerial
 	nextGlobalRunMs = now + STEP_DELAY_MS
 	-- A mutation invalidates staging immediately. Do not spend the remaining
 	-- scan budget collecting a snapshot that can no longer be committed.
@@ -333,6 +362,8 @@ local function onTick()
 		return
 	end
 	local beforeToken = stateProgressToken(job.zoneState)
+	local usedUnits = 0
+	local startedStep = nowMs()
 	local ok, err = pcall(function()
 		if job.zoneIndex > #job.zones then return end
 		if not job.zoneState then
@@ -343,12 +374,32 @@ local function onTick()
 				error(scanError or "scan_unavailable")
 			end
 		end
-		if GlobalStorageSiK.ZoneScanner.stepIncremental(job.zoneState, MAX_UNITS_PER_STEP, MAX_STEP_MS) then
+		local quantum = math.min(availableUnits, job.scanQuantum or 96)
+		local done, units = GlobalStorageSiK.ZoneScanner.stepIncremental(job.zoneState, quantum, availableMs)
+		usedUnits = units or quantum
+		if done then
 			completeZone(job)
 		end
 		if job.zoneIndex > #job.zones then commitStaged(job) end
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
+	local spentMs = math.max(0, nowMs() - startedStep)
+	-- Charge the millisecond clock's unresolved fraction conservatively.
+	local chargedMs = spentMs + (usedUnits > 0 and 1 or 0)
+	cpuCredit = cpuCredit - chargedMs
+	unitCredit = unitCredit - usedUnits
+	job.totals.scanSteps = (job.totals.scanSteps or 0) + 1
+	job.totals.scanWorkUnits = (job.totals.scanWorkUnits or 0) + usedUnits
+	job.totals.scanCpuMs = (job.totals.scanCpuMs or 0) + spentMs
+	job.totals.scanChargedMs = (job.totals.scanChargedMs or 0) + chargedMs
+	job.totals.scanPeakMs = math.max(job.totals.scanPeakMs or 0, spentMs)
+	if usedUnits > 0 then
+		if spentMs < availableMs * 0.75 then
+			job.scanQuantum = math.min(MAX_UNITS_PER_STEP, (job.scanQuantum or 96) + 48)
+		elseif spentMs > 0 then
+			job.scanQuantum = math.max(16, math.floor(usedUnits * availableMs / spentMs))
+		end
+	end
 	if not ok then
 		local zone = currentZone(job)
 		job.totals.failedZones = (job.totals.failedZones or 0) + 1

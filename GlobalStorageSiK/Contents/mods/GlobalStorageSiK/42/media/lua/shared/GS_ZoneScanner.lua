@@ -161,65 +161,80 @@ local function advanceSquareCursor(state)
 	end
 end
 
-local function queueIncrementalObject(state, obj)
-	if not obj then return false end
-	local count = GlobalStorageSiK.Utils.getContainerCount(obj)
-	for containerIndex = 0, count - 1 do
-		local eligible, rejectionReason = GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, containerIndex)
-		if not eligible and rejectionReason == "cooking" then
-			local excludedId = GlobalStorageSiK.Utils.getContainerId(obj, containerIndex)
-			if excludedId and not state.excludedEntryIds[excludedId] then
-				state.excludedEntryIds[excludedId] = true
-				state.metrics.cookingContainersExcluded = state.metrics.cookingContainersExcluded + 1
+local function queueIncrementalContainer(state, obj, containerIndex)
+	local eligible, rejectionReason = GlobalStorageSiK.Utils.isNetworkStorageContainer(obj, containerIndex)
+	if not eligible and rejectionReason == "cooking" then
+		local excludedId = GlobalStorageSiK.Utils.getContainerId(obj, containerIndex)
+		if excludedId and not state.excludedEntryIds[excludedId] then
+			state.excludedEntryIds[excludedId] = true
+			state.metrics.cookingContainersExcluded = state.metrics.cookingContainersExcluded + 1
+		end
+	elseif eligible then
+		local entry = GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
+		if entry and not state.seenEntryIds[entry.id] then
+			if #state.results >= state.limit then
+				state.limitHit = true
+				state.phase = "snapshots"
+				state.discovery = nil
+				return
 			end
-		elseif eligible then
-			local entry = GlobalStorageSiK.Utils.buildContainerEntry(obj, containerIndex)
-			if entry and not state.seenEntryIds[entry.id] then
-				if #state.results >= state.limit then
-					state.limitHit = true
-					state.phase = "snapshots"
-					return true
-				end
-				state.seenEntryIds[entry.id] = true
-				entry.zoneId = state.zone.id
-				entry.membership = "auto"
-				entry.enabled = true
-				entry.displayName = obj:getName() or entry.name
-				entry.itemSnapshot = {}
-				local container = GlobalStorageSiK.Utils.getObjectContainer(obj, containerIndex)
-				if container and container.getCapacity then
-					local okCap, cap = pcall(function() return container:getCapacity() end)
-					if okCap and cap and cap > 0 then entry.storedCapacity = cap end
-				end
-				state.results[#state.results + 1] = entry
-				state.containerTasks[#state.containerTasks + 1] = {
-					entry = entry,
-					container = container,
-				}
-				state.metrics.nodesDetected = state.metrics.nodesDetected + 1
+			state.seenEntryIds[entry.id] = true
+			entry.zoneId = state.zone.id
+			entry.membership = "auto"
+			entry.enabled = true
+			entry.displayName = obj:getName() or entry.name
+			entry.itemSnapshot = {}
+			local container = GlobalStorageSiK.Utils.getObjectContainer(obj, containerIndex)
+			if container and container.getCapacity then
+				local okCap, cap = pcall(function() return container:getCapacity() end)
+				if okCap and cap and cap > 0 then entry.storedCapacity = cap end
 			end
+			state.results[#state.results + 1] = entry
+			state.containerTasks[#state.containerTasks + 1] = { entry = entry, container = container }
+			state.metrics.nodesDetected = state.metrics.nodesDetected + 1
 		end
 	end
-	return false
 end
 
+-- Each visit performs one square lookup, one object lookup or one container.
+-- Dense tiles and multi-compartment objects yield through the same budget as items.
 local function scanIncrementalSquare(state)
-	state.metrics.squaresVisited = state.metrics.squaresVisited + 1
-	local square = state.cell:getGridSquare(state.x, state.y, state.z)
-	if square then
+	local cursor = state.discovery
+	if not cursor then
+		state.metrics.squaresVisited = state.metrics.squaresVisited + 1
+		local square = state.cell:getGridSquare(state.x, state.y, state.z)
+		if not square then advanceSquareCursor(state); return end
 		state.anySquareLoaded = true
 		state.metrics.loadedSquares = state.metrics.loadedSquares + 1
-		local objects = square:getObjects()
-		for i = 0, objects:size() - 1 do
-			if queueIncrementalObject(state, objects:get(i)) then return end
-		end
-		if square.getSpecialObjects then
-			local special = square:getSpecialObjects()
-			for i = 0, special:size() - 1 do
-				if queueIncrementalObject(state, special:get(i)) then return end
-			end
-		end
+		state.discovery = { square = square, list = square:getObjects(), index = 0, special = false }
+		return
 	end
+	if cursor.object then
+		local index = cursor.containerIndex
+		if index < cursor.containerCount then
+			cursor.containerIndex = index + 1
+			queueIncrementalContainer(state, cursor.object, index)
+			return
+		end
+		cursor.object = nil
+	end
+	if cursor.list and cursor.index < cursor.list:size() then
+		local obj = cursor.list:get(cursor.index)
+		cursor.index = cursor.index + 1
+		if obj then
+			cursor.object = obj
+			cursor.containerCount = GlobalStorageSiK.Utils.getContainerCount(obj)
+			cursor.containerIndex = 0
+		end
+		return
+	end
+	if not cursor.special then
+		cursor.special = true
+		cursor.list = cursor.square.getSpecialObjects and cursor.square:getSpecialObjects() or nil
+		cursor.index = 0
+		return
+	end
+	state.discovery = nil
 	advanceSquareCursor(state)
 end
 
@@ -256,7 +271,7 @@ local function scanIncrementalItem(state)
 	end
 end
 
---- Ejecuta una porcion acotada. `maxUnits` cuenta baldosas durante la fase de
+--- Ejecuta una porcion acotada. `maxUnits` cuenta pasos de cursor durante la fase de
 --- descubrimiento e instancias durante snapshots; `maxMs=0` desactiva solo el
 --- reloj y se usa exclusivamente por el wrapper sincrono legacy.
 ---@param state table
@@ -277,12 +292,13 @@ function GlobalStorageSiK.ZoneScanner.stepIncremental(state, maxUnits, maxMs)
 			scanIncrementalItem(state)
 		end
 		units = units + 1
-		if timeBudget > 0 and units > 0 and started > 0 and getTimestampMs
+		if timeBudget > 0 and units > 0 and getTimestampMs
 			and getTimestampMs() - started >= timeBudget then
 			break
 		end
 	end
-	return state.phase == "done"
+	state.workUnits = (state.workUnits or 0) + units
+	return state.phase == "done", units
 end
 
 ---@param state table|nil

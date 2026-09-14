@@ -240,6 +240,19 @@ Los reescaneos incrementales de zonas emiten una sola línea `ZoneScanJob comple
 [12.3s][SRV] [GlobalStorageSiK:INFO:ZoneScanJob] complete network=... durationMs=42 zones=2 nodes=18 instances=530 distinctTypes=47 snapshotRows=82 squares=225 loadedSquares=225 added=1 updated=17 offline=0 cookingExcluded=3 removedIneligible=1 limitHit=false
 ```
 
+El cierre también incluye `scanSteps`, `scanUnits`, `scanCpuMs`, `scanChargedMs` y
+`scanPeakMs`. El scanner reparte un presupuesto global de 160 ms de crédito por
+segundo entre todas las redes, con reserva máxima de 8 ms; no se multiplica por
+jugador. Cada paso busca 3–6 ms según el ritmo observado, hasta 512 unidades de
+cursor y un máximo global de 16.384 unidades por segundo. El quantum crece o baja
+según el coste medido. Una unidad de descubrimiento ya no recorre una baldosa
+entera: cede entre objetos y compartimentos, además de entre instancias.
+`scanCpuMs` suma tiempo de los pasos medido por el reloj; `scanChargedMs` añade
+un milisegundo conservador por paso útil para cubrir su resolución. Una llamada
+nativa individual y la publicación atómica pueden superar el objetivo temporal;
+`scanPeakMs` permite identificarlo. Estos contadores no miden el transporte del
+catálogo. Conservar logs y comparar misma red/carga con caché fría y caliente.
+
 La identidad y sus migraciones pertenecen a `Identidad y permisos / Identity & permissions`. La inicialización, un cambio lógico del roster y cada vínculo reparado emiten líneas acotadas; nunca una línea por tick. El campo `account` procede del `IsoPlayer` autoritativo; los IDs se tratan como opacos y no deben editarse a mano:
 
 ```text
