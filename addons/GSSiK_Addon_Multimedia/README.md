@@ -1,6 +1,6 @@
 # GSSiK Addon — Multimedia
 
-Version 0.1.0 for Project Zomboid B42.20+. Requires
+Version 0.1.1 for Project Zomboid B42.20+. Requires
 `GlobalStorageSiK` and `SiKUIFramework`. Workshop ID: `3798890105`.
 
 Find or build the GS Multimedia housing, heads and power supply, then assemble
@@ -9,6 +9,15 @@ disk-programming magazine.
 Recording the program produces an installation disk in the player's inventory.
 Installing the player on a terminal enables Multimedia for that terminal.
 The normal Core reader, disk and installation checks remain in force.
+
+World/server sandbox settings provide separate relative loot weights for the
+player (default 0.08), player magazine (0.35), programming magazine (0.30),
+components (0.20) and installation disk (0.15). Each accepts 0–5; zero disables
+that distribution entry. Weights are not drop percentages. They are read when
+the world/server loads and affect newly generated loot; existing containers are
+not rewritten. Magazines use book/magazine distributions, hardware uses electronics
+and garage distributions, and installation disks use office/electronics/tool-book
+distributions. Reloading the module does not add duplicate distribution entries.
 
 The installed peripheral turns the terminal into the player. No nearby TV or
 radio is required. In Multimedia, filter network VHS tapes by title or skill,
