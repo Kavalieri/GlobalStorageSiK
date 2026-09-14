@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.5 - 2026-09-14
+
+### Global Storage SiK
+
+- Made each container snapshot authoritative and derived network views from node manifests, node revisions and bounded deltas.
+- Added cold bootstrap, warm not-modified reopening, retained valid views and one manifest-wide readiness cycle for large multiplayer networks.
+- Preserved exact withdrawals, deposits and Craft/Builder work loans through idempotent receipts and targeted node invalidation.
+- Added revisioned, acknowledged rule and routing changes; open zone and container editors update after the server acknowledgement.
+- Scoped container inventory tables to the edited node and exposed paged snapshot candidates for addons without a global physical scan.
+- Restored bounded network decision traces, corrected category cascade values and made grouped food states deterministic.
+
+### Multimedia 0.1.1
+
+- Uses paged server snapshot candidates and exact item leases for media playback without scanning the complete network context.
+- Preserves the last complete media list and exact tape custody through bounded retries and topology or permission changes.
+
 ## 1.5.2 - 2026-09-11
 
 ### Global Storage SiK

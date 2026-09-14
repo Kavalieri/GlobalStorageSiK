@@ -1,9 +1,9 @@
-# Catalog transport — Core 1.5.5-dev1.2
+# Catalog transport — Core 1.5.5
 
 A container is the authoritative inventory unit. A network publishes a manifest
 of container revisions; the terminal catalog is a derived client view. Server
-and client require matching Core builds. Framework 1.0.4-dev1 supplies the
-retained search resize contract. Multimedia 0.1.1-dev1 consumes the additive
+and client require matching Core builds. Framework 1.0.4 supplies the
+retained search resize contract. Multimedia 0.1.1 consumes the additive
 ItemLease 1.1.0 snapshot candidate API; Craft and Builder retain their public
 WorkSession interfaces.
 
