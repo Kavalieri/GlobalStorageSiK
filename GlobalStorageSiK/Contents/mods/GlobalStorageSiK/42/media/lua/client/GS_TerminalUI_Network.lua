@@ -94,6 +94,57 @@ function Network.layoutUi(_, ui)
 	return ui
 end
 
+-- Rule ACKs patch the affected zone root (and its inherited child labels).
+-- The mounted table retains unrelated roots, selection, expansion and scroll.
+function Network.refreshRuleRows(terminal, zoneId, nodeId, rules)
+	local state=terminal and terminal.terminalState
+	if not state then return false end
+	local zone, nodes=nil,{}
+	for _,candidate in ipairs(state.zones or {}) do
+		if candidate.id==zoneId then zone=candidate;break end
+	end
+	if not zone then return false end
+	if not nodeId then zone.rules=rules end
+	for _,node in ipairs(state.nodes or {}) do
+		if node.zoneId==zoneId then
+			if node.id==nodeId then node.rules=rules end
+			nodes[#nodes+1]=node
+		end
+	end
+	local panel=terminal.networkPanel
+	local surface=panel and panel._sikNetworkSurface
+	local tree=surface and surface:getTree()
+	local tableUI=tree and tree.nodes and tree.nodes["network-table"]
+	local adapter=panel and panel._sikNetworkContext
+	if tableUI and adapter and terminal.activeTabKey=="network" then
+		local model=GlobalStorageSiK.TerminalNodes.presentationModel(nodes,{zone},adapter.sortColumn,adapter.sortDirection)
+		local row=model.rows[1]
+		if row then
+			-- A node ACK changes one child; inherited zone changes affect all.
+			for i,child in ipairs(row.children or {}) do
+				if nodeId and child.id~="node:"..tostring(nodeId) then
+					row.children[i]=adapter.rowsByKey[child.id] or child
+				end
+			end
+			local accepted,reason=tableUI:patchRows({upserts={row}})
+			if not accepted then return false,reason end
+			adapter.rowsByKey[row.id]=row
+			for _,child in ipairs(row.children or {}) do adapter.rowsByKey[child.id]=child end
+		end
+	end
+	local editor=GlobalStorageSiK.TerminalZoneEditor and GlobalStorageSiK.TerminalZoneEditor.instance
+	if editor and editor.terminal==terminal and editor.zone and editor.zone.id==zoneId and editor.zoneNodesTable then
+		if not nodeId then editor.zone.rules=rules end
+		local changed={}
+		for _,row in ipairs(GlobalStorageSiK.TerminalNodes.zoneRows(nodes,zone)) do
+			if not nodeId or row.sourceNode.id==nodeId then changed[#changed+1]=row end
+		end
+		local accepted,reason=editor.zoneNodesTable:patchRows({upserts=changed})
+		if not accepted then return false,reason end
+	end
+	return true
+end
+
 function Network.syncScrollLayout(terminal)
 	local panel = terminal and terminal.networkPanel
 	local surface = panel and panel._sikNetworkSurface

@@ -47,6 +47,25 @@ function Replica.new(options)
 		if entry then touch(entry) end
 		return entry,nil,key
 	end
+	function api.transition(meta)
+		local key=api.identity(meta)
+		if not key or not Protocol.scopeContains(meta.catalogScope,meta.previousCatalogScope) then return false,"manifest_identity" end
+		local source
+		for cachedKey,entry in pairs(entries) do
+			if entry.playerNum==meta.playerNum and entry.networkId==meta.networkId and entry.epoch==meta.replicaEpoch
+				and Protocol.scopeContains(entry.scope,meta.previousCatalogScope)
+				and Protocol.scopeContains(meta.catalogScope,entry.scope) then source=cachedKey;break end
+		end
+		if source and source~=key then
+			local entry=entries[source]
+			if entries[key] then return false,"manifest_identity" end
+			entries[source]=nil
+			entry.derivedKey=entry.derivedKey or source
+			entry.key,entry.scope=key,meta.catalogScope
+			entries[key]=entry;touch(entry)
+		end
+		return true
+	end
 	function api.manifest(meta)
 		local key=api.identity(meta)
 		if not key or not Protocol.id(meta.manifestToken) or meta.manifestSchema~=Protocol.SCHEMA then
@@ -61,6 +80,7 @@ function Replica.new(options)
 			changedNodeIds={},bytes=4096+#records*1024}
 		-- A draft never replaces the token or rows of the last accepted image.
 		if old then
+			entry.derivedKey=old.derivedKey
 			for id in pairs(old.changedNodeIds or {}) do entry.changedNodeIds[id]=true end
 			entry.confirmed=old.confirmed
 			if entry.confirmed then

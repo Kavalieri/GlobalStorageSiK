@@ -1505,7 +1505,26 @@ GlobalStorageSiK.CatalogClient.configure({
 		if GlobalStorageSiK.TerminalAccessGuard
 			and catalogConsumer("TerminalAccessGuard.acceptResponse", true,
 				GlobalStorageSiK.TerminalAccessGuard.acceptResponse, payload, true) == false then return false end
-		return catalogConsumer("TerminalUI.confirmCatalogAccess", false, GlobalStorageSiK.TerminalUI.confirmCatalogAccess, payload)
+		local accepted = catalogConsumer("TerminalUI.confirmCatalogAccess", false, GlobalStorageSiK.TerminalUI.confirmCatalogAccess, payload)
+		if accepted ~= false and payload.topologyTransition then
+			-- Advance only identity after the authenticated additive ACK. Keep the
+			-- complete rows and view sequence so the new node can patch that view.
+			local function advance(state)
+				local protocol = GlobalStorageSiK.ManifestProtocol
+				if state and protocol.scopeContains(state.catalogScope, payload.previousCatalogScope)
+					and protocol.scopeContains(payload.catalogScope, state.catalogScope) then
+					state.catalogScope = payload.catalogScope
+				end
+			end
+			local n = payload.playerNum
+			local state = GlobalStorageSiK.Client.terminalStateByPlayer[n]
+			if state and state.networkId == payload.networkId then advance(state) end
+			local ui = terminalUiForPlayer(n)
+			if ui and ui.terminalState and ui.terminalState.networkId == payload.networkId then advance(ui.terminalState) end
+			local cache = (GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {})[inventoryCatalogKey(n, payload.networkId)]
+			advance(cache)
+		end
+		return accepted
 	end,
 	hasCache=function(payload)
 		local cache = GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {}

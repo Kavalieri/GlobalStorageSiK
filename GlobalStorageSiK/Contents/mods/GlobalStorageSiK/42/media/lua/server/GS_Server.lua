@@ -1231,7 +1231,12 @@ local function addZone(zone)
 		zone.priority = 50
 	end
 
+	local topologyTicket = GlobalStorageSiK.CatalogServer.prepareZoneAddition(zone.networkId)
 	registry.zones[zone.id] = zone
+	-- Establish this mutation's revision before the directed scan captures its
+	-- starting revision. Otherwise the first progress publication invalidates it.
+	catalogScopeSignature(nil, zone.networkId)
+	GlobalStorageSiK.CatalogServer.completeZoneAddition(topologyTicket, zone.id)
 
 	GlobalStorageSiK.notifyRegistryChanged(zone.networkId)
 
@@ -2191,7 +2196,7 @@ local function scanResult(networkId, state, key, reason, summary)
 		}
 	end
 	return {
-		ok = state == "COMPLETED" or state == "STALE_RETRY" or state == "INVALIDATED_BY_MUTATION",
+		ok = state == "RUNNING" or state == "COMPLETED" or state == "STALE_RETRY" or state == "INVALIDATED_BY_MUTATION",
 		networkId = networkId, message = GlobalStorageSiK.I18n.remote(key),
 		jobType = "zoneScan", jobState = state, reason = reason,
 		reasonCode = scanStatus.reasonCode or GlobalStorageSiK.I18n.scanReasonCode(reason),
@@ -5653,6 +5658,7 @@ require "GS_CatalogPreparation"
 require "GS_CatalogServer"
 require "GS_NodeCatalogServer"
 GlobalStorageSiK.CatalogServer.configure({
+	scope=authorizedCatalogScope,
 	opened=GlobalStorageSiK.NodeCatalogServer.opened,
 	closed=GlobalStorageSiK.NodeCatalogServer.clear,
 	nodeRecover=GlobalStorageSiK.NodeCatalogServer.recover,

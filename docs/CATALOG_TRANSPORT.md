@@ -1,8 +1,8 @@
-# Catalog transport — Core 1.5.5
+# Catalog transport — Core 1.5.6-dev1
 
 A container is the authoritative inventory unit. A network publishes a manifest
 of container revisions; the terminal catalog is a derived client view. Server
-and client require matching Core builds. Framework 1.0.4 supplies the
+and client require matching Core builds. Framework 1.0.5-dev1 supplies the
 retained search resize contract. Multimedia 0.1.1 consumes the additive
 ItemLease 1.1.0 snapshot candidate API; Craft and Builder retain their public
 WorkSession interfaces.
@@ -17,6 +17,15 @@ configuration metadata. Only missing or changed node snapshots are requested.
 One immutable node block completes the existing framed transport and consumer
 ACK before the next block is sent. Removed nodes are removed from the replica.
 A changed classification stamp rebuilds the local derived presentation.
+
+An authorized zone insertion snapshots valid sessions before mutation and
+revalidates their access against the exact additive scope afterwards. The server
+emits `terminalOpenAck` with `topologyTransition=true` and `previousCatalogScope`,
+retaining `openSeq` and `replicaEpoch`. The client fences old batches, advances its
+scope and negotiates a new manifest while retaining confirmed blocks and rows.
+Consecutive additions may share the original base scope; late intermediate ACKs
+cannot roll the session back. Other scope changes are revocations. A topology
+revision is established before the directed scan captures its starting revision.
 
 Client category composition is pure during replica bootstrap. It merges manifest
 metadata, categories detected in the received node replicas and built-in defaults;

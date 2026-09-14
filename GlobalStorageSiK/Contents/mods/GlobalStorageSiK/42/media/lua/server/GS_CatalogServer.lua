@@ -125,6 +125,51 @@ local function failure(player, reason, batchId)
         .. " recoverable=" .. tostring(recoverable))
 end
 function Server.fail(player,reason) failure(player,reason,serial) end
+
+-- This ticket stays on the server stack across a synchronous authorized add.
+-- No client command can create it or use it to forgive a revoked old zone.
+function Server.prepareZoneAddition(networkId)
+    local prepared={}
+    for player,session in pairs(sessions) do
+        if session.networkId==networkId and session.replicaEpoch and not session.consumerRejected
+            and context.valid(player,session,session) then
+            prepared[#prepared+1]={player=player,session=session,scope=session.catalogScope}
+        end
+    end
+    return prepared
+end
+function Server.completeZoneAddition(prepared,zoneId)
+    local Protocol=GlobalStorageSiK.ManifestProtocol
+    for i=1,#prepared do
+        local ticket=prepared[i]
+        local player,session=ticket.player,ticket.session
+        if sessions[player]==session and session.catalogScope==ticket.scope then
+            local scope=context.scope(player,session.networkId)
+            if scope~=ticket.scope then
+                local expected=Protocol.scopeWithZone(ticket.scope,zoneId)
+                local confirmation={}
+                for _,key in ipairs({"playerNum","openSeq","networkId","replicaEpoch","manifestSchema",
+                    "accessMode","terminalAnchor","confirmedProximityRange","confirmedWirelessRange",
+                    "inventoryRevision","protocol"}) do confirmation[key]=session[key] end
+                confirmation.catalogScope=scope
+                if expected~=scope or not context.valid(player,confirmation,confirmation) then
+                    failure(player,"catalog_access_changed")
+                else
+                    -- Retire old frames/requests before exposing the new identity.
+                    release(player,"topology_addition")
+                    session.catalogScope=scope
+                    session.topologyBaseScope=session.topologyBaseScope or ticket.scope
+                    session.confirmed=nil
+                    if context.opened then context.opened(player,session) end
+                    confirmation.topologyTransition=true
+                    confirmation.previousCatalogScope=session.topologyBaseScope
+                    if not send(player,"terminalOpenAck",confirmation) then failure(player,"catalog_send") end
+                    log("topology_transition","network="..tostring(session.networkId).." zone="..zoneId)
+                end
+            end
+        end
+    end
+end
 local function prune()
     local live, retired = {}, {}
     context.visit(function(player) live[player]=true end)

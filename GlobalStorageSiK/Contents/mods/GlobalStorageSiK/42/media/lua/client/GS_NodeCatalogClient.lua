@@ -83,15 +83,20 @@ end
 function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
 	Client.clear(ack.playerNum,false)
+	if ack.topologyTransition then
+		local accepted,reason=cache.transition(ack)
+		if not accepted then return false,reason end
+	end
 	local entry,reason=cache.confirm(ack)
 	if reason then return false,reason end
 	trace(entry and "clientCacheHit" or "clientCacheMiss",ack,entry and "reason=identity_confirmed" or "reason=no_confirmed_view")
+	local current=ack.topologyTransition and context.currentState(ack.playerNum)
 	slots[ack.playerNum]={ack=ack,entry=entry,previous=entry and entry.rows,previousMetadata=entry and entry.metadata,
 		store=entry and entry.rows and entry.rowStore,hasComplete=entry and entry.rows~=nil,
 		hasPresented=entry and entry.rows~=nil,receivedBlocks=0,
 		derivedGeneration=entry and entry.rows and entry.derivedGeneration,
 		pendingNodeIds=shallow(entry and entry.changedNodeIds),
-		viewSequence=0,started=now(),retries=0,buildMs=0,viewMs=0}
+		viewSequence=current and current.viewSequence or 0,started=now(),retries=0,buildMs=0,viewMs=0}
 	return true
 end
 function Client.negotiate(ack)
@@ -136,7 +141,7 @@ local function nextNode(state,receivedBlock)
 	local registry=cache.registry(entry,partial,changedIds)
 	if not registry then return false,"replica_incomplete" end
 	state.build=GlobalStorageSiK.Index.beginCatalogBuild(state.ack.networkId,nil,nil,state.manifest.inventoryRevision,
-		{registry=registry,key=state.entry.key..Protocol.part(state.manifest.classificationEpoch),
+		{registry=registry,key=(state.entry.derivedKey or state.entry.key)..Protocol.part(state.manifest.classificationEpoch),
 			incremental=true,baseGeneration=state.derivedGeneration,changedNodeIds=changedIds,
 			completeRegistry=function() return cache.registry(entry,partial) end})
 	return state.build~=nil

@@ -149,7 +149,18 @@ local function applyReady(playerNum, slot)
 end
 function Client.ack(payload)
 	local slot = slotFor(payload)
-	if not slot or slot.confirmed then return end
+	if not slot then return end
+	if payload.topologyTransition then
+		local previous=slot.confirmed
+		local Protocol=GlobalStorageSiK.ManifestProtocol
+		if not Protocol.scopeContains(payload.catalogScope,payload.previousCatalogScope) then return end
+		if previous and (previous.networkId~=payload.networkId or previous.replicaEpoch~=payload.replicaEpoch
+			or previous.catalogScope==payload.catalogScope
+			or not Protocol.scopeContains(previous.catalogScope,payload.previousCatalogScope)
+			or not Protocol.scopeContains(payload.catalogScope,previous.catalogScope)) then return end
+		-- Explicit server fence: old fragments cannot replace the new manifest.
+		slot.batch=nil;slot.confirmed=nil
+	elseif slot.confirmed then return end
 	if type(payload.networkId) ~= "string" or not context.allowed(payload) then
 		fail(payload.playerNum, "catalog_access_changed"); return
 	end

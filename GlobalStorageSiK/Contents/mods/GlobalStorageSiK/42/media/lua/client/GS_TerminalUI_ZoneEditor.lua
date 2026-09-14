@@ -213,13 +213,20 @@ function GS_ZoneEditorUI:applyConfirmedRouting(args, result)
 	if not self.zone or not result or result.ok ~= true or args.zoneId ~= self.zone.id then return false end
 	local state = self.terminal and self.terminal.terminalState
 	if not state or result.networkId ~= state.networkId then return false end
+	local confirmedRevision = tonumber(result.routingRevision) or 0
+	if confirmedRevision < (self._confirmedRoutingRevision or 0) then return false end
+	self._confirmedRoutingRevision = confirmedRevision
 	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.zone, args)
 	if args.name ~= nil then self.zone.name = args.name end
 	if args.priority ~= nil then self.zone.priority = args.priority end
 	if args.enabled ~= nil then self.zone.enabled = args.enabled end
 	state.routingRevision = math.max(tonumber(state.routingRevision) or 0,
 		tonumber(result.routingRevision) or 0)
-	if rulesChanged then GlobalStorageSiK.RulesUI.refreshEditorRules(self, self.zone.rules, affected) end
+	if rulesChanged then
+		GlobalStorageSiK.RulesUI.refreshEditorRules(self, self.zone.rules, affected)
+		local accepted,reason=GlobalStorageSiK.TerminalNetwork.refreshRuleRows(self.terminal,self.zone.id,nil,self.zone.rules)
+		if not accepted then GlobalStorageSiK.Log.error("TerminalUI","routing_rows_refresh",tostring(reason)) end
+	end
 	if args.name ~= nil and self.setHeader then
 		self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = self.zone.name or "?",
 			separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })

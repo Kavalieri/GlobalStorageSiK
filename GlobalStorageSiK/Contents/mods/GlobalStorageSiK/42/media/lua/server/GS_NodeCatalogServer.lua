@@ -137,6 +137,10 @@ function Server.update()
 			end
 		end
 	end
-	for i=1,#retired do Server.clear(retired[i]) end
+	for i=1,#retired do
+		-- Revocation must reach the client even when no catalog job is in flight.
+		context.failed(retired[i],"catalog_access_changed")
+		Server.clear(retired[i])
+	end
 end
 return Server

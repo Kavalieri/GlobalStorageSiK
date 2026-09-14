@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.6-dev1 - 2026-09-14
+
+- Authorized zone additions advance the open session scope while retaining confirmed node blocks and the visible catalog; real access revocation still purges the replica.
+- Establish topology revisions before starting directed scans and report accepted running scans as successful actions.
+- Refresh affected zone/container rule rows after an ACK while preserving unrelated rows, drafts on rejection and newer acknowledgements.
+- Category coalescence, volatile manifest classification and editor resize remain pending.
+
 ## 1.5.5 - 2026-09-14
 
 ### Global Storage SiK

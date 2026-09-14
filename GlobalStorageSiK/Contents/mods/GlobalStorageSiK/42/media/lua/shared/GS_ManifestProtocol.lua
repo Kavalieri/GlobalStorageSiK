@@ -26,6 +26,25 @@ function Protocol.key(epoch, playerNum, networkId, scope)
 		.. Protocol.part(networkId) .. Protocol.part(scope)
 end
 
+-- Canonical scopes only. Used for server-authored additive transitions, never
+-- as a replacement for current permission/physical-access validation.
+function Protocol.scopeContains(scope, base)
+	if type(scope)~="string" or type(base)~="string" or #scope>65536 or #base>65536 then return false end
+	local found={}
+	for id in scope:gmatch("[^\31]+") do found[id]=true end
+	for id in base:gmatch("[^\31]+") do if not found[id] then return false end end
+	return true
+end
+
+function Protocol.scopeWithZone(scope, zoneId)
+	if type(scope)~="string" or #scope>65536 or not Protocol.id(zoneId) or zoneId:find("\31",1,true) then return nil end
+	local ids={}
+	for id in scope:gmatch("[^\31]+") do if id==zoneId then return nil end;ids[#ids+1]=id end
+	ids[#ids+1]=zoneId;table.sort(ids)
+	local result=table.concat(ids,"\31")
+	return #result<=65536 and result or nil
+end
+
 function Protocol.sameBlock(a, b)
 	return a and b and a.nodeId == b.nodeId and a.zoneId == b.zoneId
 		and a.revision == b.revision and a.schema == b.schema and a.signature == b.signature
