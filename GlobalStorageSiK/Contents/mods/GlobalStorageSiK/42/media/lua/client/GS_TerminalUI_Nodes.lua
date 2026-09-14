@@ -206,7 +206,10 @@ function Nodes.presentationModel(nodes, zones, sortColumn, sortDirection)
 	sortZones(order, names, priorities, sortColumn, sortDirection)
 	local rows = {}
 	local function append(id, list)
-		if not list or #list == 0 then return end
+		-- An accepted zone exists before its directed scan discovers a node.
+		-- Keep that authoritative root visible even when its child list is empty.
+		if not list and not sources[id] then return end
+		list=list or {}
 		sortNodes(list, sortColumn, sortDirection)
 		rows[#rows + 1] = zoneRow(id, list, names, priorities, enabled, rules,
 			occupancy, sources)

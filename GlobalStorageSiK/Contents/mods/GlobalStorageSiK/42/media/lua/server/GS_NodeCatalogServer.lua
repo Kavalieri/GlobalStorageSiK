@@ -27,23 +27,36 @@ local function valid(player,args)
 	local state=states[player]
 	if not state or type(args)~="table" or args.openSeq~=state.session.openSeq
 		or args.networkId~=state.session.networkId or args.replicaEpoch~=state.session.replicaEpoch
-		or args.catalogScope~=state.session.catalogScope then return nil end
+		or args.catalogScope~=state.session.catalogScope
+		or (args.topologySequence or 0)~=(state.session.topologySequence or 0) then return nil end
 	if not context.valid(player,state.session,args) then return nil end
 	return state
 end
 local function refresh(player,state)
-	state.request=nil;state.retry=nil
+	-- A recovery cannot replace an unacknowledged frame. Keep one intent and
+	-- retry after its receipt; ordinary refreshes remain coalesced until ready.
+	if context.hasJob(player) then state.retry=true;return end
+	state.request=nil;state.retry=nil;state.ready=nil
+	state.roundActive=nil;state.refreshPending=nil
 	context.refresh(player,state.session.networkId)
 end
 function Server.queueState(player,payload)
 	local state=states[player]
 	if not state or not state.negotiated then return false,"manifest_negotiation" end
 	if state.rejected then return true,"catalog_session_fenced" end
-	if context.hasJob(player) then return false,"catalog_inflight" end
 	local metadata={}
 	for i=1,#metadataFields do local key=metadataFields[i];metadata[key]=payload[key] end
 	local signature=Protocol.metadataSignature(metadata)
 	if not signature then return false,"manifest_metadata_budget" end
+	if context.hasJob(player) or state.roundActive then
+		-- Do not discard an accepted node request in the ACK-to-node handoff.
+		-- Rebuild current metadata once the complete replica is acknowledged.
+		local current=state.manifest
+		if not current or current.inventoryRevision~=payload.inventoryRevision or state.controlStamp~=signature
+			or current.snapshotRevision~=payload.snapshotRevision or current.snapshotCertified~=payload.snapshotCertified
+			or current.reconcilePending~=payload.reconcilePending then state.refreshPending=true end
+		return true,"manifest_coalesced"
+	end
 	state.session.controlStamp=signature
 	local manifest,reason=Manifest.capture(player,state.session,state.knownToken)
 	state.session.controlStamp=nil
@@ -67,7 +80,13 @@ function Server.queueState(player,payload)
 			.." reason="..(manifest.manifestNotModified and "confirmed_token" or state.knownToken and "manifest_changed" or "bootstrap_or_recovery")
 			.." records="..tostring(#(manifest.nodeManifest or {})))
 	end
-	return context.queue(player,manifest)
+	local accepted,queueReason=context.queue(player,manifest)
+	if accepted then state.roundActive=true;state.controlStamp=signature end
+	if trace and trace.isEnabled() then
+		trace.write("Manifest: queue","network="..tostring(manifest.networkId).." token="..tostring(manifest.manifestToken)
+			.." accepted="..tostring(accepted==true).." reason="..tostring(queueReason or "queued"))
+	end
+	return accepted,queueReason
 end
 function Server.dispatch(command,player,args)
 	if command~="terminalManifestRequest" and command~="terminalNodeRequest"
@@ -89,10 +108,11 @@ function Server.dispatch(command,player,args)
 		refresh(player,state)
 	elseif command=="terminalNodeRequest" then
 		if not state.negotiated or not Protocol.id(args.nodeId) or not Protocol.id(args.manifestToken) then return true end
+		if not state.roundActive or not state.manifest or args.manifestToken~=state.manifest.manifestToken then return true end
 		-- Reliable unordered commands may precede the manifest receipt. Retain one
 		-- descriptor and serve it only after the previous frame job is released.
 		if not state.request then state.request={nodeId=args.nodeId,token=args.manifestToken} end
-	elseif state.manifest and args.manifestToken==state.manifest.manifestToken
+	elseif state.roundActive and state.manifest and args.manifestToken==state.manifest.manifestToken
 		and args.inventoryRevision==state.manifest.inventoryRevision then
 		state.ready={token=args.manifestToken,revision=args.inventoryRevision}
 	end
@@ -109,18 +129,23 @@ end
 function Server.update()
 	local retired={}
 	for player,state in pairs(states) do
-		local pending=state.ready or state.retry or state.request
+		local pending=state.ready or state.retry or state.request or (state.refreshPending and not state.roundActive)
 		local check=pending or now()-(state.checkedAt or 0)>=1000
 		local accepted=true
 		if check then state.checkedAt=now();accepted=context.valid(player,state.session,state.session) end
 		if not accepted then retired[#retired+1]=player
 		elseif pending and not context.hasJob(player) then
 			if state.ready then
-				context.completed(player,state.ready.revision,state.session.catalogScope)
-				state.knownToken=state.ready.token;state.ready=nil;state.retries=0
+				local accepted=context.completed(player,state.ready.revision,state.session.catalogScope)
+				if accepted~=false and states[player]==state then
+					state.knownToken=state.ready.token;state.ready=nil;state.retries=0
+					state.roundActive=nil;state.request=nil
+					if state.refreshPending then refresh(player,state) end
+				end
 			elseif state.retry then
 				state.retry=nil
 				state.knownToken=nil;refresh(player,state)
+			elseif state.refreshPending and not state.roundActive then refresh(player,state)
 			elseif state.request and now()>=(state.request.due or 0) then
 				local request=state.request;state.request=nil
 				local payload,reason=Manifest.block(player,state.session,request.nodeId,request.token)

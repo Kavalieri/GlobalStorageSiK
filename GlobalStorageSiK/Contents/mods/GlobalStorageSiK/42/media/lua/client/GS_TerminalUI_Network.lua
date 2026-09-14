@@ -94,6 +94,71 @@ function Network.layoutUi(_, ui)
 	return ui
 end
 
+local function sameMetadata(a,b,depth)
+	if a==b then return true end
+	if type(a)~="table" or type(b)~="table" or depth>16 then return false end
+	for key,value in pairs(a) do if not sameMetadata(value,b[key],depth+1) then return false end end
+	for key in pairs(b) do if a[key]==nil then return false end end
+	return true
+end
+
+-- Metadata can converge before inventory blocks. Patch only changed roots;
+-- neither the mounted surface nor the last confirmed inventory is rebuilt.
+function Network.refreshTopologyRows(terminal,previous,state)
+	local panel=terminal and terminal.networkPanel
+	local surface=panel and panel._sikNetworkSurface
+	local tree=surface and surface:getTree()
+	local tableUI=tree and tree.nodes and tree.nodes["network-table"]
+	local adapter=panel and panel._sikNetworkContext
+	if not tableUI or not adapter then return true end
+	local oldZones,newZones,oldNodes,newNodes,changed={},{},{},{},{}
+	for _,zone in ipairs(previous.zones or {}) do oldZones[zone.id]=zone end
+	for _,zone in ipairs(state.zones or {}) do
+		newZones[zone.id]=zone
+		if not sameMetadata(zone,oldZones[zone.id],0) then changed[zone.id]=true end
+	end
+	for _,node in ipairs(previous.nodes or {}) do oldNodes[node.id]=node end
+	for _,node in ipairs(state.nodes or {}) do
+		newNodes[node.id]=node
+		local old=oldNodes[node.id]
+		if not sameMetadata(node,old,0) then
+			changed[node.zoneId]=true
+			if old then changed[old.zoneId]=true end
+		end
+	end
+	for id,node in pairs(oldNodes) do if not newNodes[id] then changed[node.zoneId]=true end end
+	local zones,nodes,removeKeys={},{},{}
+	for _,zone in ipairs(state.zones or {}) do if changed[zone.id] then zones[#zones+1]=zone end end
+	for _,node in ipairs(state.nodes or {}) do if changed[node.zoneId] then nodes[#nodes+1]=node end end
+	for id in pairs(oldZones) do if not newZones[id] then removeKeys[#removeKeys+1]="zone:"..tostring(id) end end
+	local model=GlobalStorageSiK.TerminalNodes.presentationModel(nodes,zones,adapter.sortColumn,adapter.sortDirection)
+	local previousMap,previousNodes,previousZones=adapter.rowsByKey,adapter.nodes,adapter.zones
+	local undo,isCurrent
+	if #model.rows>0 or #removeKeys>0 then
+		local accepted,reason,restore,guard=tableUI:patchRows({upserts=model.rows,removeKeys=removeKeys})
+		if not accepted then return false,reason end
+		undo,isCurrent=restore,guard
+	end
+	local nextMap={}
+	for key,row in pairs(previousMap) do nextMap[key]=row end
+	for id in pairs(oldZones) do if not newZones[id] then nextMap["zone:"..tostring(id)]=nil end end
+	for id,node in pairs(oldNodes) do
+		if changed[node.zoneId] or not newNodes[id] then nextMap["node:"..tostring(id)]=nil end
+	end
+	for _,row in ipairs(model.rows) do
+		nextMap[row.id]=row
+		for _,child in ipairs(row.children or {}) do nextMap[child.id]=child end
+	end
+	adapter.rowsByKey,adapter.nodes,adapter.zones=nextMap,state.nodes,state.zones
+	local function current() return adapter.rowsByKey==nextMap and (not isCurrent or isCurrent()) end
+	return true,nil,function()
+		if not current() then return false,"image_superseded" end
+		if undo and undo()==false then return false,"image_superseded" end
+		adapter.rowsByKey,adapter.nodes,adapter.zones=previousMap,previousNodes,previousZones
+		return true
+	end,current
+end
+
 -- Rule ACKs patch the affected zone root (and its inherited child labels).
 -- The mounted table retains unrelated roots, selection, expansion and scroll.
 function Network.refreshRuleRows(terminal, zoneId, nodeId, rules)

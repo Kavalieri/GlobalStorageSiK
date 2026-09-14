@@ -1236,7 +1236,10 @@ local function addZone(zone)
 	-- Establish this mutation's revision before the directed scan captures its
 	-- starting revision. Otherwise the first progress publication invalidates it.
 	catalogScopeSignature(nil, zone.networkId)
-	GlobalStorageSiK.CatalogServer.completeZoneAddition(topologyTicket, zone.id)
+	GlobalStorageSiK.CatalogServer.completeZoneAddition(topologyTicket, zone.id, {
+		id=zone.id,name=zone.name,source=zone.source,enabled=zone.enabled~=false,
+		priority=zone.priority,rules=zone.rules or {},nodeCount=0,neverLoaded=true,
+	})
 
 	GlobalStorageSiK.notifyRegistryChanged(zone.networkId)
 
@@ -4751,6 +4754,11 @@ local function onClientCommand(module, command, player, args)
 		for _, z in pairs(registry.zones or {}) do
 			if z.networkId == networkId then zoneCountBefore = zoneCountBefore + 1 end
 		end
+		local transition = GlobalStorageSiK.CatalogServer.prepareTopologyRemoval(networkId)
+		local removedNodes = {}
+		for id, node in pairs(registry.nodes or {}) do
+			if node.zoneId == args.zoneId then removedNodes[#removedNodes+1] = id end
+		end
 		local ok = GlobalStorageSiK.Zones.removeZone(args.zoneId)
 		if not ok then
 			GlobalStorageSiK.Log.debug("Zones", "deleteZone fallo en removeZone", "zoneId=" .. tostring(args.zoneId) .. " name=" .. tostring(zoneName))
@@ -4762,6 +4770,8 @@ local function onClientCommand(module, command, player, args)
 				.. " contenedoresEliminados=" .. tostring(nodeCountBefore)
 				.. " zonas " .. tostring(zoneCountBefore) .. "->" .. tostring(zoneCountBefore - 1)
 				.. " de " .. tostring(GlobalStorageSiK.Sandbox.getMaxZonesPerNetwork()))
+		catalogScopeSignature(nil, networkId)
+		GlobalStorageSiK.CatalogServer.completeTopologyRemoval(transition, args.zoneId, removedNodes, true)
 		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
 		pushTerminalState(player, networkId, nil, searchQuery)
@@ -4784,11 +4794,13 @@ local function onClientCommand(module, command, player, args)
 		end
 		local nodeName = node.displayName or node.name or args.nodeId
 		GlobalStorageSiK.ZoneScanJob.cancel(networkId, "remove_node")
+		local transition = GlobalStorageSiK.CatalogServer.prepareTopologyRemoval(networkId)
 		if not GlobalStorageSiK.Zones.removeNode(args.nodeId, networkId) then
 			gsSendServerCommand(player, "actionResult", { ok = false,
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRemoveFailed") })
 			return
 		end
+		GlobalStorageSiK.CatalogServer.completeTopologyRemoval(transition, zone.id, {args.nodeId}, false)
 		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		GlobalStorageSiK.Log.info("Zones", "logical node removed network=" .. tostring(networkId)
 			.. " node=" .. tostring(args.nodeId) .. " by=" .. tostring(player:getUsername()))

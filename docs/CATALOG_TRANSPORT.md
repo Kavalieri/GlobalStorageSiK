@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.6-dev1
+# Catalog transport — Core 1.5.6-dev3
 
 A container is the authoritative inventory unit. A network publishes a manifest
 of container revisions; the terminal catalog is a derived client view. Server
@@ -27,6 +27,19 @@ Consecutive additions may share the original base scope; late intermediate ACKs
 cannot roll the session back. Other scope changes are revocations. A topology
 revision is established before the directed scan captures its starting revision.
 
+Additive ACKs carry the pending `topologyZones` metadata, so accepted empty zones
+appear before their directed scan discovers children. A validated manifest can
+patch zone/node metadata before inventory blocks complete. These updates retain
+the last confirmed inventory revision and rows; they do not grant new transfer
+authority. Only affected table roots are patched, preserving unrelated rows,
+selection and expansion. Older scan metadata cannot replace a newer live result.
+
+Refreshes during a manifest round are coalesced until `terminalReplicaReady`.
+The ACK-to-node handoff belongs to that round even when no wire job is active;
+a refresh must not erase its accepted node request. Recovery waits for an active
+frame receipt before replacing the round. Topology transitions explicitly retire
+the old round and fence old-scope traffic before negotiating the new scope.
+
 Client category composition is pure during replica bootstrap. It merges manifest
 metadata, categories detected in the received node replicas and built-in defaults;
 it does not require or create a client Network/Zones registry entry. The legacy
@@ -34,9 +47,10 @@ category helpers also return bounded empty results when their registry or networ
 is absent.
 
 Confirmed replicas use a byte LRU (32 MiB, 16 scopes), with no age expiry.
-Closing, distance and chunk unload do not expire confirmed content. Revocation,
-death, a different epoch or incompatible scope invalidate the corresponding
-player's replica. Transient jobs still have bounded timeouts. An interrupted or
+Ordinary closing does not expire confirmed content. Safe retention after distance
+loss remains pending: current access-denial paths can explicitly purge the cache;
+this is not time expiry. Revocation, death, a different epoch or incompatible scope
+invalidate the corresponding player's replica. Transient jobs still have bounded timeouts. An interrupted or
 corrupt block preserves independently confirmed nodes and the last complete
 visible catalog; recovery requests missing blocks. Bootstrap and loss of the
 cache can require all authorized nodes. They do not reinstate periodic full
@@ -163,6 +177,28 @@ selected parent covers its authoritative group without duplicating selected
 children.
 
 ## Compatibility and validation
+
+Authorized zone deletion and logical node removal use the same server-stack
+ticket as additions. The server validates access before mutation and again against
+the exact expected resulting scope before confirming. Ordinary scope mismatches
+remain `catalog_access_changed`; permission, terminal and range loss are not
+converted into topology transitions.
+
+The access ACK carries a session-local `topologySequence`, its cumulative
+`topologyBaseSequence`, and `catalogBatchFloor`. These are distinct from the
+network-wide `topologyRevision` in manifests. Pending additions and tombstones
+are accumulated until ReplicaReady; reordered intermediate ACKs cannot undo the
+latest transition, even when a scope returns to the same string. Zone tombstones
+cover their nodes without enumerating containers in the ACK. Manifest/node bodies
+and client requests carry the session sequence as an additional identity fence.
+
+The client immediately removes confirmed zone/node metadata from the mounted
+table, drops only affected immutable blocks and marks their derived contributions
+dirty. The next manifest reuses unaffected blocks and the existing incremental
+view machinery removes inventory contributions. Last confirmed inventory remains
+visible during that short transition; server revision/access checks still govern
+every transfer. This is separate from the pending retention policy for temporary
+terminal/range loss.
 
 Saved node tables retain the existing persistence location and add schema,
 revision and signature metadata. No destructive world migration is performed.

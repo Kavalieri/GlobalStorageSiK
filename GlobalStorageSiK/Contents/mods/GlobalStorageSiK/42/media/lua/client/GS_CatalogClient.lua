@@ -153,13 +153,14 @@ function Client.ack(payload)
 	if payload.topologyTransition then
 		local previous=slot.confirmed
 		local Protocol=GlobalStorageSiK.ManifestProtocol
-		if not Protocol.scopeContains(payload.catalogScope,payload.previousCatalogScope) then return end
-		if previous and (previous.networkId~=payload.networkId or previous.replicaEpoch~=payload.replicaEpoch
-			or previous.catalogScope==payload.catalogScope
-			or not Protocol.scopeContains(previous.catalogScope,payload.previousCatalogScope)
-			or not Protocol.scopeContains(payload.catalogScope,previous.catalogScope)) then return end
+		if previous then
+			if previous.networkId~=payload.networkId or previous.replicaEpoch~=payload.replicaEpoch
+				or not Protocol.transitionAccepts(payload,previous.catalogScope,previous.topologySequence) then return end
+		elseif not Protocol.transitionAccepts(payload,payload.previousCatalogScope,0) then return end
+		if payload.topologySequence and not Codec.integer(payload.catalogBatchFloor,0,9007199254740991) then return end
 		-- Explicit server fence: old fragments cannot replace the new manifest.
 		slot.batch=nil;slot.confirmed=nil
+		if payload.catalogBatchFloor then slot.latest=math.max(slot.latest,payload.catalogBatchFloor) end
 	elseif slot.confirmed then return end
 	if type(payload.networkId) ~= "string" or not context.allowed(payload) then
 		fail(payload.playerNum, "catalog_access_changed"); return

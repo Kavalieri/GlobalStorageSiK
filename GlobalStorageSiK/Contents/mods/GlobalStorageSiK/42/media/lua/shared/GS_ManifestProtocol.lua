@@ -45,6 +45,31 @@ function Protocol.scopeWithZone(scope, zoneId)
 	return #result<=65536 and result or nil
 end
 
+function Protocol.scopeWithoutZone(scope, zoneId)
+	if type(scope)~="string" or not Protocol.id(zoneId) then return nil end
+	local ids,found={},false
+	for id in scope:gmatch("[^\31]+") do
+		if id==zoneId then found=true else ids[#ids+1]=id end
+	end
+	if not found then return nil end
+	table.sort(ids);return table.concat(ids,"\31")
+end
+
+-- Sequence is authored by the server after validating both sides of a mutation.
+-- It also fences ABA scopes (remove then add) and same-scope node removals.
+function Protocol.transitionAccepts(meta, scope, revision)
+	if meta.topologySequence~=nil then
+		return type(scope)=="string" and type(meta.catalogScope)=="string"
+			and Protocol.integer(meta.topologySequence,1,9007199254740991)
+			and Protocol.integer(meta.topologyBaseSequence,0,meta.topologySequence-1)
+			and (revision or 0)>=meta.topologyBaseSequence and (revision or 0)<meta.topologySequence
+	end
+	if (revision or 0)~=0 then return false end
+	return Protocol.scopeContains(meta.catalogScope,meta.previousCatalogScope)
+		and Protocol.scopeContains(scope,meta.previousCatalogScope)
+		and scope~=meta.catalogScope and Protocol.scopeContains(meta.catalogScope,scope)
+end
+
 function Protocol.sameBlock(a, b)
 	return a and b and a.nodeId == b.nodeId and a.zoneId == b.zoneId
 		and a.revision == b.revision and a.schema == b.schema and a.signature == b.signature

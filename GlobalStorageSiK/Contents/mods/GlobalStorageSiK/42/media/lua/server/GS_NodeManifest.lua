@@ -117,7 +117,7 @@ function Manifest.capture(player, meta, knownToken)
 	end
 	clock=clock+1;previous.usedAt=clock
 	local result={manifestSchema=Protocol.SCHEMA,replicaEpoch=meta.replicaEpoch,
-		manifestToken=previous.token,networkId=meta.networkId,catalogScope=meta.catalogScope,
+		manifestToken=previous.token,networkId=meta.networkId,catalogScope=meta.catalogScope,topologySequence=meta.topologySequence,
 		topologyRevision=network.topologyRevision,routingRevision=network.routingRevision or 0,
 		classificationEpoch=context.classificationStamp(),contentWatermark=network.contentWatermark or 0,
 		inventoryRevision=context.inventoryRevision(meta.networkId),catalogManifest=true}
@@ -146,7 +146,7 @@ function Manifest.block(player, meta, nodeId, token)
 	-- Published snapshots are replaced, never mutated. The transport holds this
 	-- one reference until ACK; newer commits cannot alter the encoded block.
 	return {catalogNode=true,manifestSchema=Protocol.SCHEMA,replicaEpoch=meta.replicaEpoch,
-		manifestToken=token,networkId=meta.networkId,catalogScope=meta.catalogScope,
+		manifestToken=token,networkId=meta.networkId,catalogScope=meta.catalogScope,topologySequence=meta.topologySequence,
 		inventoryRevision=state.revision,nodeRecord=record,nodeSnapshot=node.itemSnapshot}
 end
 

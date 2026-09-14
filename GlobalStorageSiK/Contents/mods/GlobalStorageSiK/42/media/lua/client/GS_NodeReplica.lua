@@ -44,17 +44,30 @@ function Replica.new(options)
 		end
 		for i=1,#retired do remove(retired[i],"scope_or_epoch_changed") end
 		local entry=entries[key]
-		if entry then touch(entry) end
+		if entry then
+			touch(entry)
+		end
 		return entry,nil,key
 	end
 	function api.transition(meta)
 		local key=api.identity(meta)
-		if not key or not Protocol.scopeContains(meta.catalogScope,meta.previousCatalogScope) then return false,"manifest_identity" end
+		if not key then return false,"manifest_identity" end
+		if meta.topologySequence~=nil then
+			if not Protocol.transitionAccepts(meta,meta.previousCatalogScope,meta.topologyBaseSequence) then return false,"manifest_identity" end
+		elseif not Protocol.scopeContains(meta.catalogScope,meta.previousCatalogScope) then return false,"manifest_identity" end
+		local removedZones,removedNodes={},{}
+		for _,field in ipairs({"removedTopologyZones","removedTopologyNodes"}) do
+			local ids=meta[field] or {}
+			if type(ids)~="table" or #ids>Protocol.MAX_NODES then return false,"manifest_identity" end
+			for _,id in ipairs(ids) do
+				if not Protocol.id(id) then return false,"manifest_identity" end
+				if field=="removedTopologyZones" then removedZones[id]=true else removedNodes[id]=true end
+			end
+		end
 		local source
 		for cachedKey,entry in pairs(entries) do
 			if entry.playerNum==meta.playerNum and entry.networkId==meta.networkId and entry.epoch==meta.replicaEpoch
-				and Protocol.scopeContains(entry.scope,meta.previousCatalogScope)
-				and Protocol.scopeContains(meta.catalogScope,entry.scope) then source=cachedKey;break end
+				and Protocol.transitionAccepts(meta,entry.scope,entry.topologySequence) then source=cachedKey;break end
 		end
 		if source and source~=key then
 			local entry=entries[source]
@@ -63,6 +76,20 @@ function Replica.new(options)
 			entry.derivedKey=entry.derivedKey or source
 			entry.key,entry.scope=key,meta.catalogScope
 			entries[key]=entry;touch(entry)
+		end
+		local entry=source and entries[key]
+		if entry then
+			local records={}
+			for _,record in ipairs(entry.records) do
+				local id=record.nodeId
+				if removedZones[record.zoneId] or removedNodes[id] then
+					local block=entry.blocks[id]
+					local released=1024+(block and block.bytes or 0)
+					entry.bytes=entry.bytes-released;bytes=bytes-released
+					entry.blocks[id]=nil;entry.byId[id]=nil;entry.changedNodeIds[id]=true
+				else records[#records+1]=record end
+			end
+			entry.records=records;entry.token=nil;entry.topologySequence=meta.topologySequence
 		end
 		return true
 	end
@@ -73,13 +100,15 @@ function Replica.new(options)
 		end
 		local records,byId=Protocol.records(meta.nodeManifest)
 		if not records then return nil,"manifest_records" end
+		if entries[key] and (entries[key].topologySequence or 0)~=(meta.topologySequence or 0) then return nil,"manifest_identity" end
 		local old,reason=api.confirm(meta)
 		if reason then return nil,reason end
 		local entry={key=key,epoch=meta.replicaEpoch,playerNum=meta.playerNum,networkId=meta.networkId,
 			scope=meta.catalogScope,token=meta.manifestToken,records=records,byId=byId,blocks={},
-			changedNodeIds={},bytes=4096+#records*1024}
+			changedNodeIds={},bytes=4096+#records*1024,topologySequence=meta.topologySequence}
 		-- A draft never replaces the token or rows of the last accepted image.
 		if old then
+			entry.topologySequence=old.topologySequence
 			entry.derivedKey=old.derivedKey
 			for id in pairs(old.changedNodeIds or {}) do entry.changedNodeIds[id]=true end
 			entry.confirmed=old.confirmed
@@ -111,7 +140,8 @@ function Replica.new(options)
 	function api.block(meta, retainedBytes)
 		local key=api.identity(meta)
 		local entry=key and entries[key]
-		if not entry or entry.token~=meta.manifestToken then return false,"manifest_changed" end
+		if not entry or entry.token~=meta.manifestToken
+			or (entry.topologySequence or 0)~=(meta.topologySequence or 0) then return false,"manifest_changed" end
 		local record=Protocol.record(meta.nodeRecord)
 		if not record or not record.confirmed or not Protocol.sameBlock(record,entry.byId[record.nodeId])
 			or type(meta.nodeSnapshot)~="table" or getmetatable(meta.nodeSnapshot)~=nil then return false,"node_revision" end

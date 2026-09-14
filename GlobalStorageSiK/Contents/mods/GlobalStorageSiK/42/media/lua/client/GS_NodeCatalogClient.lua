@@ -33,7 +33,7 @@ local function shallow(value) local out={};for k,v in pairs(value or {}) do out[
 local function intent(state)
 	local ack=state.ack
 	return {networkId=ack.networkId,openSeq=ack.openSeq,playerNum=ack.playerNum,
-		catalogScope=ack.catalogScope,replicaEpoch=ack.replicaEpoch}
+		catalogScope=ack.catalogScope,replicaEpoch=ack.replicaEpoch,topologySequence=ack.topologySequence}
 end
 local function remainingBlocks(state)
 	local remaining=0
@@ -89,6 +89,7 @@ function Client.confirm(ack)
 	end
 	local entry,reason=cache.confirm(ack)
 	if reason then return false,reason end
+	if entry then entry.topologySequence=ack.topologySequence or 0 end
 	trace(entry and "clientCacheHit" or "clientCacheMiss",ack,entry and "reason=identity_confirmed" or "reason=no_confirmed_view")
 	local current=ack.topologyTransition and context.currentState(ack.playerNum)
 	slots[ack.playerNum]={ack=ack,entry=entry,previous=entry and entry.rows,previousMetadata=entry and entry.metadata,
@@ -150,9 +151,11 @@ function Client.consume(value,retainedBytes)
 	local state=slots[value.playerNum]
 	if not state or state.ack.openSeq~=value.openSeq or state.ack.networkId~=value.networkId
 		or state.ack.replicaEpoch~=value.replicaEpoch
-		or state.ack.catalogScope~=value.catalogScope then return false,"manifest_identity" end
+		or state.ack.catalogScope~=value.catalogScope
+		or (state.ack.topologySequence or 0)~=(value.topologySequence or 0) then return false,"manifest_identity" end
 	state.started=now()
 	if value.catalogManifest then
+		trace("manifest received",value,"notModified="..tostring(value.manifestNotModified==true))
 		state.completed=false
 		state.blockVersion=(state.blockVersion or 0)+1
 		state.roundStarted=now();state.buildMs=0;state.viewMs=0
@@ -181,6 +184,10 @@ function Client.consume(value,retainedBytes)
 		local reason
 		entry,reason=cache.manifest(value)
 		if not entry then return false,reason end
+		if context.topology then
+			local accepted,topologyReason=context.topology(value,value.terminalMetadata,false)
+			if accepted==false then return false,topologyReason end
+		end
 		for id in pairs(entry.changedNodeIds) do state.pendingNodeIds[id]=true end
 		state.entry=entry;state.manifest=value;state.metadata=value.terminalMetadata;state.notModified=nil
 		state.rows=nil;state.phase=nil;state.view=nil;state.buildRows=nil;state.request=nil

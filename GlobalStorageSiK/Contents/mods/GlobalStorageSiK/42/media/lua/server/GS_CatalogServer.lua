@@ -41,6 +41,8 @@ function Server.replicaReady(player,revision,scope)
     session.openUi=false
     session.confirmed={revision=revision,scope=scope}
     session.forceFull=nil;session.recoveryUsed=nil
+    session.topologyBaseScope=nil;session.topologyZones=nil;session.topologyBaseSequence=nil
+    session.removedTopologyZones=nil;session.removedTopologyNodes=nil
     return true
 end
 function Server.isOpening(player) return sessions[player] and sessions[player].openUi == true end
@@ -138,15 +140,16 @@ function Server.prepareZoneAddition(networkId)
     end
     return prepared
 end
-function Server.completeZoneAddition(prepared,zoneId)
+local function completeTopology(prepared,zoneId,zoneMetadata,removedNodes,removeZone)
     local Protocol=GlobalStorageSiK.ManifestProtocol
     for i=1,#prepared do
         local ticket=prepared[i]
         local player,session=ticket.player,ticket.session
         if sessions[player]==session and session.catalogScope==ticket.scope then
             local scope=context.scope(player,session.networkId)
-            if scope~=ticket.scope then
-                local expected=Protocol.scopeWithZone(ticket.scope,zoneId)
+            if scope~=ticket.scope or removedNodes then
+                local expected=removedNodes and (removeZone and Protocol.scopeWithoutZone(ticket.scope,zoneId) or ticket.scope)
+                    or Protocol.scopeWithZone(ticket.scope,zoneId)
                 local confirmation={}
                 for _,key in ipairs({"playerNum","openSeq","networkId","replicaEpoch","manifestSchema",
                     "accessMode","terminalAnchor","confirmedProximityRange","confirmedWirelessRange",
@@ -159,16 +162,60 @@ function Server.completeZoneAddition(prepared,zoneId)
                     release(player,"topology_addition")
                     session.catalogScope=scope
                     session.topologyBaseScope=session.topologyBaseScope or ticket.scope
+                    session.topologyBaseSequence=session.topologyBaseSequence or session.topologySequence or 0
+                    session.topologySequence=(session.topologySequence or 0)+1
                     session.confirmed=nil
                     if context.opened then context.opened(player,session) end
                     confirmation.topologyTransition=true
                     confirmation.previousCatalogScope=session.topologyBaseScope
+                    confirmation.topologySequence=session.topologySequence
+                    confirmation.topologyBaseSequence=session.topologyBaseSequence
+                    confirmation.catalogBatchFloor=serial
+                    if removedNodes then
+                        session.removedTopologyNodes=session.removedTopologyNodes or {}
+                        -- A zone tombstone already covers all of its nodes. Keep
+                        -- the access ACK independent of the number of containers.
+                        if not removeZone then
+                            for _,id in ipairs(removedNodes) do session.removedTopologyNodes[id]=true end
+                        end
+                        if removeZone then
+                            session.removedTopologyZones=session.removedTopologyZones or {}
+                            session.removedTopologyZones[zoneId]=true
+                            if session.topologyZones then session.topologyZones[zoneId]=nil end
+                        end
+                    end
+                    if zoneMetadata then
+                        session.topologyZones=session.topologyZones or {}
+                        session.topologyZones[zoneId]=zoneMetadata
+                        if session.removedTopologyZones then session.removedTopologyZones[zoneId]=nil end
+                    end
+                    if session.topologyZones then
+                        confirmation.topologyZones={}
+                        for _,zone in pairs(session.topologyZones) do
+                            confirmation.topologyZones[#confirmation.topologyZones+1]=zone
+                        end
+                    end
+                    for _,field in ipairs({"removedTopologyZones","removedTopologyNodes"}) do
+                        if session[field] then
+                            confirmation[field]={}
+                            for id in pairs(session[field]) do confirmation[field][#confirmation[field]+1]=id end
+                        end
+                    end
                     if not send(player,"terminalOpenAck",confirmation) then failure(player,"catalog_send") end
                     log("topology_transition","network="..tostring(session.networkId).." zone="..zoneId)
                 end
             end
         end
     end
+end
+function Server.completeZoneAddition(prepared,zoneId,zoneMetadata)
+    completeTopology(prepared,zoneId,zoneMetadata)
+end
+function Server.prepareTopologyRemoval(networkId)
+    return Server.prepareZoneAddition(networkId)
+end
+function Server.completeTopologyRemoval(prepared,zoneId,nodeIds,removeZone)
+    completeTopology(prepared,zoneId,nil,nodeIds,removeZone)
 end
 local function prune()
     local live, retired = {}, {}

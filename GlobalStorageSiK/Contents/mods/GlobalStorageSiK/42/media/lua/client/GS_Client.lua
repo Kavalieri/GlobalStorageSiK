@@ -204,6 +204,78 @@ local function copyArray(source)
 	return result
 end
 
+local function paintTopology(ui,previous,state)
+	local presenter=GlobalStorageSiK.TerminalNetwork
+	if not ui or not presenter or not presenter.refreshTopologyRows then return true end
+	local accepted,reason,undo,guard=presenter.refreshTopologyRows(ui,previous,state)
+	if accepted==false then return false,reason end
+	if undo then GlobalStorageSiK.Client.registerCatalogUndo(undo,ui,"topology",guard) end
+	return true
+end
+
+local function applyTopologyMetadata(payload,metadata,additive)
+	local client,n=GlobalStorageSiK.Client,payload.playerNum
+	local previous=client.terminalStateByPlayer[n]
+	-- Bootstrap has no confirmed view to patch. Its ordinary apply installs it.
+	if not previous then return true end
+	if client.terminalOpenSeqByPlayer[n]~=payload.openSeq or previous.networkId~=payload.networkId
+		or previous.replicaEpoch~=payload.replicaEpoch or previous.catalogScope~=payload.catalogScope then
+		return false,"manifest_identity"
+	end
+	if type(metadata)~="table" or type(metadata.zones)~="table"
+		or (not additive and type(metadata.nodes)~="table") then return false,"manifest_metadata" end
+	local protocol=GlobalStorageSiK.ManifestProtocol
+	for _,field in ipairs({"zones","nodes"}) do
+		local entries=metadata[field] or {}
+		if #entries>protocol.MAX_NODES then return false,"manifest_metadata" end
+		local seen={}
+		for _,entry in ipairs(entries) do
+			if type(entry)~="table" or not protocol.id(entry.id) or seen[entry.id] then return false,"manifest_metadata" end
+			seen[entry.id]=true
+		end
+	end
+	local state={};for key,value in pairs(previous) do state[key]=value end
+	if additive then
+		local removedZones,removedNodes={},{}
+		for _,field in ipairs({"removedTopologyZones","removedTopologyNodes"}) do
+			local ids=payload[field] or {}
+			if type(ids)~="table" or #ids>protocol.MAX_NODES then return false,"manifest_metadata" end
+			for _,id in ipairs(ids) do
+				if not protocol.id(id) then return false,"manifest_metadata" end
+				if field=="removedTopologyZones" then removedZones[id]=true else removedNodes[id]=true end
+			end
+		end
+		state.zones,state.nodes={},{}
+		for _,zone in ipairs(previous.zones or {}) do
+			if not removedZones[zone.id] then state.zones[#state.zones+1]=zone end
+		end
+		for _,node in ipairs(previous.nodes or {}) do
+			if not removedZones[node.zoneId] and not removedNodes[node.id] then state.nodes[#state.nodes+1]=node end
+		end
+		for _,zone in ipairs(metadata.zones) do
+			local found=false
+			for i,old in ipairs(state.zones) do if old.id==zone.id then state.zones[i]=zone;found=true;break end end
+			if not found then state.zones[#state.zones+1]=zone end
+		end
+	else state.zones,state.nodes=metadata.zones,metadata.nodes end
+	local ui=terminalUiForPlayer(n)
+	local accepted,reason=paintTopology(ui,previous,state)
+	if accepted==false then return false,reason end
+	if client.terminalOpenSeqByPlayer[n]~=payload.openSeq or client.terminalStateByPlayer[n]~=previous then
+		return false,"catalog_stale"
+	end
+	client.terminalStateByPlayer[n]=state
+	if n==0 then client.cachedTerminalState=state end
+	if ui and ui.terminalState==previous then ui.terminalState=state end
+	local key=inventoryCatalogKey(n,payload.networkId)
+	local entry=client.inventoryCatalogByPlayerNetwork[key]
+	if entry then
+		local updated={};for field,value in pairs(entry) do updated[field]=value end
+		updated.state=state;client.inventoryCatalogByPlayerNetwork[key]=updated
+	end
+	return true
+end
+
 local function applyCatalogDelta(payload,replicaRows)
 	if type(payload) ~= "table" or (payload.protocol ~= 1 and payload.protocol ~= 2)
 		or type(payload.networkId) ~= "string" or type(payload.catalogScope) ~= "string"
@@ -298,6 +370,7 @@ local function applyCatalogDelta(payload,replicaRows)
 	state.viewSequence=payload.viewSequence
 	state.categories=payload.categories or state.categories
 	if replicaRows then
+		preserveLiveScan(payload,playerNum)
 		local fields=(require "GS_ManifestProtocol").METADATA_FIELDS
 		for i=1,#fields do state[fields[i]]=payload[fields[i]] end
 	end
@@ -305,6 +378,7 @@ local function applyCatalogDelta(payload,replicaRows)
 	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = cache
 	GlobalStorageSiK.Client.terminalStateByPlayer[playerNum] = state
 	local ui = terminalUiForPlayer(playerNum)
+	local previousUiState=ui and ui.terminalState
 	if ui and ui.terminalState and ui.terminalState.networkId == payload.networkId then ui.terminalState=state end
 	if playerNum == 0 then GlobalStorageSiK.Client.cachedTerminalState = state end
 	if GlobalStorageSiK.RemoteItemDetail and GlobalStorageSiK.RemoteItemDetail.invalidateNetwork then
@@ -314,6 +388,9 @@ local function applyCatalogDelta(payload,replicaRows)
 		catalogConsumer("TerminalItems.onInventoryRevisionChanged", false, GlobalStorageSiK.TerminalItems.onInventoryRevisionChanged, payload.networkId, playerNum)
 	end
 	local matchingUi = ui and ui.terminalState and ui.terminalState.networkId == payload.networkId
+	if replicaRows and matchingUi then
+		catalogConsumer("TerminalNetwork.refreshTopologyRows",false,paintTopology,ui,previousUiState or {},state)
+	end
 	if matchingUi and GlobalStorageSiK.TerminalSync and GlobalStorageSiK.TerminalSync.applyCatalogRows then
 		catalogConsumer("TerminalSync.applyCatalogRows", false, GlobalStorageSiK.TerminalSync.applyCatalogRows,
 			payload.networkId, nextRows, payload.inventoryRevision, playerNum, true,
@@ -1506,14 +1583,22 @@ GlobalStorageSiK.CatalogClient.configure({
 			and catalogConsumer("TerminalAccessGuard.acceptResponse", true,
 				GlobalStorageSiK.TerminalAccessGuard.acceptResponse, payload, true) == false then return false end
 		local accepted = catalogConsumer("TerminalUI.confirmCatalogAccess", false, GlobalStorageSiK.TerminalUI.confirmCatalogAccess, payload)
+		if accepted ~= false and not payload.topologyTransition then
+			local state=GlobalStorageSiK.Client.terminalStateByPlayer[payload.playerNum]
+			if state and state.networkId==payload.networkId and state.catalogScope==payload.catalogScope then
+				state.topologySequence=payload.topologySequence or 0
+			end
+			local entry=GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[inventoryCatalogKey(payload.playerNum,payload.networkId)]
+			if entry then entry.topologySequence=payload.topologySequence or 0 end
+		end
 		if accepted ~= false and payload.topologyTransition then
 			-- Advance only identity after the authenticated additive ACK. Keep the
 			-- complete rows and view sequence so the new node can patch that view.
 			local function advance(state)
 				local protocol = GlobalStorageSiK.ManifestProtocol
-				if state and protocol.scopeContains(state.catalogScope, payload.previousCatalogScope)
-					and protocol.scopeContains(payload.catalogScope, state.catalogScope) then
+				if state and protocol.transitionAccepts(payload,state.catalogScope,state.topologySequence) then
 					state.catalogScope = payload.catalogScope
+					state.topologySequence = payload.topologySequence
 				end
 			end
 			local n = payload.playerNum
@@ -1523,6 +1608,16 @@ GlobalStorageSiK.CatalogClient.configure({
 			if ui and ui.terminalState and ui.terminalState.networkId == payload.networkId then advance(ui.terminalState) end
 			local cache = (GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork or {})[inventoryCatalogKey(n, payload.networkId)]
 			advance(cache)
+			if payload.topologyZones or payload.removedTopologyZones or payload.removedTopologyNodes then
+				local protocol=GlobalStorageSiK.ManifestProtocol
+				local zones=payload.topologyZones or {}
+				if type(zones)~="table" then return false,"manifest_identity" end
+				for _,zone in ipairs(zones) do
+					if type(zone)~="table" or not protocol.id(zone.id)
+						or not protocol.scopeContains(payload.catalogScope,zone.id) then return false,"manifest_identity" end
+				end
+				return applyTopologyMetadata(payload,{zones=zones},true)
+			end
 		end
 		return accepted
 	end,
@@ -1606,6 +1701,7 @@ GlobalStorageSiK.CatalogClient.configure({
 })
 GlobalStorageSiK.NodeCatalogClient.configure({
 	send=GlobalStorageSiK.NetClient.sendCommand,
+	topology=applyTopologyMetadata,
 	current=function(n,seq) return GlobalStorageSiK.Client.terminalOpenSeqByPlayer[n]==seq end,
 	pending=function(n) return GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n]==true end,
 	currentState=function(n) return GlobalStorageSiK.Client.terminalStateByPlayer[n] end,
