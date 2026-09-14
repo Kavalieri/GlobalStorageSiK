@@ -67,6 +67,19 @@ local function ensurePump()
 	Events.OnTick.Add(Client.onTick)
 end
 
+local function sameRows(a,b)
+	if #a~=#b then return false end
+	for i=1,#a do
+		for _,key in ipairs(fields) do if a[i][key]~=b[i][key] then return false end end
+		for _,key in ipairs({"itemIds","fullTypes"}) do
+			local left,right=a[i][key] or {},b[i][key] or {}
+			if #left~=#right then return false end
+			for j=1,#left do if left[j]~=right[j] then return false end end
+		end
+	end
+	return true
+end
+
 local function afterDispatch(entry, worker)
 	local state = queues[entry.playerNum]
 	if not state or state.entries[1] ~= entry or entry.worker ~= worker or worker.isPending() then return end
@@ -136,6 +149,40 @@ local function enqueue(rows, batch, amount, targetKey, searchQuery, options)
 		or (client and client.activeNetworkIdByPlayer and client.activeNetworkIdByPlayer[playerNum])
 		or (playerNum == 0 and client and client.activeNetworkId)
 	if type(networkId) ~= "string" or networkId == "" then return reject(player, options, "network_unavailable") end
+	local image=ui and ui.terminalState or client and client.terminalStateByPlayer and client.terminalStateByPlayer[playerNum]
+	if image and image.networkId==networkId and image.replicaPartial==true then
+		return reject(player,options,"snapshot_pending")
+	end
+	if image and image.networkId==networkId then
+		local revision=tonumber(image._gsAppliedCatalogRevision or image.inventoryRevision)
+		local presentation=ui and ui.itemsListPanel and ui.itemsListPanel._gsKeyedPresentation
+		for i=1,#rows do
+			local row=rows[i]
+			if row._gsStale or row._gsRowKind=="child" and tonumber(row.selectionRevision)~=revision then
+				return reject(player,options,"selection_stale")
+			end
+			if presentation and presentation.incremental and row._gsRowKind=="parent" then
+				if presentation.rootsByKey[row.rowKey]~=row then return reject(player,options,"selection_stale") end
+				-- This parent survived the accepted delta unchanged. Capture the
+				-- current revision at the gesture, without retagging every row.
+				captured[i].selectionRevision=revision
+			end
+		end
+	end
+	-- Repeated clicks while this exact visible intent is pending join its result.
+	-- Distinct quantity/destination/selection/loan remain ordered operations.
+	for _,pending in ipairs(state and state.entries or {}) do
+		if not pending.completed and pending.player==player and pending.networkId==networkId and pending.amount==numericAmount
+			and pending.targetKey==targetKey and pending.batch==batch and pending.readLoanId==options.readLoanId
+			and pending.returnItemIds==(options.returnItemIds==true) and sameRows(pending.rows,captured) then
+			if options.onComplete then
+				for _,fn in ipairs(pending.callbacks) do if fn==options.onComplete then return true end end
+				if #pending.callbacks>=16 then return reject(player,options,"callback_limit") end
+				pending.callbacks[#pending.callbacks+1]=options.onComplete
+			end
+			return true
+		end
+	end
 	serial = serial + 1
 	local entry = {
 		playerNum = playerNum, player = player, networkId = networkId, rows = captured,
@@ -145,6 +192,15 @@ local function enqueue(rows, batch, amount, targetKey, searchQuery, options)
 		operationId = "withdraw:" .. tostring(playerNum) .. ":"
 			.. tostring(getTimestampMs and getTimestampMs() or 0) .. ":" .. tostring(serial),
 	}
+	entry.callbacks=options.onComplete and {options.onComplete} or {}
+	entry.onComplete=function(ok,result)
+		entry.completed=true
+		local callbacks=entry.callbacks; entry.callbacks={}
+		for _,fn in ipairs(callbacks) do
+			local success,err=pcall(fn,ok,result)
+			if not success then GlobalStorageSiK.Log.error("WithdrawClient","completion callback failed",tostring(err)) end
+		end
+	end
 	if not state then state = { entries = {}, rows = 0 }; queues[playerNum] = state end
 	state.entries[#state.entries + 1] = entry
 	state.rows = state.rows + #captured

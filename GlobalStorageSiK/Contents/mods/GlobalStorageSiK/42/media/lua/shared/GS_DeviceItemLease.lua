@@ -45,8 +45,8 @@ local function sourceFor(record, nodeId)
 	end
 end
 local function changed(record, source)
-	GS.Index.syncNodeSnapshot(source.entry, source.container)
-	GS.Index.bumpInventoryRevision(record.networkId, true)
+	local ok, updated=pcall(GS.Index.syncNodeSnapshot,source.entry,source.container)
+	GS.NodeSnapshots.notifyMutation(nil,record.networkId,ok and updated==true,source.entry.id)
 end
 
 function Service.get(addonId, networkId, anchor)

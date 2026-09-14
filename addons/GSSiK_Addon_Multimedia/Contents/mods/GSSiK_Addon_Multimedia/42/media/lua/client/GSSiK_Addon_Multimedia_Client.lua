@@ -13,7 +13,7 @@ Client.text = T
 local function fail(session, reason)
 	Log.debug("Playback", "client command=" .. tostring(session.command)
 		.. " ok=false reason=" .. tostring(reason or "unknown"))
-	session.pending, session.loading, session.upload = nil, false, nil
+	session.pending, session.loading, session.upload, session.staging = nil, false, nil, nil
 	session.status = { ok = false, reason = reason or "unknown" }
 	session.generation = session.generation + 1
 end
@@ -59,7 +59,7 @@ function Client.release(session)
 	if not session or Client.sessions[session.player:getPlayerNum()] ~= session then return end
 	-- Closing the view abandons only its upload/cache. The terminal owns any
 	-- committed playlist; uncommitted drafts expire without touching playback.
-	session.upload, session.loading, session.pending = nil, false, nil
+	session.upload, session.loading, session.pending, session.staging = nil, false, nil, nil
 	Client.sessions[session.player:getPlayerNum()] = nil
 	session.rows, session.filtered, session.metadata, session.selected = {}, {}, {}, {}
 	session.mediaCategories = {}
@@ -181,9 +181,12 @@ function Client.catalog(session, preserveSelection)
 	session.selectionRestore = preserveSelection and session.selected or nil
 	session.catalogDirty = false
 	session.loading, session.complete, session.page = true, false, nil
-	session.rows, session.filtered, session.byId, session.selected, session.metadata = {}, {}, {}, {}, {}
-	session.mediaCategories = {}
+	-- Keep the last complete image until every replacement page is confirmed.
+	session.staging = { rows={}, byId={}, metadata={}, mediaCategories={}, player=session.player }
+	session.catalogRetries = session.retryCatalog and (session.catalogRetries or 0) or 0
+	session.retryCatalog = nil
 	session.catalogRevision = nil
+	session.catalogScope = nil
 	request(session, "catalog", { node = 1, offset = 0 })
 	return true
 end
@@ -216,8 +219,10 @@ function Client.update(session)
 		return
 	end
 	if now < (session.nextRequestAt or 0) then return end
+	if session.retryCatalog then Client.catalog(session, true); return end
 	if session.loading and session.page and session.page.hasMore then
-		request(session, "catalog", { node = session.page.node, offset = session.page.offset })
+		request(session, "catalog", { node = session.page.node, row = session.page.row, offset = session.page.offset,
+			inventoryRevision = session.catalogRevision, scopeToken = session.catalogScope })
 	elseif session.upload and session.upload.token then
 		local upload = session.upload
 		if upload.offset <= #upload.items then
@@ -258,29 +263,43 @@ local function received(player, result, catalog)
 	end
 	if catalog then
 		if result.requestId ~= session.requestId or not session.loading then return end
-		if not result.ok or type(result.page) ~= "table" then fail(session, result.reason or "catalog_failed"); return end
+		if not result.ok or type(result.page) ~= "table" then
+			local reason=result.reason or "catalog_failed"
+			fail(session,reason)
+			if (reason=="catalog_pending" or reason=="catalog_changed") and (session.catalogRetries or 0)<2 then
+				session.catalogRetries=(session.catalogRetries or 0)+1; session.retryCatalog=true
+				session.nextRequestAt=getTimestampMs()+session.catalogRetries*1000
+			end
+			return
+		end
 		local page = result.page
-		if session.catalogRevision ~= nil and page.inventoryRevision ~= session.catalogRevision then
+		if (session.catalogRevision ~= nil and page.inventoryRevision ~= session.catalogRevision)
+			or (session.catalogScope ~= nil and page.scopeToken ~= session.catalogScope) then
 			fail(session, "catalog_changed"); return
 		end
-		if session.page and page.hasMore and page.node == session.page.node and page.offset == session.page.offset then
+		if session.page and page.hasMore and page.node == session.page.node and page.row == session.page.row and page.offset == session.page.offset then
 			fail(session, "catalog_stalled"); return
 		end
 		session.catalogRevision, session.page = page.inventoryRevision, page
+		session.catalogScope = page.scopeToken
+		local staging=session.staging
+		if not staging then return end
 		for i = 1, #(page.rows or {}) do
 			local row = page.rows[i]
 			local key = tostring(row.itemId)
-			if not session.byId[key] then
-				if #session.rows >= LIMIT then fail(session, "catalog_limit"); return end
-				session.byId[key] = row; session.rows[#session.rows + 1] = row
-				Client.describe(session, row)
+			if not staging.byId[key] then
+				if #staging.rows >= LIMIT then fail(session, "catalog_limit"); return end
+				staging.byId[key] = row; staging.rows[#staging.rows + 1] = row
+				Client.describe(staging, row)
 			end
 		end
 		session.complete, session.loading = page.hasMore ~= true, page.hasMore == true
-		if session.complete and session.selectionRestore then
-			session.selected, session.selectionRestore = session.selectionRestore, nil
+		if session.complete then
+			session.rows,session.byId,session.metadata=staging.rows,staging.byId,staging.metadata
+			session.mediaCategories,session.staging=staging.mediaCategories,nil
+			if session.selectionRestore then session.selected,session.selectionRestore=session.selectionRestore,nil end
+			Client.filter(session)
 		end
-		Client.filter(session)
 	end
 	if result.requestId == session.requestId then
 		session.pending = nil

@@ -5,6 +5,7 @@
 	Descripción: Actualiza nodos de zona bajo demanda, sin polling continuo.
 ]]
 
+require "GS_NodeSnapshots"
 require "GS_Zones"
 require "GS_ZoneScanner"
 require "GS_Sandbox"
@@ -95,6 +96,7 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 				entry.discoveredAtMs = scanMs
 				entry.lastSeenMs = scanMs
 				registry.nodes[id] = entry
+				if entry.itemSnapshot then GlobalStorageSiK.NodeSnapshots.commit(entry, entry.itemSnapshot, "bootstrap") end
 				summary.added = summary.added + 1
 			end
 		else
@@ -134,7 +136,7 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 					existing.displayName = entry.displayName
 				end
 				if entry.itemSnapshot then
-					existing.itemSnapshot = entry.itemSnapshot
+					GlobalStorageSiK.NodeSnapshots.commit(existing, entry.itemSnapshot, "zone_scan")
 				end
 				if entry.storedCapacity then
 					existing.storedCapacity = entry.storedCapacity

@@ -219,19 +219,17 @@ end
 function GS_ZoneEditorUI:applyAll()
 	if not self.zone or not self.terminal then return end
 	local name = self.nameEntry and self.nameEntry:getText() or ""
-	if name ~= "" and name ~= self.zone.name and self.terminal.onRenameZone then
-		self.terminal:onRenameZone(self.zone.id, name)
-		self.zone.name = name
-		if self.setHeader then
-			self:setHeader({ titleParts = { prefix = T("IGUI_GS_ZoneEditorTitle"), name = name,
-				separator = " " .. T("IGUI_GS_PunctuationMiddleDot") .. " " } })
-		end
+	local priority = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
+	local args = { zoneId = self.zone.id, expectedRoutingRevision = self.terminal.terminalState.routingRevision }
+	if name ~= "" and name ~= self.zone.name then args.name = name end
+	if priority then
+		priority = math.max(1, math.min(100, math.floor(priority + 0.5)))
+		if priority ~= (self.zone.priority or 50) then args.priority = priority end
 	end
-	local n = tonumber(self.priorityEntry and self.priorityEntry:getText() or "")
-	if n and math.floor(n + 0.5) ~= (self.zone.priority or 50) then
-		self:applyPriority(n)
-	end
+	if args.name == nil and args.priority == nil then return end
+	GlobalStorageSiK.NetClient.sendCommand("updateZoneConfig", args, self.playerNum)
 end
+
 
 --- Reconstruye el formulario dentro de editorScroll (llamar solo desde
 --- rebuildForm/setZone) - igual que GS_TerminalUI_NodeEditor.lua:ensureForm.

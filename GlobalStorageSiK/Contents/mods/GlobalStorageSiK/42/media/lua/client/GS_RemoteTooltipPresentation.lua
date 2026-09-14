@@ -37,9 +37,13 @@ function Presentation.blocks(context)
 	local row = context.row or {}
 	local exact = row._gsRowKind == "child"
 	local detail = type(context.detail) == "table" and context.detail or nil
-	local physical = exact or row.representativeItemId ~= nil
+	local physical = exact
 	local source = physical and detail and detail.ok == true and detail or row
 	local title = source.displayName or row.displayName or row.fullType or ""
+	if not physical then
+		title=GlobalStorageSiK.I18n.itemDisplayName(row.fullType,row.displayName,row.worldSprite)
+		title=GlobalStorageSiK.I18n.foodDisplayName(row,title)
+	end
 	local lines = { tostring(title) }
 	if physical and not (detail and detail.ok == true) then
 		lines[#lines + 1] = text(context.loading and "IGUI_GS_RemoteDetailLoading" or "IGUI_GS_RemoteDetailUnavailable")
@@ -48,7 +52,7 @@ function Presentation.blocks(context)
 	local groupCount = math.max(0, finite(row.count) or 0)
 	if not exact and groupCount > 1 then
 		lines[#lines + 1] = text("IGUI_GS_RemoteGroupTotal", groupCount)
-		lines[#lines + 1] = text("IGUI_GS_RemoteGroupRepresentative")
+		lines[#lines + 1] = text("IGUI_GS_RemoteGroupExpand")
 	end
 	local weight = finite(physical and source.weight or row.totalWeight)
 	if weight then lines[#lines + 1] = getText("Tooltip_item_Weight") .. ": " .. numberText(weight) end
@@ -56,7 +60,12 @@ function Presentation.blocks(context)
 		lines[#lines + 1] = getText("Tooltip_weapon_Condition") .. ": " .. tostring(source.condition) .. " / " .. tostring(source.conditionMax)
 	end
 	local food = GlobalStorageSiK.I18n.foodStateLabel(source)
-	if food ~= "" then lines[#lines + 1] = food end
+	if not physical and row.foodMixed then
+		for _,key in ipairs(GlobalStorageSiK.FoodPresentation.order) do
+			local count=row.foodSummaryCounts and row.foodSummaryCounts[key]
+			if count and count>0 then lines[#lines+1]=tostring(count).." · "..getText("Tooltip_food_"..key) end
+		end
+	elseif food ~= "" then lines[#lines + 1] = food end
 	local quantity = Presentation.fluidQuantity(source, not physical)
 	local fluid = type(source.fluidState) == "table" and source.fluidState or nil
 	if physical and fluid then

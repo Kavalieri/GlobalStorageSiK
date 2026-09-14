@@ -147,20 +147,10 @@ function RemoteDetail.contextForProbe(probe)
 end
 
 local function physicalRow(row)
-	if not row then return nil end
+	if not row or row._gsRowKind ~= "child" then return nil end
 	if validItemId(row.itemId) and type(row.nodeId) == "string"
 		and type(row.fullType) == "string" and type(row.selectionRevision) == "number" then
 		return row
-	end
-	if validItemId(row.representativeItemId) and type(row.representativeNodeId) == "string"
-		and type(row.representativeFullType) == "string"
-		and type(row.representativeRevision) == "number" then
-		return {
-			itemId = row.representativeItemId,
-			nodeId = row.representativeNodeId,
-			fullType = row.representativeFullType,
-			selectionRevision = row.representativeRevision,
-		}
 	end
 	return nil
 end

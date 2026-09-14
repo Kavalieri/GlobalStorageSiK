@@ -117,7 +117,7 @@ local function onPlayerDeath(player)
 		GlobalStorageSiK.Client.cachedTerminalState = nil
 		if GlobalStorageSiK.Client.clearTransientCaches then
 			local playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
-			GlobalStorageSiK.Client.clearTransientCaches(playerNum)
+			GlobalStorageSiK.Client.clearTransientCaches(playerNum, true)
 		end
 	end
 	trace("clear_highlights")

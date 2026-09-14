@@ -146,8 +146,8 @@ function GlobalStorageSiK.NetworkMigrate.run(registry)
 	registry[MIGRATE_FLAG] = true
 	registry._migrating = nil
 
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	return changed
 end
@@ -189,8 +189,8 @@ function GlobalStorageSiK.NetworkMigrate.runV1070(registry)
 		end
 	end
 	registry[MIGRATE_V1070] = true
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	if changed and GlobalStorageSiK.Log and GlobalStorageSiK.Log.info then
 		GlobalStorageSiK.Log.info("NetworkMigrate", "v1070 multi-terminal records", "ok")
@@ -236,8 +236,8 @@ function GlobalStorageSiK.NetworkMigrate.runV1080(registry)
 		end
 	end
 	registry[MIGRATE_V1080] = true
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	if changed and GlobalStorageSiK.Log and GlobalStorageSiK.Log.info then
 		GlobalStorageSiK.Log.info("NetworkMigrate", "v1080 reader addon migration", "ok")

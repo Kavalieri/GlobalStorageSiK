@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "Reenviar logs del dedicado a administradores",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients_tooltip": "Desactivado por defecto. Envía el diagnóstico activado en lotes acotados solo a administradores suscritos. El servidor comprueba el acceso al suscribir y en cada envío; perder acceso o desconectarse elimina la suscripción.",
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork": "   >> Trazas de red",
-	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requiere Modo depuración. Resume comandos cliente/servidor, secuencia y estado de sincronización. Los payloads completos permanecen en el bloque >>> DETALLE independiente.",
+	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requiere Modo depuración. Registra resúmenes acotados de envío, recepción, respuesta y causa de rechazo. No vuelca catálogos ni payloads completos; no requiere DETALLE.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Acceso a terminal",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Requiere Modo depuración activado. Cada comprobación de proximidad/acceso a un terminal (manifiesto, registro, evaluación de rango). Se dispara repetidamente mientras se intenta abrir un terminal - muy detallado.",
 	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identidad y permisos",

@@ -10,12 +10,20 @@ local PLAYER_BYTES, GLOBAL_BYTES = 32*1024*1024, 64*1024*1024
 local function now() return getTimestampMs and getTimestampMs() or 0 end
 function Client.configure(value) context = value end
 function Client.clear(playerNum, sequence)
-	if playerNum == nil then slots = {}
+	if playerNum == nil then
+		if GlobalStorageSiK.NodeCatalogClient then for n=0,3 do GlobalStorageSiK.NodeCatalogClient.clear(n,false) end end
+		slots = {}
 	elseif sequence == nil or (slots[playerNum] and slots[playerNum].sequence == sequence) then
+		if GlobalStorageSiK.NodeCatalogClient then GlobalStorageSiK.NodeCatalogClient.clear(playerNum,false) end
 		slots[playerNum] = nil
 	end
 end
+function Client.replicaApplied(playerNum,revision)
+	local slot=slots[playerNum]
+	if slot then slot.completedRevision=revision;slot.applied=true;slot.recoveryUsed=nil;slot.started=now() end
+end
 function Client.start(playerNum, sequence)
+	if GlobalStorageSiK.NodeCatalogClient then GlobalStorageSiK.NodeCatalogClient.clear(playerNum,false) end
 	slots[playerNum] = {sequence=sequence, latest=0, started=now()}
 end
 local function slotFor(payload)
@@ -30,6 +38,12 @@ local function fail(playerNum, reason, serverError)
 	if not slot then return end
 	local recoverable = slot.applied == true and reason ~= "catalog_access_changed"
 	local rejected = slot.batch and slot.batch.meta
+	if slot.confirmed and slot.confirmed.replicaEpoch and reason~="catalog_access_changed"
+		and reason~="catalog_budget" and context.nodeRecover then
+		slot.batch=nil
+		if rejected and not serverError and context.reject then context.reject(rejected,reason) end
+		if context.nodeRecover(playerNum) then slot.started=now();return end
+	end
 	if recoverable then slot.batch = nil else slots[playerNum] = nil end
 	if rejected and not serverError and reason ~= "catalog_access_changed" and context.reject then context.reject(rejected, reason) end
 	if recoverable and slots[playerNum] ~= slot then return end
@@ -44,6 +58,7 @@ local function fail(playerNum, reason, serverError)
 		if recover then recover(rejected or slot.confirmed, reason) end
 	end
 end
+function Client.abortReplica(playerNum,reason) fail(playerNum,reason or "catalog_apply") end
 local function consumerFailure(playerNum, slot, meta, ok, result, reason, stage)
 	if slots[playerNum] ~= slot then return end
 	local cause = ok and reason or result
@@ -67,7 +82,8 @@ end
 local function applyReady(playerNum, slot)
 	local batch = slot.batch
 	if not slot.confirmed or not batch or batch.count ~= batch.meta.total then return end
-	if slot.confirmed.networkId ~= batch.meta.networkId then fail(playerNum, "catalog_schema"); return end
+	if slot.confirmed.networkId ~= batch.meta.networkId
+		or slot.confirmed.catalogScope ~= batch.meta.catalogScope then fail(playerNum, "catalog_schema"); return end
 	if batch.bytes ~= batch.meta.totalBytes or batch.tokens ~= batch.meta.tokenCount then
 		fail(playerNum, "catalog_incomplete"); return
 	end
@@ -86,7 +102,8 @@ local function applyReady(playerNum, slot)
 	if value.networkId ~= batch.meta.networkId or value.openSeq ~= batch.meta.openSeq
 		or value.playerNum ~= playerNum or value.inventoryRevision ~= batch.meta.inventoryRevision
 		or value.catalogScope ~= batch.meta.catalogScope then fail(playerNum, "catalog_schema"); return end
-	if value.catalogDetail ~= true and value.catalogDelta ~= true and value.notModified ~= true and (type(value.items) ~= "table"
+	if value.catalogManifest ~= true and value.catalogNode ~= true
+		and value.catalogDetail ~= true and value.catalogDelta ~= true and value.notModified ~= true and (type(value.items) ~= "table"
 		or value.itemTypeCount ~= #value.items) then fail(playerNum, "catalog_incomplete"); return end
 	-- A queued refresh may replace the first snapshot before its receipt. Only
 	-- the client's live opening intent decides whether completion opens a view.
@@ -96,9 +113,10 @@ local function applyReady(playerNum, slot)
 	if value.notModified == true and not context.hasCache(value) then
 		fail(playerNum, "catalog_cache_miss"); return
 	end
-	local consumer = value.catalogDetail == true and context.applyDetail
+	local consumer = (value.catalogManifest == true or value.catalogNode == true) and context.applyNode
+		or value.catalogDetail == true and context.applyDetail
 		or value.catalogDelta == true and context.applyDelta or context.apply
-	local ok, accepted, applyReason, stage = pcall(consumer, value)
+	local ok, accepted, applyReason, stage = pcall(consumer, value,batch.bytes*2+batch.tokens*64)
 	-- Consumer callbacks may close/reopen synchronously (including SP).
 	-- Completion of the old request cannot fail or acknowledge its replacement.
 	if slots[playerNum] ~= slot then return end
@@ -107,7 +125,8 @@ local function applyReady(playerNum, slot)
 		return
 	end
 	slot.batch = nil
-	if value.catalogDetail ~= true then
+	if value.catalogManifest or value.catalogNode then slot.applied=true
+	elseif value.catalogDetail ~= true then
 		slot.completedRevision, slot.applied = value.inventoryRevision, true
 		slot.recoveryUsed = nil
 		if value.catalogDelta ~= true then slot.retainedBytes = batch.bytes*2 end
@@ -143,6 +162,7 @@ function Client.ack(payload)
 	end
 	if slots[payload.playerNum] ~= slot then return end
 	applyReady(payload.playerNum, slot)
+	if payload.replicaEpoch and context.negotiate then context.negotiate(payload) end
 end
 function Client.receive(payload)
 	local slot = slotFor(payload)
@@ -156,7 +176,8 @@ function Client.receive(payload)
 		or type(payload.catalogScope) ~= "string" or type(payload.networkId) ~= "string"
 		or type(payload.data) ~= "table" then fail(payload.playerNum, "catalog_schema"); return end
 	if payload.batchId < slot.latest then return end
-	if slot.confirmed and slot.confirmed.networkId ~= payload.networkId then return end
+	if slot.confirmed and (slot.confirmed.networkId ~= payload.networkId
+		or slot.confirmed.catalogScope ~= payload.catalogScope) then return end
 	if slot.completedRevision and payload.inventoryRevision < slot.completedRevision then return end
 	local size = Codec.frameSize(payload)
 	if not size or size > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
@@ -289,6 +310,12 @@ function Client.waiting(payload)
 end
 function Client.update(timestamp)
 	local active = false
+	if context and context.nodeUpdate then
+		active=context.nodeUpdate()==true
+		if active then
+			for n=0,3 do if slots[n] and slots[n].confirmed and slots[n].confirmed.replicaEpoch then slots[n].started=timestamp end end
+		end
+	end
 	local started, work = now(), 0
 	for playerNum = 0, 3 do
 		local slot = slots[playerNum]

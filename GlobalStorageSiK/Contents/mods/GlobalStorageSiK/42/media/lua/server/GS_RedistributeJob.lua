@@ -148,7 +148,9 @@ local function finishJob(networkId, job, reason)
 	uninstallTickIfIdle()
 	local summary = { moved = job.moved, failed = job.failed, skipped = job.skipped, reason = reason }
 	local msg
-	if reason == "network_busy" or reason == "stalled" then
+	if reason == "routing_changed" then
+		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RoutingSortStopped")
+	elseif reason == "network_busy" or reason == "stalled" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError")
 	elseif reason == "no_permission" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole")
@@ -162,7 +164,7 @@ local function finishJob(networkId, job, reason)
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RedistributeCompleteMsg",
 			job.moved, job.skipped, job.failed)
 	end
-	local ok = reason ~= "remote_disabled" and reason ~= "no_power"
+	local ok = reason ~= "routing_changed" and reason ~= "remote_disabled" and reason ~= "no_power"
 		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
 		and reason ~= "network_busy" and reason ~= "stalled"
 		and reason ~= "no_permission" and reason ~= "source_unavailable"
@@ -285,7 +287,9 @@ onTick = function()
 	mergeCounts(job.movedByType, summary.movedByType)
 	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
 		and GlobalStorageSiK.Server.markInventoryDirty then
-		GlobalStorageSiK.Server.markInventoryDirty(networkId, player)
+		GlobalStorageSiK.Server.markInventoryDirty(networkId, player, {
+			scheduleSnapshot=false, snapshotsUpdated=summary.snapshotsUpdated == true,
+			touchedNodeIds=summary.touchedNodeIds or {} })
 	end
 	if summary.reason == "limit" then
 		local progressKey = tostring(summary.phase) .. ":" .. tostring(summary.checked or 0)

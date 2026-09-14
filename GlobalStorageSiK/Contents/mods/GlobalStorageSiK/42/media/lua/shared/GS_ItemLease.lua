@@ -10,6 +10,7 @@ require "GS_Transfer"
 require "GS_TransferLock"
 require "GS_InventorySync"
 require "GS_Index"
+require "GS_NodeSnapshots"
 
 local Lease = {}
 GlobalStorageSiK.ItemLease = Lease
@@ -142,6 +143,73 @@ function Lease.listCandidates(player, args, inspect)
 		inventoryRevision = GS.Index.getInventoryRevision(args.networkId) }
 end
 
+-- Separate contract: inspect receives defensive snapshot metadata, never an
+-- InventoryItem. The later physical custody operation always revalidates it.
+function Lease.listSnapshotCandidates(player, args, inspect)
+	if type(args) ~= "table" or type(inspect) ~= "function"
+		or not integer(args.node or 1,8192) or (args.node or 1)<1
+		or not integer(args.row or 1,8193) or (args.row or 1)<1
+		or not integer(args.offset or 0,32768) then return false,"invalid_request" end
+	local allowed, reason = authorize(player,args)
+	if not allowed then return false,reason end
+	local revision=GS.Index.getInventoryRevision(args.networkId)
+	if args.inventoryRevision~=nil and args.inventoryRevision~=revision then return false,"catalog_changed" end
+	local registry=GS.Network.getRegistry()
+	local ordered={}
+	local total=0
+	for id,node in pairs(registry.nodes or {}) do
+		total=total+1
+		if total>8192 then return false,"catalog_limit" end
+		local zone=registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId==args.networkId and zone.enabled~=false and node.enabled~=false
+			and node.membership~="excluded" and node.offline~=true
+			and GS.Permissions.canAccessZone(player,args.networkId,node.zoneId) then ordered[#ordered+1]=id end
+	end
+	table.sort(ordered)
+	-- Pagination is also fenced by visible topology and zone permissions.
+	local sa,sb=1,7
+	for i=1,#ordered do
+		local id=tostring(#ordered[i])..":"..ordered[i]
+		for j=1,#id do local byte=string.byte(id,j);sa=(sa*31+byte)%2147483629;sb=(sb*33+byte)%2147483587 end
+	end
+	local scopeToken=tostring(#ordered)..":"..tostring(sa)..":"..tostring(sb)
+	if args.scopeToken~=nil and args.scopeToken~=scopeToken then return false,"catalog_changed" end
+	local n,r,offset=args.node or 1,args.row or 1,args.offset or 0
+	local rows,scanned,visited={},0,0
+	while n<=#ordered and #rows<16 and scanned<1024 and visited<128 do
+		local node=registry.nodes[ordered[n]]
+		visited=visited+1
+		if node.snapshotSchema~=GS.NodeSnapshots.SCHEMA or type(node.itemSnapshot)~="table" then
+			if GS.CatalogReconciler then GS.CatalogReconciler.markDirty(node.id,"replication_bootstrap") end
+			return false,"catalog_pending"
+		end
+		local keys={}
+		for key in pairs(node.itemSnapshot) do
+			keys[#keys+1]=key
+			if #keys>8192 then return false,"catalog_limit" end
+		end
+		table.sort(keys)
+		while r<=#keys and #rows<16 and scanned<1024 do
+			local source=node.itemSnapshot[keys[r]]
+			local projection={fullType=source.fullType,mediaIndex=source.mediaIndex,
+				mediaType=source.mediaType,mediaTitle=source.mediaTitle,count=source.count}
+			local ok,fingerprint=pcall(inspect,projection)
+			scanned=scanned+1
+			local ids=ok and text(fingerprint,240) and text(source.fullType,160)
+				and text(node.id,240) and source.itemIds or nil
+			while ids and offset<#ids and #rows<16 and scanned<1024 do
+				offset=offset+1;scanned=scanned+1
+				rows[#rows+1]={itemId=ids[offset],fullType=source.fullType,
+					sourceNodeId=node.id,nodeRevision=node.contentRevision,fingerprint=fingerprint}
+			end
+			if not ids or offset>=#ids then r,offset=r+1,0 end
+		end
+		if r>#keys then n,r,offset=n+1,1,0 end
+	end
+	return true,"OK",{rows=rows,hasMore=n<=#ordered,node=n,row=r,offset=offset,
+		inventoryRevision=revision,scopeToken=scopeToken,source="node_snapshots"}
+end
+
 function Lease.borrow(player, args, inspect)
 	if type(args) ~= "table" or not integer(args.sequence, 2147483646) or args.sequence < 1
 		or not integer(args.itemId, 9007199254740991) or not text(args.fullType, 160)
@@ -181,10 +249,13 @@ function Lease.borrow(player, args, inspect)
 			anchor = { x = args.anchor.x, y = args.anchor.y, z = args.anchor.z }, state = "withdrawing",
 		}
 		actor[args.addonId] = record
-		local ok, why, moved, ids = GS.InventorySync.withBatch(function()
+		local ok, why, moved, ids, nodeIds, updated = GS.InventorySync.withBatch(function()
 			return GS.Transfer.withdrawType(player, args.fullType, args.networkId, 1,
 				player:getInventory(), nil, nil, { args.itemId }, nil, nil, 1, args.sourceNodeId)
 		end)
+		if moved and moved > 0 then
+			GS.NodeSnapshots.notifyMutation(player,args.networkId,updated,nodeIds and nodeIds[1] or args.sourceNodeId)
+		end
 		if moved ~= 1 or not ids or tostring(ids[1]) ~= tostring(args.itemId) then
 			-- A failed physical transfer does not authorize fabricating a replacement.
 			if moved == 0 and not findHeld(player, args.itemId)
@@ -325,11 +396,14 @@ function Lease.returnItem(player, addonId, sequence)
 			return false, "item_unavailable", copy(record)
 		end
 		if item:getFullType() ~= record.fullType then return false, "item_unavailable", copy(record) end
-		local ok, reason = GS.InventorySync.withBatch(function()
+		local ok, reason, updated, nodeId = GS.InventorySync.withBatch(function()
 			return GS.Transfer.depositItem(player, item, record.networkId,
 				{ preferredNodeId = record.sourceNodeId })
 		end)
-		if ok then record.state = "settled" end
+		if ok then
+			GS.NodeSnapshots.notifyMutation(player,record.networkId,updated,nodeId)
+			record.state = "settled"
+		end
 		return ok == true, reason or "OK", copy(record)
 	end)
 end

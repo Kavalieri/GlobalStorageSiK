@@ -6,6 +6,7 @@
 ]]
 
 require "GS_CatalogManager"
+require "GS_FoodPresentation"
 
 GlobalStorageSiK.I18n = GlobalStorageSiK.I18n or {}
 
@@ -1431,20 +1432,14 @@ function GlobalStorageSiK.I18n.foodStateLabel(row)
 	if type(row) ~= "table" then return "" end
 	local seen, labels = {}, {}
 	if type(row.foodSummary) == "table" then
-		for _, key in ipairs({ "Fresh", "Stale", "Rotten", "Cooked", "Burnt", "Frozen" }) do
+		for _, key in ipairs(GlobalStorageSiK.FoodPresentation.order) do
 			if row.foodSummary[key] == true then labels[#labels + 1] = getText("Tooltip_food_" .. key) end
 		end
-		return table.concat(labels, " / ")
+		return table.concat(labels, row.foodMixed and " / " or ", ")
 	end
 	local function addState(state)
 		if type(state) ~= "table" then return end
-		local keys = {}
-		if state.rotten == true then keys[#keys + 1] = "Rotten"
-		elseif state.fresh == true then keys[#keys + 1] = "Fresh"
-		elseif state.fresh == false then keys[#keys + 1] = "Stale" end
-		if state.burnt == true then keys[#keys + 1] = "Burnt"
-		elseif state.cooked == true then keys[#keys + 1] = "Cooked" end
-		if state.frozen == true then keys[#keys + 1] = "Frozen" end
+		local keys = GlobalStorageSiK.FoodPresentation.keys(state)
 		for i = 1, #keys do
 			if not seen[keys[i]] then
 				seen[keys[i]] = true
@@ -1454,7 +1449,14 @@ function GlobalStorageSiK.I18n.foodStateLabel(row)
 	end
 	addState(row.foodState)
 	for i = 1, #(row.variantSummary or {}) do addState(row.variantSummary[i].foodState) end
-	return table.concat(labels, " / ")
+	return table.concat(labels, ", ")
+end
+
+function GlobalStorageSiK.I18n.foodDisplayName(row, name)
+	if row.foodMixed then return name .. " · " .. GlobalStorageSiK.I18n.text("IGUI_GS_FoodMixed") end
+	local label=GlobalStorageSiK.I18n.foodStateLabel(row)
+	if label=="" then return name end
+	return getText("IGUI_FoodNaming", label, name)
 end
 
 function GlobalStorageSiK.I18n.itemSearchHaystack(row)

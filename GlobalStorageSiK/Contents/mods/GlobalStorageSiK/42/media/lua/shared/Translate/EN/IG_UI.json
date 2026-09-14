@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RoutingTimeout": "No confirmation received. Your draft is kept; you can retry.",
+    "IGUI_GS_RoutingSaved": "Configuration saved and confirmed.",
+    "IGUI_GS_RoutingRejected": "Configuration rejected: %1. Your draft is preserved.",
+    "IGUI_GS_RoutingSortStopped": "Auto Sort stopped: configuration changed. Start it again to use the confirmed rules.",
+
 	"IGUI_GS_CheckingAccess": "Checking access",
 	"IGUI_GS_LoadingInventory": "Loading inventory",
 	"IGUI_GS_ValidatingInventory": "Validating inventory",
@@ -28,6 +33,8 @@
 	"IGUI_GS_RemoteDetailUnavailable": "Details unavailable; refresh the inventory.",
 	"IGUI_GS_RemoteGroupTotal": "Group total: {1} items",
 	"IGUI_GS_RemoteGroupRepresentative": "Data from one representative item",
+	"IGUI_GS_RemoteGroupExpand": "Expand to inspect a specific item.",
+	"IGUI_GS_FoodMixed": "mixed states",
 	"IGUI_GS_ScanUpdatingAge": "Updating inventory · last valid snapshot {1} s ago",
 	"IGUI_GS_ItemDetailPage": "Showing {1}-{2} of {3} lines · {4} objects",
 	"IGUI_GS_BlockedVacantTitle": "Network without an owner",

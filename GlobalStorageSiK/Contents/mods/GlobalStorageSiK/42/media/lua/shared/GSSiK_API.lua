@@ -40,7 +40,7 @@ local CAPABILITY_VERSIONS = {
 	WorkSession = "1.0.0",
 	Terminal = "1.0.0",
 	Search = "1.0.0",
-	ItemLease = "1.0.0",
+	ItemLease = "1.1.0",
 	DeviceLease = "1.0.0",
 	ItemPresentation = "1.0.0",
 	InventoryView = "1.0.0",
@@ -651,6 +651,10 @@ end
 
 function API.ItemLease.listCandidates(player, args, inspect)
 	return itemLeaseCall("listCandidates", player, args, inspect)
+end
+
+function API.ItemLease.listSnapshotCandidates(player, args, inspectSnapshot)
+	return itemLeaseCall("listSnapshotCandidates", player, args, inspectSnapshot)
 end
 
 function API.ItemLease.borrow(player, args, inspect)

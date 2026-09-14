@@ -89,7 +89,7 @@
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients": "Relay dedicated-server logs to administrators",
 	"Sandbox_GlobalStorageSiK_DebugRelayToClients_tooltip": "Off by default. Sends enabled diagnostics in bounded batches only to subscribed administrators. The server checks access on subscription and on every delivery; access loss or disconnect removes the subscription.",
 	"Sandbox_GlobalStorageSiK_DebugCatNetwork": "   >> Network traces",
-	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requires Debug mode. Summarizes client/server commands, sequence and synchronization state. Full payloads remain in the separate >>> DETAIL block.",
+	"Sandbox_GlobalStorageSiK_DebugCatNetwork_tooltip": "Requires Debug mode. Records bounded summaries of sends, receives, responses and rejection reasons. Does not dump catalogs or full payloads; DETAIL is not required.",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess": "   >> Terminal access",
 	"Sandbox_GlobalStorageSiK_DebugCatTerminalAccess_tooltip": "Requires Debug mode ON. Every proximity/access check against a terminal (manifest, registry, range evaluation). Fires repeatedly while trying to open a terminal - very verbose.",
 	"Sandbox_GlobalStorageSiK_DebugCatPermissions": "   >> Identity & permissions",

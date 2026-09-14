@@ -7,10 +7,10 @@
   &quot;frameworkManifestSha256&quot;: &quot;2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063&quot;,
   &quot;generatorSha256&quot;: &quot;b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae&quot;,
   &quot;schemaSha256&quot;: &quot;ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5&quot;,
-  &quot;surfaceSpecSha256&quot;: &quot;5b18d9d612bc613024803970df5c6e7f5590d33521088cc4f8e932988f7b467d&quot;,
+  &quot;surfaceSpecSha256&quot;: &quot;13c317a500b0932db3fcec1cde01734314b09692afa3bb0300cc67fe2b0a410c&quot;,
   &quot;visualCanonicalizer&quot;: &quot;sik-ui-dom-v2&quot;,
-  &quot;visualMasterSha256&quot;: &quot;9e5b8cc6044ee75e8d60a5943f14dc7dbc98d254b7db517b049ea8bd913c5ac9&quot;,
-  &quot;visualSubtreeSha256&quot;: &quot;9e5b1072f6a341b553cbc4825e979fd9b34f6614ad147df8e4ff1b67aedbbac6&quot;
+  &quot;visualMasterSha256&quot;: &quot;9e0d9e114a32ab92737c9d47e5527032d14e0d4003cf2332521c7ca118db3a9f&quot;,
+  &quot;visualSubtreeSha256&quot;: &quot;7007ff2faa17918b2760269c2e90ff390b42a7e69f957a7c6b0eb936d9c75ae7&quot;
 }">
   <title>tab-warehouse</title>
   <style>:root {
@@ -828,6 +828,8 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 
 /* Shared composed search control: icon, field and clear action share one control rect. */
 .sik-search-control {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   min-height: var(--sik-control-height);
   display: flex;
@@ -839,6 +841,9 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 .sik-search-control:focus-within { outline: 1px solid var(--sik-accent); border-color: var(--sik-accent); }
 .sik-search-control > .sik-icon { flex: 0 0 18px; margin-left: var(--sik-space-3); }
 .sik-search-control > .sik-search {
+  width: 0;
+  min-width: 0;
+  flex: 1 1 0;
   min-height: calc(var(--sik-control-height) - 2px);
   border: 0;
   outline: 0;
@@ -875,6 +880,7 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
 .sik-table-row > [data-align="left"] { text-align: left; }
 .sik-table-row > [data-align="center"] { text-align: center; }
 .sik-table-row > [data-align="right"] { text-align: right; }
+.sik-table-row > [data-cell-pad] { padding-inline: var(--sik-cell-pad, 0px); }
 .sik-table-head { min-height: 26px; color: var(--sik-text-muted); background: #0d0d0d; text-transform: uppercase; font-size: 10px; }
 .sik-table-head > * { position: relative; }
 .sik-column-resizer { position: absolute; z-index: 3; top: 2px; right: -4px; width: 8px; height: calc(100% - 4px); cursor: col-resize; }
@@ -1306,15 +1312,21 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
                     <span data-col data-key="name" data-flex="1" data-min="130" data-align="left">Nombre</span>
                     <span data-col data-key="category" data-flex="1.4" data-min="180" data-align="left">Categoría</span>
                     <span data-col data-key="zone" data-width="110" data-align="left">Zona</span>
-                    <span data-col data-key="count" data-width="70" data-align="right">Cant.</span>
+                    <span data-col data-key="count" data-width="70" data-align="right" data-cell-pad="8">Cant.</span>
                   </div>
                   <div class="sik-table-row is-group" data-expand-group="crisps" data-row-help="12 bolsas agrupadas como el mismo objeto útil. Despliega para elegir la variante visual y ubicación." aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span><i class="sik-item-swatch is-crisps"></i>Patatas fritas</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Varias zonas</span><span>12</span></div>
                   <div class="sik-table-row is-child" data-group-child="crisps"><span><i class="sik-item-swatch is-original"></i>Patatas fritas - Original</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Cocina</span><span>5</span></div>
                   <div class="sik-table-row is-child" data-group-child="crisps"><span><i class="sik-item-swatch is-bbq"></i>Patatas fritas - Barbacoa</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Garaje</span><span>4</span></div>
                   <div class="sik-table-row is-child" data-group-child="crisps"><span><i class="sik-item-swatch is-vinegar"></i>Patatas fritas - Sal y vinagre</span><span class="sik-category-path is-food">Comida y bebida › No perecedero › Otros alimentos</span><span>Cocina</span><span>3</span></div>
-                  <div class="sik-table-row is-group" data-expand-group="pepper" aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span>Pimiento · estados mixtos</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Varias zonas</span><span>2</span></div>
-                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Instancia exacta; el estado alimentario se consulta en el icono y tooltip vanilla."><span>Pimiento</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
-                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Instancia exacta; el estado alimentario se consulta en el icono y tooltip vanilla."><span>Pimiento</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Garaje</span><span>1</span></div>
+                  <div class="sik-table-row is-group" data-expand-group="pepper" data-row-help="2 objetos: 1 fresco y 1 podrido. Estado mixto; despliega para consultar una unidad concreta." aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span>Pimiento · estados mixtos</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Varias zonas</span><span>2</span></div>
+                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Unidad exacta: pimiento fresco."><span>Pimiento (fresco)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="pepper" data-row-help="Unidad exacta: pimiento podrido."><span>Pimiento (podrido)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Garaje</span><span>1</span></div>
+                  <div class="sik-table-row is-group" data-expand-group="apple" aria-expanded="false" data-row-help="2 objetos. Estado compartido: podrido. Despliega para elegir una unidad."><span><span class="sik-expander" aria-hidden="true"></span>Manzana (podrido)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>2</span></div>
+                  <div class="sik-table-row is-child" data-group-child="apple" hidden><span>Manzana (podrido)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="apple" hidden><span>Manzana (podrido)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
+                  <div class="sik-table-row is-group" data-expand-group="mince" aria-expanded="false" data-row-help="2 objetos. Estado compartido: fresco y crudo. Despliega para elegir una unidad."><span><span class="sik-expander" aria-hidden="true"></span>Carne picada (fresco, crudo)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>2</span></div>
+                  <div class="sik-table-row is-child" data-group-child="mince" hidden><span>Carne picada (fresco, crudo)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
+                  <div class="sik-table-row is-child" data-group-child="mince" hidden><span>Carne picada (fresco, crudo)</span><span class="sik-category-path is-food">Comida y bebida › Perecederos</span><span>Cocina</span><span>1</span></div>
 
                   <div class="sik-table-row is-group" data-families="vehicles containers" data-expand-group="fuel" data-row-help="3 bidones. Se separan por contenido y llenado porque no son intercambiables al retirar una unidad." aria-expanded="true"><span><span class="sik-expander" aria-hidden="true"></span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina</span><span class="sik-category-path is-neutral">Varias categorías</span><span>Garaje</span><span>3</span></div>
                   <div class="sik-table-row is-child" data-group-child="fuel" data-row-help="Instancia exacta: 8 / 10 L de gasolina (80%), ubicada en Garaje. El icono y tooltip vanilla muestran su estado."><span><img class="sik-drag-icon" src="assets/requirements/Base_GasCan.png" alt="">Bidón de gasolina</span><span class="sik-category-path is-fuel">Vehículos › Consumibles › Combustible</span><span>Garaje</span><span>1</span></div>
@@ -1418,6 +1430,10 @@ html[data-active-tab="blocked"] .sik-footer-blocked { display: inline; }
         if (!descriptor) return;
         cell.dataset.key = descriptor.dataset.key || "col" + index;
         cell.dataset.align = descriptor.dataset.align || "left";
+        if (descriptor.dataset.cellPad !== undefined) {
+          cell.dataset.cellPad = descriptor.dataset.cellPad;
+          cell.style.setProperty("--sik-cell-pad", `${Math.max(0, Number(descriptor.dataset.cellPad) || 0)}px`);
+        }
       });
     });
     columns.slice(0, -1).forEach((cell, index) => {

@@ -28,6 +28,9 @@ addon/network/terminal coordinates, with no retained player reference. Its
 `validate/get/open/check/consume/release/close` operations are documented in
 `API.md`. This is the Multimedia playback contract; `ItemLease` still supplies
 its access checks and read-only catalogue.
+Core 1.5.5-dev1 adds `ItemLease` 1.1.0 `listSnapshotCandidates`: Multimedia's
+catalogue reads confirmed node snapshots with bounded pages, while insertion
+and ejection retain physical identity checks and terminal-owned custody.
 
 `Terminal.activate(terminal, tabKey)` selects a registered, currently available
 tab through the public client facade. Consumers do not call terminal internals.

@@ -209,7 +209,7 @@ function TabWarehouseContext.create(terminal, panel)
 		-- A running recapture never hides the last received inventory. Exact
 		-- transfers separately require a certified revision, not visual rows.
 		local availableCount = #catalogItems
-		local visibleCount = #(tableModel.rows or {})
+		local visibleCount = tableModel.visibleCount or #(tableModel.rows or {})
 		local fingerprint = tostring(hasSnapshot) .. ":" .. tostring(availableCount)
 			.. ":" .. tostring(visibleCount)
 		if self.resourceFingerprint ~= fingerprint then

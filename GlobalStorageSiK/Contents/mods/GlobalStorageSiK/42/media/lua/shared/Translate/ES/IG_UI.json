@@ -1,4 +1,9 @@
 {
+	"IGUI_GS_RoutingTimeout": "No se ha recibido confirmación. El borrador se conserva; puedes reintentar.",
+    "IGUI_GS_RoutingSaved": "Configuración guardada y confirmada.",
+    "IGUI_GS_RoutingRejected": "Configuración rechazada: %1. El borrador se conserva.",
+    "IGUI_GS_RoutingSortStopped": "Autoordenado detenido: cambió la configuración. Inícialo de nuevo para aplicar las reglas confirmadas.",
+
 	"IGUI_GS_CheckingAccess": "Comprobando acceso",
 	"IGUI_GS_LoadingInventory": "Cargando inventario",
 	"IGUI_GS_ValidatingInventory": "Validando inventario",
@@ -28,6 +33,8 @@
 	"IGUI_GS_RemoteDetailUnavailable": "Detalle no disponible; actualiza el inventario.",
 	"IGUI_GS_RemoteGroupTotal": "Total del grupo: {1} objetos",
 	"IGUI_GS_RemoteGroupRepresentative": "Datos de una unidad representativa",
+	"IGUI_GS_RemoteGroupExpand": "Despliega para consultar una unidad concreta.",
+	"IGUI_GS_FoodMixed": "estados mixtos",
 	"IGUI_GS_ScanUpdatingAge": "Actualizando inventario · última captura válida hace {1} s",
 	"IGUI_GS_ItemDetailPage": "Mostrando {1}-{2} de {3} líneas · {4} objetos",
 	"IGUI_GS_BlockedVacantTitle": "Red sin propietario",

@@ -262,8 +262,8 @@ function GlobalStorageSiK.TerminalRegistry.appendTerminal(networkId, x, y, z, op
 		network.controller = { x = x, y = y, z = z }
 	end
 	network.relocation = { status = "active" }
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
@@ -340,8 +340,8 @@ function GlobalStorageSiK.TerminalRegistry.pruneInvalid(networkId)
 		end
 	end
 
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	return changed
 end
@@ -405,8 +405,8 @@ function GlobalStorageSiK.TerminalRegistry.suspendTerminalAt(networkId, x, y, z)
 	}
 	changed = true
 
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	if changed and GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
@@ -441,8 +441,8 @@ function GlobalStorageSiK.TerminalRegistry.renameTerminalAt(networkId, x, y, z, 
 		return false
 	end
 	entry.label = (label and label ~= "") and label or nil
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
@@ -480,8 +480,8 @@ function GlobalStorageSiK.TerminalRegistry.setControllerAt(networkId, x, y, z)
 		return false, "terminal_not_active"
 	end
 	network.controller = { x = math.floor(x), y = math.floor(y), z = math.floor(z) }
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
 		GlobalStorageSiK.RegistryStore.notifyChanged()
@@ -591,8 +591,8 @@ function GlobalStorageSiK.TerminalRegistry.compactAllNetworks()
 			changed = true
 		end
 	end
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	return changed
 end
@@ -641,8 +641,8 @@ function GlobalStorageSiK.TerminalRegistry.reconcileAllNetworks()
 			changed = true
 		end
 	end
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	if changed and GlobalStorageSiK.Debug and GlobalStorageSiK.Debug.log then
 		GlobalStorageSiK.Debug.log("TerminalRegistry", "reconcileAll", "done")
@@ -773,8 +773,8 @@ function GlobalStorageSiK.TerminalRegistry.rebindTerminal(networkId, x, y, z, op
 			setController = opts.setController == true,
 		})
 	end
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	return networkId
 end
@@ -934,8 +934,8 @@ function GlobalStorageSiK.TerminalRegistry.unregister(networkId, x, y, z)
 		changed = true
 	end
 
-	if changed and ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if changed then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	return changed
 end

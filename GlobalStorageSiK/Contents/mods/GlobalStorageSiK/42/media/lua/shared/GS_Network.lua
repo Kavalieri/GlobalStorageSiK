@@ -53,8 +53,8 @@ function GlobalStorageSiK.Network.ensureRegistry(registry)
 			-- invalida una sola vez y el siguiente acceso/scan la reconstruye.
 			for _, node in pairs(registry.nodes) do node.itemSnapshot = nil end
 			registry._itemSnapshotSchema = wantedSnapshotSchema
-			if isServer and isServer() and ModData and ModData.transmit then
-				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			if GlobalStorageSiK.isAuthoritative() then
+				GlobalStorageSiK.notifyRegistryChanged()
 			end
 		end
 	end
@@ -244,8 +244,8 @@ function GlobalStorageSiK.Network.createNetwork(player)
 		end
 		return nil
 	end
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged()
 	end
 	GlobalStorageSiK.Permissions.requestTransmit()
 	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
@@ -316,8 +316,8 @@ function GlobalStorageSiK.Network.renameDisplayName(networkId, ownerUsername, ne
 	-- hacia antes) rechazaba siempre al propio propietario cuando su cuenta y
 	-- su personaje no se llaman igual.
 	net.name = newName
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	return true, newName
 end
@@ -462,7 +462,7 @@ local function liveZoneEnabled(registry, entry)
 	return zone.enabled ~= false
 end
 
-function GlobalStorageSiK.Network.getLiveContainers(networkId)
+function GlobalStorageSiK.Network.getLiveContainers(networkId, player)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	GlobalStorageSiK.Network.ensureRegistry(registry)
 	local live = {}
@@ -538,7 +538,10 @@ function GlobalStorageSiK.Network.getLiveContainers(networkId)
 	-- cacheado para esta red (misma resolucion IsoObject, solo cambia de
 	-- donde sale la lista de candidatos).
 	if not GlobalStorageSiK.isAuthoritative() and #live == 0 then
-		local cached = GlobalStorageSiK.Client and GlobalStorageSiK.Client.cachedTerminalState
+		local client = GlobalStorageSiK.Client
+		local playerNum = player and player:getPlayerNum() or 0
+		local cached = client and client.terminalStateByPlayer and client.terminalStateByPlayer[playerNum]
+		if not cached and playerNum == 0 then cached = client and client.cachedTerminalState end
 		if cached and cached.networkId == nid and cached.nodes then
 			for _, node in ipairs(cached.nodes) do
 				local obj = GlobalStorageSiK.Network.findWorldObject(node)

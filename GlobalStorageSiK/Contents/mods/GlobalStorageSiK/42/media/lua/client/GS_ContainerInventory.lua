@@ -8,6 +8,25 @@ local Inventory = {}
 GlobalStorageSiK.ContainerInventory = Inventory
 local views = {}
 local cleanupRegistered = false
+local serial = 0
+local function now() return getTimestampMs and getTimestampMs() or 0 end
+local function metadata(state, node)
+	local zone
+	for _, candidate in pairs(state.zones or {}) do
+		if candidate.id == node.zoneId then zone = candidate; break end
+	end
+	return { node }, zone and { zone } or {}
+end
+
+local function retag(rows, revision)
+	for i = 1, #rows do
+		local row = rows[i]
+		row.selectionRevision, row.representativeRevision = revision, revision
+		for _, variant in pairs(row.variantSummary or {}) do
+			if variant.representativeItemId then variant.representativeRevision = revision end
+		end
+	end
+end
 
 function Inventory.installCleanup()
 	if cleanupRegistered then return true end
@@ -41,12 +60,15 @@ function Inventory.mount(parent, editor, node, options)
 	view.panel = panel
 	local playerNum = editor.playerNum or 0
 	view.playerNum = playerNum
+	serial = serial + 1
+	view.id, view.sequence = tostring(playerNum) .. ":" .. tostring(serial), 0
 	local state = GlobalStorageSiK.Client.terminalStateByPlayer[playerNum]
 		or GlobalStorageSiK.Client.cachedTerminalState or {}
-	view.networkId = state.networkId
+	view.networkId = options.networkId or editor.networkId or state.networkId
+	local nodes, zones = metadata(state, node)
 	view.controller = { playerNum = playerNum, terminalState = {
-		networkId = state.networkId, inventoryRevision = state.inventoryRevision,
-		zones = state.zones, nodes = state.nodes, items = view.rows,
+		networkId = view.networkId, inventoryRevision = state.inventoryRevision,
+		zones = zones, nodes = nodes, items = view.rows,
 	} }
 	-- TerminalItems reutiliza el mismo menú contextual en Almacén y editores.
 	-- Aquí la capa superior real es el editor, no la terminal principal.
@@ -104,6 +126,7 @@ function Inventory.mount(parent, editor, node, options)
 		local sent = GlobalStorageSiK.NetClient.sendCommand("getNodeContents", {
 			networkId = view.networkId, nodeId = view.node.id, rowKey = row.rowKey,
 			inventoryRevision = self.terminalState.inventoryRevision, page = page or 1,
+			nodeViewId = view.id, nodeViewSeq = view.sequence, nodeRevision = view.nodeRevision,
 		}, getSpecificPlayer and getSpecificPlayer(view.playerNum) or nil)
 		if sent == false then panel._detailPending[row.rowKey] = nil end
 		return sent
@@ -176,7 +199,13 @@ function Inventory.mount(parent, editor, node, options)
 	end
 	function view:request()
 		if self.disposed then return end
-		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { networkId = self.networkId, nodeId = self.node.id },
+		self.sequence = self.sequence + 1
+		self.nextPoll = now() + 2000
+		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", {
+			networkId = self.networkId, nodeId = self.node.id,
+			nodeViewId = self.id, nodeViewSeq = self.sequence,
+			knownNodeRevision = self.nodeRevision, knownClassification = self.classificationStamp,
+		},
 			getSpecificPlayer and getSpecificPlayer(self.playerNum) or nil)
 	end
 	function view:refresh(nextNode)
@@ -188,6 +217,7 @@ function Inventory.mount(parent, editor, node, options)
 		self.disposed = true
 		if self.detailTick and Events and Events.OnTick then Events.OnTick.Remove(self.detailTick) end
 		if self.refreshTick and Events and Events.OnTick then Events.OnTick.Remove(self.refreshTick) end
+		if self.pollTick and Events and Events.OnTick then Events.OnTick.Remove(self.pollTick) end
 		self.detailTick, self.refreshTick, self.detailQueue = nil, nil, {}
 		views[self] = nil
 		GlobalStorageSiK.TerminalDrop.disposePanel(panel, self.controller)
@@ -197,6 +227,10 @@ function Inventory.mount(parent, editor, node, options)
 	function view:receive(payload)
 		if self.disposed or payload.networkId ~= self.networkId or payload.nodeId ~= self.node.id then return end
 		if payload.playerNum ~= nil and payload.playerNum ~= self.playerNum then return end
+		if payload.nodeViewId ~= self.id then return end
+		if (tonumber(payload.nodeViewSeq) or 0) < (self.receivedSequence or 0) then return end
+		self.receivedSequence = tonumber(payload.nodeViewSeq) or 0
+		if payload.nodeRevision and self.nodeRevision and payload.nodeRevision < self.nodeRevision then return end
 		local revision = payload.inventoryRevision
 		local knownRevision = self.controller.terminalState.inventoryRevision
 		if tonumber(revision) and tonumber(knownRevision) and revision < knownRevision then return end
@@ -212,15 +246,25 @@ function Inventory.mount(parent, editor, node, options)
 		self.controller.terminalState.reconcilePending = payload.reconcilePending
 		self.requestedRevision = nil
 		self.capacity = payload.capacity or self.capacity
-		if payload.catalogRows then
+		self.nodeRevision, self.classificationStamp = payload.nodeRevision, payload.classificationStamp
+        if payload.catalogRows then
 			self.rows = payload.catalogRows
 			self.controller.terminalState.items = self.rows
+        end
+		if payload.nodeUnavailable or payload.snapshotCertified==false then
+			-- Empty unavailable rows are not a confirmed image of this revision.
+			-- Re-enabling must fetch the node even if its contents did not change.
+			self.nodeRevision, self.classificationStamp = nil, nil
+			panel._detailPages,panel._detailPending,panel._detailPageByKey={},{},{}
+			self.detailQueue={}
 		end
+		if payload.nodeNotModified then retag(self.rows, revision) end
 		local detail = payload.detailPage
-		if detail and detail.reason then
-			panel._detailPending[detail.rowKey] = nil
-			if detail.reason == "revision_mismatch" then self:request() end
-			return
+        if detail and detail.reason then
+            panel._detailPending[detail.rowKey] = nil
+            if detail.reason == "revision_mismatch" then self:request() end
+			self:render()
+            return
 		end
 		if detail and detail.rowKey and not detail.reason then
 			local page = tonumber(detail.page) or 1
@@ -238,6 +282,12 @@ function Inventory.mount(parent, editor, node, options)
 		self:render()
 	end
 	views[view] = true
+	-- A mounted editor only asks for its node's metadata. Unchanged replies carry
+	-- no rows; no global manifest or physical scan is needed to keep it current.
+	view.pollTick = function()
+		if not view.disposed and now() >= (view.nextPoll or 0) then view:request() end
+	end
+	if Events and Events.OnTick then Events.OnTick.Add(view.pollTick) end
 	view:render()
 	view:request()
 	return view
@@ -257,19 +307,17 @@ function Inventory.onTerminalState(state)
 		local view = snapshot[i]
 		if not view.disposed and view.networkId == state.networkId
 			and view.playerNum == (tonumber(state.playerNum) or 0) then
-			view.controller.terminalState.zones = state.zones
-			view.controller.terminalState.nodes = state.nodes
+			local nodes, zones = metadata(state, view.node)
+			view.controller.terminalState.zones = zones
+			view.controller.terminalState.nodes = nodes
 			local capacity = state.capacity and state.capacity.perNode
 				and state.capacity.perNode[view.node.id]
 			if capacity then
 				view.capacity = capacity
 				view:render()
 			end
-			local revision = tonumber(state.inventoryRevision)
-			local known = tonumber(view.controller.terminalState.inventoryRevision) or -1
-			if revision and revision > known and view.requestedRevision ~= revision then
-				view:invalidateAndScheduleRefresh(revision, "terminal-state")
-			end
+			-- The global revision is only a mutation fence. This view obtains its
+			-- own node revision and never reloads because another node changed.
 		end
 	end
 end
@@ -287,7 +335,7 @@ function Inventory.onActionResult(args)
 		local view = snapshot[i]
 		if not view.disposed and view.networkId == transfer.networkId
 			and (args.playerNum == nil or view.playerNum == tonumber(args.playerNum))
-			and (transfer.op ~= "redistribute" or view.node.id == transfer.sourceNodeId) then
+			and (view.node.id == transfer.sourceNodeId or view.node.id == transfer.nodeId) then
 			view:invalidateAndScheduleRefresh(transfer.inventoryRevision,
 				transfer.op .. "-ack")
 		end

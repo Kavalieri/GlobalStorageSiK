@@ -18,8 +18,8 @@ GlobalStorageSiK.CONTAINER_MODDATA_KEY = "GlobalStorageSiK"
 -- responder al comando adminGetNetworkHistory (un envio 1-a-1 al staff que
 -- lo pide, no una emision general) - separa el coste de "quien quiere ver
 -- el historico completo de una red" del coste de sincronizar el registro
--- operativo (MODDATA_KEY) que SI necesita llegar a todos los clientes en
--- tiempo real.
+-- operativo (MODDATA_KEY), persistido solo en la autoridad. Sus vistas se
+-- envian por comandos autenticados y manifiestos por contenedor.
 GlobalStorageSiK.HISTORY_MODDATA_KEY = "GlobalStorageSiK_History"
 -- Registro de permisos/identidad por red (2026-08-22, separacion de
 -- responsabilidades pedida explicitamente: "no podemos mezclar deteccion,
@@ -65,6 +65,28 @@ function GlobalStorageSiK.isAuthoritative()
 	return true
 end
 
+-- Persist metadata locally, then coalesce notifications for authenticated views.
+-- Never serialize the operational registry: it contains every node snapshot.
+local registryChanges, registryChangeCount, registryAllChanged = {}, 0, false
+function GlobalStorageSiK.notifyRegistryChanged(networkId)
+	if not GlobalStorageSiK.isAuthoritative() then return false end
+	if type(networkId) ~= "string" or networkId == "" then registryAllChanged = true
+	elseif not registryChanges[networkId] then
+		if registryChangeCount >= 128 then registryAllChanged = true
+		else registryChanges[networkId] = true; registryChangeCount = registryChangeCount + 1 end
+	end
+	if GlobalStorageSiK.RegistryStore and GlobalStorageSiK.RegistryStore.notifyChanged then
+		GlobalStorageSiK.RegistryStore.notifyChanged()
+	end
+	return true
+end
+function GlobalStorageSiK.takeRegistryChanges()
+	if registryChangeCount == 0 and not registryAllChanged then return nil end
+	local pending, all = registryChanges, registryAllChanged
+	registryChanges, registryChangeCount, registryAllChanged = {}, 0, false
+	return pending, all
+end
+
 --- Distinta de isAuthoritative(): esta responde "hay mas de un jugador
 --- humano compartiendo esta red ahora mismo", no "corre la logica
 --- autoritativa en este proceso". En SP real (isClient/isServer ambos
@@ -92,7 +114,7 @@ GlobalStorageSiK.Config = {
 	-- Unificada con modversion de mod.info (antes llevaba un esquema interno
 	-- 0.10.x-preprod aparte, lo que dificultaba saber que build produjo un
 	-- error en el log). A partir de aqui suben siempre juntas.
-	MOD_VERSION = "1.5.4",
+	MOD_VERSION = "1.5.5-dev1",
 	-- Esquema de la cache persistida por nodo. Se incrementa cuando cambia la
 	-- identidad/estado serializado de filas y obliga a reconstruir snapshots.
 	ITEM_SNAPSHOT_SCHEMA = "3",

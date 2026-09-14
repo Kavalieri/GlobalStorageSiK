@@ -257,6 +257,22 @@ An unresolved physical unit never expires or authorizes a manufactured replaceme
   `sourceNodeId`, `fingerprint`.
   One call inspects at most 1024 items/128 nodes and emits at most 100 rows.
   Cursors are not snapshots or authorization; later mutations revalidate identity.
+- `listSnapshotCandidates(player, args, inspectSnapshot)` is additive in
+  `ItemLease` 1.1.0 / Core 1.5.5-dev1. It reads confirmed container snapshots,
+  with no physical inventory traversal. Arguments additionally carry `row` and
+  optional `inventoryRevision` from the preceding page. The trusted callback
+  receives a defensive projection (`fullType`, `mediaIndex`, `mediaType`,
+  `mediaTitle`, `count`), and returns a fingerprint under the same 240-byte limit.
+  The page has `node`, `row`, `offset`, `hasMore`, `inventoryRevision`,
+  `source="node_snapshots"`; candidate rows also identify `nodeRevision`.
+  Limits: 8192 registry nodes/rows per container, 128 visited nodes, 1024 work
+  units and 16 emitted candidates per call. Continuations echo `scopeToken` as
+  well as `inventoryRevision`; changed permissions/topology reject a stale page.
+  Unconfirmed nodes request directed
+  bootstrap and return `catalog_pending`; revision drift returns
+  `catalog_changed`. Neither a cursor nor a snapshot authorizes a movement.
+  Multimedia uses this method for discovery and physical `DeviceLease.consume`
+  validation for playback. Existing `listCandidates` callbacks remain physical.
 - `borrow(player, args, inspect)` additionally requires `sequence`, exact
   `itemId`, `fullType`, `sourceNodeId`, and addon-owned `contextKey`. It moves one
   permitted unit through Core transfer/locking/sync and returns `ok, reason,

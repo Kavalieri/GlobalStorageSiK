@@ -24,6 +24,23 @@ Al iniciar una partida, cada proceso escribe siempre una única identidad de run
 
 ## Core
 
+### Network traces (Core 1.5.5-dev1 work in progress)
+
+`Modo depuración (debug)` / `Debug mode` plus `>> Trazas de red` /
+`>> Network traces` enables bounded DEBUG records from `NetTrace` without DETAIL.
+`C->S`, `S<-C`, `S->C` and `C<-S` identify send/receive direction. Server responses
+with `ok` report `decision=ACK` or `decision=NACK`; the summary includes the
+localization key and reason, and any request/revision/target IDs supplied by the
+command. This instrumentation does not add transactional IDs to commands that
+do not yet have them and does not prove that a mutation was persisted.
+
+Only a fixed scalar allowlist is read. Traces do not enumerate the network
+registry, dump catalogs or add timing fields to the wire payload. Records fit
+inside the logger's normal per-category budget; catalog fragments, receipts,
+keepalive and debug relay echoes remain excluded. Preserve the client/server
+`console.txt` and the session's `debug/network-<runId>.log` for a future authorized
+runtime check. Automated author checks are not a PZ runtime reproduction.
+
 `GlobalStorageSiK.DebugMode` es el interruptor maestro del log general. Las categorías permiten reducir volumen: Network, TerminalAccess, Permissions, Craft, Inventory, Tooltip, Router y el árbol **SiK UI** (ver más abajo). Las opciones `DebugSkip*` están en la página separada **GSSiK: Excepciones para pruebas / GSSiK: Testing overrides** porque alteran validaciones; no son opciones de logging.
 
 ### Evidencias por sesión

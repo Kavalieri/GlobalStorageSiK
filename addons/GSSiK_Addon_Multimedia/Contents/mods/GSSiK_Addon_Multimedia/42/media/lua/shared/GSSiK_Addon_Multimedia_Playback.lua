@@ -145,8 +145,22 @@ function M.state(player, args)
 end
 function M.catalog(player, args)
 	if type(args) ~= "table" then return false, "invalid_request" end
-	local ok, reason, page = Lease.listCandidates(player, { addonId = ADDON, networkId = args.networkId,
-		anchor = args.anchor, node = args.node, offset = args.offset }, inspect)
+	local ok, reason, page = Lease.listSnapshotCandidates(player, { addonId = ADDON, networkId = args.networkId,
+		anchor = args.anchor, node = args.node, row = args.row, offset = args.offset,
+		inventoryRevision = args.inventoryRevision, scopeToken = args.scopeToken }, function(row)
+			local mediaType=row.mediaType
+			-- Older persisted snapshots lack mediaType. Resolve only the immutable
+			-- recorded-media definition; never enumerate an unloaded container.
+			if mediaType==nil and type(row.mediaIndex)=="number" and row.mediaIndex>=0 then
+				local radio=getZomboidRadio and getZomboidRadio()
+				local recorded=radio and radio:getRecordedMedia()
+				local data=recorded and recorded:getMediaDataFromIndex(row.mediaIndex)
+				mediaType=data and data:getMediaType()
+			end
+			if mediaType == 1 and type(row.mediaIndex) == "number" and row.mediaIndex >= 0 then
+				return tostring(row.mediaIndex)
+			end
+		end)
 	local result = projected(player, args); result.ok, result.reason, result.page = ok, reason, page
 	if isServer and isServer() then sendServerCommand(player, "GSSiK_Multimedia", "catalog", result)
 	elseif M.onCatalog then M.onCatalog(player, result) end

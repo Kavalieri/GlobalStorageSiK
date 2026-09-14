@@ -176,12 +176,12 @@ function GlobalStorageSiK.TerminalConfig.fillMainCategoryCombo(combo, items, sel
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
-	combo:addOption(T("IGUI_GS_CategoryAny"))
+	combo:addOptionWithData(T("IGUI_GS_CategoryAny"), "")
 	local filters = GlobalStorageSiK.NativeProduct.listOptions(nil)
 	for i = 1, #filters do
 		if not isAvailable or isAvailable(filters[i].key) then
 			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-			combo:addOption(filters[i].label)
+			combo:addOptionWithData(filters[i].label, filters[i].key)
 		end
 	end
 	combo.selected = 1
@@ -206,14 +206,14 @@ function GlobalStorageSiK.TerminalConfig.fillSubCategoryCombo(combo, mainKey, se
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
-	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
+	combo:addOptionWithData(T("IGUI_GS_FilterSubCategoryAll"), "")
 	local filters = GlobalStorageSiK.NativeProduct.decodePath(mainKey)
 		and GlobalStorageSiK.NativeProduct.listOptions(mainKey)
 		or {}
 	for i = 1, #filters do
 		if not isAvailable or isAvailable(filters[i].key) then
 			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-			combo:addOption(filters[i].label)
+			combo:addOptionWithData(filters[i].label, filters[i].key)
 		end
 	end
 	combo.selected = 1
@@ -239,7 +239,7 @@ function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, s
 	if not combo then return end
 	combo:clear()
 	combo.categoryKeys = { "" }
-	combo:addOption(T("IGUI_GS_FilterSubCategoryAll"))
+	combo:addOptionWithData(T("IGUI_GS_FilterSubCategoryAll"), "")
 	-- La cascada es estricta: L3 solo existe tras elegir L2. Usar L1 como
 	-- parent repetia las opciones L2 dentro del tercer combo.
 	local filters = {}
@@ -251,7 +251,7 @@ function GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(combo, mainKey, s
 	for i = 1, #filters do
 		if not isAvailable or isAvailable(filters[i].key) then
 			combo.categoryKeys[#combo.categoryKeys + 1] = filters[i].key
-			combo:addOption(filters[i].label)
+			combo:addOptionWithData(filters[i].label, filters[i].key)
 		end
 	end
 	combo.selected = 1
@@ -416,8 +416,7 @@ function GlobalStorageSiK.TerminalConfig.renderNodeContentsBlock(scroll, termina
 			UI.Scroll.addChild(scroll, widget)
 		end
 	end
-	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
-	local payload = cache[node.id]
+	local payload = GlobalStorageSiK.Client.getNodeContents(node.id, terminal.playerNum)
 	local source = payload and payload.source or "empty"
 	local rows = payload and payload.rows or {}
 	local sourceLbl

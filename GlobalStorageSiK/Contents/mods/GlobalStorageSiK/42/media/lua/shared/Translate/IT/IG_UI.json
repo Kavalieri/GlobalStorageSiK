@@ -1,4 +1,10 @@
 {
+	"IGUI_GS_RoutingTimeout": "No confirmation received. Your draft is kept; you can retry.",
+	"IGUI_GS_RoutingSaved": "Configuration saved and confirmed.",
+	"IGUI_GS_RoutingRejected": "Configuration rejected: %1. Your draft is preserved.",
+	"IGUI_GS_RoutingSortStopped": "Auto Sort stopped: configuration changed. Start it again to use the confirmed rules.",
+	"IGUI_GS_RemoteGroupExpand": "Expand to inspect a specific item.",
+	"IGUI_GS_FoodMixed": "mixed states",
 	"IGUI_GS_CheckingAccess": "Checking access",
 	"IGUI_GS_LoadingInventory": "Loading inventory",
 	"IGUI_GS_ValidatingInventory": "Validating inventory",

@@ -43,27 +43,49 @@ end
 
 ---@return boolean
 function GlobalStorageSiK.NetTrace.isEnabled()
-	return GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugMode()
-		and GlobalStorageSiK.Sandbox.debugMode() == true
+	local sandbox = GlobalStorageSiK.Sandbox
+	return sandbox and sandbox.debugMode() == true
+		and sandbox.debugCategoryEnabled("Network") == true
 end
 
---- Escribe traza NetTrace (INFO en servidor dedicado; DEBUG en cliente).
+--- Traza agregada DEBUG en todos los modos; nunca depende del nivel DETAIL.
 ---@param line string
 ---@param detail string|nil
 function GlobalStorageSiK.NetTrace.write(line, detail)
 	if not GlobalStorageSiK.NetTrace.isEnabled() then
 		return
 	end
-	-- Categoria "Network" tambien aqui, no solo en el branch DEBUG de abajo:
-	-- en servidor dedicado esta traza sale por Log.info (siempre visible,
-	-- no depende de DebugMode) para que aparezca en consola sin cliente
-	-- conectado - pero debe seguir respetando el interruptor de categoria,
-	-- si no, apagar "Red" en el sandbox no calla nada en ese caso concreto.
-	if GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugCategoryEnabled
-			and not GlobalStorageSiK.Sandbox.debugCategoryEnabled("Network") then
-		return
+	-- Keep the combined record below Log.writeNormal's 1024-byte limit.
+	GlobalStorageSiK.Log.debug("NetTrace", tostring(line):sub(1, 240),
+		detail ~= nil and tostring(detail):sub(1, 720) or nil)
+end
+
+-- Read a fixed scalar allowlist: diagnostic cost cannot scale with rows,
+-- inventory units or nested rule payloads. Field order is stable on Kahlua.
+local SUMMARY_KEYS = {
+	"requestId", "ok", "reason", "networkId", "nodeId", "zoneId", "openSeq", "operation",
+	"expectedRoutingRevision", "routingRevision", "requestSeq", "configEpoch",
+	"baseRevision", "routingConfigRevision", "inventoryRevision", "catalogScope",
+	"jobType", "jobState", "withdrawId", "fullType", "amount",
+	"requested", "moved", "notModified", "catalogDelta", "manifestNotModified",
+	"nodeRevision", "nodeViewSeq", "knownNodeRevision", "manifestToken",
+}
+local function commandSummary(payload)
+	local parts = {}
+	local message = payload.message
+	if type(message) == "table" then message = message.__gsI18nKey end
+	if type(message) == "string" then
+		parts[#parts + 1] = "message=" .. message:gsub("[%c]", " "):sub(1, 120)
 	end
-	GlobalStorageSiK.Log.detail("NetTrace", line, detail)
+	for i = 1, #SUMMARY_KEYS do
+		local key = SUMMARY_KEYS[i]
+		local value = payload[key]
+		local kind = type(value)
+		if kind == "string" or kind == "number" or kind == "boolean" then
+			parts[#parts + 1] = key .. "=" .. tostring(value):gsub("[%c]", " "):sub(1, 120)
+		end
+	end
+	return table.concat(parts, " ")
 end
 
 --- Milisegundos monótonos para medir latencia.
@@ -234,20 +256,18 @@ function GlobalStorageSiK.NetTrace.logClientSend(command, args)
 	if not GlobalStorageSiK.NetTrace.isEnabled() or isNoisy(command) then
 		return
 	end
-	args = args or {}
+	args = type(args) == "table" and args or {}
 	GlobalStorageSiK.NetTrace._seqClientSend = GlobalStorageSiK.NetTrace._seqClientSend + 1
 	local ts = GlobalStorageSiK.NetTrace.nowMs()
-	args._gsTraceSeq = GlobalStorageSiK.NetTrace._seqClientSend
-	args._gsClientTs = ts
 	GlobalStorageSiK.NetTrace.write(string.format(
 		"C->S #%d ts=%s cmd=%s",
 		GlobalStorageSiK.NetTrace._seqClientSend,
 		GlobalStorageSiK.NetTrace.ts(),
 		tostring(command)
-	), GlobalStorageSiK.NetTrace.summarize(args))
+	), commandSummary(args))
 end
 
---- Servidor ← cliente (incluye catálogo completo).
+--- Servidor ← cliente, sin capturar catalogos ni recorrer el registro.
 ---@param player IsoPlayer|nil
 ---@param command string
 ---@param args table|nil
@@ -255,7 +275,7 @@ function GlobalStorageSiK.NetTrace.logServerRecv(player, command, args)
 	if not GlobalStorageSiK.NetTrace.isEnabled() or isNoisy(command) then
 		return
 	end
-	args = args or {}
+	args = type(args) == "table" and args or {}
 	GlobalStorageSiK.NetTrace._seqServerRecv = GlobalStorageSiK.NetTrace._seqServerRecv + 1
 	local user = player and player.getUsername and player:getUsername() or "?"
 	local clientTs = tonumber(args._gsClientTs)
@@ -270,17 +290,10 @@ function GlobalStorageSiK.NetTrace.logServerRecv(player, command, args)
 		tostring(command),
 		traceSeq,
 		deltaText
-	), GlobalStorageSiK.NetTrace.summarize(args))
-	local snapshot = GlobalStorageSiK.NetTrace.buildCatalogSnapshot()
-	GlobalStorageSiK.NetTrace.logCatalog(snapshot, string.format(
-		"S CATALOG ts=%s cmd=%s user=%s",
-		GlobalStorageSiK.NetTrace.ts(),
-		tostring(command),
-		tostring(user)
-	))
+	), commandSummary(args))
 end
 
---- Servidor → cliente (solo línea; catálogo ya volcado en S<-C).
+--- Servidor → cliente; resultado y causa agregados en la misma linea.
 ---@param player IsoPlayer|nil
 ---@param command string
 ---@param payload table|nil
@@ -290,16 +303,15 @@ function GlobalStorageSiK.NetTrace.logServerSend(player, command, payload)
 	end
 	GlobalStorageSiK.NetTrace._seqServerSend = GlobalStorageSiK.NetTrace._seqServerSend + 1
 	local user = player and player.getUsername and player:getUsername() or "?"
-	payload = payload or {}
-	payload._gsServerTs = GlobalStorageSiK.NetTrace.nowMs()
-	payload._gsServerSendSeq = GlobalStorageSiK.NetTrace._seqServerSend
+	payload = type(payload) == "table" and payload or {}
 	GlobalStorageSiK.NetTrace.write(string.format(
-		"S->C #%d ts=%s user=%s cmd=%s",
+		"S->C #%d ts=%s user=%s cmd=%s decision=%s",
 		GlobalStorageSiK.NetTrace._seqServerSend,
 		GlobalStorageSiK.NetTrace.ts(),
 		tostring(user),
-		tostring(command)
-	), GlobalStorageSiK.NetTrace.summarize(payload))
+		tostring(command),
+		payload.ok == true and "ACK" or payload.ok == false and "NACK" or "state"
+	), commandSummary(payload))
 end
 
 --- Cliente ← servidor.
@@ -309,7 +321,7 @@ function GlobalStorageSiK.NetTrace.logClientRecv(command, args)
 	if not GlobalStorageSiK.NetTrace.isEnabled() or isNoisy(command) then
 		return
 	end
-	args = args or {}
+	args = type(args) == "table" and args or {}
 	GlobalStorageSiK.NetTrace._seqClientRecv = GlobalStorageSiK.NetTrace._seqClientRecv + 1
 	local serverTs = tonumber(args._gsServerTs)
 	local delta = serverTs and (GlobalStorageSiK.NetTrace.nowMs() - serverTs) or nil
@@ -322,13 +334,5 @@ function GlobalStorageSiK.NetTrace.logClientRecv(command, args)
 		tostring(command),
 		sendSeq,
 		deltaText
-	), GlobalStorageSiK.NetTrace.summarize(args))
-	if command == "terminalState" or command == "recoveryNetworks" or command == "terminalManifest" then
-		local snapshot = GlobalStorageSiK.NetTrace.buildCatalogSnapshot()
-		GlobalStorageSiK.NetTrace.logCatalog(snapshot, string.format(
-			"C LOCAL CATALOG ts=%s after=%s",
-			GlobalStorageSiK.NetTrace.ts(),
-			tostring(command)
-		))
-	end
+	), commandSummary(args))
 end

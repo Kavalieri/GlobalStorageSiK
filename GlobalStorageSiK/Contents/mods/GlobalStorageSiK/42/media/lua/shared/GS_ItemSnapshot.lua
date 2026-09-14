@@ -10,6 +10,7 @@ require "GS_I18n"
 require "GS_FluidTaxonomy"
 require "GS_NativeProduct"
 require "GS_RecordedMedia"
+require "GS_FoodPresentation"
 
 -- El publicador forma parte del runtime completo, pero ItemSnapshot tambien se
 -- carga aislado en harnesses y consumidores de la API shared. Intentar cargarlo
@@ -273,13 +274,14 @@ local function foodState(item)
 		customName = customName,
 	}
 	state.iconVariant = foodIconVariant(item, state)
+	state.nameState = GlobalStorageSiK.FoodPresentation.captureNameState(item,state,boolState,scalarState)
 	local signature = string.format(
 		"food:fresh=%s;cooked=%s;burnt=%s;frozen=%s;rotten=%s;uses=%s;extra=%s;spices=%s;name=%s;icon=%s",
 		booleanSignature(state.fresh), booleanSignature(state.cooked), booleanSignature(state.burnt),
 		booleanSignature(state.frozen), booleanSignature(state.rotten),
 		tostring(uses or ""), encodeStateList(extraItems), encodeStateList(spices),
 		tostring(customName or ""), tostring(state.iconVariant or "?"))
-	return signature, state
+	return signature .. ";naming=" .. tostring(state.nameState or "?"), state
 end
 
 local function actualWeight(item)
@@ -370,6 +372,30 @@ local function looksRecordedMedia(item, fullType)
 		or name:find("dvd_disc", 1, true) == 1 or name:find("cd_disc", 1, true) == 1
 end
 
+-- Change detector for loaded containers. Uses the same mutable state readers
+-- as capture, without catalog rows, taxonomy publication, unit-detail maps or
+-- recursive snapshot comparison. It is a hint; transfers still revalidate the
+-- exact live item and container. No shared vanilla dirty flag is consumed.
+function GlobalStorageSiK.ItemSnapshot.probeItem(item)
+	if not item or not item.getFullType then return nil end
+	local foodKey = foodState(item)
+	local conditionKey = conditionState(item)
+	local fluid = GlobalStorageSiK.FluidTaxonomy.inspect and GlobalStorageSiK.FluidTaxonomy.inspect(item)
+	local fields = { item:getFullType(), tostring(scalarState(item, "getID")),
+		tostring(actualWeight(item)), tostring(conditionKey), tostring(foodKey),
+		tostring(fluid and fluid.signature), tostring(fluid and fluid.amount), tostring(fluid and fluid.capacity),
+		tostring(readWorldSprite(item)), tostring(literatureTitleFromItem(item)),
+		tostring(GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)),
+		tostring(scalarState(item, "getMediaType")),
+		tostring(scalarState(item, "getDisplayName")) }
+	local parts = {}
+	for i = 1, #fields do
+		local value = tostring(fields[i])
+		parts[i] = tostring(#value) .. ":" .. value
+	end
+	return table.concat(parts)
+end
+
 local function metadataForItem(item, fullType)
 	local worldSprite = readWorldSprite(item)
 	local cacheKey = fullType .. "\31" .. tostring(worldSprite or "")
@@ -430,6 +456,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 	-- clave compuesta solo decide como se agrupan las filas, nunca que se
 	-- transfiere.
 	local mediaIndex = GlobalStorageSiK.ItemSnapshot.recordedMediaIndexFromItem(item)
+	local mediaType = mediaIndex ~= nil and scalarState(item, "getMediaType") or nil
 	local mediaTitle = recordedMediaTitleFromItem(item)
 	local mediaCodes = mediaIndex ~= nil and recordedMediaCodes(item) or nil
 	local worldSprite = readWorldSprite(item)
@@ -526,6 +553,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 			numberOfPages = metadata.numberOfPages,
 			literatureTitle = literatureTitle,
 			mediaIndex = mediaIndex,
+			mediaType = mediaType,
 			mediaTitle = mediaTitle,
 			mediaCodes = mediaCodes,
 			dynamicSignature = dynamicSignature,
@@ -589,6 +617,7 @@ function GlobalStorageSiK.ItemSnapshot.addItem(byType, item, knownFullType)
 				condition = condition,
 				conditionMax = conditionMax,
 				mediaIndex = mediaIndex,
+			mediaType = mediaType,
 				mediaTitle = mediaTitle,
 				mediaCodes = mediaCodes,
 			}
@@ -638,6 +667,7 @@ function GlobalStorageSiK.ItemSnapshot.mergeMaps(target, source)
 				numberOfPages = row.numberOfPages,
 				literatureTitle = row.literatureTitle,
 				mediaIndex = row.mediaIndex,
+				mediaType = row.mediaType,
 				mediaTitle = row.mediaTitle,
 				mediaCodes = row.mediaCodes,
 				dynamicSignature = row.dynamicSignature,

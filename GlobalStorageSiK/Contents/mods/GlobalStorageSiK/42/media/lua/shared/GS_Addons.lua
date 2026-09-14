@@ -401,8 +401,8 @@ function GlobalStorageSiK.Addons.install(player, networkId, anchor, addonId)
 		at = (getTimestamp and getTimestamp()) or 0,
 		itemType = moduleItemType,
 	}
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	GlobalStorageSiK.Log.debug("Addons", "installOk",
 		"addonId=" .. tostring(addonId) .. " key=" .. tostring(key) .. " recordedItemType=" .. tostring(moduleItemType))
@@ -479,8 +479,8 @@ function GlobalStorageSiK.Addons.uninstall(player, networkId, anchor, addonId)
 	-- La desinstalacion es transaccional: el registro solo desaparece despues
 	-- de que la unidad exacta haya sido entregada y sincronizada con exito.
 	net.addonInstalls[key][addonId] = nil
-	if ModData and ModData.transmit then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_AddonRemovedMsg")
 end

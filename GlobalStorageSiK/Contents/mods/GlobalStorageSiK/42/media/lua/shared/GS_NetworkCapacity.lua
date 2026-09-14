@@ -27,14 +27,14 @@ GlobalStorageSiK.NetworkCapacity = {}
 ---@return number used
 ---@return number|nil capacity
 ---@return number personalBonus  -- 0 si no hay player o el contenedor no expone getEffectiveCapacity
-local function readContainerWeights(container, player)
+local function readContainerWeights(container, player, confirmedWeight)
 	if not container then
 		return 0, nil, 0
 	end
-	local used = 0
+	local used = confirmedWeight or 0
 	local capacity = nil
 	local personalBonus = 0
-	if container.getWeight then
+	if confirmedWeight == nil and container.getWeight then
 		local ok, w = pcall(function()
 			return container:getWeight()
 		end)
@@ -42,7 +42,7 @@ local function readContainerWeights(container, player)
 			used = w
 		end
 	end
-	if used <= 0 and container.getContentsWeight then
+	if confirmedWeight == nil and used <= 0 and container.getContentsWeight then
 		local okAlt, wAlt = pcall(function()
 			return container:getContentsWeight()
 		end)
@@ -50,7 +50,7 @@ local function readContainerWeights(container, player)
 			used = wAlt
 		end
 	end
-	if used <= 0 and container.getItems then
+	if confirmedWeight == nil and used <= 0 and container.getItems then
 		local okItems, items = pcall(function()
 			return container:getItems()
 		end)
@@ -128,9 +128,11 @@ end
 ---@param player IsoPlayer|nil  -- si se pasa, suma tambien su bonus personal real (Organizado/etc.)
 ---@return number used
 ---@return number|nil effectiveCapacity
-local function accumulateNode(totals, node, liveEntry, player)
+local function accumulateNode(totals, node, liveEntry, player, confirmedOnly)
 	if liveEntry and liveEntry.container then
-		local used, capacity, personalBonus = readContainerWeights(liveEntry.container, player)
+		local used, capacity, personalBonus = readContainerWeights(liveEntry.container, player,
+			confirmedOnly and (tonumber(node.snapshotWeight) or 0) or nil)
+		if confirmedOnly and node.snapshotSchema ~= 1 then totals.partialEstimate = true end
 		totals.usedWeight = totals.usedWeight + used
 		if capacity then
 			totals.totalCapacity = totals.totalCapacity + capacity
@@ -180,7 +182,8 @@ local function accumulateNode(totals, node, liveEntry, player)
 
 	local used = 0
 	if node.itemSnapshot then
-		used = GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(node.itemSnapshot)
+		used = confirmedOnly and (tonumber(node.snapshotWeight) or 0)
+			or GlobalStorageSiK.NetworkCapacity.estimateSnapshotWeight(node.itemSnapshot)
 		totals.usedWeight = totals.usedWeight + used
 		totals.partialEstimate = true
 	else
@@ -247,7 +250,7 @@ end
 ---@param networkId string|nil
 ---@param player IsoPlayer|nil
 ---@return table
-function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
+function GlobalStorageSiK.NetworkCapacity.compute(networkId, player, confirmedOnly)
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
 	local totals = {
 		usedWeight = 0,
@@ -283,7 +286,7 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local zone = registry.zones and registry.zones[node.zoneId]
 			if zone and zone.networkId == networkId and zone.enabled ~= false then
 				counted[node.id] = true
-				local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, node, liveById[node.id], player)
+				local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, node, liveById[node.id], player, confirmedOnly)
 				recordScope(totals, node, nodeUsed, nodeCap, bonus, partial)
 			end
 		end
@@ -296,7 +299,7 @@ function GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
 			local entry = network.containers[i]
 			if entry and entry.id and not counted[entry.id] then
 				counted[entry.id] = true
-				local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, entry, liveById[entry.id], player)
+					local nodeUsed, nodeCap, bonus, partial = accumulateNode(totals, entry, liveById[entry.id], player, confirmedOnly)
 				recordScope(totals, entry, nodeUsed, nodeCap, bonus, partial)
 			end
 		end
@@ -353,11 +356,11 @@ end
 ---@param container ItemContainer|nil
 ---@param player IsoPlayer|nil
 ---@return table|nil
-function GlobalStorageSiK.NetworkCapacity.computeNode(container, player)
+function GlobalStorageSiK.NetworkCapacity.computeNode(container, player, confirmedWeight)
 	if not container then
 		return nil
 	end
-	local used, capacity, personalBonus = readContainerWeights(container, player)
+	local used, capacity, personalBonus = readContainerWeights(container, player, confirmedWeight)
 	if not capacity or capacity <= 0 then
 		return nil
 	end

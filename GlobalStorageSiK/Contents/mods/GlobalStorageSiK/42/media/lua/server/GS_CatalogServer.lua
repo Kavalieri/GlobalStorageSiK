@@ -9,7 +9,7 @@ local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
 local TIMEOUT_MS = 60000
 local RESPONSE_DEADLINE_MS = 10000
-local counters = {full=0, delta=0, notModified=0, details=0, completed=0, discarded=0, rejected=0, coalesced=0}
+local counters = {full=0, delta=0, notModified=0, details=0, manifests=0, nodes=0, completed=0, discarded=0, rejected=0, coalesced=0}
 local lastDiscardLog = 0
 local lastProgressLog = 0
 local function now() return getTimestampMs and getTimestampMs() or 0 end
@@ -33,6 +33,16 @@ local function release(player, reason)
     end
 end
 function Server.configure(value) context = value end
+function Server.valid(player,session,payload) return context.valid(player,session,payload) end
+function Server.replicaReady(player,revision,scope)
+    local session=sessions[player]
+    if not session or not session.replicaEpoch or jobs[player] then return false end
+    if not context.valid(player,session,{catalogScope=scope}) then return false end
+    session.openUi=false
+    session.confirmed={revision=revision,scope=scope}
+    session.forceFull=nil;session.recoveryUsed=nil
+    return true
+end
 function Server.isOpening(player) return sessions[player] and sessions[player].openUi == true end
 function Server.hasJob(player) return jobs[player] ~= nil end
 function Server.base(player)
@@ -63,6 +73,7 @@ function Server.clear(player)
     local session = sessions[player]
     retainedBytes = math.max(0, retainedBytes-(session and session.baseBytes or 0))
     sessions[player] = nil
+    if context and context.closed then context.closed(player) end
     for i=#order,1,-1 do if order[i]==player then table.remove(order,i) end end
     if cursor>#order then cursor=0 end
 end
@@ -82,6 +93,7 @@ end
 local function recoverOnce(player, session, reason)
     if session.recoveryUsed then return end
     session.recoveryUsed=true
+    if session.replicaEpoch and context.nodeRecover and context.nodeRecover(player,reason) then return end
     if context.recover then context.recover(player,session.networkId,reason)
     elseif context.stale then context.stale(player,session.networkId) end
 end
@@ -91,7 +103,7 @@ local function failure(player, reason, batchId)
     local active = jobs[player]
     if active and active.envelope then batchId=active.envelope.batchId
     else serial=serial+1; batchId=serial end
-    local recoverable = session.confirmed ~= nil and reason ~= "catalog_access_changed"
+    local recoverable = (session.confirmed ~= nil or session.replicaEpoch ~= nil) and reason ~= "catalog_access_changed"
     if recoverable then release(player,reason); session.forceFull=true
     else
         release(player,reason)
@@ -104,6 +116,7 @@ local function failure(player, reason, batchId)
     log("failed", "batch=" .. tostring(batchId) .. " reason=" .. tostring(reason)
         .. " recoverable=" .. tostring(recoverable))
 end
+function Server.fail(player,reason) failure(player,reason,serial) end
 local function prune()
     local live, retired = {}, {}
     context.visit(function(player) live[player]=true end)
@@ -146,6 +159,7 @@ function Server.begin(player, confirmation)
         jobs[player]=active
         log("resumed",description(active.envelope).." phase=preparation reason=reopen")
     end
+    if context.opened then context.opened(player,confirmation) end
     local ok=send(player,"terminalOpenAck",confirmation)
     if not ok then
         Server.clear(player)
@@ -161,7 +175,7 @@ local function copyMetadata(value, depth, active)
     active[value]=true
     local result={}
     for key, child in pairs(value) do
-        if depth==0 and (key=="items" or key=="changedRows") then result[key]=child
+        if depth==0 and (key=="items" or key=="changedRows" or key=="nodeSnapshot") then result[key]=child
         else result[key]=copyMetadata(child,depth+1,active) end
     end
     active[value]=nil
@@ -206,10 +220,11 @@ local function queue(player, payload, rows, builder)
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
-        detail=payload.catalogDetail==true,
+        detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
     retainedBytes=retainedBytes+4096
-    local kind=payload.catalogDetail and "details" or payload.catalogDelta and "delta"
+    local kind=payload.catalogNode and "nodes" or payload.catalogManifest and "manifests"
+        or payload.catalogDetail and "details" or payload.catalogDelta and "delta"
         or payload.notModified and "notModified" or "full"
     jobs[player].kind=kind
     counters[kind]=counters[kind]+1
@@ -258,7 +273,7 @@ function Server.receipt(player,payload)
         return
     end
     if job.builder or job.encoder or job.framer or job.nextPart<=meta.total then discard("premature"); return end
-    if not job.detail then
+    if not job.detail and not job.nodeTransfer then
         retainedBytes=math.max(0,retainedBytes-(session.baseBytes or 0))
         session.baseBytes=job.baseEstimate or 0
         retainedBytes=retainedBytes+session.baseBytes
@@ -268,10 +283,12 @@ function Server.receipt(player,payload)
         session.recoveryUsed=nil
     end
     counters.completed=counters.completed+1
+    if job.nodeTransfer then session.recoveryUsed=nil end
     log("completed",description(meta) .. " kind=" .. tostring(job.kind) .. " rows=" .. tostring(job.rows)
         .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs)
         .. " elapsedMs=" .. tostring(now()-job.startedAt))
     release(player)
+    if context.received then context.received(player,job.payload) end
 end
 local function encodeStep(player,job,session)
     local started=now()
@@ -299,7 +316,7 @@ local function encodeStep(player,job,session)
         job.framer,reason=Codec.beginFraming(encoded,job.envelope)
         if not job.framer then failure(player,reason,job.envelope.batchId);return end
         job.framingBaseBytes=job.bytes
-        job.baseEstimate=job.detail and 0 or math.min(reservation,encoded.totalBytes*2+job.rows*256)
+        job.baseEstimate=(job.detail or job.nodeTransfer) and 0 or math.min(reservation,encoded.totalBytes*2+job.rows*256)
         log("encoded",description(job.envelope) .. " bytes=" .. tostring(encoded.totalBytes)
             .. " parts=" .. tostring(#encoded.chunks) .. " encodeMs=" .. tostring(job.encodeMs)
             .. " elapsedMs=" .. tostring(now()-job.startedAt))

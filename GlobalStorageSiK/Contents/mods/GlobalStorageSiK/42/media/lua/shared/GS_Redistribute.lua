@@ -6,6 +6,7 @@
 	afinidad taxonómica canónica; fallback controlado a «cualquiera».
 ]]
 
+require "GS_RoutingProtocol"
 require "GS_Network"
 require "GS_Router"
 require "GS_InventorySync"
@@ -275,6 +276,7 @@ local function beginSession(player, networkId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	return {
 		networkId = networkId,
+		routingRevision = GlobalStorageSiK.RoutingProtocol.revision(networkId),
 		liveNodes = liveNodes,
 		zonePriorityOf = buildZonePriorityLookup(registry, networkId),
 		phase = "index",
@@ -293,6 +295,9 @@ end
 -- A job yields between batches. Re-resolve membership, permissions, rules and
 -- physical identity before using its captured item references again.
 local function revalidateSession(session, player)
+	if session.routingRevision ~= GlobalStorageSiK.RoutingProtocol.revision(session.networkId) then
+		return "routing_changed"
+	end
 	if not GlobalStorageSiK.Permissions.canAccess(player, session.networkId) then return "no_permission" end
 	if GlobalStorageSiK.Permissions.shouldEnforce()
 		and not GlobalStorageSiK.Permissions.isAdminPlayer(player, session.networkId) then return "no_permission" end
@@ -360,6 +365,7 @@ local function stepIndex(session, startedAt, pacing)
 end
 
 local function stepMoves(session, player, summary, startedAt, pacing)
+	local touched = {}
 	local inspected = 0
 	local maxMoves = pacing.maxMovesPerStep or 2
 	while session.nodeIndex <= #session.liveNodes
@@ -386,6 +392,8 @@ local function stepMoves(session, player, summary, startedAt, pacing)
 				local target, targetIndex, targetTier, targetReason = pickRedistributeTarget(item, nodeIndex, session, player)
 				if target and target.container and target.container ~= container then
 					if GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player) then
+						touched[fromLive.entry.id] = fromLive
+						touched[target.entry.id] = target
 						summary.moved = summary.moved + 1
 						summary.movedByTier = summary.movedByTier or {}
 						summary.movedByType = summary.movedByType or {}
@@ -412,6 +420,14 @@ local function stepMoves(session, player, summary, startedAt, pacing)
 				updateTypeCount(session, nodeIndex, fullType, -1)
 				updateAffinityCount(session, nodeIndex, item, -1)
 			end
+		end
+	end
+	summary.snapshotsUpdated, summary.touchedNodeIds = true, {}
+	for id, live in pairs(touched) do
+		summary.touchedNodeIds[#summary.touchedNodeIds + 1] = id
+		if GlobalStorageSiK.Index.syncNodeSnapshot(live.entry, live.container) ~= true then
+			summary.snapshotsUpdated = false
+			if GlobalStorageSiK.CatalogReconciler then GlobalStorageSiK.CatalogReconciler.markDirty(id, "autosort_capture_failed") end
 		end
 	end
 	return inspected, timeBudgetExceeded(startedAt, inspected, pacing)

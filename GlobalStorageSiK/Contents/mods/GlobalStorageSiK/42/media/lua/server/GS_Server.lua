@@ -14,6 +14,8 @@
 
 require "GS_Config"
 require "GS_TerminalCommandOrder"
+require "GS_RoutingTransactions"
+require "GS_WithdrawReceipts"
 
 require "GS_I18n"
 
@@ -44,6 +46,7 @@ require "GS_NetworkCapacity"
 require "GS_Power"
 
 require "GS_Transfer"
+require "GS_WorkTransfers"
 require "GS_FloorTransfers"
 require "GS_InventorySync"
 
@@ -256,6 +259,13 @@ local function invalidateCatalogCache(networkId)
 end
 
 local function queuePreparedCatalog(player,payload,base)
+    if GlobalStorageSiK.NodeCatalogServer and GlobalStorageSiK.NodeCatalogServer.active(player) then
+        local accepted,reason=GlobalStorageSiK.NodeCatalogServer.queueState(player,payload)
+        if not accepted and reason~="manifest_negotiation" and reason~="catalog_inflight" then
+            GlobalStorageSiK.CatalogServer.fail(player,reason)
+        end
+        return accepted,reason
+    end
     local networkId,scope,revision=payload.networkId,payload.catalogScope,payload.inventoryRevision
     base=base or GlobalStorageSiK.CatalogServer.base(player)
     if base and (base.scope~=scope or base.revision>revision) then base=nil end
@@ -287,10 +297,9 @@ end
 
 local function shouldScanOnOpen(networkId)
 	local hasAny, complete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
-	local meta, age = snapshotStatus(networkId)
 	if hasAny and not complete then return true, "incomplete_snapshot" end
-	if not meta then return true, "unknown_age" end
-	if meta.potentiallyStale == true then return true, "potentially_stale" end
+	-- Persistent confirmed containers remain useful across closing/restarting.
+	-- Loaded-node probes own external detection; opening is not an audit timer.
 	return false, "confirmed_snapshot"
 end
 
@@ -401,19 +410,13 @@ function GlobalStorageSiK.Server.markInventoryDirty(networkId, player, options)
 	elseif preciseReconciled then
 		-- The active scan retains its budget and will certify this revision while
 		-- preserving the exact node snapshots already refreshed by Transfer.
-	elseif (GlobalStorageSiK.ZoneScanJob and GlobalStorageSiK.ZoneScanJob.isActive(networkId))
-		or pendingSnapshotSync[networkId] then
-		-- Si ya hay un scan, cada mutación desplaza la recaptura hasta que la red
-		-- lleve el quiet period completo. Fuera de un scan no se crea trabajo
-		-- global: el snapshot dirigido del nodo es suficiente.
-		scheduleSnapshotSync(networkId, player, revision)
 	elseif ok and previouslyStable and options.snapshotsUpdated == true then
-		-- Exact transfers refreshed every touched node. Advance the baseline,
-		-- never its capture time: unrelated physical changes still expire by age.
+		-- Legacy aggregate selectors may advance only an already complete base.
 		GlobalStorageSiK.Index.setSnapshotRevision(networkId, revision)
-	elseif options.snapshotsUpdated == true then
-		-- A precise delta cannot certify an already incomplete baseline.
-		scheduleSnapshotSync(networkId, player, revision)
+	elseif options.snapshotsUpdated ~= true and GlobalStorageSiK.CatalogReconciler then
+		for _, nodeId in ipairs(options.touchedNodeIds or {}) do
+			GlobalStorageSiK.CatalogReconciler.markDirty(nodeId, "directed_capture_failed")
+		end
 	end
 end
 
@@ -522,6 +525,7 @@ local function gsSendServerCommand(player, command, payload)
 	if command == "actionResult" then
 		payload = payload or {}
 		payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+		GlobalStorageSiK.WithdrawReceipts.capture(player,payload)
 		if payload.jobType == "zoneScan" and player and payload.networkId then
 			payload.openSeq = GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)
 			payload.catalogScope = catalogScopeSignature(player, payload.networkId)
@@ -548,19 +552,6 @@ local function getDefaultNetworkId()
 
 	return GlobalStorageSiK.Network.getDefaultNetworkId()
 
-end
-
-
-
---- Cuenta tipos en snapshot de nodo.
----@param snapshot table|nil
----@return number
-local function countSnapshotTypes(snapshot)
-	local n = 0
-	for _ in pairs(snapshot or {}) do
-		n = n + 1
-	end
-	return n
 end
 
 
@@ -597,7 +588,9 @@ local function serializeNodes(networkId, player)
 				discoveredAtMs = n.discoveredAtMs,
 				lastSeenMs = n.lastSeenMs,
 				priority = n.priority or 50,
-				itemTypeCount = countSnapshotTypes(n.itemSnapshot),
+				itemTypeCount = tonumber(n.snapshotRows) or 0,
+				contentRevision = tonumber(n.contentRevision) or 0,
+				snapshotAvailability = n.snapshotAvailability or "unknown",
 				x = n.x,
 				y = n.y,
 				z = n.z,
@@ -778,8 +771,8 @@ local function sanitizePersistedRules(registry, networkId)
 			.. " version=" .. tostring(LEGACY_RULE_SANITIZER_VERSION)
 			.. " status=withheld remaining=" .. tostring(post.matches))
 	end
-	if ModData and ModData.transmit and GlobalStorageSiK.MODDATA_KEY then
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	if GlobalStorageSiK.isAuthoritative() then
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 	end
 	if (first.changed or second.changed or markerWritten or previousMarker ~= nil)
 		and GlobalStorageSiK.RegistryStore
@@ -832,7 +825,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 	-- pestaña Almacén (capacity, mas abajo) - misma llamada, ya trait-aware
 	-- (personalBonus del player) y capacidad-custom-aware (container:getCapacity()
 	-- real, cualquier mod de expansion incluido), nunca dos pasadas.
-	local capacityStats = GlobalStorageSiK.NetworkCapacity.compute(networkId, player)
+	local capacityStats = GlobalStorageSiK.NetworkCapacity.compute(networkId, player, true)
 	for i = 1, #nodesList do
 		local perNode = capacityStats.perNode and capacityStats.perNode[nodesList[i].id]
 		nodesList[i].occupancyPercent = perNode and perNode.percent or nil
@@ -858,6 +851,8 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 		networkId = networkId,
 
 		networkName = GlobalStorageSiK.Network.getDisplayName(networkId),
+		configEpoch = GlobalStorageSiK.RoutingTransactions.epoch(player),
+		routingRevision = GlobalStorageSiK.RoutingProtocol.revision(networkId),
 
 		powered = GlobalStorageSiK.Power.networkPowered(networkId),
 
@@ -1099,7 +1094,8 @@ end
 ---@param player IsoPlayer
 ---@param args table|nil
 local function applyAccessHints(player, args)
-	args = args or {}
+	if args == nil then args = {} end
+	if type(args) ~= "table" or getmetatable(args) ~= nil then return end
 	local proxRange = GlobalStorageSiK.Sandbox.getTerminalProximityRange()
 	if args.terminalHint and GlobalStorageSiK.TerminalRegistry.applyPlayerTerminalHint then
 		GlobalStorageSiK.TerminalRegistry.applyPlayerTerminalHint(player, args.terminalHint, proxRange)
@@ -1235,7 +1231,7 @@ local function addZone(zone)
 
 	registry.zones[zone.id] = zone
 
-	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	GlobalStorageSiK.notifyRegistryChanged(zone.networkId)
 
 	GlobalStorageSiK.Log.debug("Zones", "addZone OK",
 		"id=" .. tostring(zone.id) .. " name=" .. tostring(zone.name)
@@ -1301,7 +1297,7 @@ local function registerContainer(entry, networkId)
 
 	table.insert(containers, entry)
 
-	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	GlobalStorageSiK.notifyRegistryChanged(networkId)
 
 	return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerMarkedMsg")
 
@@ -1339,7 +1335,7 @@ local function unregisterContainer(containerId, networkId)
 
 			table.remove(containers, index)
 
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			GlobalStorageSiK.notifyRegistryChanged(networkId)
 
 			return true, GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerUnmarkedMsg")
 
@@ -1452,7 +1448,7 @@ local function checkMissingTerminalHere(player)
 		GlobalStorageSiK.Log.warn("Server", "autoSuspendMissingTerminal",
 			string.format("%d,%d,%d network=%s user=%s",
 				known.x, known.y, known.z, tostring(known.networkId), player:getUsername()))
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(known.networkId)
 	end
 	return "terminal_missing_here"
 end
@@ -1691,36 +1687,6 @@ local function suggestNativePathFromSnapshot(rows)
 	return best
 end
 
---- Obtiene filas de inventario de un nodo (vivo o snapshot).
----@param node table
----@param networkId string
----@return table[] rows
----@return string source live|snapshot|empty
---- @return table rows
---- @return string source
---- @return ItemContainer|nil container  -- solo en la rama "live" - dev26
----   ronda 4, el indicador de ocupacion del editor de contenedor reutiliza
----   este mismo objeto ya resuelto en vez de buscarlo otra vez.
-local function resolveNodeContents(node, networkId)
-	if not node then
-		return {}, "empty", nil
-	end
-	local obj = GlobalStorageSiK.Network.findWorldObject(node)
-	local container = obj and GlobalStorageSiK.Utils.getObjectContainer(obj, node.containerIndex) or nil
-	if container then
-		local snapshot = GlobalStorageSiK.ItemSnapshot.fromContainer(container)
-		local changed = GlobalStorageSiK.Index.snapshotSignature(node.itemSnapshot)
-			~= GlobalStorageSiK.Index.snapshotSignature(snapshot)
-		node.itemSnapshot = snapshot
-		if changed then GlobalStorageSiK.Index.bumpInventoryRevision(networkId) end
-		return GlobalStorageSiK.ItemSnapshot.toRows(snapshot), "live", container
-	end
-	if node.itemSnapshot then
-		return GlobalStorageSiK.ItemSnapshot.toRows(node.itemSnapshot), "snapshot", nil
-	end
-	return {}, "empty", nil
-end
-
 local TRANSFER_BUSY_MSG = "Red ocupada: otra transferencia en curso. Reintenta."
 
 --- Itera jugadores conectados (servidor dedicado o anfitrión).
@@ -1787,59 +1753,19 @@ end
 GlobalStorageSiK.TerminalPlace = GlobalStorageSiK.TerminalPlace or {}
 GlobalStorageSiK.TerminalPlace._onAccessChanged = notifyTerminalAccessChanged
 
---- Busca un ítem por ID dentro de los contenedores vivos de una red - usado
---- por craftClaimItem para mover el ítem EXACTO que el cliente ya seleccionó
---- como input de receta (no uno cualquiera del mismo tipo), autoritativo en
---- servidor.
----@param networkId string|nil
----@param itemId number
----@return InventoryItem|nil item
----@return ItemContainer|nil container
-local function findNetworkItemById(networkId, itemId, player)
-	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
-		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
-	for i = 1, #live do
-		local container = live[i].container
-		if container and container.getItems then
-			local items = container:getItems()
-			if items then
-				for j = 0, items:size() - 1 do
-					local item = items:get(j)
-					if item and item.getID and item:getID() == itemId then
-						return item, container
-					end
-				end
-			end
-		end
-	end
-	return nil, nil
-end
-
---- Cuenta el total de items (sumando cantidades apiladas, ver getItems():
---- size() ya usado igual en el resto del fichero) en todos los contenedores
---- en vivo de una red - diagnostico pedido (2026-08-16, "posible dupeo, añade
---- trazas de items antes y despues en el almacenamiento") para poder
---- comparar a ojo el total ANTES de reclamar (craftAttemptStart) contra el
---- total DESPUES de que la receta termine (craftAttempt RESULT) y confirmar
---- que la diferencia es exactamente lo esperado (materiales consumidos
---- menos, resultado craftado si se deposito) - nunca mas de lo esperado.
----@param networkId string|nil
----@return number
+-- Diagnostic totals read committed node metadata, never physical inventories.
 local function countNetworkItems(networkId)
-	local total = 0
-	local live = GlobalStorageSiK.Network.getLiveContainers(networkId)
-	for i = 1, #live do
-		local container = live[i].container
-		if container and container.getItems then
-			local items = container:getItems()
-			if items and items.size then
-				total = total + items:size()
-			end
+	local registry=GlobalStorageSiK.Zones.getRegistry()
+	local total=0
+	for _,node in pairs(registry.nodes or {}) do
+		local zone=registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId==networkId and zone.enabled~=false
+			and node.enabled~=false and node.membership~="excluded" then
+			total=total+(tonumber(node.snapshotUnits) or 0)
 		end
 	end
 	return total
 end
-
 --- Ejecuta una transferencia con bloqueo exclusivo por red.
 ---@param player IsoPlayer
 ---@param networkId string|nil
@@ -1889,6 +1815,9 @@ end
 local function pushTerminalInventorySync(player, networkId, searchQuery)
 	if not player or not networkId then
 		return
+	end
+	if GlobalStorageSiK.NodeCatalogServer.active(player) then
+		return GlobalStorageSiK.Server.pushTerminalState(player,networkId,nil,searchQuery)
 	end
 	if GlobalStorageSiK.CatalogServer.hasJob(player) then
 		return queueTerminalRefresh(player, networkId, searchQuery, false)
@@ -2033,7 +1962,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	-- se estaba difundiendo una vez por cada lote ademas de los mensajes
 	-- vanilla por objeto. El terminal se actualiza por terminalState, debajo.
 	GlobalStorageSiK.Server.markInventoryDirty(networkId, actor, {
-		scheduleSnapshot = options.snapshotsUpdated ~= true,
+		scheduleSnapshot = false,
 		snapshotsUpdated = options.snapshotsUpdated == true,
 		touchedNodeIds = options.touchedNodeIds,
 	})
@@ -2097,12 +2026,21 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 			.. " watcherSyncs=" .. tostring(watcherCount))
 end
 
+-- Coalesced metadata notifications for direct WorkSession mutations. This does
+-- not capture content; the source/target snapshot was committed before calling.
+function GlobalStorageSiK.Server.notifyNodeMutation(player, networkId)
+	if player then queueTerminalRefresh(player, networkId, nil, false) end
+	pushTerminalStateToNetworkWatchers(player, networkId, nil)
+end
+
 --- Envía estado del terminal al cliente.
 ---@param openUi boolean|nil true solo tras openTerminal exitoso
 ---@param accessMode string|nil physical|wireless|bypass
 ---@param terminalAnchor table|nil { x, y, z } terminal usado en el servidor
 ---@param meta table|nil { openSeq = number }
 local function pushTerminalState(player, networkId, scanSummary, searchQuery, craftProbe, openUi, accessMode, terminalAnchor, meta)
+	if openUi~=true and GlobalStorageSiK.NodeCatalogServer.active(player)
+		and not GlobalStorageSiK.NodeCatalogServer.negotiated(player) then return end
 	if openUi ~= true and GlobalStorageSiK.CatalogServer.hasJob(player) then
 		return queueTerminalRefresh(player, networkId, searchQuery, true)
 	end
@@ -2136,6 +2074,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		-- Confirm authorization before catalog construction/serialization. This
 		-- is not an empty terminalState and cannot install an empty inventory.
 		local confirmed = {
+			manifestSchema=1,replicaEpoch=GlobalStorageSiK.RoutingTransactions.epoch(player),
 			playerNum=player:getPlayerNum(), openSeq=meta and meta.openSeq,
 			networkId=networkId, accessMode=accessMode,
 			catalogScope=catalogScopeSignature(player, networkId),
@@ -2145,12 +2084,9 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 			confirmedProximityRange=GlobalStorageSiK.Sandbox.getTerminalProximityRange(),
 			confirmedWirelessRange=GlobalStorageSiK.TerminalAccess.getWirelessRangeForNetwork(player, networkId, terminalAnchor),
 		}
-		if not GlobalStorageSiK.CatalogServer.begin(player, confirmed) then return end
-		if meta and meta.knownCatalogNetworkId==networkId then
-			GlobalStorageSiK.CatalogServer.restoreBase(player,
-				inventoryCatalogCache.get(catalogCacheKey(player,networkId,confirmed.catalogScope),meta.knownInventoryRevision),
-				meta.knownInventoryRevision,meta.knownCatalogScope)
-		end
+		GlobalStorageSiK.NetworkReadLoans.reconcileStored(player,networkId)
+		GlobalStorageSiK.CatalogServer.begin(player, confirmed)
+		return -- Cache negotiation follows the resolved and authorized identity ACK.
 	end
 	local requestMeta = meta and {
 		knownCatalogNetworkId = meta.knownCatalogNetworkId,
@@ -2171,8 +2107,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 		.. " notModified=" .. tostring(payload.notModified == true))
 	payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
 	payload.openUi = openUi == true
-	if openUi == true then
-		GlobalStorageSiK.NetworkReadLoans.reconcileStored(player, networkId)
+	if openUi == true or GlobalStorageSiK.CatalogServer.isOpening(player) then
 		payload.readLoans = GlobalStorageSiK.NetworkReadLoans.pending(player, networkId)
 	end
 	if meta and meta.openSeq then
@@ -2222,7 +2157,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 			payload.accessMode,
 			player
 		)
-		if openUi == true and GlobalStorageSiK.NetworkManager then
+		if (openUi == true or GlobalStorageSiK.CatalogServer.isOpening(player)) and GlobalStorageSiK.NetworkManager then
 			payload.networks = GlobalStorageSiK.NetworkManager.listForPlayer(player)
 			payload.activeNetworkId = GlobalStorageSiK.NetworkManager.getPlayerSessionNetwork(player)
 		end
@@ -3076,7 +3011,7 @@ local function handleInstallTerminalReader(player, args)
 	if GlobalStorageSiK.NetworkManager then
 		GlobalStorageSiK.NetworkManager.setPlayerSessionNetwork(player, nid)
 	end
-	ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+	GlobalStorageSiK.notifyRegistryChanged()
 	-- IMPORTANTE: el manifiesto se envia ANTES que "terminalRegistered". El
 	-- cliente reacciona a "terminalRegistered" abriendo la ventana al vuelo
 	-- (TerminalUI.requestOpen) - en MP real (latencia de red de verdad, a
@@ -3447,6 +3382,9 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 		and string.sub(args.withdrawId, 1, 96) or nil
 	local withdrawMeta = { withdrawId = withdrawId, transferOp = "withdrawItem" }
 	if not requireTerminalAccess(player, networkId, withdrawMeta) then return end
+	local decision,receipt=GlobalStorageSiK.WithdrawReceipts.begin(player,args,networkId)
+	if decision=="replayed" then gsSendServerCommand(player,"actionResult",receipt);return end
+	if decision~="new" then sendWithdrawFailure(player,networkId,withdrawId,nil,0,decision);return end
 	runLockedTransfer(player, networkId, "withdrawItem", function()
 		local sourceNodeId = args.sourceNodeId
 		if sourceNodeId ~= nil then
@@ -3696,6 +3634,7 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 			},
 		})
 	end, withdrawMeta)
+	GlobalStorageSiK.WithdrawReceipts.finish(player)
 end
 
 local function onClientCommand(module, command, player, args)
@@ -3708,7 +3647,8 @@ local function onClientCommand(module, command, player, args)
 
 
 
-	args = args or {}
+	if args == nil then args = {} end
+	if type(args) ~= "table" or getmetatable(args) ~= nil then return end
 
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logServerRecv then
 		GlobalStorageSiK.NetTrace.logServerRecv(player, command, args)
@@ -3720,6 +3660,8 @@ local function onClientCommand(module, command, player, args)
 	local networkId = GlobalStorageSiK.Network.resolveCommandNetworkId(player, args, command)
 
 	local searchQuery = args.searchQuery
+	if GlobalStorageSiK.RoutingTransactions.dispatch(command, player, args, networkId) then return end
+	if GlobalStorageSiK.NodeCatalogServer.dispatch(command, player, args) then return end
 
 
 
@@ -4015,7 +3957,7 @@ local function onClientCommand(module, command, player, args)
 			if ok and ModData and ModData.transmit then
 				-- Borra tanto la parte operativa (contenedores/terminales) como la
 				-- de permisos (ModData propia) - las dos hay que difundirlas.
-				ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+				GlobalStorageSiK.notifyRegistryChanged()
 				GlobalStorageSiK.Permissions.requestTransmit()
 			end
 			gsSendServerCommand(player, "actionResult", { ok = ok })
@@ -4135,65 +4077,8 @@ local function onClientCommand(module, command, player, args)
 			player, args, networkId, requireTerminalAccess, gsSendServerCommand)
 
 	elseif command == "getNodeContents" then
-		if not requireTerminalAccess(player, networkId) then
-			return
-		end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local node = registry.nodes and registry.nodes[args.nodeId]
-		if not node then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
-			return
-		end
-		-- BUG DE SEGURIDAD real cerrado (2026-08-25, auditoria pre-release):
-		-- requireTerminalAccess solo comprueba el rol del jugador SOBRE
-		-- networkId (su propia red, siempre legitima) - nunca comprobaba que
-		-- el nodo pedido (args.nodeId, deducible a simple vista por
-		-- coordenadas+sprite) perteneciera de verdad a esa red. Cualquier
-		-- miembro podia leer el contenido en vivo de un contenedor de OTRA
-		-- red ajena. Mismo patron ya usado en updateZoneRules/setZonePriority
-		-- (zone.networkId ~= networkId), extendido aqui via la zona del nodo.
-		local nodeZone = registry.zones and node.zoneId and registry.zones[node.zoneId]
-		if not nodeZone or nodeZone.networkId ~= networkId
-			or not GlobalStorageSiK.Permissions.canAccessZone(player, networkId, node.zoneId) then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
-			return
-		end
-		local rows, source, liveContainer = resolveNodeContents(node, networkId)
-		local _, snapshotComplete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
-		if not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
-			and (not snapshotComplete or GlobalStorageSiK.Index.getSnapshotRevision(networkId)
-			~= GlobalStorageSiK.Index.getInventoryRevision(networkId) or shouldScanOnOpen(networkId)) then
-			scheduleSnapshotSync(networkId, player,
-				GlobalStorageSiK.Index.getInventoryRevision(networkId), "node_capture_pending")
-		end
-		local detailPage = nil
-		if type(args.rowKey) == "string" and #args.rowKey <= 500 then
-			if tonumber(args.inventoryRevision) ~= GlobalStorageSiK.Index.getInventoryRevision(networkId) then
-				detailPage = { items = {}, reason = "revision_mismatch", rowKey = args.rowKey }
-			else
-				detailPage = GlobalStorageSiK.Index.buildDetailPage(networkId, player,
-					args.rowKey, args.page, 25, node.id)
-			end
-			detailPage.networkId = networkId
-			detailPage.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-		end
-		gsSendServerCommand(player, "nodeContents", {
-			playerNum = player.getPlayerNum and player:getPlayerNum() or 0,
-			networkId = networkId,
-			inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId),
-			nodeId = args.nodeId,
-			snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId),
-			snapshotCertified = snapshotComplete and GlobalStorageSiK.Index.getSnapshotRevision(networkId)
-				== GlobalStorageSiK.Index.getInventoryRevision(networkId),
-			snapshotAgeMs = select(2, snapshotStatus(networkId)),
-			reconcilePending = pendingSnapshotSync[networkId] ~= nil,
-			rows = rows,
-			catalogRows = not detailPage and GlobalStorageSiK.Index.buildRows(networkId, player, nil, node.id) or nil,
-			detailPage = detailPage,
-			source = source,
-			suggestedNativePath = suggestNativePathFromSnapshot(rows),
-			capacity = GlobalStorageSiK.NetworkCapacity.computeNode(liveContainer, player),
-		})
+		args.networkId=networkId
+		return GlobalStorageSiK.NodeViewServer.request(player,args)
 
 	elseif command == "getZoneCapacity" then
 		if not requireTerminalAccess(player, networkId) then
@@ -4391,8 +4276,8 @@ local function onClientCommand(module, command, player, args)
 		if GlobalStorageSiK.NetworkManager then
 			nid, err = GlobalStorageSiK.NetworkManager.createNetworkForPlayer(player, args.name)
 		end
-		if nid and ModData and ModData.transmit then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		if nid then
+			GlobalStorageSiK.notifyRegistryChanged(nid)
 		end
 		gsSendServerCommand(player, "networkCreated", {
 			ok = nid ~= nil,
@@ -4424,7 +4309,7 @@ local function onClientCommand(module, command, player, args)
 			GlobalStorageSiK.Log.info("Server", "suspendTerminal",
 				string.format("%d,%d,%d network=%s user=%s",
 					args.x, args.y, args.z, tostring(nid), player:getUsername()))
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			GlobalStorageSiK.notifyRegistryChanged(nid)
 			GlobalStorageSiK.Server.pushTerminalManifest(player)
 			if nid then
 				gsSendServerCommand(player, "terminalRelocated", {
@@ -4453,7 +4338,7 @@ local function onClientCommand(module, command, player, args)
 			notifyTerminalAccessChanged(nid, player)
 			GlobalStorageSiK.Log.info("Server", "uninstallTerminalReader",
 				string.format("%d,%d,%d network=%s user=%s", x, y, z, tostring(nid), player:getUsername()))
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			GlobalStorageSiK.notifyRegistryChanged(nid)
 			GlobalStorageSiK.Server.pushTerminalManifest(player)
 			-- BUG REAL encontrado (feedback directo): a diferencia de
 			-- "removeTerminal" (mas abajo), esta rama nunca reenviaba
@@ -4470,7 +4355,7 @@ local function onClientCommand(module, command, player, args)
 				or GlobalStorageSiK.Network.findNetworkIdAtTerminal(args.x, args.y, args.z)
 			GlobalStorageSiK.TerminalRegistry.suspendTerminalAt(nid, args.x, args.y, args.z)
 			notifyTerminalAccessChanged(nid, player)
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			GlobalStorageSiK.notifyRegistryChanged(nid)
 			GlobalStorageSiK.Server.pushTerminalManifest(player)
 		end
 
@@ -4490,7 +4375,7 @@ local function onClientCommand(module, command, player, args)
 			if GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 				GlobalStorageSiK.TerminalAccess.clearSession(player)
 			end
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+			GlobalStorageSiK.notifyRegistryChanged(nid)
 			GlobalStorageSiK.Server.pushTerminalManifest(player)
 			-- Enviar estado actualizado para refrescar la UI en tiempo real
 			pushTerminalState(player, nid, nil, searchQuery)
@@ -4738,11 +4623,11 @@ local function onClientCommand(module, command, player, args)
 		end
 		runLockedTransfer(player, networkId, "craftClaimItem", function()
 			local itemId = args.itemId
-			local item, container = findNetworkItemById(networkId, itemId, player)
+			local item, container, entry = GlobalStorageSiK.WorkTransfers.findClaimSource(player, networkId, args.sourceNodeId, itemId)
 			local fullType = item and item.getFullType and item:getFullType() or "?"
 			local ok = false
 			if item and container then
-				ok = GlobalStorageSiK.InventorySync.moveBetween(container, player:getInventory(), item, player)
+				ok = GlobalStorageSiK.WorkTransfers.claim(player, networkId, item, container, entry)
 			end
 			GlobalStorageSiK.Log.info("CraftDiag", string.format(
 				"claimReceive operationId=%s itemId=%s fullType=%s claimResult=%s",
@@ -4751,11 +4636,10 @@ local function onClientCommand(module, command, player, args)
 			-- el indice entero por ingrediente/herramienta multiplicaba el trafico
 			-- en recetas de varias unidades; el refresco visual llega al cierre de
 			-- la operacion o en la siguiente peticion explicita del terminal.
-			if ok then GlobalStorageSiK.Server.markInventoryDirty(networkId, player) end
 			gsSendServerCommand(player, "actionResult", {
 				ok = ok,
 				message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CraftClaimOk") or GlobalStorageSiK.I18n.remote("IGUI_GS_CraftClaimFail"),
-				craftClaim = { itemId = itemId, ok = ok },
+				craftClaim = { itemId = itemId, ok = ok, networkId = networkId, operationId = args.operationId },
 			})
 		end)
 
@@ -4823,24 +4707,6 @@ local function onClientCommand(module, command, player, args)
 		end
 		end)()
 
-	elseif command == "renameZone" then
-		return (function()
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local zone = registry.zones and registry.zones[args.zoneId]
-		if not zone or not args.name or args.name == "" then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
-			return
-		end
-		zone.name = args.name
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneRenamedMsg") })
-		pushTerminalState(player, networkId, nil, searchQuery)
-		end)()
-
 	elseif command == "deleteZone" then
 		return (function()
 		logZoneCommand("deleteZone", player, networkId)
@@ -4889,7 +4755,7 @@ local function onClientCommand(module, command, player, args)
 				.. " contenedoresEliminados=" .. tostring(nodeCountBefore)
 				.. " zonas " .. tostring(zoneCountBefore) .. "->" .. tostring(zoneCountBefore - 1)
 				.. " de " .. tostring(GlobalStorageSiK.Sandbox.getMaxZonesPerNetwork()))
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneDeletedMsg", zoneName) })
 		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
@@ -4916,7 +4782,7 @@ local function onClientCommand(module, command, player, args)
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRemoveFailed") })
 			return
 		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		GlobalStorageSiK.Log.info("Zones", "logical node removed network=" .. tostring(networkId)
 			.. " node=" .. tostring(args.nodeId) .. " by=" .. tostring(player:getUsername()))
 		gsSendServerCommand(player, "actionResult", { ok = true,
@@ -4967,7 +4833,7 @@ local function onClientCommand(module, command, player, args)
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected") })
 			return
 		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		GlobalStorageSiK.Log.info("Zones", "logical node rebound network=" .. tostring(networkId)
 			.. " from=" .. sourceId .. " to=" .. targetId .. " by=" .. tostring(player:getUsername()))
 		gsSendServerCommand(player, "actionResult", { ok = true,
@@ -5005,214 +4871,12 @@ local function onClientCommand(module, command, player, args)
 				message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeRebindRejected"), reason = reason })
 			return
 		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		GlobalStorageSiK.Log.info("Zones", "manual configuration transfer network=" .. tostring(networkId)
 			.. " from=" .. sourceId .. " to=" .. target.id .. " by=" .. tostring(player:getUsername()))
 		gsSendServerCommand(player, "actionResult", { ok = true,
 			message = GlobalStorageSiK.I18n.remote("IGUI_GS_NodeReboundMsg") })
 		pushTerminalState(player, networkId, nil, searchQuery)
-		end)()
-
-	elseif command == "updateNode" then
-		return (function()
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local node = registry.nodes and registry.nodes[args.nodeId]
-		if not node then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
-			return
-		end
-		-- BUG DE SEGURIDAD real cerrado (2026-08-25, auditoria pre-release):
-		-- requireAdminAccess solo comprueba el rol del jugador SOBRE
-		-- networkId (su propia red, siempre legitima) - nunca comprobaba que
-		-- el nodo pedido (args.nodeId, deducible a simple vista por
-		-- coordenadas+sprite del objeto) perteneciera de verdad a esa red.
-		-- Cualquier admin de SU red podia reescribir reglas/prioridad/
-		-- nombre/membresia de un contenedor de OTRA red ajena. Mismo patron
-		-- ya usado en updateZoneRules/setZonePriority (zone.networkId ~=
-		-- networkId), extendido aqui via la zona del nodo.
-		local nodeZone = registry.zones and node.zoneId and registry.zones[node.zoneId]
-		if not nodeZone or nodeZone.networkId ~= networkId then
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerNotFoundMsg") })
-			return
-		end
-		if args.removeRuleIndex ~= nil and (args.rules ~= nil or args.addRule ~= nil
-			or not GlobalStorageSiK.RuleIdentity.matches(node.rules, args.removeRuleIndex, args.expectedRule)) then
-			gsSendServerCommand(player, "actionResult", { ok = false,
-				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RulesChangedRetry") })
-			pushTerminalState(player, networkId, nil, searchQuery)
-			return
-		end
-		local replacementRules = args.rules ~= nil and sanitizeNodeRules(args.rules) or nil
-		if args.rules ~= nil and not replacementRules then
-			gsSendServerCommand(player, "actionResult", { ok = false,
-				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
-			return
-		end
-		if args.membership == "excluded" then
-			node.membership = "excluded"
-			node.enabled = false
-		elseif args.membership == "active" then
-			node.membership = "active"
-			node.enabled = true
-		end
-		if args.displayName and args.displayName ~= "" then
-			node.displayName = args.displayName
-		end
-		if args.category ~= nil then
-			local cat = args.category
-			if cat == "" or cat == "*" then
-				node.categories = {}
-			else
-				node.categories = { cat }
-			end
-		elseif args.categoriesText ~= nil then
-			node.categories = {}
-			for part in string.gmatch(tostring(args.categoriesText), "[^,]+") do
-				local trimmed = part:match("^%s*(.-)%s*$")
-				if trimmed and trimmed ~= "" then
-					table.insert(node.categories, trimmed)
-				end
-			end
-		elseif args.categories ~= nil then
-			node.categories = sanitizeNodeCategories(args.categories)
-		end
-		if args.enabled ~= nil then
-			node.enabled = args.enabled == true
-		end
-		if args.priority ~= nil then
-			-- Escala 1-100, 1 = maxima prioridad (coherente con zone.priority).
-			-- BUG REAL cerrado (2026-08-25, auditoria pre-release): un valor
-			-- no numerico (tonumber devuelve nil) dejaba node.priority en
-			-- nil sin mas, perdiendo la prioridad ya configurada - asimetrico
-			-- con GS_Zones.setPriority, que ya usaba "or 50" para el mismo
-			-- caso. Mismo valor por defecto aqui.
-			local p = tonumber(args.priority) or 50
-			p = math.floor(p + 0.5)
-			if p < 1 then p = 1 elseif p > 100 then p = 100 end
-			node.priority = p
-		end
-		if args.notes ~= nil then
-			local notes = tostring(args.notes):gsub("^%s*(.-)%s*$", "%1")
-			node.notes = (notes ~= "") and notes:sub(1, 120) or nil
-		end
-		if args.filters ~= nil then
-			-- Pegado de plantilla: reemplazo completo, acotado y validado. Un
-			-- payload malformado no conserva referencias del cliente ni supera el
-			-- mismo maximo de 20 reglas que el editor individual.
-			node.filters = {}
-			if type(args.filters) == "table" then
-				for i = 1, math.min(#args.filters, 20) do
-					local clean = sanitizeNodeFilter(args.filters[i])
-					if clean then node.filters[#node.filters + 1] = clean end
-				end
-			end
-		elseif args.addFilter ~= nil then
-			-- Añade UN filtro (validado aquí, nunca se confía en la forma
-			-- exacta que mandó el cliente). Límite razonable por nodo para
-			-- que la lista de filtros no crezca sin control.
-			local clean = sanitizeNodeFilter(args.addFilter)
-			if clean then
-				node.filters = node.filters or {}
-				if #node.filters < 20 then
-					table.insert(node.filters, clean)
-				end
-			end
-		end
-		if args.removeFilterIndex ~= nil then
-			local idx = tonumber(args.removeFilterIndex)
-			if idx and node.filters and node.filters[idx] then
-				table.remove(node.filters, idx)
-			end
-		end
-		if args.rules ~= nil then
-			-- Reemplazo completo del motor unificado AND/OR/NOT (dev26): pegado
-			-- de plantilla o guardado desde el nuevo editor. Mismo patron que
-			-- args.filters de arriba.
-			node.rules = replacementRules
-		elseif args.addRule ~= nil then
-			local clean = sanitizeNodeRule(args.addRule)
-			if clean then
-				if not prepareCoverageRule(registry, "node", node, clean) then
-					gsSendServerCommand(player, "actionResult", {
-						ok = false,
-						message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleCoverageUnavailable"),
-					})
-					return
-				end
-				node.rules = node.rules or {}
-				if #node.rules < 20 then
-					table.insert(node.rules, clean)
-				end
-			end
-		end
-		if args.removeRuleIndex ~= nil then
-			local idx = tonumber(args.removeRuleIndex)
-			if idx and node.rules and node.rules[idx] then
-				table.remove(node.rules, idx)
-			end
-		end
-		if GlobalStorageSiK.NodeNaming and GlobalStorageSiK.NodeNaming.applyToNode then
-			GlobalStorageSiK.NodeNaming.applyToNode(node)
-		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", {
-			ok = true,
-			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ContainerUpdatedMsg"),
-			containerUpdated = true,
-			nodeId = args.nodeId,
-			displayName = node.displayName,
-		})
-		pushTerminalState(player, networkId, nil, searchQuery)
-		-- Difundir a los demas miembros online con acceso: sin esto, un cambio
-		-- de nombre/categoria/prioridad de OTRO jugador no se veia hasta que
-		-- el resto tocara algo que disparase su propio refresco.
-		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
-		end)()
-
-	elseif command == "applyNodeTemplateToZone" then
-		return (function()
-		-- "Extender a la zona" (dev26, ronda 2 - ver
-		-- Documentacion/GS_FilterRedesign_Plan.md §4.4-quater): aplica el
-		-- protocolo de aceptacion (reglas) de UN contenedor a TODOS los
-		-- contenedores actuales de su zona. La PRIORIDAD NUNCA viaja aqui -
-		-- queda siempre independiente por contenedor/zona, decision
-		-- explicita del usuario. Sustituye a la antigua seccion "Plantilla"
-		-- del editor de zona (categorias+filtros+prioridad), ya retirada de
-		-- la interfaz - un contenedor destino conserva su propia prioridad.
-		if not requireAdminAccess(player, networkId) then return end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local zone = registry.zones and registry.zones[args.zoneId]
-		if not zone or zone.networkId ~= networkId then
-			gsSendServerCommand(player, "actionResult", {
-				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
-			})
-			return
-		end
-		local rules = sanitizeNodeRules(args.rules)
-		if not rules then
-			gsSendServerCommand(player, "actionResult", { ok = false,
-				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
-			return
-		end
-		local updated = 0
-		for _, target in pairs(registry.nodes or {}) do
-			if target.zoneId == zone.id then
-				target.rules = cloneRuleList(rules)
-				updated = updated + 1
-			end
-		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", {
-			ok = true,
-			message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneTemplateAppliedMsg", updated, zone.name or zone.id),
-		})
-		pushTerminalState(player, networkId, nil, searchQuery)
-		pushNodeChangeToNetworkWatchers(player, networkId, searchQuery)
 		end)()
 
 	elseif command == "createZoneRoom" then
@@ -5250,121 +4914,6 @@ local function onClientCommand(module, command, player, args)
 			local running = startIncrementalScan(player, networkId, searchQuery, zone.id) == true
 			pushTerminalState(player, networkId, { running = running, _freshSnapshotScope = "network" }, searchQuery)
 		end
-		end)()
-
-	elseif command == "moveZonePriority" then
-		return (function()
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local ok = GlobalStorageSiK.Zones.moveZonePriority(networkId, args.zoneId, args.direction)
-		if ok then
-			-- Cambiar prioridad no altera el inventario ni exige volver a recorrerlo.
-			pushTerminalState(player, networkId, { _freshSnapshotScope = "network" }, searchQuery)
-		else
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_PriorityChangeFailedMsg") })
-		end
-		end)()
-
-	elseif command == "setZonePriority" then
-		return (function()
-		-- Escala libre 1-100 (ver GS_Zones.setPriority), sustituye al sistema
-		-- de posicion secuencial - usado por el modal de edicion de zona.
-		if not requireAdminAccess(player, networkId) then
-			return
-		end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local ok = GlobalStorageSiK.Zones.setPriority(networkId, args.zoneId, args.priority)
-		if ok then
-			ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-			pushTerminalState(player, networkId, nil, searchQuery)
-		else
-			gsSendServerCommand(player, "actionResult", { ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_InvalidZone") })
-		end
-		end)()
-
-	elseif command == "setZoneEnabled" then
-		return (function()
-		-- "Excluir zona" (dev26, ronda 2 - ver §4.5 del plan): simetrico a
-		-- excluir un contenedor. Una zona no tiene ningun rescan que le
-		-- reponga enabled=true sola (a diferencia de un nodo, ver
-		-- GS_ZoneRefresh.lua:105-108) - un booleano simple basta, sin
-		-- necesitar un campo "membership" propio como en los nodos.
-		if not requireAdminAccess(player, networkId) then return end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local zone = registry.zones and registry.zones[args.zoneId]
-		if not zone or zone.networkId ~= networkId then
-			gsSendServerCommand(player, "actionResult", {
-				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
-			})
-			return
-		end
-		zone.enabled = args.enabled ~= false
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneUpdatedMsg") })
-		pushTerminalState(player, networkId, nil, searchQuery)
-		end)()
-
-	elseif command == "updateZoneRules" then
-		return (function()
-		-- Motor unificado AND/OR/NOT a nivel de ZONA (dev26, ronda 2 - ver
-		-- Documentacion/GS_FilterRedesign_Plan.md §4.4-bis): mismo patron que
-		-- updateNode/rules, reutiliza sanitizeNodeRule(s) tal cual (no hay
-		-- nada especifico de contenedor en esa validacion). Actua como
-		-- puerta binaria ANTES de las reglas de cada contenedor - ver
-		-- GS_Router.zoneRulesAllow/matchWithZoneGate.
-		if not requireAdminAccess(player, networkId) then return end
-		if not blockIfNetworkJobRunning(player, networkId) then return end
-		local registry = GlobalStorageSiK.Zones.getRegistry()
-		local zone = registry.zones and registry.zones[args.zoneId]
-		if not zone or zone.networkId ~= networkId then
-			gsSendServerCommand(player, "actionResult", {
-				ok = false, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneNotFoundMsg"),
-			})
-			return
-		end
-		if args.removeRuleIndex ~= nil and (args.rules ~= nil or args.addRule ~= nil
-			or not GlobalStorageSiK.RuleIdentity.matches(zone.rules, args.removeRuleIndex, args.expectedRule)) then
-			gsSendServerCommand(player, "actionResult", { ok = false,
-				message = GlobalStorageSiK.I18n.remote("IGUI_GS_RulesChangedRetry") })
-			pushTerminalState(player, networkId, nil, searchQuery)
-			return
-		end
-		if args.rules ~= nil then
-			local rules = sanitizeNodeRules(args.rules)
-			if not rules then
-				gsSendServerCommand(player, "actionResult", { ok = false,
-					message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleReplacementInvalid") })
-				return
-			end
-			zone.rules = rules
-		elseif args.addRule ~= nil then
-			local clean = sanitizeNodeRule(args.addRule)
-			if clean then
-				if not prepareCoverageRule(registry, "zone", zone, clean) then
-					gsSendServerCommand(player, "actionResult", {
-						ok = false,
-						message = GlobalStorageSiK.I18n.remote("IGUI_GS_RuleCoverageUnavailable"),
-					})
-					return
-				end
-				zone.rules = zone.rules or {}
-				if #zone.rules < 20 then
-					table.insert(zone.rules, clean)
-				end
-			end
-		end
-		if args.removeRuleIndex ~= nil then
-			local idx = tonumber(args.removeRuleIndex)
-			if idx and zone.rules and zone.rules[idx] then
-				table.remove(zone.rules, idx)
-			end
-		end
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
-		gsSendServerCommand(player, "actionResult", { ok = true, message = GlobalStorageSiK.I18n.remote("IGUI_GS_ZoneUpdatedMsg") })
-		pushTerminalState(player, networkId, nil, searchQuery)
 		end)()
 
 	elseif command == "createZoneStructure" then
@@ -5602,7 +5151,7 @@ local function onClientCommand(module, command, player, args)
 		end
 		if not blockIfNetworkJobRunning(player, networkId) then return end
 		local ok = GlobalStorageSiK.Categories.add(networkId, args.name)
-		ModData.transmit(GlobalStorageSiK.MODDATA_KEY)
+		GlobalStorageSiK.notifyRegistryChanged(networkId)
 		gsSendServerCommand(player, "actionResult", { ok = ok, message = ok and GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryAdded") or GlobalStorageSiK.I18n.remote("IGUI_GS_CategoryDuplicate") })
 		pushTerminalState(player, networkId, nil, searchQuery)
 
@@ -6053,15 +5602,6 @@ local function onClientCommand(module, command, player, args)
 			return
 		end
 
-		local _, snapshotComplete = GlobalStorageSiK.Index.hasNetworkSnapshot(networkId)
-		if not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
-			and (not snapshotComplete or GlobalStorageSiK.Index.getSnapshotRevision(networkId)
-			~= GlobalStorageSiK.Index.getInventoryRevision(networkId) or shouldScanOnOpen(networkId)) then
-			-- Reuse the network's pending capture; repeated drag requests cannot
-			-- start scans or postpone a same-revision retry indefinitely.
-			scheduleSnapshotSync(networkId, player,
-				GlobalStorageSiK.Index.getInventoryRevision(networkId), "selection_capture_pending")
-		end
 		pushTerminalState(player, networkId, nil, searchQuery)
 
 	elseif command == "getItemNetworkCounts" then
@@ -6109,7 +5649,12 @@ end
 
 require "GS_CatalogPreparation"
 require "GS_CatalogServer"
+require "GS_NodeCatalogServer"
 GlobalStorageSiK.CatalogServer.configure({
+	opened=GlobalStorageSiK.NodeCatalogServer.opened,
+	closed=GlobalStorageSiK.NodeCatalogServer.clear,
+	nodeRecover=GlobalStorageSiK.NodeCatalogServer.recover,
+	received=GlobalStorageSiK.NodeCatalogServer.received,
 	send=gsSendServerCommand,
 	visit=forEachOnlinePlayer,
 	abort=function(player)
@@ -6144,15 +5689,43 @@ GlobalStorageSiK.CatalogServer.configure({
 		queueTerminalRefresh(player, networkId, nil, false)
 	end,
 })
+GlobalStorageSiK.NodeManifest.configure({
+	registry=function() return GlobalStorageSiK.Zones.getRegistry() end,
+	valid=function(player,meta) return GlobalStorageSiK.CatalogServer.valid(player,meta,meta) end,
+	zoneAllowed=GlobalStorageSiK.Permissions.canAccessZone,
+	classificationStamp=GlobalStorageSiK.Index.getClassificationStamp,
+	inventoryRevision=GlobalStorageSiK.Index.getInventoryRevision,
+	visit=forEachOnlinePlayer,
+})
+GlobalStorageSiK.NodeCatalogServer.configure({
+	valid=GlobalStorageSiK.CatalogServer.valid,
+	queue=GlobalStorageSiK.CatalogServer.queue,
+	hasJob=GlobalStorageSiK.CatalogServer.hasJob,
+	completed=GlobalStorageSiK.CatalogServer.replicaReady,
+	failed=GlobalStorageSiK.CatalogServer.fail,
+	refresh=function(player,networkId) pushTerminalState(player,networkId) end,
+})
+require "GS_NodeViewServer"
+GlobalStorageSiK.NodeViewServer.configure({
+	authorize=function(player,networkId,nodeId)
+		if not requireTerminalAccess(player,networkId) then return nil end
+		local registry=GlobalStorageSiK.Zones.getRegistry()
+		local node=registry.nodes and registry.nodes[nodeId]
+		local zone=node and registry.zones and registry.zones[node.zoneId]
+		if zone and zone.networkId==networkId
+			and GlobalStorageSiK.Permissions.canAccessZone(player,networkId,node.zoneId) then return node end
+	end,
+	scope=authorizedCatalogScope, suggest=suggestNativePathFromSnapshot,
+	busy=GlobalStorageSiK.CatalogServer.hasJob,
+	queue=GlobalStorageSiK.CatalogServer.queue,queueBuild=GlobalStorageSiK.CatalogServer.queueBuild,
+	capacity=function(node,player)
+		local object=GlobalStorageSiK.Network.findWorldObject(node)
+		local container=object and GlobalStorageSiK.Utils.getObjectContainer(object,node.containerIndex)
+		return GlobalStorageSiK.NetworkCapacity.computeNode(container,player,node.snapshotWeight or 0)
+	end,
+})
 require "GS_CatalogReconciler"
 GlobalStorageSiK.CatalogReconciler.configure({
-	visitNetworks=function(visit)
-		forEachOnlinePlayer(function(player)
-			local key = terminalWatcherKey(player)
-			local networkId = key and terminalWatchNetworkByPlayer[key]
-			if networkId and isTerminalWatcher(player, networkId) then visit(networkId) end
-		end)
-	end,
 	changed=function(networkId, nodeId)
 		GlobalStorageSiK.Server.markInventoryDirty(networkId, nil, {
 			scheduleSnapshot=false, snapshotsUpdated=true, touchedNodeIds={nodeId}})
@@ -6165,8 +5738,7 @@ GlobalStorageSiK.CatalogReconciler.configure({
 		-- through the changed callback; explicit scans retain their own channel.
 		GlobalStorageSiK.Log.debug("CatalogTransport", "reconcile", "network=" .. tostring(networkId)
 			.. " phase=" .. tostring(phase) .. " nodes=" .. tostring(stats and stats.nodes)
-			.. " stage=" .. tostring(stats and stats.phase).." node="..tostring(stats and stats.nodeIndex)
-			.. " totalNodes="..tostring(stats and stats.totalNodes).." remaining="..tostring(stats and stats.remaining)
+			.. " node="..tostring(stats and stats.nodeId).." reason="..tostring(stats and stats.reason)
 			.. " units=" .. tostring(stats and stats.units)
 			.. " compared=" .. tostring(stats and stats.compared)
 			.. " changed=" .. tostring(stats and stats.changed)
@@ -6174,6 +5746,34 @@ GlobalStorageSiK.CatalogReconciler.configure({
 		-- Phase counters describe only this reconciler, never catalog build work.
 	end,
 })
+GlobalStorageSiK.RoutingTransactions.configure({
+	send = gsSendServerCommand,
+	visitPlayers = forEachOnlinePlayer,
+	sanitizeRule = sanitizeNodeRule, sanitizeRules = sanitizeNodeRules,
+	sanitizeCategories = sanitizeNodeCategories, sanitizeFilter = sanitizeNodeFilter,
+	prepareCoverage = prepareCoverageRule,
+	authorize = function(player, networkId)
+		if not GlobalStorageSiK.Permissions.canAccess(player, networkId) then return false, "no_access" end
+		if GlobalStorageSiK.Permissions.shouldEnforce()
+			and not GlobalStorageSiK.Permissions.isAdminPlayer(player, networkId) then return false, "admin_required" end
+		local access = GlobalStorageSiK.TerminalAccess.evaluate(player, networkId,
+			GlobalStorageSiK.TerminalAccess.getSessionAnchor(player), {sessionLock=true, strictDistance=true})
+		if not access then return false, "terminal_access_changed" end
+		return true
+	end,
+	committed = function(player, networkId, command, args)
+		if command == "updateNode" and GlobalStorageSiK.NodeNaming then
+			local node = GlobalStorageSiK.Zones.getRegistry().nodes[args.nodeId]
+			if node then GlobalStorageSiK.NodeNaming.applyToNode(node) end
+		end
+		-- The registry also contains every container snapshot. Routing ACK and
+		-- scoped terminal metadata own replication; never broadcast that tree.
+		if GlobalStorageSiK.RegistryStore then GlobalStorageSiK.RegistryStore.notifyChanged() end
+		pushTerminalState(player, networkId, nil, args.searchQuery)
+		pushNodeChangeToNetworkWatchers(player, networkId, args.searchQuery)
+	end,
+})
+
 Events.OnClientCommand.Add(onClientCommand)
 
 -- Un unico flush de snapshots como maximo por tick, compartido por todas las
@@ -6182,6 +5782,17 @@ Events.OnClientCommand.Add(onClientCommand)
 if Events and Events.OnTick then
 	Events.OnTick.Add(function()
 		if not GlobalStorageSiK.isAuthoritative() then return end
+		local registryChanges, allRegistryChanges = GlobalStorageSiK.takeRegistryChanges()
+		if registryChanges then
+			forEachOnlinePlayer(function(player)
+				local key = terminalWatcherKey(player)
+				local networkId = key and terminalWatchNetworkByPlayer[key]
+				if networkId and (allRegistryChanges or registryChanges[networkId])
+					and isTerminalWatcher(player, networkId) then
+					queueTerminalRefresh(player, networkId, nil, true)
+				end
+			end)
+		end
 		GlobalStorageSiK.WithdrawSelectionTickets.update()
 		GlobalStorageSiK.NativeWorldOverrideCommands.flushPublications(publishTaxonomyOverride)
 		flushPendingSnapshotSync()
@@ -6192,6 +5803,8 @@ if Events and Events.OnTick then
 			end
 		end
 		GlobalStorageSiK.CatalogServer.update()
+		GlobalStorageSiK.NodeCatalogServer.update()
+		GlobalStorageSiK.NodeViewServer.update()
 		GlobalStorageSiK.CatalogPreparation.update()
 		GlobalStorageSiK.CatalogReconciler.update()
 		flushCatalogDetails()

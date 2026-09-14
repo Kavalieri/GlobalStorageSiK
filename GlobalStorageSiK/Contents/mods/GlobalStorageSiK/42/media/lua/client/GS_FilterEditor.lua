@@ -155,7 +155,10 @@ function GS_FilterEditorUI:initialise()
                 end,
                 title = T("IGUI_GS_FilterEditorTitle") .. " - "
                         .. T("IGUI_GS_FilterEditorOperatorLabel", self.operator),
-                onClose = function() GlobalStorageSiK.FilterEditor.instance = nil end,
+                onClose = function()
+                        self._closed = true
+                        if GlobalStorageSiK.FilterEditor.instance == self then GlobalStorageSiK.FilterEditor.instance = nil end
+                end,
         })
         self._filterLayoutReady = true
         self:buildLayout()
@@ -172,7 +175,8 @@ local function layoutHost(panel)
 end
 
 function GS_FilterEditorUI:destroy()
-	GlobalStorageSiK.FilterEditor.instance = nil
+	self._closed = true
+	if GlobalStorageSiK.FilterEditor.instance == self then GlobalStorageSiK.FilterEditor.instance = nil end
 	if UI.Modal and UI.Modal.close then
 		UI.Modal.close(self, "product")
 	else
@@ -237,11 +241,11 @@ function GS_FilterEditorUI:buildLayout()
 		playerNum = self.playerNum,
 	}))
 	self.filterBlock = filterBlock
-	local column = filterBlock:beginColumn()
+	local column = filterBlock:beginColumn({ retain = true })
 
 	local typeLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_FilterTypeLabel"))
-	column:label(typeLabel, typeLabel.height, 2)
+	column:label(typeLabel, function() return typeLabel.height end, 2)
 	self.typeCombo = addCombo(column.parent, 0, 0, column.width, function()
 		self:captureDraft()
 		local idx = self.typeCombo.selected or 1
@@ -276,7 +280,7 @@ function GS_FilterEditorUI:buildLayout()
 		tooltip = T("IGUI_GS_PermColActions"), playerNum = self.playerNum,
 	}))
 	self.actionsBlock = actions
-	local actionColumn = actions:beginColumn()
+	local actionColumn = actions:beginColumn({ retain = true })
 	self.addBtn = UI.Controls.button(actionColumn.parent, {
 		x = 0, y = 0, w = actionColumn.width, h = BTN_H,
 		text = T("IGUI_GS_FilterAddBtn"), fullWidth = true,
@@ -296,12 +300,19 @@ function GS_FilterEditorUI:buildLayout()
 	self:reflowContent()
 end
 
---- Width changes rebuild only the active local form; draft values survive.
---- Height changes update the shared viewport without shrinking the user window.
+--- Replay geometry on existing controls, preserving native focus and selection.
 function GS_FilterEditorUI:reflowContent()
-	if self._layoutBusy then return end
+	if self._layoutBusy or not self.filterBlock or not self.actionsBlock then return end
+	self._layoutBusy = true
 	local _, content = layoutHost(self)
-	if content.w ~= self._filterLayoutWidth then self:buildLayout() end
+	self._filterLayoutWidth = content.w
+	self.filterBlock:setBounds(0, 0, content.w, self.filterBlock.h)
+	self.actionsBlock:setBounds(0, self.filterBlock.y + self.filterBlock.h + BLOCK_GAP,
+		content.w, self.actionsBlock.h)
+	if self.contentBlock then
+		self.contentBlock:setContentHeight(self.actionsBlock.y + self.actionsBlock.h)
+	end
+	self._layoutBusy = false
 end
 
 --- Categoria > Subcategoria > Sub-subcategoria en cascada VERTICAL (a
@@ -313,7 +324,7 @@ function GS_FilterEditorUI:buildCategoryFields(column)
 	local draft = (self._drafts and self._drafts.category) or {}
 	local mainLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_NodeCategoryMainLabel"))
-	column:label(mainLabel, mainLabel.height, 2)
+	column:label(mainLabel, function() return mainLabel.height end, 2)
 
 	self.catMainCombo = addCombo(column.parent, 0, 0, column.width, function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
@@ -328,7 +339,7 @@ function GS_FilterEditorUI:buildCategoryFields(column)
 
 	local subLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_NodeCategorySubLabel"))
-	column:label(subLabel, subLabel.height, 2)
+	column:label(subLabel, function() return subLabel.height end, 2)
 
 	self.catSubCombo = addCombo(column.parent, 0, 0, column.width, function()
 		local mainKey = GlobalStorageSiK.TerminalConfig.getSelectedCategory(self.catMainCombo)
@@ -340,7 +351,7 @@ function GS_FilterEditorUI:buildCategoryFields(column)
 
 	local leafLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_NodeCategoryLeafLabel"))
-	column:label(leafLabel, leafLabel.height, 2)
+	column:label(leafLabel, function() return leafLabel.height end, 2)
 
 	self.catLeafCombo = addCombo(column.parent, 0, 0, column.width)
 	GlobalStorageSiK.TerminalConfig.fillLeafCategoryCombo(self.catLeafCombo,
@@ -351,7 +362,7 @@ end
 function GS_FilterEditorUI:buildNameFields(column)
 	local draft = (self._drafts and self._drafts.name) or {}
 	local modeLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterModeLabel"))
-	column:label(modeLabel, modeLabel.height, 2)
+	column:label(modeLabel, function() return modeLabel.height end, 2)
 
 	self.nameModeCombo = addCombo(column.parent, 0, 0, column.width)
 	for i = 1, #NAME_MODES do
@@ -361,7 +372,7 @@ function GS_FilterEditorUI:buildNameFields(column)
 	column:block(self.nameModeCombo, ENTRY_H)
 
 	local valueLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterValueLabel"))
-	column:label(valueLabel, valueLabel.height, 2)
+	column:label(valueLabel, function() return valueLabel.height end, 2)
 
 	self.nameEntry = addField(column.parent, 0, 0, column.width)
 	self.nameEntry:setText(draft.value or "")
@@ -371,7 +382,7 @@ end
 function GS_FilterEditorUI:buildWeightFields(column)
 	local draft = (self._drafts and self._drafts.weight) or {}
 	local modeLabel = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterModeLabel"))
-	column:label(modeLabel, modeLabel.height, 2)
+	column:label(modeLabel, function() return modeLabel.height end, 2)
 
 	self.weightModeCombo = addCombo(column.parent, 0, 0, column.width, function()
 		self:captureDraft()
@@ -388,7 +399,7 @@ function GS_FilterEditorUI:buildWeightFields(column)
 
 	local valueLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_FilterWeightValueLabel"))
-	column:label(valueLabel, valueLabel.height, 2)
+	column:label(valueLabel, function() return valueLabel.height end, 2)
 
 	if mode == "between" then
 		self.weightEntry = addField(column.parent, 0, 0, 1, true)
@@ -407,7 +418,7 @@ end
 function GS_FilterEditorUI:buildTagFields(column)
 	local draft = (self._drafts and self._drafts.tag) or {}
 	local hint = addCopy(column.parent, 0, 0, column.width, T("IGUI_GS_FilterTagHint"), "textMuted")
-	column:label(hint, hint.height)
+	column:label(hint, function() return hint.height end)
 	self.tagEntry = addField(column.parent, 0, 0, column.width)
 	self.tagEntry:setText(draft.value or "")
 	column:block(self.tagEntry, ENTRY_H)
@@ -417,7 +428,7 @@ function GS_FilterEditorUI:buildItemFields(column)
 	local draft = (self._drafts and self._drafts.item) or {}
 	local searchLabel = addCopy(column.parent, 0, 0, column.width,
 		T("IGUI_GS_FilterItemSearchLabel"))
-	column:label(searchLabel, searchLabel.height, 2)
+	column:label(searchLabel, function() return searchLabel.height end, 2)
 
 	self.itemSearchEntry = addField(column.parent, 0, 0, column.width, false, function()
 		self:refreshItemResults()
@@ -429,7 +440,7 @@ function GS_FilterEditorUI:buildItemFields(column)
 	if self.selectedItem then
 		local selected = addCopy(column.parent, 0, 0, column.width,
 			T("IGUI_GS_FilterItemSelected", self.selectedItem.name), "success")
-		column:label(selected, selected.height)
+		column:label(selected, function() return selected.height end)
 	end
 
 	self.itemResultsHost = UI.Controls.panel(column.parent, {
@@ -440,8 +451,12 @@ function GS_FilterEditorUI:buildItemFields(column)
 	})
 	self.itemResultsHost:setHeight(0)
 	self._itemResultsBaseHeight = 0
-	column:block(self.itemResultsHost, 0, 0)
-	column:space(self:refreshItemResults(true))
+	local resultsHost = self.itemResultsHost
+	function resultsHost:reflow(width)
+		for _, child in ipairs(self.childrenInOrder or {}) do child:setWidth(width) end
+	end
+	self:refreshItemResults(true)
+	column:block(resultsHost, function() return resultsHost.height end, 0)
 end
 
 --- Repinta la lista de resultados de búsqueda de ítem (sin reconstruir todo el formulario).
@@ -481,14 +496,7 @@ function GS_FilterEditorUI:refreshItemResults(initial)
 	local previous = self._itemResultsBaseHeight or 0
 	self._itemResultsBaseHeight = ry
 	if not initial and self.filterBlock and self.actionsBlock and ry ~= previous then
-		self.filterBlock:setBounds(self.filterBlock.x, self.filterBlock.y,
-			self.filterBlock.w, self.filterBlock.h + ry - previous)
-		self.actionsBlock:setBounds(self.actionsBlock.x,
-			self.filterBlock.y + self.filterBlock.h + BLOCK_GAP,
-			self.actionsBlock.w, self.actionsBlock.h)
-		if self.contentBlock then
-			self.contentBlock:setContentHeight(self.actionsBlock.y + self.actionsBlock.h)
-		end
+		self.filterBlock:refreshLayout()
 		self:reflowContent()
 	end
 	return ry
@@ -564,16 +572,29 @@ end
 --- Envia la regla ya validada (sin conflicto, o confirmado por el jugador).
 ---@param newRule table {op, condition}
 function GS_FilterEditorUI:sendAddRule(newRule)
-	if self.target.kind == "zone" then
-		GlobalStorageSiK.NetClient.sendCommand("updateZoneRules", { zoneId = self.target.id, addRule = newRule })
-	else
-		GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.target.id, addRule = newRule })
-	end
-	if self.onAdded then
-		self.onAdded()
-	end
-	self:destroy()
+	local command = self.target.kind == "zone" and "updateZoneRules" or "updateNode"
+	local args = { addRule = newRule, expectedRoutingRevision = self._draftRoutingRevision, networkId = self.networkId }
+	if self.target.kind == "zone" then args.zoneId = self.target.id else args.nodeId = self.target.id end
+	-- A retry uses the pending intent's ID. No optimistic mutation or close.
+	GlobalStorageSiK.NetClient.sendCommand(command, args, self.playerNum, function(result)
+		if self._closed then return end
+		self._routingResult = result
+		if result.reason == "request_timeout" and GlobalStorageSiK.UIFeedback then
+			local player = getSpecificPlayer and getSpecificPlayer(self.playerNum)
+			if player then GlobalStorageSiK.UIFeedback.halo(player,
+				T("IGUI_GS_RoutingTimeout"), 235, 180, 90, 1200) end
+		end
+		if result.ok then
+			if self.onAdded then self.onAdded() end
+			self:destroy()
+		elseif result.routingRevision then
+			-- Keep the draft; a subsequent explicit click can retry against the
+			-- reported revision after the conflict has been shown to the user.
+			self._draftRoutingRevision = result.routingRevision
+		end
+	end)
 end
+
 
 --- Confirmacion explicita antes de guardar una regla que contradice una ya
 --- existente - nombra AMBAS reglas (ver §4.4-quinquies). Confirmar guarda de
@@ -625,6 +646,10 @@ function GlobalStorageSiK.FilterEditor.show(target, operator, onAdded, parentMod
 	ui.playerNum = parentModal and parentModal.playerNum or 0
 	ui._sikModalOwner = parentModal
 	ui.target = target
+	ui.networkId = target.networkId or (parentModal and parentModal.terminal
+		and parentModal.terminal.terminalState and parentModal.terminal.terminalState.networkId)
+	ui._draftRoutingRevision = parentModal and parentModal.terminal
+		and parentModal.terminal.terminalState and parentModal.terminal.terminalState.routingRevision or nil
 	ui.operator = operator or "OR"
 	ui.onAdded = onAdded
 	ui:initialise()

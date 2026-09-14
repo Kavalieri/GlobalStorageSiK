@@ -9,6 +9,7 @@ require "GS_Debug"
 require "GS_NetTrace"
 require "GS_NetworkResolve"
 require "GS_FloorTargets"
+require "GS_RoutingClient"
 
 GlobalStorageSiK.NetClient = GlobalStorageSiK.NetClient or {}
 local floorSequences = {}
@@ -36,7 +37,7 @@ end
 ---@param args table|nil
 ---@param playerArg IsoPlayer|number|nil
 ---@return boolean
-function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
+function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg, onResult)
 	if not command then
 		return false
 	end
@@ -84,9 +85,6 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 			return false
 		end
 	end
-	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logClientSend then
-		GlobalStorageSiK.NetTrace.logClientSend(command, args)
-	end
 	local exempt = GlobalStorageSiK.NetworkResolve
 		and GlobalStorageSiK.NetworkResolve.isSessionExempt(command)
 	if not exempt and not args.networkId then
@@ -106,13 +104,18 @@ function GlobalStorageSiK.NetClient.sendCommand(command, args, playerArg)
 			args.networkId = GlobalStorageSiK.Client.activeNetworkId
 		end
 	end
-	if (command == "withdrawItem" and GlobalStorageSiK.FloorTargets.isKey(args.targetKey))
-		or (command == "depositItems" and GlobalStorageSiK.FloorTargets.isKey(args.sourceKey)) then
+	if args.floorSeq == nil and ((command == "withdrawItem" and GlobalStorageSiK.FloorTargets.isKey(args.targetKey))
+		or (command == "depositItems" and GlobalStorageSiK.FloorTargets.isKey(args.sourceKey))) then
 		-- Shared by every local queue; assign only when actually sending. A
 		-- failed/uncertain send consumes its number and must not be replayed.
 		local playerNum = player:getPlayerNum()
 		floorSequences[playerNum] = (floorSequences[playerNum] or 0) % 2147483647 + 1
 		args.floorSeq = floorSequences[playerNum]
+	end
+	if not GlobalStorageSiK.RoutingClient.prepare(command, args, player:getPlayerNum(), onResult) then return false end
+	if command == "withdrawItem" and not GlobalStorageSiK.RoutingClient.prepareWithdrawal(args,player:getPlayerNum()) then return false end
+	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.logClientSend then
+		GlobalStorageSiK.NetTrace.logClientSend(command, args)
 	end
 	local ok, err = pcall(sendClientCommand, player, GlobalStorageSiK.MOD_ID, command, args)
 	if not ok then

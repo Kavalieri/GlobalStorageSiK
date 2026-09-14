@@ -31,7 +31,7 @@ end
 
 local RESPONSE_TIMEOUT_MS = 10000
 -- A read-only recapture can take longer than a transfer ACK (12 s in TEST).
--- Never extend the non-idempotent transfer deadline or retry a lost ACK.
+-- Transfers retry only their identical receipt-backed request, at most twice.
 local SELECTION_REFRESH_TIMEOUT_MS = 30000
 local MAX_QUEUED_REQUESTS = 4096
 
@@ -284,7 +284,7 @@ local function dispatchCurrent()
 		.. " revision=" .. tostring(current.rowData.selectionRevision)
 		.. " count=" .. tostring(current.rowData.count)
 		.. " destination=" .. tostring(current.targetKey))
-	local sent = sendCommand("withdrawItem", {
+	local payload = {
 		-- Un itemId exacto ya identifica una unidad fisica unica. No acoplarlo
 		-- al nodo que produjo la captura: el servidor vuelve a buscarlo solo en
 		-- los contenedores accesibles de esta red y valida tipo/selector antes de
@@ -323,7 +323,9 @@ local function dispatchCurrent()
 		networkId = current.networkId,
 		returnItemIds = current.returnItemIds == true,
 		readLoanId = current.readLoanId,
-	})
+	}
+	current.sentPayload, current.responseRetries = payload, 0
+	local sent = sendCommand("withdrawItem", payload)
 	if not sent and current and current.requestId == expectedRequestId then
 		GlobalStorageSiK.Log.error("WithdrawClient", "send failed",
 			"withdrawId=" .. tostring(expectedRequestId))
@@ -354,10 +356,16 @@ function worker.onTick()
 			worker.cancelAll("selection_stale")
 			return
 		end
-		-- Retirar no es idempotente: jamás se reenvía a ciegas una petición cuya
-		-- respuesta se perdió, porque podría retirar dos veces. Tampoco se continúa
-		-- con las filas siguientes: se aborta la operación lógica completa y se
-		-- elimina su OnTick, sin dejar trabajos latentes ni un resultado engañoso.
+		-- Solo el recibo autoritativo permite repetir exactamente esta intención.
+		-- Agotados los reintentos se aborta sin avanzar a las siguientes filas.
+		if current.sentPayload and current.sentPayload.withdrawEpoch and (current.responseRetries or 0) < 2 then
+			current.responseRetries = (current.responseRetries or 0) + 1
+			responseDeadlineMs = now + RESPONSE_TIMEOUT_MS
+			-- Preserve the exact request, including floor and receipt sequences.
+			-- SP can complete synchronously, so do not touch current after sending.
+			sendCommand("withdrawItem", current.sentPayload)
+			return
+		end
 		GlobalStorageSiK.Log.error("WithdrawClient", "response timeout",
 			"withdrawId=" .. tostring(current.requestId)
 				.. " movedConfirmed=" .. tostring(current.totalMoved or 0))

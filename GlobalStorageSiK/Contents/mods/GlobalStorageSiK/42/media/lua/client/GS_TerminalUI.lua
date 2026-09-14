@@ -857,7 +857,7 @@ function GS_TerminalUI:refreshFromState(state)
 		self:activateTab("config")
 	end
 	self:setRedistributeState(self.terminalState.redistributeActive == true,
-		self.terminalState.redistributeActive == true and T("IGUI_GS_RedistributeConfigLocked") or nil,
+		self.terminalState.redistributeActive == true and T("IGUI_GS_RedistributingNetwork") or nil,
 		self.terminalState.redistributeActive == true and "warn" or nil,
 		self.terminalState.redistributeProgress)
 	if state and state.accessMode then
@@ -1143,17 +1143,9 @@ end
 --- La autoridad real vive en servidor; este gate evita abrir editores que el
 --- servidor tendría que rechazar mientras la captura de Auto Sort está activa.
 function GS_TerminalUI:canEditNetworkConfig(showWarning)
-	local locked = self._autoSortRunning == true
-		or (self.terminalState and self.terminalState.redistributeActive == true)
-	if locked and showWarning then
-		local player = GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer
-			and GlobalStorageSiK.NetClient.getPlayer(self.playerNum) or nil
-		if player then
-			GlobalStorageSiK.UIFeedback.halo(player, T("IGUI_GS_RedistributeConfigLocked"),
-				255, 190, 70, 420, { tone = "warning", channel = "redistribute" })
-		end
-	end
-	return not locked
+	-- Configuration commits carry their own revision. A running sort stops at
+	-- its next bounded step when that revision changes; it cannot lock editors.
+	return true
 end
 
 function GS_TerminalUI:onRedistributeNetwork()
@@ -1464,6 +1456,7 @@ function GS_TerminalUI:onSearch(force)
 end
 
 function GS_TerminalUI:onWithdrawRow(row, amount, targetKey)
+	if self.terminalState and self.terminalState.replicaPartial==true then return false end
 	if not row or not row.fullType then
 		return
 	end

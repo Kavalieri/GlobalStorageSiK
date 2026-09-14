@@ -305,6 +305,7 @@ function Public.startOperation(options)
 		operationId = operationId,
 		addonId = options.addonId,
 		playerNum = currentPlayerNum,
+		player = options.player,
 		networkId = active.networkId,
 		kind = options.kind,
 		recipeName = options.recipeName or "?",
@@ -315,7 +316,7 @@ function Public.startOperation(options)
 	if options.diagnostics == true then
 		local client = GlobalStorageSiK and GlobalStorageSiK.NetClient or nil
 		if client and type(client.sendCommand) == "function" then
-			client.sendCommand("craftAttemptStart", boundedAttemptPayload(operation, options))
+			client.sendCommand("craftAttemptStart", boundedAttemptPayload(operation, options), options.player)
 		end
 	end
 	return true, OK, operationSnapshot(operation)
@@ -325,7 +326,7 @@ local function ownedOperation(operationId, player)
 	if not validId(operationId, 160) then return nil, ERR_SCHEMA end
 	local operation = operations[operationId]
 	if not operation then return nil, ERR_OPERATION end
-	if player ~= nil and playerNumber(player) ~= operation.playerNum then
+	if player ~= nil and (player ~= operation.player or playerNumber(player) ~= operation.playerNum) then
 		return nil, ERR_OWNER
 	end
 	return operation, OK
@@ -362,7 +363,7 @@ function Public.claimItem(operationId, player, item, container)
 		or type(current.isNetworkContainer) ~= "function" then
 		return false, ERR_UNAVAILABLE, false
 	end
-	if current.isNetworkContainer(container, operation.networkId) ~= true then
+	if current.isNetworkContainer(container, operation.networkId, player) ~= true then
 		return false, ERR_SOURCE, false
 	end
 	local claimed = current.claimNetworkItem(player, item, container,

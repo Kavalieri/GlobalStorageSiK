@@ -193,13 +193,14 @@ end
 --- formulario tiene su propio boton "Aplicar" que llama esto con un unico
 --- campo; nunca se resetean sin querer los demas (antes `categories` se
 --- mandaba siempre, incluso vacio, si no se incluia explicitamente).
-function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts)
+function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts, owner)
 	local searchQuery = ""
-	local ui = GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
+	local ui = owner and owner.terminal or GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.instance
 	if ui and ui.getSearchQuery then
 		searchQuery = ui:getSearchQuery()
 	end
 	local payload = { nodeId = nodeId, searchQuery = searchQuery }
+	payload.networkId = ui and ui.terminalState and ui.terminalState.networkId
 	if opts.displayName ~= nil then payload.displayName = opts.displayName end
 	if opts.categories  ~= nil then payload.categories  = opts.categories  end
 	if opts.filters     ~= nil then payload.filters     = opts.filters     end
@@ -208,7 +209,7 @@ function GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(nodeId, opts)
 	if opts.membership  ~= nil then payload.membership  = opts.membership end
 	if opts.priority    ~= nil then payload.priority    = opts.priority   end
 	if opts.notes       ~= nil then payload.notes       = opts.notes      end
-	GlobalStorageSiK.NetClient.sendCommand("updateNode", payload)
+	GlobalStorageSiK.NetClient.sendCommand("updateNode", payload, owner and owner.playerNum or ui and ui.playerNum)
 end
 
 --- Captura la configuracion visible del editor. El nombre, la etiqueta, la
@@ -299,9 +300,10 @@ function GS_NodeEditorUI:confirmExtendToZone()
 	local message = T("IGUI_GS_NodeExtendToZoneQuestion", count, self.node.zoneName or "?")
 	confirmAction(self, message, function()
 		GlobalStorageSiK.NetClient.sendCommand("applyNodeTemplateToZone", {
+			networkId = self.terminal and self.terminal.terminalState and self.terminal.terminalState.networkId,
 			zoneId = zoneId,
 			rules = rules,
-		})
+		}, self.playerNum)
 	end, T("IGUI_GS_NodeExtendToZoneConsequences", count, self.node.zoneName or "?"))
 end
 
@@ -321,19 +323,19 @@ end
 ---@param value any
 function GS_NodeEditorUI:applyField(field, value)
 	if not self.node then return end
-	GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(self.node.id, { [field] = value })
+	GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(self.node.id, { [field] = value }, self)
 end
 
 function GS_NodeEditorUI:requestNodeUpdate(opts)
 	if not self.node or not opts then return end
-	GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(self.node.id, opts)
+	GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(self.node.id, opts, self)
 end
 
 function GS_NodeEditorUI:requestNodeContents(nodeId)
 	if self.terminal and self.terminal.onRequestNodeContents then
 		self.terminal:onRequestNodeContents(nodeId)
 	else
-		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { nodeId = nodeId })
+		GlobalStorageSiK.NetClient.sendCommand("getNodeContents", { nodeId = nodeId }, self.playerNum)
 	end
 end
 
@@ -470,9 +472,8 @@ local RULE_OP_TONE = { OR = "info", AND = "warning", NOT = "danger" }
 --- requestNodeContents/refreshContents - sin llamada de red aparte.
 ---@param node table
 ---@return number itemCount, number typeCount
-local function nodeItemStats(node)
-	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
-	local payload = node and cache[node.id]
+local function nodeItemStats(node, playerNum)
+	local payload = node and GlobalStorageSiK.Client.getNodeContents(node.id, playerNum)
 	local rows = payload and payload.rows or {}
 	local itemCount = 0
 	for i = 1, #rows do
@@ -490,9 +491,8 @@ end
 --- chunk/API vanilla ausente).
 ---@param node table
 ---@return table|nil
-local function nodeCapacityInfo(node)
-	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
-	local payload = node and cache[node.id]
+local function nodeCapacityInfo(node, playerNum)
+	local payload = node and GlobalStorageSiK.Client.getNodeContents(node.id, playerNum)
 	return payload and payload.capacity or nil
 end
 
@@ -623,8 +623,7 @@ function GS_NodeEditorUI:ensureForm()
 	protocolColumn:block(self.rulesSummaryHost, function(w) return self:refreshRulesSummary(w) end)
 	rulesColumn:block(protocol, protocolColumn:finish())
 
-	local cache = GlobalStorageSiK.Client.nodeContentsCache or {}
-	local payload = cache[node.id]
+	local payload = GlobalStorageSiK.Client.getNodeContents(node.id, self.playerNum)
 	local suggested = payload and payload.suggestedNativePath
 	self._sugCardMissingData = payload == nil
 	local present = false
@@ -641,7 +640,7 @@ function GS_NodeEditorUI:ensureForm()
 			if GlobalStorageSiK.NativeProduct.decodePath(suggested) then condition.nativePath = suggested end
 			local newRule = { op = op, condition = condition }
 			local function apply()
-				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = node.id, addRule = newRule })
+				GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = node.id, addRule = newRule }, self.playerNum)
 			end
 			local conflict = GlobalStorageSiK.RulesUI.detectContradiction(node.rules, newRule)
 			if conflict then
@@ -698,7 +697,7 @@ function GS_NodeEditorUI:ensureForm()
 	-- pero ensureForm dejo de crearlas y por eso los contadores desaparecieron
 	-- silenciosamente. Se reconstruyen como Blocks reales y consumen solamente
 	-- el snapshot/capacidad autoritativos ya cacheados para este contenedor.
-	local itemCount, typeCount = nodeItemStats(node)
+	local itemCount, typeCount = nodeItemStats(node, self.playerNum)
 	local statsBlock = section(nil)
 	self.statsBlock = statsBlock
 	local statsColumn = statsBlock:beginColumn({ retain = true })
@@ -708,7 +707,7 @@ function GS_NodeEditorUI:ensureForm()
 	local occupancyBlock = section(nil)
 	self.occupancyBlock = occupancyBlock
 	local occupancyColumn = occupancyBlock:beginColumn({ retain = true })
-	self.occupancyLbl = label(occupancyColumn, occupancyLabelText(nodeCapacityInfo(node)))
+	self.occupancyLbl = label(occupancyColumn, occupancyLabelText(nodeCapacityInfo(node, self.playerNum)))
 	finish(occupancyBlock, occupancyColumn)
 
 	self._contentsStartY = bottom
@@ -884,7 +883,7 @@ function GS_NodeEditorUI:rebuildRuleChips(op)
 				onRemove = function()
 					if not self.node or not capturedRule then return end
 					GlobalStorageSiK.NetClient.sendCommand("updateNode", { nodeId = self.node.id,
-						removeRuleIndex = capturedIdx, expectedRule = capturedRule })
+						removeRuleIndex = capturedIdx, expectedRule = capturedRule }, self.playerNum)
 				end })
 			cy = cy + CHIP_H + CHIP_PAD
 		end
@@ -932,11 +931,11 @@ function GS_NodeEditorUI:syncFormButtons()
 		UI.Controls.setDanger(self.membBtn, not excluded)
 	end
 	if self.statsLbl then
-		local itemCount, typeCount = nodeItemStats(self.node)
+		local itemCount, typeCount = nodeItemStats(self.node, self.playerNum)
 		self.statsLbl:setText(T("IGUI_GS_NodeStatsLine", itemCount, typeCount))
 	end
 	if self.occupancyLbl then
-		self.occupancyLbl:setText(occupancyLabelText(nodeCapacityInfo(self.node)))
+		self.occupancyLbl:setText(occupancyLabelText(nodeCapacityInfo(self.node, self.playerNum)))
 	end
 	self:refreshRulesSummary()
 end
@@ -944,9 +943,8 @@ end
 --- Huella del bloque de contenido para evitar reconstrucciones redundantes.
 ---@param node table
 ---@return string
-local function contentsFingerprint(node)
-	local cache = GlobalStorageSiK.Client and GlobalStorageSiK.Client.nodeContentsCache or {}
-	local payload = cache[node.id] or {}
+local function contentsFingerprint(node, playerNum)
+	local payload = GlobalStorageSiK.Client.getNodeContents(node.id, playerNum) or {}
 	local rows = payload.rows or {}
 	local rowCount = #rows
 	local firstType = rowCount > 0 and (rows[1].fullType or "") or ""
@@ -966,7 +964,7 @@ function GS_NodeEditorUI:refreshContents()
 		return
 	end
 
-	local fp = contentsFingerprint(self.node)
+	local fp = contentsFingerprint(self.node, self.playerNum)
 	if self._contentsFingerprint == fp then
 		return
 	end
@@ -1134,24 +1132,8 @@ function GS_NodeEditorUI:setNode(terminal, node, categories)
 	self.categories = categories or {}
 	-- Inicializar estado de edición al abrir un nodo nuevo
 	if not sameNode then
-		-- Las claves historicas se conservan literalmente: el servidor las
-		-- clasifica y deja inactivas si pertenecen a un proveedor retirado.
-		-- No se traducen ni se convierten al abrir el editor.
-		local legacyCategories = node.categories or {}
-
-		-- Migracion al motor unificado de reglas (dev26, ver
-		-- Documentacion/GS_FilterRedesign_Plan.md): un contenedor que
-		-- todavia no tiene entry.rules pero SI tenia categorias/filtros
-		-- legacy los traduce a reglas OR (mismo comportamiento exacto, ver
-		-- migrateLegacyToRules) y persiste de inmediato al abrir su editor -
-		-- mismo patron ya establecido arriba para canonicalizar categorias.
-		-- Un contenedor SIN ninguna regla configurada nunca migra (sigue
-		-- vacio, protege el caso base de afinidad, ver §4.3 del plan).
-		if (not node.rules or #node.rules == 0) and (#legacyCategories > 0 or #(node.filters or {}) > 0) then
-			node.rules = migrateLegacyToRules(legacyCategories, node.filters)
-			GlobalStorageSiK.TerminalNodeEditor.sendNodeUpdate(node.id, { rules = node.rules })
-		end
-
+		-- Opening an editor is read-only. Legacy filters remain effective in
+		-- Router until an explicit revisioned configuration edit is confirmed.
 		self._editName     = node.displayName or node.name or ""
 		self._editNotes    = node.notes or ""
 		self._editPriority = node.priority or 50
@@ -1253,6 +1235,8 @@ function GlobalStorageSiK.TerminalNodeEditor.onContentsReceived(args)
 		return
 	end
 	local nodeId = args and args.nodeId
+	if args and (tonumber(args.playerNum) or 0) ~= (ui.playerNum or 0) then return end
+	if args and ui.terminal and ui.terminal.terminalState and args.networkId ~= ui.terminal.terminalState.networkId then return end
 	if nodeId and ui.node.id ~= nodeId then
 		return
 	end
