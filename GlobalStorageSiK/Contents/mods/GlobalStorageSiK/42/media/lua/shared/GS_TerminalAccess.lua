@@ -780,7 +780,7 @@ function GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player, anchor,
 		or not finite(anchor.z) or not finite(proximityRange) or proximityRange < 0
 		or not finite(wirelessRange) or wirelessRange < 0
 		or not finite(player:getX()) or not finite(player:getY()) or not finite(player:getZ()) then
-		return false, nil, "terminal_out_of_range"
+		return false, nil, "catalog_access_changed"
 	end
 	return evaluateAnchorDistance(player, anchor, proximityRange, wirelessRange, nil, true)
 end

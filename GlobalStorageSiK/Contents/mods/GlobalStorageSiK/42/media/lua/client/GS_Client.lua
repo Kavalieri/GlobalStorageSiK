@@ -1171,7 +1171,17 @@ local function onServerCommand(module, command, args)
 		if GlobalStorageSiK.TerminalAccessGuard
 			and not GlobalStorageSiK.TerminalAccessGuard.acceptResponse(args, false) then return end
 		local blockedPlayerNum = tonumber(args and args.playerNum) or 0
-		GlobalStorageSiK.NodeCatalogClient.clear(blockedPlayerNum,true)
+		local suspended=GlobalStorageSiK.ManifestProtocol.suspendsAccess(args and args.reason)
+		GlobalStorageSiK.NodeCatalogClient.clear(blockedPlayerNum,not suspended)
+		-- Cancel before callbacks, including the remote-open early-return path.
+		GlobalStorageSiK.Client.clearInventoryCatalog(blockedPlayerNum)
+		GlobalStorageSiK.Client.clearTransientCaches(blockedPlayerNum)
+		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
+			GlobalStorageSiK.TransferQueue.clear(blockedPlayerNum)
+		end
+		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
+			GlobalStorageSiK.WithdrawClient.cancelAll("access_lost",blockedPlayerNum)
+		end
 		local remoteHandled = GlobalStorageSiK.TerminalUI
 			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult
 			and GlobalStorageSiK.TerminalUI.onRemoteOpenResult(args, false)
@@ -1199,21 +1209,9 @@ local function onServerCommand(module, command, args)
 		if blockedPlayerNum == 0 then
 			GlobalStorageSiK.Client.cachedTerminalState = nil
 		end
-		if GlobalStorageSiK.Client.clearTransientCaches then
-			if GlobalStorageSiK.Client.clearInventoryCatalog then
-				GlobalStorageSiK.Client.clearInventoryCatalog(blockedPlayerNum, args and args.networkId)
-			end
-			GlobalStorageSiK.Client.clearTransientCaches(blockedPlayerNum)
-		end
 		local player = GlobalStorageSiK.NetClient.getPlayer(blockedPlayerNum)
 		if player and GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 			GlobalStorageSiK.TerminalAccess.clearSession(player)
-		end
-		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.clear then
-			GlobalStorageSiK.TransferQueue.clear(blockedPlayerNum)
-		end
-		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.cancelAll then
-			GlobalStorageSiK.WithdrawClient.cancelAll("access_lost", blockedPlayerNum)
 		end
 		GlobalStorageSiK.Log.info("Client", "terminalBlocked", args and args.reason or "no_access")
 		local payload = args or {}
@@ -1576,6 +1574,17 @@ local function logClientRuntimeIdentity()
 	GlobalStorageSiK.Log.runtimeIdentity("client", version)
 end
 
+local function catalogAccessAllowed(payload)
+	local player=GlobalStorageSiK.NetClient.getPlayer(payload.playerNum)
+	if not player or player:getPlayerNum()~=payload.playerNum or (player.isDead and player:isDead()) then
+		return false,"catalog_access_changed"
+	end
+	if not GlobalStorageSiK.Sandbox.requireTerminalAccess() then return true end
+	local accepted,_,reason=GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player,payload.terminalAnchor,
+		payload.confirmedProximityRange,payload.confirmedWirelessRange)
+	return accepted,GlobalStorageSiK.ManifestProtocol.suspendsAccess(reason) and reason or "catalog_access_changed"
+end
+
 GlobalStorageSiK.CatalogClient.configure({
 	current=function(n, seq)
 		return GlobalStorageSiK.Client.terminalOpenSeqByPlayer
@@ -1585,13 +1594,7 @@ GlobalStorageSiK.CatalogClient.configure({
 		return GlobalStorageSiK.Client.pendingTerminalOpenByPlayer
 			and GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n] == true
 	end,
-	allowed=function(payload)
-		local player = GlobalStorageSiK.NetClient.getPlayer(payload.playerNum)
-		if not player or player:getPlayerNum() ~= payload.playerNum or (player.isDead and player:isDead()) then return false end
-		if not GlobalStorageSiK.Sandbox.requireTerminalAccess() then return true end
-		return GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player, payload.terminalAnchor,
-			payload.confirmedProximityRange, payload.confirmedWirelessRange)
-	end,
+	allowed=catalogAccessAllowed,
 	confirm=function(payload)
 		if payload.replicaEpoch then
 			local accepted,reason=GlobalStorageSiK.NodeCatalogClient.confirm(payload)
@@ -1686,9 +1689,15 @@ GlobalStorageSiK.CatalogClient.configure({
 		GlobalStorageSiK.NetClient.sendCommand("terminalReplicaReject", meta, meta.playerNum)
 	end,
 	failure=function(n, seq, reason, confirmed, recoverable)
-		if reason == "catalog_access_changed" then
-			GlobalStorageSiK.NodeCatalogClient.clear(n,true)
+		local suspended=GlobalStorageSiK.ManifestProtocol.suspendsAccess(reason)
+		if GlobalStorageSiK.ManifestProtocol.accessLoss(reason) then
+			GlobalStorageSiK.NodeCatalogClient.clear(n,not suspended)
 			GlobalStorageSiK.Client.clearInventoryCatalog(n)
+			GlobalStorageSiK.Client.clearTransientCaches(n)
+			local player=GlobalStorageSiK.NetClient.getPlayer(n)
+			if player then GlobalStorageSiK.TerminalAccess.clearSession(player) end
+			if GlobalStorageSiK.TransferQueue then GlobalStorageSiK.TransferQueue.clear(n) end
+			if GlobalStorageSiK.WithdrawClient then GlobalStorageSiK.WithdrawClient.cancelAll("access_lost",n) end
 		end
 		local visible = terminalUiForPlayer(n)
 		if recoverable and visible then
@@ -1708,7 +1717,7 @@ GlobalStorageSiK.CatalogClient.configure({
 		if ui and ui.onClose then ui:onClose() end
 		GlobalStorageSiK.NetClient.sendCommand("closeTerminal", {targetOpenSeq=seq}, n)
 		local player = GlobalStorageSiK.NetClient.getPlayer(n)
-		if player and player:getPlayerNum() == n and not (player.isDead and player:isDead()) then
+		if not suspended and player and player:getPlayerNum() == n and not (player.isDead and player:isDead()) then
 			GlobalStorageSiK.TerminalUI.showCatalogFailure(n, reason, confirmed)
 		end
 		-- Notify only after fencing/closing the failed session. A callback may
@@ -1721,6 +1730,7 @@ GlobalStorageSiK.CatalogClient.configure({
 })
 GlobalStorageSiK.NodeCatalogClient.configure({
 	send=GlobalStorageSiK.NetClient.sendCommand,
+	player=GlobalStorageSiK.NetClient.getPlayer,
 	topology=applyTopologyMetadata,
 	current=function(n,seq) return GlobalStorageSiK.Client.terminalOpenSeqByPlayer[n]==seq end,
 	pending=function(n) return GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n]==true end,
@@ -1728,13 +1738,7 @@ GlobalStorageSiK.NodeCatalogClient.configure({
 	progress=function(payload,done,total,ready)
 		return GlobalStorageSiK.TerminalUI.catalogProgress(payload,done,total,ready)
 	end,
-	allowed=function(payload)
-		local player=GlobalStorageSiK.NetClient.getPlayer(payload.playerNum)
-		if not player or (player.isDead and player:isDead()) then return false end
-		if not GlobalStorageSiK.Sandbox.requireTerminalAccess() then return true end
-		return GlobalStorageSiK.TerminalAccess.evaluateConfirmedAnchor(player,payload.terminalAnchor,
-			payload.confirmedProximityRange,payload.confirmedWirelessRange)
-	end,
+	allowed=catalogAccessAllowed,
 	apply=function(payload,delta,rows)
 		payload._gsReplicaRows=delta and rows or nil
 		local accepted,reason=applyCatalogTransaction(payload,delta and "replicaDelta" or false)
@@ -1747,8 +1751,9 @@ GlobalStorageSiK.NodeCatalogClient.configure({
 		return accepted,reason
 	end,
 	failed=function(n,reason,meta)
-		GlobalStorageSiK.Log.error("CatalogTransport","node_replica_apply",tostring(reason))
-		GlobalStorageSiK.CatalogClient.abortReplica(n,"catalog_apply",meta)
+		local accessLost=GlobalStorageSiK.ManifestProtocol.accessLoss(reason)
+		if not accessLost then GlobalStorageSiK.Log.error("CatalogTransport","node_replica_apply",tostring(reason)) end
+		GlobalStorageSiK.CatalogClient.abortReplica(n,accessLost and reason or "catalog_apply",meta)
 	end,
 	evicted=function(entry,reason)
 		if reason=="scope_or_epoch_changed" or reason=="revoked" then GlobalStorageSiK.Client.clearInventoryCatalog(entry.playerNum) end

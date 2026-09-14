@@ -848,6 +848,7 @@
 	"IGUI_GS_VHSSkillLineRange": "{1} (Stufe {2}, bis {3})",
 	"IGUI_GS_ColTerminalName": "Name",
 	"IGUI_GS_ColTerminalCoords": "Koordinaten",
+	"IGUI_GS_ContainerCompartment": "Fach",
 	"IGUI_GS_ColTerminalRole": "Rolle",
 	"IGUI_GS_ColTerminalStatus": "Status",
 	"IGUI_GS_TerminalEditorTitle": "Terminal bearbeiten",

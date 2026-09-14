@@ -848,6 +848,7 @@
 	"IGUI_GS_VHSSkillLineRange": "{1} (уровень {2}, до {3})",
 	"IGUI_GS_ColTerminalName": "Имя",
 	"IGUI_GS_ColTerminalCoords": "Координаты",
+	"IGUI_GS_ContainerCompartment": "Отделение",
 	"IGUI_GS_ColTerminalRole": "Роль",
 	"IGUI_GS_ColTerminalStatus": "Статус",
 	"IGUI_GS_TerminalEditorTitle": "Редактировать терминал",

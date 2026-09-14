@@ -1,5 +1,6 @@
 -- Private reassembly: no partial table reaches the inventory/UI consumers.
 local Codec = require "GS_CatalogCodec"
+local AccessPolicy = require "GS_ManifestProtocol"
 local Client = {}
 GlobalStorageSiK.CatalogClient = Client
 local slots = {}
@@ -37,16 +38,16 @@ local function fail(playerNum, reason, serverError, consumerRejected)
 	local slot = slots[playerNum]
 	if not slot then return end
 	if consumerRejected then slot.consumerRejected=true end
-	local recoverable = slot.applied == true and reason ~= "catalog_access_changed"
+	local recoverable = slot.applied == true and not AccessPolicy.accessLoss(reason)
 	local rejected = slot.batch and slot.batch.meta
-	if slot.confirmed and slot.confirmed.replicaEpoch and reason~="catalog_access_changed"
+	if slot.confirmed and slot.confirmed.replicaEpoch and not AccessPolicy.accessLoss(reason)
 		and reason~="catalog_budget" and not slot.consumerRejected and context.nodeRecover then
 		slot.batch=nil
 		if rejected and not serverError and context.reject then context.reject(rejected,reason,false) end
 		if context.nodeRecover(playerNum) then slot.started=now();return end
 	end
 	if recoverable then slot.batch = nil else slots[playerNum] = nil end
-	if rejected and not serverError and reason ~= "catalog_access_changed" and context.reject
+	if rejected and not serverError and not AccessPolicy.accessLoss(reason) and context.reject
 		and not slot.rejectionSent then context.reject(rejected,reason,slot.consumerRejected==true);slot.rejectionSent=true end
 	if slot.consumerRejected and not rejected and context.replicaReject and slot.replicaFailure
 		and not slot.rejectionSent then context.replicaReject(slot.replicaFailure,reason);slot.rejectionSent=true end
@@ -62,6 +63,13 @@ local function fail(playerNum, reason, serverError, consumerRejected)
 		local recover = context.recover or context.stale
 		if recover then recover(rejected or slot.confirmed, reason) end
 	end
+end
+local function allowed(payload, playerNum)
+	local accepted, reason = context.allowed(payload)
+	if not accepted then
+		fail(playerNum, AccessPolicy.suspendsAccess(reason) and reason or "catalog_access_changed")
+	end
+	return accepted
 end
 function Client.abortReplica(playerNum,reason,meta)
 	local slot=slots[playerNum]
@@ -80,7 +88,7 @@ local function consumerFailure(playerNum, slot, meta, ok, result, reason, stage)
 			.. " revision=" .. tostring(meta.inventoryRevision) .. " scope=" .. tostring(meta.catalogScope):sub(1,120)
 			.. " source=" .. tostring(meta.catalogSource))
 	end
-	fail(playerNum, cause == "catalog_access_changed" and cause or "catalog_apply",false,true)
+	fail(playerNum, AccessPolicy.accessLoss(cause) and cause or "catalog_apply",false,true)
 end
 local function same(a, b)
 	return a.protocol == b.protocol and a.batchId == b.batchId and a.networkId == b.networkId and a.openSeq == b.openSeq
@@ -121,7 +129,7 @@ local function applyReady(playerNum, slot)
 	-- the client's live opening intent decides whether completion opens a view.
 	value.openUi = value.catalogDetail ~= true and context.pending(playerNum) == true
 	value.accessProbeId = nil
-	if not context.allowed(slot.confirmed) then fail(playerNum, "catalog_access_changed"); return end
+	if not allowed(slot.confirmed,playerNum) then return end
 	if value.notModified == true and not context.hasCache(value) then
 		fail(playerNum, "catalog_cache_miss"); return
 	end
@@ -165,9 +173,10 @@ function Client.ack(payload)
 		slot.batch=nil;slot.confirmed=nil
 		if payload.catalogBatchFloor then slot.latest=math.max(slot.latest,payload.catalogBatchFloor) end
 	elseif slot.confirmed then return end
-	if type(payload.networkId) ~= "string" or not context.allowed(payload) then
+	if type(payload.networkId) ~= "string" then
 		fail(payload.playerNum, "catalog_access_changed"); return
 	end
+	if not allowed(payload,payload.playerNum) then return end
 	local confirmed,accepted,reason=pcall(context.confirm,payload)
 	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
 	if accepted == false then
@@ -269,7 +278,7 @@ function Client.error(payload)
 	if slot.confirmed and (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0) then return end
 	if slot.confirmed and payload.networkId ~= slot.confirmed.networkId then return end
 	if not Codec.integer(payload.batchId, 1, 9007199254740991) then return end
-	if payload.reason == "catalog_access_changed" and slot.confirmed then
+	if AccessPolicy.accessLoss(payload.reason) and slot.confirmed then
 		fail(payload.playerNum, payload.reason, true)
 		return
 	end
@@ -296,9 +305,10 @@ function Client.delta(payload)
 	if not size or size + 128 > Codec.FRAME_BYTES then return end
 	if slot.completedRevision and payload.inventoryRevision <= slot.completedRevision then return end
 	if slot.confirmed and slot.confirmed.networkId ~= payload.networkId then return end
-	if not slot.confirmed or not context.allowed(slot.confirmed) then
+	if not slot.confirmed then
 		fail(payload.playerNum, "catalog_access_changed"); return
 	end
+	if not allowed(slot.confirmed,payload.playerNum) then return end
 	if slot.batch then return end -- Preserve an accepted fragmented B1.
 	local ok, accepted, reason, stage = pcall(context.applyDelta, payload)
 	if slots[payload.playerNum] ~= slot then return end
@@ -358,8 +368,8 @@ function Client.update(timestamp)
 					if (context.pending(playerNum) and timestamp - slot.started >= TIMEOUT_MS)
 						or (batch and timestamp - batch.progress >= IDLE_MS) then
 						fail(playerNum, "catalog_timeout")
-					elseif slot.confirmed and not context.allowed(slot.confirmed) then
-						fail(playerNum, "catalog_access_changed")
+					elseif slot.confirmed and not allowed(slot.confirmed,playerNum) then
+						-- The authority-loss path already fenced and closed this slot.
 					elseif batch and batch.decoder then
 						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
 							and work < 8192 and now() - started < 4 do

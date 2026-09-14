@@ -848,6 +848,7 @@
 	"IGUI_GS_VHSSkillLineRange": "{1}（等级 {2}，最高至 {3}）",
 	"IGUI_GS_ColTerminalName": "名称",
 	"IGUI_GS_ColTerminalCoords": "坐标",
+	"IGUI_GS_ContainerCompartment": "分区",
 	"IGUI_GS_ColTerminalRole": "角色",
 	"IGUI_GS_ColTerminalStatus": "状态",
 	"IGUI_GS_TerminalEditorTitle": "编辑终端",

@@ -937,6 +937,7 @@
 	"IGUI_GS_VHSSkillLineRange": "{1} (level {2}, up to {3})",
 	"IGUI_GS_ColTerminalName": "Name",
 	"IGUI_GS_ColTerminalCoords": "Coordinates",
+	"IGUI_GS_ContainerCompartment": "Compartment",
 	"IGUI_GS_ColTerminalRole": "Role",
 	"IGUI_GS_ColTerminalStatus": "Status",
 	"IGUI_GS_TerminalEditorTitle": "Edit terminal",

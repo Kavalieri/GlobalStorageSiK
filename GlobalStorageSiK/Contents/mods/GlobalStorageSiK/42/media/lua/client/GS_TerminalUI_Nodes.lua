@@ -8,6 +8,7 @@ require "GS_TerminalUI_Config"
 require "GS_TerminalUI_NodeEditor"
 require "GS_TerminalUI_ZoneEditor"
 require "GS_NodeHighlight"
+local UI = require "GS_UI_Framework"
 
 GlobalStorageSiK.TerminalNodes = GlobalStorageSiK.TerminalNodes or {}
 
@@ -143,13 +144,28 @@ end
 local function nodeRow(node, zoneRules)
 	local protocol, r, g, b = nodeProtocolInfo(node.rules, zoneRules)
 	local status = nodeStatusInfo(node)
+	local function coordinate(value)
+		if type(value)~="number" or value~=value or math.abs(value)>2147483647
+			or value~=math.floor(value) then return nil end
+		return tostring(value)
+	end
+	local x,y,z=coordinate(node.x),coordinate(node.y),coordinate(node.z)
+	local details={}
+	if x and y and z then
+		details[#details+1]=T("IGUI_GS_ColTerminalCoords")..": X "..x.." · Y "..y.." · Z "..z
+		local compartment=coordinate(node.containerIndex)
+		if compartment and node.containerIndex>=0 then
+			details[#details+1]=T("IGUI_GS_ContainerCompartment")..": "..compartment
+		end
+	end
+	if status.detail then details[#details+1]=status.detail end
 	return {
 		id = "node:" .. tostring(node.id or node.nodeId or "?"), kind = "node",
 		name = node.displayName or node.name or "?", protocol = cell(protocol, r, g, b),
 		priority = tonumber(node.priority) or 50,
 		status = cell(status.label, status.r, status.g, status.b),
 		occupancy = occupancyDisplay(node.occupancyPercent), sourceNode = node,
-		tooltip = status.detail,
+		tooltip = #details>0 and table.concat(details,"\n") or nil,
 	}
 end
 
@@ -260,10 +276,37 @@ function Nodes.activateRow(terminal, row, allNodes, categories)
 	return true
 end
 
+local function disposeRowTooltip(row)
+	if row and row._gsNodeTooltip then
+		row._gsNodeTooltip:dispose();row._gsNodeTooltip=nil
+	end
+end
+
+function Nodes.hideTooltips(tableUI)
+	for _,row in ipairs(tableUI and tableUI.list and tableUI.list.pool or {}) do
+		if row._gsNodeTooltip then row._gsNodeTooltip:hide() end
+	end
+end
+
 function Nodes.tableOptions(terminal, context)
 	return {
 		keyOf = function(row, index) return row and row.id or index end,
+		row = {
+			update = function(payload)
+				local row,item=payload.row,payload.item
+				if not item or item.kind~="node" or not item.tooltip then disposeRowTooltip(row);return end
+				local content={title=item.name,text=item.tooltip}
+				if row._gsNodeTooltip then
+					row._gsNodeTooltip:hide();row._gsNodeTooltip:setContent(content)
+				else
+					row._gsNodeTooltip=UI.Tooltip.attach(row,{kind="descriptive",variant="transient",
+						replace=true,content=content,playerNum=terminal.playerNum or 0,channel="network-node"})
+				end
+			end,
+			dispose = function(payload) disposeRowTooltip(payload.row) end,
+		},
 		onExpansionChange = function(payload)
+			Nodes.hideTooltips(payload and payload.component)
 			local row = payload and payload.item
 			if row and row.kind == "zone" and GlobalStorageSiK.NodeHighlight then
 				GlobalStorageSiK.NodeHighlight.highlightZone(row.zoneId,
@@ -272,6 +315,7 @@ function Nodes.tableOptions(terminal, context)
 			end
 		end,
 		onSort = function(payload)
+			Nodes.hideTooltips(payload and payload.component)
 			context.sortColumn = payload and payload.key or nil
 			context.sortDirection = payload and payload.ascending == false and "desc" or "asc"
 			local model = Nodes.presentationModel(context.nodes, context.zones,

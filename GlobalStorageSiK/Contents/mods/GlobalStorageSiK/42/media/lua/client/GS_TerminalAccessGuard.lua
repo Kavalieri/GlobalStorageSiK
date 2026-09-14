@@ -10,6 +10,7 @@ require "GS_Network"
 require "GS_NetClient"
 require "GS_TerminalAccess"
 require "GS_TerminalUI_Api"
+local AccessPolicy=require "GS_ManifestProtocol"
 
 GlobalStorageSiK.TerminalAccessGuard = GlobalStorageSiK.TerminalAccessGuard or {}
 
@@ -84,7 +85,7 @@ end
 
 --- Limpia sesión, cola de transferencias y estado UI en bloqueo.
 ---@param player IsoPlayer|nil
-local function clearAccessState(player)
+local function clearAccessState(player,reason)
 	if GlobalStorageSiK.TerminalAccess and GlobalStorageSiK.TerminalAccess.clearSession then
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
 	end
@@ -97,6 +98,7 @@ local function clearAccessState(player)
 	if GlobalStorageSiK.Client then
 		local playerNum = player and player:getPlayerNum() or 0
 		local client = GlobalStorageSiK.Client
+		if client.clearTransientCaches then client.clearTransientCaches(playerNum,not AccessPolicy.suspendsAccess(reason)) end
 		if client.terminalStateByPlayer then client.terminalStateByPlayer[playerNum] = nil end
 		if client.pendingTerminalOpenByPlayer then client.pendingTerminalOpenByPlayer[playerNum] = nil end
 		if playerNum == 0 then
@@ -118,7 +120,7 @@ local function denyOpenUi(reason, playerNum, main, networkId)
 	if player and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.sendCommand then
 		GlobalStorageSiK.NetClient.sendCommand("closeTerminal", {networkId=networkId}, player)
 	end
-	clearAccessState(player)
+	clearAccessState(player,reason)
 	if GlobalStorageSiK.TerminalUI and GlobalStorageSiK.TerminalUI.showBlocked then
 		GlobalStorageSiK.TerminalUI.showBlocked({reason=reason, playerNum=playerNum,
 			networkId=networkId}, { x = px, y = py, w = pw, h = ph })

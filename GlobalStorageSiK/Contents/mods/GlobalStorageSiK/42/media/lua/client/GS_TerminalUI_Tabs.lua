@@ -418,6 +418,9 @@ function GlobalStorageSiK.TerminalTabs.activate(terminal, tabKey)
 	local builtNow = terminal.ensureTabBuilt and terminal:ensureTabBuilt(tabKey) == true
 
 	if terminal.activeTabKey == "network" and tabKey ~= "network" then
+		if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.hideTooltips then
+			GlobalStorageSiK.TerminalNetwork.hideTooltips(terminal)
+		end
 
 		if GlobalStorageSiK.NodeHighlight and GlobalStorageSiK.NodeHighlight.clear then
 

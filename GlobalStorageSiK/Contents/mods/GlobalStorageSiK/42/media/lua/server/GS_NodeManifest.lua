@@ -81,9 +81,9 @@ function Manifest.capture(player, meta, knownToken)
 	end
 	table.sort(records,function(a,b) return a.nodeId<b.nodeId end)
 	append(parts,meta.replicaEpoch);append(parts,meta.catalogScope)
-	append(parts,network.topologyRevision);append(parts,network.routingRevision or 0)
-	append(parts,context.inventoryRevision(meta.networkId))
-	append(parts,context.classificationStamp());append(parts,meta.controlStamp or "")
+	append(parts,network.topologyRevision)
+	-- The token describes reusable blocks, not scan/control or presentation.
+	-- Access is still validated above and before every individual block.
 	for i=1,#records do
 		local record=records[i]
 		append(parts,record.nodeId);append(parts,record.zoneId);append(parts,record.revision)
@@ -116,6 +116,7 @@ function Manifest.capture(player, meta, knownToken)
 		sessions[player]=previous
 	end
 	clock=clock+1;previous.usedAt=clock
+	previous.revision=context.inventoryRevision(meta.networkId)
 	local result={manifestSchema=Protocol.SCHEMA,replicaEpoch=meta.replicaEpoch,
 		manifestToken=previous.token,networkId=meta.networkId,catalogScope=meta.catalogScope,topologySequence=meta.topologySequence,
 		topologyRevision=network.topologyRevision,routingRevision=network.routingRevision or 0,

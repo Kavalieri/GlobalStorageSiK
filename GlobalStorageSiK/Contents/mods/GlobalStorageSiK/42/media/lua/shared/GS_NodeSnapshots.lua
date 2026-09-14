@@ -26,6 +26,14 @@ function Snapshots.commit(entry, snapshot, reason, canonical, prepared)
 	if not GlobalStorageSiK.isAuthoritative() or type(entry) ~= "table" or type(snapshot) ~= "table" then return false end
 	if snapshot == entry.itemSnapshot and entry.snapshotSchema == Snapshots.SCHEMA then return true, false end
 	if not prepared then canonical = canonical or GlobalStorageSiK.Index.snapshotSignature(snapshot) end
+	local signature=prepared and prepared.signature or compactSignature(canonical)
+	if entry.snapshotSchema==Snapshots.SCHEMA and signature==entry.snapshotSignature
+		and type(entry.itemSnapshot)=="table" then
+		-- Checksums are only a fast filter. Equality of canonical content prevents
+		-- a collision from hiding an actual unit/ID/dynamic-state change.
+		canonical=canonical or GlobalStorageSiK.Index.snapshotSignature(snapshot)
+		if canonical==GlobalStorageSiK.Index.snapshotSignature(entry.itemSnapshot) then return true,false end
+	end
 	local units, weight, rows = 0, 0, 0
 	if prepared then units,weight,rows=prepared.units,prepared.weight,prepared.rows
 	else
@@ -38,7 +46,7 @@ function Snapshots.commit(entry, snapshot, reason, canonical, prepared)
 	entry.itemSnapshot = snapshot
 	entry.contentRevision = (tonumber(entry.contentRevision) or 0) + 1
 	entry.snapshotSchema = Snapshots.SCHEMA
-	entry.snapshotSignature = prepared and prepared.signature or compactSignature(canonical)
+	entry.snapshotSignature = signature
 	entry.snapshotUnits, entry.snapshotRows, entry.snapshotWeight = units, rows, weight
 	entry.snapshotConfirmedAt = getTimestampMs and getTimestampMs() or 0
 	entry.snapshotReason = reason or "capture"

@@ -1,5 +1,6 @@
 -- One immutable, acknowledged catalog job per authorized recipient.
 local Codec = require "GS_CatalogCodec"
+local AccessPolicy = require "GS_ManifestProtocol"
 local Server = {}
 GlobalStorageSiK.CatalogServer = Server
 local sessions, jobs, order = {}, {}, {}
@@ -113,7 +114,7 @@ local function failure(player, reason, batchId)
     local active = jobs[player]
     if active and active.envelope then batchId=active.envelope.batchId
     else serial=serial+1; batchId=serial end
-    local recoverable = (session.confirmed ~= nil or session.replicaEpoch ~= nil) and reason ~= "catalog_access_changed"
+    local recoverable = (session.confirmed ~= nil or session.replicaEpoch ~= nil) and not AccessPolicy.accessLoss(reason)
     if recoverable then release(player,reason); session.forceFull=true
     else
         release(player,reason)

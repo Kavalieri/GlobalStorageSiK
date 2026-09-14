@@ -13,6 +13,13 @@ local Network = GlobalStorageSiK.TerminalNetwork
 local SURFACE_ID = "tab-red"
 Network.surfaceId = SURFACE_ID
 
+function Network.hideTooltips(terminal)
+	local panel=terminal and terminal.networkPanel
+	local surface=panel and panel._sikNetworkSurface
+	local tree=surface and surface:getTree()
+	GlobalStorageSiK.TerminalNodes.hideTooltips(tree and tree.nodes and tree.nodes["network-table"])
+end
+
 local function panelBounds(panel)
 	local width = panel and panel.getWidth and panel:getWidth() or panel and panel.width or 1
 	local height = panel and panel.getHeight and panel:getHeight() or panel and panel.height or 1
@@ -40,6 +47,7 @@ end
 local function snapshotFor(terminal, panel, state)
 	local adapter = panel and panel._sikNetworkContext
 	if not adapter then return nil, "context_unavailable" end
+	Network.hideTooltips(terminal)
 	local snapshot, reason = adapter:snapshot(state)
 	if not snapshot then return nil, reason end
 	snapshot.viewport = panelBounds(panel)
@@ -135,6 +143,7 @@ function Network.refreshTopologyRows(terminal,previous,state)
 	local previousMap,previousNodes,previousZones=adapter.rowsByKey,adapter.nodes,adapter.zones
 	local undo,isCurrent
 	if #model.rows>0 or #removeKeys>0 then
+		GlobalStorageSiK.TerminalNodes.hideTooltips(tableUI)
 		local accepted,reason,restore,guard=tableUI:patchRows({upserts=model.rows,removeKeys=removeKeys})
 		if not accepted then return false,reason end
 		undo,isCurrent=restore,guard
@@ -191,6 +200,7 @@ function Network.refreshRuleRows(terminal, zoneId, nodeId, rules)
 					row.children[i]=adapter.rowsByKey[child.id] or child
 				end
 			end
+			GlobalStorageSiK.TerminalNodes.hideTooltips(tableUI)
 			local accepted,reason=tableUI:patchRows({upserts={row}})
 			if not accepted then return false,reason end
 			adapter.rowsByKey[row.id]=row

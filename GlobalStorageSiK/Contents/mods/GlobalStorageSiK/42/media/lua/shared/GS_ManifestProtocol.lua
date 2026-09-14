@@ -2,6 +2,14 @@
 require "GS_Config"
 local Protocol = { SCHEMA = 1, MAX_NODES = 8192, MAX_REQUEST_NODES = 64 }
 GlobalStorageSiK.ManifestProtocol = Protocol
+-- Temporary physical loss cancels authority but retains quarantined session data.
+-- Unknown denial reasons remain revocations; this never grants access or reuse.
+function Protocol.suspendsAccess(reason)
+	return reason=="terminal_out_of_range" or reason=="tablet_out_of_range" or reason=="no_terminal"
+end
+function Protocol.accessLoss(reason)
+	return reason=="catalog_access_changed" or Protocol.suspendsAccess(reason)
+end
 Protocol.METADATA_FIELDS={"networkName","configEpoch","routingRevision","powered","fuelConsumption",
 	"scan","scanActive","scanStatus","zones","terminals","nodes","permissions","redistributeActive",
 	"craftProbe","capacity","proximityRange","wirelessRange","readLoans","installedAddons",

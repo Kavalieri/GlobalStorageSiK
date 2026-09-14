@@ -5688,18 +5688,20 @@ GlobalStorageSiK.CatalogServer.configure({
 		local key = terminalWatcherKey(player)
 		if not key or terminalWatchNetworkByPlayer[key] ~= session.networkId then return false end
 		if not GlobalStorageSiK.Permissions.canAccess(player, session.networkId) then return false, "catalog_access_changed" end
-		local access, _, terminal = GlobalStorageSiK.TerminalAccess.evaluate(player, session.networkId,
+		local scope = authorizedCatalogScope(player, session.networkId)
+		-- Check real revocation before geometry, including when both change together.
+		if payload.catalogScope ~= scope or session.catalogScope ~= scope then return false, "catalog_access_changed" end
+		local access, _, terminal, accessReason = GlobalStorageSiK.TerminalAccess.evaluate(player, session.networkId,
 			GlobalStorageSiK.TerminalAccess.getSessionAnchor(player), {sessionLock=true, strictDistance=true})
-		if not access then return false, "catalog_access_changed" end
+		if not access then return false, GlobalStorageSiK.ManifestProtocol.suspendsAccess(accessReason)
+			and accessReason or "catalog_access_changed" end
 		local anchor=session.terminalAnchor
 		if anchor and (not terminal or anchor.x~=terminal.x or anchor.y~=terminal.y
 			or (anchor.z or 0)~=(terminal.z or 0)) then return false,"catalog_access_changed" end
 		if terminal and GlobalStorageSiK.Network.findNetworkIdAtTerminal(terminal.x, terminal.y,
 			terminal.z or 0, {activeOnly=true}) ~= session.networkId then return false, "catalog_access_changed" end
-		local scope = authorizedCatalogScope(player, session.networkId)
 		-- Revisions describe immutable content, not authorization. A newer world
 		-- revision queues reconciliation after ACK; a changed scope revokes data.
-		if payload.catalogScope ~= scope or session.catalogScope ~= scope then return false, "catalog_access_changed" end
 		return true
 	end,
 	recover=function(player, networkId)

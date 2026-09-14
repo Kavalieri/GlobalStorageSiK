@@ -57,13 +57,15 @@ function Server.queueState(player,payload)
 			or current.reconcilePending~=payload.reconcilePending then state.refreshPending=true end
 		return true,"manifest_coalesced"
 	end
-	state.session.controlStamp=signature
 	local manifest,reason=Manifest.capture(player,state.session,state.knownToken)
-	state.session.controlStamp=nil
 	if not manifest then return false,reason end
 	state.manifest=manifest
 	state.request=nil
-	if not manifest.manifestNotModified then manifest.terminalMetadata=metadata end
+	-- Control metadata is fresh even when the complete set of blocks is stable.
+	manifest.terminalMetadata=metadata
+	manifest.viewStamp=Protocol.metadataSignature({classification=manifest.classificationEpoch,
+		routing=manifest.routingRevision,categories=metadata.categories,configEpoch=metadata.configEpoch})
+	if not manifest.viewStamp then return false,"manifest_metadata_budget" end
 	manifest.catalogSource=manifest.manifestNotModified and "manifest_not_modified" or "node_manifest"
 	manifest.snapshotRevision=payload.snapshotRevision
 	manifest.snapshotCertified=payload.snapshotCertified
@@ -131,9 +133,9 @@ function Server.update()
 	for player,state in pairs(states) do
 		local pending=state.ready or state.retry or state.request or (state.refreshPending and not state.roundActive)
 		local check=pending or now()-(state.checkedAt or 0)>=1000
-		local accepted=true
-		if check then state.checkedAt=now();accepted=context.valid(player,state.session,state.session) end
-		if not accepted then retired[#retired+1]=player
+		local accepted,reason=true,nil
+		if check then state.checkedAt=now();accepted,reason=context.valid(player,state.session,state.session) end
+		if not accepted then retired[#retired+1]={player=player,reason=reason or "catalog_access_changed"}
 		elseif pending and not context.hasJob(player) then
 			if state.ready then
 				local accepted=context.completed(player,state.ready.revision,state.session.catalogScope)
@@ -164,8 +166,8 @@ function Server.update()
 	end
 	for i=1,#retired do
 		-- Revocation must reach the client even when no catalog job is in flight.
-		context.failed(retired[i],"catalog_access_changed")
-		Server.clear(retired[i])
+		context.failed(retired[i].player,retired[i].reason)
+		Server.clear(retired[i].player)
 	end
 end
 return Server

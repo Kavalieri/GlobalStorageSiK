@@ -128,6 +128,7 @@ function Replica.new(options)
 				local c=entry.confirmed
 				entry.rows,entry.metadata,entry.rowStore=c.rows,c.metadata,c.rowStore
 				entry.derivedGeneration,entry.viewBytes=c.derivedGeneration,c.viewBytes
+				entry.viewStamp=c.viewStamp
 				entry.viewCharge=c.viewBytes;entry.bytes=entry.bytes+c.viewBytes
 			end
 			for id in pairs(old.byId) do if not byId[id] then entry.changedNodeIds[id]=true end end
@@ -196,7 +197,7 @@ function Replica.new(options)
 		else for i=1,#entry.records do add(entry.records[i]) end end
 		return registry
 	end
-	function api.stageView(entry,rows,metadata,retainedBytes,complete,rowStore,generation,viewToken)
+	function api.stageView(entry,rows,metadata,retainedBytes,complete,rowStore,generation,viewToken,viewStamp)
 		if not entry or entries[entry.key]~=entry or type(rows)~="table"
 			or not Protocol.integer(retainedBytes,1,maxBytes) or entry.staged then return nil,"replica_budget" end
 		local c=entry.confirmed
@@ -218,9 +219,10 @@ function Replica.new(options)
 			entry.viewCharge=finalCharge;entry.staged=nil
 			if complete~=false then
 				entry.confirmed={token=viewToken or stage.token,rows=rows,metadata=metadata,rowStore=rowStore,
-					derivedGeneration=generation,viewBytes=retainedBytes}
+					derivedGeneration=generation,viewBytes=retainedBytes,viewStamp=viewStamp}
 				entry.rows,entry.metadata,entry.rowStore=rows,metadata,rowStore
 				entry.derivedGeneration,entry.viewBytes=generation,retainedBytes
+				entry.viewStamp=viewStamp
 				if not viewToken or viewToken==entry.token then entry.changedNodeIds={} end
 			end
 			touch(entry);return true

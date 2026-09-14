@@ -964,6 +964,9 @@ function GS_TerminalUI:cleanupTerminalSession()
         if GlobalStorageSiK.TerminalOptions and GlobalStorageSiK.TerminalOptions.dispose then
                 GlobalStorageSiK.TerminalOptions.dispose(self)
         end
+	if GlobalStorageSiK.TerminalNetwork and GlobalStorageSiK.TerminalNetwork.dispose then
+		GlobalStorageSiK.TerminalNetwork.dispose(self)
+	end
         if GlobalStorageSiK.UIDebug then GlobalStorageSiK.UIDebug.log("OPEN", "onClose()") end
 	if GlobalStorageSiK.TerminalBlockedUI and GlobalStorageSiK.TerminalBlockedUI.instance == self then
 		GlobalStorageSiK.TerminalBlockedUI.instance = nil

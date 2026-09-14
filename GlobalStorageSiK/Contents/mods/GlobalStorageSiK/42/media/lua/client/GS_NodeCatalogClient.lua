@@ -5,6 +5,7 @@ require "GS_Index"
 local Client={}
 GlobalStorageSiK.NodeCatalogClient=Client
 local context,slots=nil,{}
+local owners={}
 local cursor=0
 local function diagnosticId(value)
 	value=tostring(value or "")
@@ -80,8 +81,26 @@ function Client.clear(playerNum,revoke)
 	slots[playerNum]=nil
 	if revoke then cache.clear(playerNum) end
 end
+local function currentOwner(playerNum)
+	if not context.player then return true end
+	local player=context.player(playerNum)
+	if owners[playerNum] and owners[playerNum]~=player then Client.clear(playerNum,true) end
+	owners[playerNum]=player
+	return player~=nil
+end
+local function allowed(state)
+	local accepted,reason=context.allowed(state.ack)
+	if accepted then return true end
+	reason=Protocol.suspendsAccess(reason) and reason or "catalog_access_changed"
+	local n=state.ack.playerNum
+	Client.clear(n,not Protocol.suspendsAccess(reason))
+	trace("clientAccessSuspended",state.ack,"reason="..reason.." retained="..tostring(Protocol.suspendsAccess(reason)))
+	if context.failed then context.failed(n,reason,failureIdentity(state)) end
+	return false
+end
 function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
+	if not currentOwner(ack.playerNum) then return false,"catalog_access_changed" end
 	Client.clear(ack.playerNum,false)
 	if ack.topologyTransition then
 		local accepted,reason=cache.transition(ack)
@@ -142,7 +161,7 @@ local function nextNode(state,receivedBlock)
 	local registry=cache.registry(entry,partial,changedIds)
 	if not registry then return false,"replica_incomplete" end
 	state.build=GlobalStorageSiK.Index.beginCatalogBuild(state.ack.networkId,nil,nil,state.manifest.inventoryRevision,
-		{registry=registry,key=(state.entry.derivedKey or state.entry.key)..Protocol.part(state.manifest.classificationEpoch),
+		{registry=registry,key=(state.entry.derivedKey or state.entry.key)..Protocol.part(state.manifest.viewStamp or state.manifest.classificationEpoch),
 			incremental=true,baseGeneration=state.derivedGeneration,changedNodeIds=changedIds,
 			completeRegistry=function() return cache.registry(entry,partial) end})
 	return state.build~=nil
@@ -171,10 +190,22 @@ function Client.consume(value,retainedBytes)
 				or not entry.rows or not entry.metadata then
 				return false,"manifest_cache_miss"
 			end
-			state.entry=entry;state.manifest=value;state.metadata=entry.metadata
+			if type(value.terminalMetadata)~="table" then return false,"manifest_metadata" end
+			state.entry=entry;state.manifest=value;state.metadata=value.terminalMetadata
 			state.partial=false;state.stats=nil;state.store=entry.rowStore;state.hasComplete=true
 			state.derivedGeneration=entry.derivedGeneration
+			if context.topology then
+				local accepted,reason=context.topology(value,value.terminalMetadata,false)
+				if accepted==false then return false,reason end
+			end
+			if entry.viewStamp~=value.viewStamp then
+				state.derivedGeneration=nil;state.notModified=nil
+				for _,record in ipairs(entry.records) do state.pendingNodeIds[record.nodeId]=true end
+				state.progressDone,state.progressTotal=1,2
+				return nextNode(state)
+			end
 			state.rows=entry.rows;state.phase="apply";state.notModified=true
+			state.view={changed={},removed={}}
 			state.progressDone,state.progressTotal=1,2
 			publishProgress(state,false)
 			trace("notModified",value,"nodesRequested=0 buildWork=0")
@@ -215,18 +246,21 @@ local function prepareView(state,rows,stats)
 		if not undo then return false,reason end
 		state.undo=undo
 		state.view={changed=rows,removed=stats.removedRowKeys or {}}
+	elseif state.store then
+		-- A classification change derives all rows locally, but still patches the
+		-- mounted view transactionally instead of rebuilding its window/widgets.
+		local present,removed={},{}
+		for _,row in ipairs(rows) do present[row.rowKey]=true end
+		for key in pairs(state.store.byKey) do if not present[key] then removed[#removed+1]=key end end
+		local undo,reason=Rows.patch(state.store,rows,removed,#rows)
+		if not undo then return false,reason end
+		state.undo=undo;state.view={changed=rows,removed=removed}
 	else
 		local store,reason=Rows.new(rows)
 		if not store then return false,reason end
 		state.store=store;state.view=nil
 	end
 	state.rows=state.store.rows
-	local categories={}
-	for key in pairs(state.store.categories) do
-		if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then categories[#categories+1]=key end
-	end
-	state.metadata=shallow(state.metadata)
-	state.metadata.categories=GlobalStorageSiK.Categories.composeCatalog({state.metadata.categories,categories})
 	state.phase="apply"
 	return true
 end
@@ -236,6 +270,16 @@ local function apply(state)
 		local accepted,reason=prepareView(state,state.buildRows,state.stats)
 		state.buildRows=nil
 		if not accepted then return false,reason end
+	end
+	-- Fresh control metadata also accompanies notModified. Preserve categories
+	-- derived from the confirmed local rows without rebuilding those rows.
+	if state.store then
+		local categories={}
+		for key in pairs(state.store.categories) do
+			if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then categories[#categories+1]=key end
+		end
+		state.metadata=shallow(state.metadata)
+		state.metadata.categories=GlobalStorageSiK.Categories.composeCatalog({state.metadata.categories,categories})
 	end
 	local payload=shallow(state.metadata)
 	for k,v in pairs(intent(state)) do payload[k]=v end
@@ -266,15 +310,14 @@ local function apply(state)
 	local retained=math.max(4096,(state.stats and state.stats.retainedBytes) or #state.rows*1024)
 	local generation=state.stats and state.stats.generation or state.derivedGeneration
 	local commit,storeReason,cancel=cache.stageView(state.entry,state.rows,state.metadata,retained,
-		not state.partial,state.store,generation,state.manifest.manifestToken)
+		not state.partial,state.store,generation,state.manifest.manifestToken,state.manifest.viewStamp)
 	if not commit then return false,storeReason end
 	state.cancelStage=cancel
 	local accepted,reason=context.apply(payload,delta,state.rows)
 	if accepted==false then return false,reason end
 	if slots[payload.playerNum]~=state then return true end
-	if not context.current(payload.playerNum,state.ack.openSeq) or not context.allowed(state.ack) then
-		Client.clear(payload.playerNum,true);return true
-	end
+	if not context.current(payload.playerNum,state.ack.openSeq) then Client.clear(payload.playerNum,false);return true end
+	if not allowed(state) then return true end
 	if not commit() then return false,"manifest_changed" end
 	state.cancelStage=nil
 	state.undo=nil;state.viewSequence=payload.viewSequence;state.hasPresented=true
@@ -306,10 +349,11 @@ function Client.update()
 	local active=false
 	for offset=0,3 do
 		local n=(cursor+offset)%4
+		currentOwner(n)
 		local state=slots[n]
 		if state then
 			if not context.current(n,state.ack.openSeq) then Client.clear(n,false)
-			elseif not context.allowed(state.ack) then Client.clear(n,true)
+			elseif not allowed(state) then -- Access loss already cancelled this round.
 			elseif not state.completed and not state.build and not state.phase and now()-state.started>10000 then
 				active=true
 				if not Client.recover(n) then Client.clear(n,false);context.failed(n,"catalog_timeout") end
