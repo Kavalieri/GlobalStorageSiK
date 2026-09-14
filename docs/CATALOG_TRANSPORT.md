@@ -1,4 +1,4 @@
-# Catalog transport — Core 1.5.5-dev1
+# Catalog transport — Core 1.5.5-dev1.1
 
 A container is the authoritative inventory unit. A network publishes a manifest
 of container revisions; the terminal catalog is a derived client view. Server
@@ -18,6 +18,12 @@ One immutable node block completes the existing framed transport and consumer
 ACK before the next block is sent. Removed nodes are removed from the replica.
 A changed classification stamp rebuilds the local derived presentation.
 
+Client category composition is pure during replica bootstrap. It merges manifest
+metadata, categories detected in the received node replicas and built-in defaults;
+it does not require or create a client Network/Zones registry entry. The legacy
+category helpers also return bounded empty results when their registry or network
+is absent.
+
 Confirmed replicas use a byte LRU (32 MiB, 16 scopes), with no age expiry.
 Closing, distance and chunk unload do not expire confirmed content. Revocation,
 death, a different epoch or incompatible scope invalidate the corresponding
@@ -31,6 +37,14 @@ Node content revisions, inventory mutation fences and routing revisions are
 separate. A metadata-only manifest change at the same inventory revision commits
 a complete *local* derived view, never an invalid same-revision content delta.
 All actions remain subject to current server permissions and physical identity.
+
+A deterministic replica consumer failure fences that `openSeq`, manifest token and
+revision after the first rejection. The server releases queued work and will not
+resend the rejected identity; the client preserves its last confirmed view. A new
+opening is required to negotiate a different session. Progress belongs to the
+whole manifest operation rather than individual transport batches. It is monotonic,
+remains below 100 percent while actions are fenced, and reaches 100 percent once,
+only after the complete view has been applied and `terminalReplicaReady` accepted.
 
 ## Mutation and external changes
 

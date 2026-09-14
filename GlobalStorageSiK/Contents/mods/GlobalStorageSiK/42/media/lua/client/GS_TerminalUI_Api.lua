@@ -146,7 +146,8 @@ local function applyTerminalState(ui, state, forceDeferred)
 			GlobalStorageSiK.Log.error("TerminalUI", "refreshFromState failed", err)
 			Loading.set(ui, "failed", load and load.sequence)
 		else
-			Loading.finish(ui, load)
+			if pendingState._gsAwaitReplicaReady then Loading.lock(ui)
+			else Loading.finish(ui, load) end
 			local client = GlobalStorageSiK.Client
 			if pendingState.openUi and client and client.pendingInitialTab then
 				local tab = client.pendingInitialTab
@@ -579,9 +580,24 @@ function GlobalStorageSiK.TerminalUI.dispatchOpening(player, sequence, dispatch)
 	return true
 end
 
-function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
+function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total, ready)
 	local ui = GlobalStorageSiK.TerminalUI.getInstanceForPlayer(payload.playerNum)
 	if not ui or GlobalStorageSiK.Client.terminalOpenSeqByPlayer[payload.playerNum] ~= payload.openSeq then return end
+	local requestedDone=tonumber(done) or 0
+	local active=ui._gsCatalogLoad
+	if active and active.sequence==payload.openSeq
+		and (not active.manifestToken or active.manifestToken==payload.manifestToken) then
+		if active.ready then return true end
+		local oldTotal,oldDone=tonumber(active.total),tonumber(active.done)
+		if oldTotal and oldTotal>0 and tonumber(total) and total>0
+			and oldDone and oldDone/oldTotal>requestedDone/total then
+			requestedDone=math.ceil(oldDone*total/oldTotal)
+		end
+	end
+	if tonumber(total) and total>0 then
+		done=math.max(0,requestedDone)
+		if ready then done=total elseif done>=total then done=math.max(0,total-1) end
+	else total=nil end
 	local first = not ui._gsCatalogLoad or ui._gsCatalogLoad.phase == "checking"
 	if first and done == 0 then
 		-- ACK is already authorized by CatalogClient. Reuse only data matching
@@ -656,6 +672,22 @@ function GlobalStorageSiK.TerminalUI.catalogProgress(payload, done, total)
 		if hasRows and ui._gsCatalogLoad and ui._gsCatalogLoad.phase == "validating" then phase = "validating" end
 		Loading.set(ui, phase, payload.openSeq, done, total)
 	end
+	if ui._gsCatalogLoad and ui._gsCatalogLoad.sequence==payload.openSeq then
+		ui._gsCatalogLoad.manifestToken=payload.manifestToken
+	end
+	if ready and ui._gsCatalogLoad and ui._gsCatalogLoad.sequence==payload.openSeq then
+		local load=ui._gsCatalogLoad
+		load.ready=true
+		Loading.unlock(ui)
+		if not ui._gsCatalogReadyFinish and Events and Events.OnTick then
+			local function finishReady()
+				Events.OnTick.Remove(finishReady);ui._gsCatalogReadyFinish=nil
+				Loading.finish(ui,load)
+			end
+			ui._gsCatalogReadyFinish=finishReady;Events.OnTick.Add(finishReady)
+		end
+	end
+	return true
 end
 
 -- Called by the existing access watcher only while a view or request exists.

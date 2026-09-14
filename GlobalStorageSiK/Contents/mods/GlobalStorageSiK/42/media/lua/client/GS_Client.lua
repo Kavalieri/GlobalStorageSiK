@@ -1541,11 +1541,15 @@ GlobalStorageSiK.CatalogClient.configure({
 			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
 		}, meta.playerNum)
 	end,
-	reject=function(meta)
+	reject=function(meta,reason,consumerRejected)
 		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
 			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
 			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope, rejected=true,
+			consumerRejected=consumerRejected==true,
 		}, meta.playerNum)
+	end,
+	replicaReject=function(meta)
+		GlobalStorageSiK.NetClient.sendCommand("terminalReplicaReject", meta, meta.playerNum)
 	end,
 	failure=function(n, seq, reason, confirmed, recoverable)
 		if reason == "catalog_access_changed" then
@@ -1586,6 +1590,9 @@ GlobalStorageSiK.NodeCatalogClient.configure({
 	current=function(n,seq) return GlobalStorageSiK.Client.terminalOpenSeqByPlayer[n]==seq end,
 	pending=function(n) return GlobalStorageSiK.Client.pendingTerminalOpenByPlayer[n]==true end,
 	currentState=function(n) return GlobalStorageSiK.Client.terminalStateByPlayer[n] end,
+	progress=function(payload,done,total,ready)
+		return GlobalStorageSiK.TerminalUI.catalogProgress(payload,done,total,ready)
+	end,
 	allowed=function(payload)
 		local player=GlobalStorageSiK.NetClient.getPlayer(payload.playerNum)
 		if not player or (player.isDead and player:isDead()) then return false end
@@ -1604,9 +1611,9 @@ GlobalStorageSiK.NodeCatalogClient.configure({
 		if accepted~=false and not payload.replicaPartial then GlobalStorageSiK.CatalogClient.replicaApplied(payload.playerNum,payload.inventoryRevision) end
 		return accepted,reason
 	end,
-	failed=function(n,reason)
+	failed=function(n,reason,meta)
 		GlobalStorageSiK.Log.error("CatalogTransport","node_replica_apply",tostring(reason))
-		GlobalStorageSiK.CatalogClient.abortReplica(n,"catalog_apply")
+		GlobalStorageSiK.CatalogClient.abortReplica(n,"catalog_apply",meta)
 	end,
 	evicted=function(entry,reason)
 		if reason=="scope_or_epoch_changed" or reason=="revoked" then GlobalStorageSiK.Client.clearInventoryCatalog(entry.playerNum) end

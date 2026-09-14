@@ -31,14 +31,19 @@ GlobalStorageSiK.Categories.DEFAULTS = {
 ---@param registry table
 ---@param networkId string
 function GlobalStorageSiK.Categories.ensure(registry, networkId)
+	if type(registry) ~= "table" or type(networkId) ~= "string" or networkId == "" then
+		return nil, "categories_registry"
+	end
 	GlobalStorageSiK.Network.ensureRegistry(registry)
-	local net = registry.networks[networkId]
-	if not net.categories or #net.categories == 0 then
+	local net = type(registry.networks) == "table" and registry.networks[networkId] or nil
+	if type(net) ~= "table" then return nil, "categories_network" end
+	if type(net.categories) ~= "table" or #net.categories == 0 then
 		net.categories = {}
 		for i = 1, #GlobalStorageSiK.Categories.DEFAULTS do
 			table.insert(net.categories, GlobalStorageSiK.Categories.DEFAULTS[i])
 		end
 	end
+	return net.categories
 end
 
 --- Devuelve categorías de una red.
@@ -47,8 +52,8 @@ end
 function GlobalStorageSiK.Categories.getList(networkId)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
-	GlobalStorageSiK.Categories.ensure(registry, networkId)
-	return registry.networks[networkId].categories
+	local list, reason = GlobalStorageSiK.Categories.ensure(registry, networkId)
+	return list or {}, reason
 end
 
 --- Añade categoría si no existe.
@@ -61,8 +66,8 @@ function GlobalStorageSiK.Categories.add(networkId, name)
 		return false
 	end
 	local registry = GlobalStorageSiK.Network.getRegistry()
-	GlobalStorageSiK.Categories.ensure(registry, networkId)
-	local list = registry.networks[networkId].categories
+	local list = GlobalStorageSiK.Categories.ensure(registry, networkId)
+	if not list then return false end
 	for i = 1, #list do
 		if string.lower(list[i]) == string.lower(name) then
 			return false
@@ -109,6 +114,7 @@ function GlobalStorageSiK.Categories.collectFromNodeRules(networkId)
 	local found = {}
 	local seen = {}
 	local registry = GlobalStorageSiK.Zones.getRegistry()
+	if type(registry) ~= "table" then return found end
 	for _, node in pairs(registry.nodes or {}) do
 		local zone = registry.zones and registry.zones[node.zoneId]
 		if zone and zone.networkId == networkId and node.categories then
@@ -126,48 +132,43 @@ function GlobalStorageSiK.Categories.collectFromNodeRules(networkId)
 	return found
 end
 
---- Catálogo para desplegables de contenedores (defaults + red + ítems presentes).
----@param networkId string
+--- Compone un catálogo sin consultar ni mutar registros Network/Zones. Las
+--- fuentes ya están autorizadas por quien llama (manifiesto, réplicas o reglas).
+---@param sources table[]|nil
 ---@return string[]
-function GlobalStorageSiK.Categories.buildCatalog(networkId, preparedRows, detectedCategories)
-	local seen = {}
-	local catalog = {}
-
+function GlobalStorageSiK.Categories.composeCatalog(sources)
+	local seen, catalog = {}, {}
 	local function add(cat)
 		cat = type(cat) == "string" and cat or nil
-		if not cat or cat == "" or cat == "*" then
-			return
-		end
-		if not GlobalStorageSiK.CategoryResolution.isVanillaKey(cat) then
-			return
-		end
+		if not cat or cat == "" or cat == "*"
+			or not GlobalStorageSiK.CategoryResolution.isVanillaKey(cat) then return end
 		local key = string.lower(cat)
-		if seen[key] then
-			return
-		end
+		if seen[key] then return end
 		seen[key] = true
-		table.insert(catalog, cat)
+		catalog[#catalog + 1] = cat
 	end
-
-	for i = 1, #GlobalStorageSiK.Categories.DEFAULTS do
-		add(GlobalStorageSiK.Categories.DEFAULTS[i])
+	for i = 1, #GlobalStorageSiK.Categories.DEFAULTS do add(GlobalStorageSiK.Categories.DEFAULTS[i]) end
+	for i = 1, #(sources or {}) do
+		local source = type(sources[i]) == "table" and sources[i] or {}
+		for j = 1, #source do add(source[j]) end
 	end
-	for _, cat in ipairs(GlobalStorageSiK.Categories.getList(networkId)) do
-		add(cat)
-	end
-	for _, cat in ipairs(detectedCategories or GlobalStorageSiK.Categories.collectFromNetworkItems(networkId, preparedRows)) do
-		add(cat)
-	end
-	for _, cat in ipairs(GlobalStorageSiK.Categories.collectFromNodeRules(networkId)) do
-		add(cat)
-	end
-
 	table.sort(catalog, function(a, b)
 		local la = GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = a })
 		local lb = GlobalStorageSiK.CategoryResolution.label({ effective = "vanilla", vanillaKey = b })
 		return string.lower(la) < string.lower(lb)
 	end)
 	return catalog
+end
+
+--- Catálogo para desplegables de contenedores (defaults + red + ítems presentes).
+---@param networkId string
+---@return string[]
+function GlobalStorageSiK.Categories.buildCatalog(networkId, preparedRows, detectedCategories)
+	local detected = detectedCategories or GlobalStorageSiK.Categories.collectFromNetworkItems(networkId, preparedRows)
+	return GlobalStorageSiK.Categories.composeCatalog({
+		GlobalStorageSiK.Categories.getList(networkId), detected,
+		GlobalStorageSiK.Categories.collectFromNodeRules(networkId),
+	})
 end
 
 --- Serializa catálogo detectado para el cliente.

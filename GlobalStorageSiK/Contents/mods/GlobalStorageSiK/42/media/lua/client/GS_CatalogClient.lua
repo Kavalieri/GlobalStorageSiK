@@ -33,32 +33,41 @@ local function slotFor(payload)
 		or not context.current(payload.playerNum, payload.openSeq) then return end
 	return slot
 end
-local function fail(playerNum, reason, serverError)
+local function fail(playerNum, reason, serverError, consumerRejected)
 	local slot = slots[playerNum]
 	if not slot then return end
+	if consumerRejected then slot.consumerRejected=true end
 	local recoverable = slot.applied == true and reason ~= "catalog_access_changed"
 	local rejected = slot.batch and slot.batch.meta
 	if slot.confirmed and slot.confirmed.replicaEpoch and reason~="catalog_access_changed"
-		and reason~="catalog_budget" and context.nodeRecover then
+		and reason~="catalog_budget" and not slot.consumerRejected and context.nodeRecover then
 		slot.batch=nil
-		if rejected and not serverError and context.reject then context.reject(rejected,reason) end
+		if rejected and not serverError and context.reject then context.reject(rejected,reason,false) end
 		if context.nodeRecover(playerNum) then slot.started=now();return end
 	end
 	if recoverable then slot.batch = nil else slots[playerNum] = nil end
-	if rejected and not serverError and reason ~= "catalog_access_changed" and context.reject then context.reject(rejected, reason) end
+	if rejected and not serverError and reason ~= "catalog_access_changed" and context.reject
+		and not slot.rejectionSent then context.reject(rejected,reason,slot.consumerRejected==true);slot.rejectionSent=true end
+	if slot.consumerRejected and not rejected and context.replicaReject and slot.replicaFailure
+		and not slot.rejectionSent then context.replicaReject(slot.replicaFailure,reason);slot.rejectionSent=true end
 	if recoverable and slots[playerNum] ~= slot then return end
 	if GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.debug("CatalogTransport", "failed", "player=" .. tostring(playerNum)
 			.. " openSeq=" .. tostring(slot.sequence) .. " reason=" .. tostring(reason))
 	end
 	context.failure(playerNum, slot.sequence, reason, slot.confirmed ~= nil, recoverable)
-	if recoverable and not rejected and not serverError and slots[playerNum] == slot and not slot.recoveryUsed then
+	if recoverable and not slot.consumerRejected and not rejected and not serverError
+		and slots[playerNum] == slot and not slot.recoveryUsed then
 		slot.recoveryUsed = true
 		local recover = context.recover or context.stale
 		if recover then recover(rejected or slot.confirmed, reason) end
 	end
 end
-function Client.abortReplica(playerNum,reason) fail(playerNum,reason or "catalog_apply") end
+function Client.abortReplica(playerNum,reason,meta)
+	local slot=slots[playerNum]
+	if slot then slot.replicaFailure=meta end
+	fail(playerNum,reason or "catalog_apply",false,true)
+end
 local function consumerFailure(playerNum, slot, meta, ok, result, reason, stage)
 	if slots[playerNum] ~= slot then return end
 	local cause = ok and reason or result
@@ -71,7 +80,7 @@ local function consumerFailure(playerNum, slot, meta, ok, result, reason, stage)
 			.. " revision=" .. tostring(meta.inventoryRevision) .. " scope=" .. tostring(meta.catalogScope):sub(1,120)
 			.. " source=" .. tostring(meta.catalogSource))
 	end
-	fail(playerNum, cause == "catalog_access_changed" and cause or "catalog_apply")
+	fail(playerNum, cause == "catalog_access_changed" and cause or "catalog_apply",false,true)
 end
 local function same(a, b)
 	return a.protocol == b.protocol and a.batchId == b.batchId and a.networkId == b.networkId and a.openSeq == b.openSeq
@@ -125,8 +134,7 @@ local function applyReady(playerNum, slot)
 		return
 	end
 	slot.batch = nil
-	if value.catalogManifest or value.catalogNode then slot.applied=true
-	elseif value.catalogDetail ~= true then
+	if value.catalogDetail ~= true and not value.catalogManifest and not value.catalogNode then
 		slot.completedRevision, slot.applied = value.inventoryRevision, true
 		slot.recoveryUsed = nil
 		if value.catalogDelta ~= true then slot.retainedBytes = batch.bytes*2 end
@@ -167,6 +175,7 @@ end
 function Client.receive(payload)
 	local slot = slotFor(payload)
 	if not slot then return end
+	if slot.consumerRejected then return end
 	if (payload.protocol ~= 1 and payload.protocol ~= 2) or not Codec.integer(payload.batchId, 1, 9007199254740991)
 		or not Codec.integer(payload.total, 1, Codec.MAX_CHUNKS)
 		or not Codec.integer(payload.part, 1, payload.total)
@@ -231,7 +240,7 @@ function Client.receive(payload)
 	end
 	-- Only accepted, unique fragments advance presentation. A complete batch
 	-- still remains non-operable until decoding and the consumer apply finish.
-	if slot.confirmed and context.progress then
+	if slot.confirmed and context.progress and not slot.confirmed.replicaEpoch then
 		local ok, accepted, reason, stage = pcall(context.progress, batch.meta, batch.count, batch.meta.total)
 		if not ok or accepted == false then consumerFailure(payload.playerNum, slot, batch.meta, ok, accepted, reason, stage or "catalogProgress"); return end
 	end

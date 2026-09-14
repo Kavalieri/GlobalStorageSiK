@@ -45,6 +45,14 @@ function Server.replicaReady(player,revision,scope)
 end
 function Server.isOpening(player) return sessions[player] and sessions[player].openUi == true end
 function Server.hasJob(player) return jobs[player] ~= nil end
+function Server.fenceConsumer(player,reason)
+	local session=sessions[player]
+	if not session then return false end
+	release(player,reason or "catalog_consumer")
+	session.consumerRejected=true;session.forceFull=true;session.recoveryUsed=true
+	if context and context.rejectNode then context.rejectNode(player) end
+	return true
+end
 function Server.base(player)
     local session = sessions[player]
     return session and not session.forceFull and session.confirmed or nil
@@ -182,8 +190,9 @@ local function copyMetadata(value, depth, active)
     return result
 end
 local function queue(player, payload, rows, builder)
-    local session=sessions[player]
-    if not session or type(payload)~="table" or session.networkId~=payload.networkId then return false end
+	local session=sessions[player]
+	if not session or type(payload)~="table" or session.networkId~=payload.networkId then return false end
+	if session.consumerRejected then return false,"catalog_session_fenced" end
     local valid, invalidReason=context.valid(player,session,payload)
     if not valid then
         if invalidReason then failure(player,invalidReason,serial) else Server.clear(player) end
@@ -264,13 +273,16 @@ function Server.receipt(player,payload)
         if reason then failure(player,reason,meta.batchId) else Server.clear(player) end
         return
     end
-    if payload.rejected==true then
-        counters.rejected=counters.rejected+1
-        log("rejected",description(meta) .. " reason=catalog_consumer")
-        release(player)
-        session.forceFull=true
-        recoverOnce(player,session,"catalog_consumer")
-        return
+	if payload.rejected==true then
+		counters.rejected=counters.rejected+1
+		local rejectReason=payload.consumerRejected==true and "catalog_consumer" or "catalog_transport"
+		log("rejected",description(meta) .. " reason="..rejectReason)
+		if payload.consumerRejected==true then Server.fenceConsumer(player,"catalog_consumer")
+		else
+			release(player,rejectReason);session.forceFull=true
+			recoverOnce(player,session,rejectReason)
+		end
+		return
     end
     if job.builder or job.encoder or job.framer or job.nextPart<=meta.total then discard("premature"); return end
     if not job.detail and not job.nodeTransfer then

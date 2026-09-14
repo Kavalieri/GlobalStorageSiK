@@ -35,9 +35,40 @@ local function intent(state)
 	return {networkId=ack.networkId,openSeq=ack.openSeq,playerNum=ack.playerNum,
 		catalogScope=ack.catalogScope,replicaEpoch=ack.replicaEpoch}
 end
+local function remainingBlocks(state)
+	local remaining=0
+	local entry=state.entry
+	for i=1,#(entry and entry.records or {}) do
+		local record=entry.records[i]
+		local unavailable=record.availability=="unloaded_or_missing" or record.availability=="offline"
+		if record.enabled and not entry.blocks[record.nodeId]
+			and (record.confirmed or not unavailable) then remaining=remaining+1 end
+	end
+	return remaining
+end
+local function publishProgress(state,ready)
+	if not context.progress then return true end
+	local total=state.progressTotal
+	local done=state.progressDone
+	if total then
+		done=math.max(done or 1,total-remainingBlocks(state)-1)
+		if ready then done=total elseif done>=total then done=total-1 end
+		if not state.progressDone or done>state.progressDone then state.progressDone=done end
+	end
+	local meta=intent(state)
+	meta.manifestToken=state.manifest and state.manifest.manifestToken
+	meta.inventoryRevision=state.manifest and state.manifest.inventoryRevision
+	return context.progress(meta,state.progressDone,total,ready==true)
+end
 local function send(state,command,args)
 	args=args or intent(state)
 	return context.send(command,args,state.ack.playerNum)
+end
+local function failureIdentity(state)
+	local result=intent(state)
+	result.manifestToken=state.manifest and state.manifest.manifestToken
+	result.inventoryRevision=state.manifest and state.manifest.inventoryRevision
+	return result
 end
 function Client.configure(value) context=value end
 function Client.clear(playerNum,revoke)
@@ -136,6 +167,8 @@ function Client.consume(value,retainedBytes)
 			state.partial=false;state.stats=nil;state.store=entry.rowStore;state.hasComplete=true
 			state.derivedGeneration=entry.derivedGeneration
 			state.rows=entry.rows;state.phase="apply";state.notModified=true
+			state.progressDone,state.progressTotal=1,2
+			publishProgress(state,false)
 			trace("notModified",value,"nodesRequested=0 buildWork=0")
 			return true
 		end
@@ -146,6 +179,9 @@ function Client.consume(value,retainedBytes)
 		for id in pairs(entry.changedNodeIds) do state.pendingNodeIds[id]=true end
 		state.entry=entry;state.manifest=value;state.metadata=value.terminalMetadata;state.notModified=nil
 		state.rows=nil;state.phase=nil;state.view=nil;state.buildRows=nil;state.request=nil
+		state.progressDone=1
+		state.progressTotal=remainingBlocks(state)+2
+		publishProgress(state,false)
 		return nextNode(state)
 	elseif value.catalogNode then
 		local accepted,reason=cache.block(value,retainedBytes)
@@ -154,6 +190,7 @@ function Client.consume(value,retainedBytes)
 		state.blockVersion=(state.blockVersion or 0)+1
 		state.retries=0
 		state.receivedBlocks=(state.receivedBlocks or 0)+1
+		publishProgress(state,false)
 		return nextNode(state,true)
 	end
 	return false,"manifest_schema"
@@ -177,7 +214,7 @@ local function prepareView(state,rows,stats)
 		if GlobalStorageSiK.CategoryResolution.isVanillaKey(key) then categories[#categories+1]=key end
 	end
 	state.metadata=shallow(state.metadata)
-	state.metadata.categories=GlobalStorageSiK.Categories.buildCatalog(state.ack.networkId,{},categories)
+	state.metadata.categories=GlobalStorageSiK.Categories.composeCatalog({state.metadata.categories,categories})
 	state.phase="apply"
 	return true
 end
@@ -202,6 +239,7 @@ local function apply(state)
 	payload.accessMode=state.ack.accessMode;payload.terminalAnchor=state.ack.terminalAnchor
 	payload.confirmedProximityRange=state.ack.confirmedProximityRange
 	payload.confirmedWirelessRange=state.ack.confirmedWirelessRange
+	payload._gsAwaitReplicaReady=true
 	local delta=false
 	local current=context.currentState(payload.playerNum)
 	if not payload.openUi and current and current.replicaEpoch==payload.replicaEpoch
@@ -247,7 +285,10 @@ local function apply(state)
 	end
 	state.hasComplete=true
 	local args=intent(state);args.manifestToken=state.manifest.manifestToken;args.inventoryRevision=payload.inventoryRevision
-	return send(state,"terminalReplicaReady",args)
+	local ready=send(state,"terminalReplicaReady",args)
+	payload._gsAwaitReplicaReady=nil
+	if ready then publishProgress(state,true) end
+	return ready
 end
 function Client.update()
 	local active=false
@@ -265,7 +306,9 @@ function Client.update()
 				local phaseStarted=now()
 				local done,rows,stats=GlobalStorageSiK.Index.stepCatalogBuild(state.build,256,2)
 				state.buildMs=(state.buildMs or 0)+now()-phaseStarted
-				if state.build.error then local reason=state.build.error;Client.clear(n,false);context.failed(n,reason)
+				if state.build.error then
+					local reason,identity=state.build.error,failureIdentity(state)
+					Client.clear(n,false);context.failed(n,reason,identity)
 				elseif done then
 					state.build=nil
 					state.buildRows=rows;state.stats=stats;state.phase="apply"
@@ -274,7 +317,10 @@ function Client.update()
 				active=true
 				local ok,accepted,reason=pcall(apply,state)
 				if not ok or accepted==false then
-					if slots[n]==state then Client.clear(n,false);context.failed(n,ok and reason or accepted) end
+					if slots[n]==state then
+						local identity=failureIdentity(state)
+						Client.clear(n,false);context.failed(n,ok and reason or accepted,identity)
+					end
 				end
 			end
 		end

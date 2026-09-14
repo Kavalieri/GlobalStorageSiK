@@ -17,6 +17,12 @@ function Server.received(player)
 	local state=states[player]
 	if state then state.lastPayload=nil end
 end
+function Server.reject(player)
+	local state=states[player]
+	if not state then return false end
+	state.rejected=true;state.request=nil;state.retry=nil;state.ready=nil;state.lastPayload=nil
+	return true
+end
 local function valid(player,args)
 	local state=states[player]
 	if not state or type(args)~="table" or args.openSeq~=state.session.openSeq
@@ -32,6 +38,7 @@ end
 function Server.queueState(player,payload)
 	local state=states[player]
 	if not state or not state.negotiated then return false,"manifest_negotiation" end
+	if state.rejected then return true,"catalog_session_fenced" end
 	if context.hasJob(player) then return false,"catalog_inflight" end
 	local metadata={}
 	for i=1,#metadataFields do local key=metadataFields[i];metadata[key]=payload[key] end
@@ -63,9 +70,19 @@ function Server.queueState(player,payload)
 	return context.queue(player,manifest)
 end
 function Server.dispatch(command,player,args)
-	if command~="terminalManifestRequest" and command~="terminalNodeRequest" and command~="terminalReplicaReady" then return false end
+	if command~="terminalManifestRequest" and command~="terminalNodeRequest"
+		and command~="terminalReplicaReady" and command~="terminalReplicaReject" then return false end
 	local state=valid(player,args)
 	if not state then return true end
+	if command=="terminalReplicaReject" then
+		if state.manifest and args.manifestToken==state.manifest.manifestToken
+			and args.inventoryRevision==state.manifest.inventoryRevision then
+			Server.reject(player)
+			if context.fence then context.fence(player,"catalog_consumer") end
+		end
+		return true
+	end
+	if state.rejected then return true end
 	if command=="terminalManifestRequest" then
 		if args.knownManifestToken~=nil and not Protocol.id(args.knownManifestToken) then return true end
 		state.negotiated=true;state.knownToken=args.knownManifestToken
@@ -83,7 +100,7 @@ function Server.dispatch(command,player,args)
 end
 function Server.recover(player)
 	local state=states[player]
-	if not state or not state.negotiated then return false end
+	if not state or not state.negotiated or state.rejected then return false end
 	state.retries=(state.retries or 0)+1
 	if state.retries>2 then return false end
 	state.retry=true

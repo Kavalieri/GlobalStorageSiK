@@ -880,7 +880,9 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		searchQuery = searchQuery or "",
 
-		categories = nil, -- Prepared from the same captured, authorized index.
+		-- El manifiesto necesita solo configuración y reglas. Las categorías
+		-- detectadas en inventario se añaden de forma pura desde las réplicas.
+		categories = GlobalStorageSiK.Categories.buildCatalog(networkId, {}, {}),
 
 		permissions = GlobalStorageSiK.Permissions.serialize(networkId, player),
 
@@ -5654,6 +5656,7 @@ GlobalStorageSiK.CatalogServer.configure({
 	opened=GlobalStorageSiK.NodeCatalogServer.opened,
 	closed=GlobalStorageSiK.NodeCatalogServer.clear,
 	nodeRecover=GlobalStorageSiK.NodeCatalogServer.recover,
+	rejectNode=GlobalStorageSiK.NodeCatalogServer.reject,
 	received=GlobalStorageSiK.NodeCatalogServer.received,
 	send=gsSendServerCommand,
 	visit=forEachOnlinePlayer,
@@ -5703,6 +5706,7 @@ GlobalStorageSiK.NodeCatalogServer.configure({
 	hasJob=GlobalStorageSiK.CatalogServer.hasJob,
 	completed=GlobalStorageSiK.CatalogServer.replicaReady,
 	failed=GlobalStorageSiK.CatalogServer.fail,
+	fence=GlobalStorageSiK.CatalogServer.fenceConsumer,
 	refresh=function(player,networkId) pushTerminalState(player,networkId) end,
 })
 require "GS_NodeViewServer"
