@@ -243,7 +243,7 @@ Los reescaneos incrementales de zonas emiten una sola línea `ZoneScanJob comple
 El cierre también incluye `scanSteps`, `scanUnits`, `scanCpuMs`, `scanChargedMs` y
 `scanPeakMs`. El scanner reparte un presupuesto global de 160 ms de crédito por
 segundo entre todas las redes, con reserva máxima de 8 ms; no se multiplica por
-jugador. Cada paso busca 3–6 ms según el ritmo observado, hasta 512 unidades de
+jugador. Cada paso busca 3–7 ms según el ritmo observado, hasta 768 unidades de
 cursor y un máximo global de 16.384 unidades por segundo. El quantum crece o baja
 según el coste medido. Una unidad de descubrimiento ya no recorre una baldosa
 entera: cede entre objetos y compartimentos, además de entre instancias.
@@ -252,6 +252,25 @@ un milisegundo conservador por paso útil para cubrir su resolución. Una llamad
 nativa individual y la publicación atómica pueden superar el objetivo temporal;
 `scanPeakMs` permite identificarlo. Estos contadores no miden el transporte del
 catálogo. Conservar logs y comparar misma red/carga con caché fría y caliente.
+
+Antes de publicar se verifica por pasos la estructura observada: baldosas,
+listas de objetos, compartimentos y referencias de instancias. Si un índice
+cambia durante la captura, se descarta todo el staging y se conserva la vista
+confirmada. La publicación es un único cambio lógico; no bloquea el mundo PZ
+ni promete que todas las zonas se observaron en el mismo instante. Los estados
+mutables de objetos conservan la detección normal por nodos y las transferencias
+revalidan siempre el objeto real. Una transferencia ya confirmada protege sólo
+su nodo frente al cuerpo anterior del escaneo, sin eximir su resolución física.
+
+Las referencias de prueba se limitan a 262.144 por trabajo, compartidas por sus
+zonas, y se liberan al completar, rechazar, cancelar o borrar la red. El límite
+es de referencias, no una medida del heap Lua/Java. `scan_capture_budget` termina
+con fallo explícito sin publicar un resultado parcial. La interferencia admite
+como máximo dos recapturas automáticas coalescidas; después se muestra fallo
+`snapshot_stale` y se conserva la vista previa. Un nuevo reescaneo explícito
+puede iniciar otro intento. La cola respeta su backoff incluso si venció el
+plazo de fuerza, para que una red ocupada no monopolice la selección.
+
 
 La identidad y sus migraciones pertenecen a `Identidad y permisos / Identity & permissions`. La inicialización, un cambio lógico del roster y cada vínculo reparado emiten líneas acotadas; nunca una línea por tick. El campo `account` procede del `IsoPlayer` autoritativo; los IDs se tratan como opacos y no deben editarse a mano:
 

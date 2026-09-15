@@ -17,8 +17,8 @@ GlobalStorageSiK.ZoneScanJob = GlobalStorageSiK.ZoneScanJob or {}
 
 local STEP_DELAY_MS = 0
 local BUSY_DELAY_MS = 250
-local MAX_UNITS_PER_STEP = 512
-local MAX_STEP_MS = 6
+local MAX_UNITS_PER_STEP = 768
+local MAX_STEP_MS = 7
 local MIN_STEP_MS = 3
 -- One global allowance, independent of active network/player count. The extra
 -- millisecond charged per step covers clock resolution, not additional work.
@@ -120,33 +120,46 @@ end
 
 local function progressStatus(job)
 	local total = #(job and job.zones or {})
-	local completed = math.max(0, (job and job.zoneIndex or 1) - 1)
+	local completed = math.min(total, math.max(0, (job and job.zoneIndex or 1) - 1))
 	local fraction = 0
 	local state = job and job.zoneState or nil
 	local zone = job and job.zones and job.zones[job.zoneIndex] or nil
-	if state and zone then
-		if state.phase == "snapshots" then
-			local tasks = math.max(1, #(state.containerTasks or {}))
-			fraction = 0.70 + 0.30 * math.min(1,
-				math.max(0, ((tonumber(state.taskIndex) or 1) - 1) / tasks))
-		else
-			local squares = math.max(1,
-				((tonumber(zone.x2) or 0) - (tonumber(zone.x1) or 0) + 1)
-				* ((tonumber(zone.y2) or 0) - (tonumber(zone.y1) or 0) + 1)
-				* ((tonumber(zone.zMax) or tonumber(zone.z) or 0)
-					- (tonumber(zone.zMin) or tonumber(zone.z) or 0) + 1))
-			fraction = 0.70 * math.min(1,
-				math.max(0, (tonumber(state.metrics and state.metrics.squaresVisited) or 0) / squares))
+	local validating = job and job.zoneIndex > total
+	local progress = 0
+	if validating then
+		local staged = job.stagedZones and job.stagedZones[job.validationIndex]
+		zone = staged and staged.zone or nil
+		if state then
+			fraction = math.min(1, math.max(0, ((state.workUnits or 0)
+				- (state.validationStartUnits or 0)) / math.max(1, state.validationTotalUnits or 1)))
 		end
+		progress = total * 0.80 + 0.20 * math.max(0, (job.validationIndex or 1) - 1 + fraction)
+	else
+		if state and zone then
+			if state.phase == "snapshots" then
+				local tasks = math.max(1, #(state.containerTasks or {}))
+				fraction = 0.70 + 0.30 * math.min(1,
+					math.max(0, ((tonumber(state.taskIndex) or 1) - 1) / tasks))
+			else
+				local squares = math.max(1,
+					((tonumber(zone.x2) or 0) - (tonumber(zone.x1) or 0) + 1)
+					* ((tonumber(zone.y2) or 0) - (tonumber(zone.y1) or 0) + 1)
+					* ((tonumber(zone.zMax) or tonumber(zone.z) or 0)
+						- (tonumber(zone.zMin) or tonumber(zone.z) or 0) + 1))
+				fraction = 0.70 * math.min(1,
+					math.max(0, (tonumber(state.metrics and state.metrics.squaresVisited) or 0) / squares))
+			end
+		end
+		progress = (completed + fraction) * 0.80
 	end
 	return {
 		state = "RUNNING", phase = job and job.phase or "preparing",
 		reason = job and job.reason or nil,
 		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
 		zonesDone = completed, zonesTotal = total,
-		-- Publication may still fail or require a stale retry after the last zone.
+		-- Keep the integer zone counter independent of weighted work progress.
 		-- Only the terminal COMPLETED result may be presented as 100 percent.
-		progressDone = math.min(total * 0.99, completed + fraction), progressTotal = math.max(1, total),
+		progressDone = math.min(total * 0.99, progress), progressTotal = math.max(1, total),
 		startedMs = job and job.startedMs or 0,
 		lastProgressMs = job and job.lastProgressMs or 0,
 		failedZones = job and job.totals and job.totals.failedZones or 0,
@@ -176,7 +189,7 @@ local function stateProgressToken(state)
 	return table.concat({
 		tostring(state.workUnits or 0), tostring(state.phase or ""), tostring(state.x or ""), tostring(state.y or ""),
 		tostring(state.z or ""), tostring(state.taskIndex or ""),
-		tostring(state.itemIndex or ""), tostring(#(state.results or {})),
+		tostring(state.itemIndex or ""), tostring(state.verifyTask or ""), tostring(state.verifyItem or ""), tostring(#(state.results or {})),
 	}, "|")
 
 end
@@ -190,7 +203,7 @@ local function completeZone(job)
 	-- por instantes distintos. Se conserva staging acotado y se hace commit
 	-- atomico bajo el lock solo al certificar la revision inicial.
 	job.stagedZones[#job.stagedZones + 1] = {
-		zone = zone, results = state.results,
+		zone = zone, results = state.results, captureState = state,
 		area = GlobalStorageSiK.ZonePriority.zoneArea(zone),
 		loaded = state.anySquareLoaded,
 		excludedEntryIds = state.excludedEntryIds,
@@ -217,6 +230,11 @@ local function commitStaged(job)
 		job.totals._stagedDiscarded = true
 		return false
 	end
+	for _, staged in ipairs(job.stagedZones or {}) do
+        if not GlobalStorageSiK.ZoneScanner.validateIncremental(staged.captureState) then
+            job.totals._stagedDiscarded = true; return false
+        end
+    end
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	for i = 1, #(job.stagedZones or {}) do
 		local staged = job.stagedZones[i]
@@ -231,6 +249,9 @@ local function commitStaged(job)
 		job.totals.removedIneligible = job.totals.removedIneligible
 			+ (summary.removedIneligible or 0)
 	end
+	for _, staged in ipairs(job.stagedZones or {}) do
+        GlobalStorageSiK.ZoneScanner.releaseIncremental(staged.captureState)
+    end
 	job.stagedZones = {}
 	return true
 end
@@ -238,11 +259,16 @@ end
 local function discardJobState(job)
 
 	if not job then return end
+    GlobalStorageSiK.ZoneScanner.releaseIncremental(job.zoneState)
+    for _, staged in ipairs(job.stagedZones or {}) do
+        GlobalStorageSiK.ZoneScanner.releaseIncremental(staged.captureState)
+    end
 	job.zoneState = nil
 	job.zones = {}
 	job.watchers = {}
 	job.distinctTypeSet = {}
 	job.stagedZones = {}
+    job.captureBudget = nil
 
 end
 
@@ -281,10 +307,11 @@ local function finishJob(networkId, job)
 		or job.totals._stagedDiscarded and "INVALIDATED_BY_MUTATION" or "COMPLETED"
 	job.totals._terminalState = state
 	if state == "COMPLETED" then job.totals._freshSnapshotScope = job.zoneId or "network" end
+	job.totals._retryAttempt = job.retryAttempt or 0
 	job.totals._background = job.background == true
 	job.totals._startRevision = job.startRevision or 0
 	job.totals._startContentSignature = job.startContentSignature
-	recordTerminalState(networkId, job, state, state == "FAILED" and "zone_error"
+	recordTerminalState(networkId, job, state, state == "FAILED" and (job.totals.failureReason or "zone_error")
 		or state == "INVALIDATED_BY_MUTATION" and "snapshot_stale" or "complete")
 	if state == "COMPLETED" and GlobalStorageSiK.RegistryStore
 		and GlobalStorageSiK.RegistryStore.notifyChanged then
@@ -365,22 +392,40 @@ local function onTick()
 	local usedUnits = 0
 	local startedStep = nowMs()
 	local ok, err = pcall(function()
-		if job.zoneIndex > #job.zones then return end
-		if not job.zoneState then
-			local scanError
-			job.zoneState, scanError = GlobalStorageSiK.ZoneScanner.beginIncremental(
-				job.zones[job.zoneIndex], GlobalStorageSiK.Sandbox.getMaxContainersPerZone())
-			if not job.zoneState then
-				error(scanError or "scan_unavailable")
-			end
-		end
-		local quantum = math.min(availableUnits, job.scanQuantum or 96)
-		local done, units = GlobalStorageSiK.ZoneScanner.stepIncremental(job.zoneState, quantum, availableMs)
-		usedUnits = units or quantum
-		if done then
-			completeZone(job)
-		end
-		if job.zoneIndex > #job.zones then commitStaged(job) end
+        local scanner = GlobalStorageSiK.ZoneScanner
+        local validating = job.zoneIndex > #job.zones
+        if validating then
+            local staged = job.stagedZones[job.validationIndex]
+            if not staged then commitStaged(job); job.publicationDone = true; return end
+            job.zoneState = staged.captureState
+            if job.zoneState.phase ~= "verify" then
+                scanner.beginValidation(job.zoneState, job.preciseMutationEntryIds)
+            end
+        elseif not job.zoneState then
+            local scanError
+            job.zoneState, scanError = scanner.beginIncremental(job.zones[job.zoneIndex],
+                GlobalStorageSiK.Sandbox.getMaxContainersPerZone(), true, job.captureBudget, job.preciseMutationEntryIds)
+            if not job.zoneState then error(scanError or "scan_unavailable") end
+        end
+        local quantum = math.min(availableUnits, job.scanQuantum or 96)
+        local done, units = scanner.stepIncremental(job.zoneState, quantum, availableMs)
+        usedUnits = units or quantum
+        if done then
+            if job.zoneState.invalidated then
+                job.totals._stagedDiscarded = not job.zoneState.captureFailure
+                if job.zoneState.captureFailure then
+                    job.totals.failedZones = job.totals.failedZones + 1
+                    job.totals.failureReason = job.zoneState.captureFailure
+                end
+                job.publicationDone = true
+            elseif validating then
+                job.validationIndex = job.validationIndex + 1
+                job.zoneState = nil
+                if job.validationIndex > #job.stagedZones then
+                    commitStaged(job); job.publicationDone = true
+                end
+            else completeZone(job) end
+        end
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
 	local spentMs = math.max(0, nowMs() - startedStep)
@@ -405,13 +450,15 @@ local function onTick()
 		job.totals.failedZones = (job.totals.failedZones or 0) + 1
 		GlobalStorageSiK.Log.warn("ZoneScanJob", "zone_failed network=" .. tostring(networkId)
 			.. " zone=" .. tostring(zone and zone.id or "?") .. " error=" .. tostring(err))
+		GlobalStorageSiK.ZoneScanner.releaseIncremental(job.zoneState)
 		job.zoneState = nil
 		job.zoneIndex = job.zoneIndex + 1
+        job.publicationDone = true
 		markProgress(job, now, "recovering")
 	elseif beforeToken ~= stateProgressToken(job.zoneState) then
 		markProgress(job, now, job.zoneState and job.zoneState.phase or "merging")
 	end
-	if job.zoneIndex > #job.zones then
+	if job.publicationDone then
 		finishJob(networkId, job)
 	else
 		job.nextRunMs = now + STEP_DELAY_MS
@@ -454,6 +501,7 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		zoneIndex = 1,
 		zoneState = nil,
 		background = opts.background == true,
+        retryAttempt = math.max(0, math.min(2, math.floor(tonumber(opts.retryAttempt) or 0))),
 		reason = opts.reason,
 		startedMs = nowMs(),
 		lastProgressMs = nowMs(),
@@ -464,6 +512,8 @@ function GlobalStorageSiK.ZoneScanJob.start(player, networkId, opts)
 		watchers = {},
 		distinctTypeSet = {},
 		stagedZones = {},
+        captureBudget = {refs = 0, bytes = 0},
+        validationIndex = 1,
 		preciseMutationEntryIds = {},
 		totals = {
 			added = 0, updated = 0, offline = 0, outOfRange = 0,

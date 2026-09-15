@@ -303,7 +303,7 @@ local function shouldScanOnOpen(networkId)
 	return false, "confirmed_snapshot"
 end
 
-local function scheduleSnapshotSync(networkId, player, revision, reason)
+local function scheduleSnapshotSync(networkId, player, revision, reason, retryAttempt)
 	if not networkId then
 		return
 	end
@@ -322,6 +322,7 @@ local function scheduleSnapshotSync(networkId, player, revision, reason)
 		end
 		pending.revision = math.max(pending.revision or 0, revision or 0)
 		pending.reason = reason or pending.reason
+        pending.retryAttempt = math.max(pending.retryAttempt or 0, retryAttempt or 0)
 		if player and player.getUsername then pending.username = player:getUsername() end
 	else
 		pendingSnapshotSync[networkId] = {
@@ -330,6 +331,7 @@ local function scheduleSnapshotSync(networkId, player, revision, reason)
 			revision = revision or 0,
 			username = player and player.getUsername and player:getUsername() or nil,
 			reason = reason or "inventory_mutation",
+            retryAttempt = retryAttempt or 0,
 		}
 	end
 end
@@ -349,6 +351,7 @@ local function flushPendingSnapshotSync()
 	local pending = pendingSnapshotSync[selectedId]
 	if GlobalStorageSiK.ZoneScanJob.isActive(selectedId) then
 		pending.dueMs = now + 500
+        pending.forceMs = pending.dueMs
 		return
 	end
 	local player = GlobalStorageSiK.PlayerUtils.resolveByUsername(pending.username)
@@ -367,6 +370,7 @@ local function flushPendingSnapshotSync()
 	local started, reason = GlobalStorageSiK.ZoneScanJob.start(player, selectedId, {
 		background = true,
 		reason = pending.reason,
+        retryAttempt = pending.retryAttempt,
 	})
 	if started then
 		-- Quitar fuera del recorrido. Si otra transferencia ocurre durante el
@@ -374,8 +378,10 @@ local function flushPendingSnapshotSync()
 		pendingSnapshotSync[selectedId] = nil
 	elseif reason == "active" or reason == "redistribute_active" then
 		pending.dueMs = now + 500
+        pending.forceMs = pending.dueMs
 	else
 		pending.dueMs = now + 1000
+        pending.forceMs = pending.dueMs
 		GlobalStorageSiK.Log.warn("Server", "snapshotSync deferred network="
 			.. tostring(selectedId) .. " reason=" .. tostring(reason))
 	end
@@ -2422,7 +2428,16 @@ end
 function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, requestedWatchers)
 	local startRevision = summary._startRevision or 0
 	local currentRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
-	if summary._stagedDiscarded == true or currentRevision ~= startRevision then
+	if summary._terminalState ~= "FAILED"
+        and (summary._stagedDiscarded == true or currentRevision ~= startRevision) then
+        if (summary._retryAttempt or 0) >= 2 then
+            summary._terminalState = "FAILED"
+            summary.failureReason = "snapshot_stale"
+            summary.failedZones = math.max(1, summary.failedZones or 0)
+            pendingSnapshotSync[networkId] = nil
+            GlobalStorageSiK.ZoneScanJob.overrideTerminalState(networkId, "FAILED", "snapshot_stale")
+            GlobalStorageSiK.Log.warn("ZoneScanJob", "snapshot retry exhausted network=" .. tostring(networkId))
+        else
 		-- El lock se libera entre pasos del job: una transferencia puede desplazar
 		-- índices del contenedor antes del paso siguiente. No publicar esa mezcla.
 		-- La cola quiet/force coalesce una única recaptura posterior y cada nueva
@@ -2437,7 +2452,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 				if not retryPlayer and isTerminalWatcher(player, networkId) then retryPlayer = player end
 			end)
 		end
-		scheduleSnapshotSync(networkId, retryPlayer, currentRevision, "invalidated_by_mutation")
+		scheduleSnapshotSync(networkId, retryPlayer, currentRevision, "invalidated_by_mutation", (summary._retryAttempt or 0) + 1)
 		GlobalStorageSiK.Log.debug("ZoneScanJob", "snapshot retry network="
 			.. tostring(networkId) .. " startRevision=" .. tostring(startRevision)
 			.. " currentRevision=" .. tostring(currentRevision)
@@ -2449,6 +2464,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		status.snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
 		GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, requestedWatchers)
 		return
+        end
 	end
 	if summary._terminalState == "FAILED" then
 		if inventorySnapshotMeta[networkId] then
@@ -2457,7 +2473,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		forEachOnlinePlayer(function(player)
 			if isTerminalWatcher(player, networkId) then
 				summary.networkId = networkId
-				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanPartialFailed", "zone_error", summary))
+				gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanPartialFailed", summary.failureReason or "zone_error", summary))
 				pushTerminalState(player, networkId, summary, requestedWatchers and requestedWatchers[player:getUsername()] or "")
 			end
 		end)
