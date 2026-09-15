@@ -12,7 +12,7 @@
   },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "9e0d9e114a32ab92737c9d47e5527032d14e0d4003cf2332521c7ca118db3a9f",
+    "masterSha256": "6bb257f3a71d7e213401da9d67bce105b52b39fa2dbd667878f2e8baaf3c1a43",
     "selector": "[data-surface-id=\"tab-warehouse\"]",
     "subtreeSha256": "7007ff2faa17918b2760269c2e90ff390b42a7e69f957a7c6b0eb936d9c75ae7",
     "canonicalizer": "sik-ui-dom-v2",

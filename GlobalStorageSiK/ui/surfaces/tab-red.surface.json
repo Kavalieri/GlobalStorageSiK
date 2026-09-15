@@ -4,14 +4,14 @@
   "schemaVersion": 1,
   "frameworkRef": {
     "id": "SiKUIFramework",
-    "manifestSha256": "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74"
+    "manifestSha256": "2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063"
   },
   "product": { "id": "global-storage-sik", "namespace": "GlobalStorageSiK" },
   "visualBaseline": {
     "masterPath": "Documentacion/UI/terminal-tabs.html",
-    "masterSha256": "fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5",
+    "masterSha256": "6bb257f3a71d7e213401da9d67bce105b52b39fa2dbd667878f2e8baaf3c1a43",
     "selector": "[data-surface-id=\"tab-red\"]",
-    "subtreeSha256": "ad39b8c492c1950a2ce66922e31a5a2710eb54e5a4373e35524e1769d08ed00a",
+    "subtreeSha256": "a0efccadb4bbb30bb136ef29263fcc832d49ad725396f7a44d37ab256cc345e7",
     "canonicalizer": "sik-ui-dom-v2",
     "validation": "HTML_VALIDATED_BY_KAVA"
   },

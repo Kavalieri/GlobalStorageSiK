@@ -1,16 +1,16 @@
 {
   "inputs": {
-    "frameworkManifestSha256": "9be0e45d500be678ed17f628d151c164b83d3673097f3d8c53eacc0115590c74",
+    "frameworkManifestSha256": "2cca88b2efa1f44f02bae6d86aef44131bbd212a002c9b439c6d5d673505b063",
     "generatorSha256": "b680dfefc17e687bb2839cb5f589d64cf0da07fff454a4ee26e002333eee73ae",
     "schemaSha256": "ef8b4a9769c8794563d33ee8fabc8f407504300a36094e1689f0e300286695e5",
-    "surfaceSpecSha256": "41a58f60f884a391f2c86199a6d300e8d0f3b8dac0e1a3bbc6ea0cf1537725a1",
+    "surfaceSpecSha256": "3191448b4a4724f9fcf4770d61980d6dba511d714f9eb2ddf6429871d4095f73",
     "visualCanonicalizer": "sik-ui-dom-v2",
-    "visualMasterSha256": "fdc0af9ddac5bf72956e5174a31d7904e2dfd83fb15f26c032bb19b055dc87e5",
+    "visualMasterSha256": "6bb257f3a71d7e213401da9d67bce105b52b39fa2dbd667878f2e8baaf3c1a43",
     "visualSubtreeSha256": "09af53f74d8b483706fa1ad8b14e2a6f30834fef2b1e14f9412c956315fc3cb3"
   },
   "outputs": {
-    "htmlSha256": "5d58c560725c6004550f173b096c63d457e8243b3d30b3799a287471cf4e94bf",
-    "luaSha256": "7a32cf80708ddc4654cbfdc2edfadd9ccfcec2da335556292745d462dc975380"
+    "htmlSha256": "551ece768a537e2ea3ae7d2534dc3013f1e5a14ed1487aa3832af545786ce7ae",
+    "luaSha256": "1356908402fefa848a76ac008c90fa0d4fe6aae247888589a5a675c2ab71520a"
   },
   "runtime": {
     "artifact": {
