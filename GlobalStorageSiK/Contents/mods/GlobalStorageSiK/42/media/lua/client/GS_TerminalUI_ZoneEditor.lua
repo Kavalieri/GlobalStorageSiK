@@ -214,9 +214,11 @@ function GS_ZoneEditorUI:applyConfirmedRouting(args, result)
 	local state = self.terminal and self.terminal.terminalState
 	if not state or result.networkId ~= state.networkId then return false end
 	local confirmedRevision = tonumber(result.routingRevision) or 0
-	if confirmedRevision < (self._confirmedRoutingRevision or 0) then return false end
+	if confirmedRevision < math.max(self._confirmedRoutingRevision or 0,
+		tonumber(state.routingRevision) or 0) then return false end
 	self._confirmedRoutingRevision = confirmedRevision
-	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.zone, args)
+	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.zone,
+		{ rules = result.confirmedRules })
 	if args.name ~= nil then self.zone.name = args.name end
 	if args.priority ~= nil then self.zone.priority = args.priority end
 	if args.enabled ~= nil then self.zone.enabled = args.enabled end

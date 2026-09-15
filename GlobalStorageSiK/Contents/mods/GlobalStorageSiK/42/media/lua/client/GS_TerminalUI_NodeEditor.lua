@@ -226,9 +226,11 @@ function GS_NodeEditorUI:applyConfirmedRouting(args, result)
 	local state = self.terminal and self.terminal.terminalState
 	if not state or result.networkId ~= state.networkId then return false end
 	local confirmedRevision = tonumber(result.routingRevision) or 0
-	if confirmedRevision < (self._confirmedRoutingRevision or 0) then return false end
+	if confirmedRevision < math.max(self._confirmedRoutingRevision or 0,
+		tonumber(state.routingRevision) or 0) then return false end
 	self._confirmedRoutingRevision = confirmedRevision
-	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.node, args)
+	local rulesChanged, affected = GlobalStorageSiK.RulesUI.applyConfirmedIntent(self.node,
+		{ rules = result.confirmedRules })
 	for _, key in ipairs({ "displayName", "notes", "priority", "categories", "filters" }) do
 		if args[key] ~= nil then self.node[key] = type(args[key]) == "table"
 			and GlobalStorageSiK.RoutingProtocol.copy(args[key]) or args[key] end

@@ -28,6 +28,14 @@ end
 function CapacityPresentation.fromState(capacity, options)
 	local cap = type(capacity) == "table" and capacity or {}
 	options = options or {}
+	if options.partial == true then
+		-- A progressive catalog has a different coverage from network capacity.
+		-- Keep the existing loading state until all five metrics can be shown
+		-- together; never combine partial row counts with global weight.
+		local label = text("IGUI_GS_LoadingInventory")
+		return { label = label, text = label, value = 0, mode = "indeterminate",
+			status = "warning", tone = "warning", partial = true }
+	end
 	local used = tonumber(cap.usedWeight) or 0
 	local total = tonumber(cap.effectiveCapacity) or tonumber(cap.totalCapacity)
 		or tonumber(cap.capacity) or 0

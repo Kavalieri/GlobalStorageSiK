@@ -510,3 +510,5 @@ and cannot release a tape from device custody.
 ### Core 1.5.3-dev1 catalog delivery
 
 Terminal catalog delivery is privately fragmented and atomically reassembled. Existing public inventory consumers retain their complete-state contract. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md). No addon action, permission or persistence API changes.
+
+Correlated routing results for `updateNode` and `updateZoneRules` include `confirmedRules` when rules changed. This is the persisted, server-normalized representation; consumers apply it only for the matching request/epoch and never over a newer routing revision. The complete result is checked against the protocol budget before committing. The `expectedRule` stale-identity fence remains mandatory for deletion.

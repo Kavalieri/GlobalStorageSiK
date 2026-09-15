@@ -227,3 +227,5 @@ technical behavior only. Dedicated MP remains the primary runtime gate, with SP,
 hosted and split-screen checks for authority, physical replication, lifecycle,
 food changes, routing NACKs, cache timing and native input focus. QA certification
 and Systems runtime acceptance are separate from publication.
+
+The world zone picker rearms the terminal access watcher when restoring a visible terminal, including cancellation. Catalog decoding remains subject to fresh access validation and shared token limits; an authorized batch can begin one bounded decoder step even when access validation consumed the wall-time slice. Progressive global capacity presenters explicitly show loading until the replica is confirmed.

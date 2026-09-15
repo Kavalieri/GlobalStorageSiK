@@ -726,6 +726,7 @@ function GS_TerminalUI:applyCapacityState(cap)
 			end
 		end
 		local warehouseCapacity = CapacityPresentation.fromState(cap, {
+			partial = state.replicaPartial == true,
 			count = itemCount,
 			typeCount = tonumber(state.itemTypeCount),
 		})

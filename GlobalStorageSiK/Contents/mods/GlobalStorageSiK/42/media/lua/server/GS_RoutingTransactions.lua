@@ -48,7 +48,8 @@ local function reply(player, args, networkId, ok, reason, revision)
 end
 
 local function remember(state, sequence, signature, result)
-	local bytes = #signature + 1024
+	local _, resultSignature = Protocol.copy(result)
+	local bytes = #signature + #(resultSignature or "") + 1024
 	state.results[sequence] = { signature = signature, result = result, bytes = bytes }
 	state.order[#state.order + 1] = sequence
 	state.bytes = state.bytes + bytes
@@ -254,6 +255,29 @@ function Transactions.dispatch(command, player, args, networkId)
 	local changes
 	if args.expectedRoutingRevision ~= revision then reason = "routing_revision_conflict"
 	else changes, reason = prepare(registry, networkId, command, clean) end
+	-- Return the persisted representation, including server-added identity fields.
+	-- Only the affected target's bounded rules travel with its correlated ACK.
+	local confirmedRules
+	if changes and (command == "updateNode" or command == "updateZoneRules")
+		and changes[1] and changes[1].patch.rules then
+		confirmedRules = Protocol.copy(changes[1].patch.rules)
+		if not confirmedRules then changes, reason = nil, "invalid_stored_rules" end
+	end
+	local result = { routingResult = true, requestId = args.requestId, requestSeq = args.requestSeq,
+		configEpoch = state.epoch, networkId = networkId, ok = changes ~= nil,
+		confirmedRules = confirmedRules,
+		reason = reason or "committed", routingRevision = changes and revision + 1 or revision,
+		message = GlobalStorageSiK.I18n.remote(changes and "IGUI_GS_RoutingSaved" or "IGUI_GS_RoutingRejected", reason or "") }
+	-- Validate the whole ACK before mutation: normalization adds fields and the
+	-- correlated envelope shares the same wire budget as the confirmed rules.
+	local wireResult = Protocol.copy(result)
+	if not wireResult and changes then
+		changes, reason = nil, "invalid_stored_rules"
+		result.ok, result.confirmedRules = false, nil
+		result.reason, result.routingRevision = reason, revision
+		result.message = GlobalStorageSiK.I18n.remote("IGUI_GS_RoutingRejected", reason)
+		wireResult = Protocol.copy(result)
+	end
 	if changes then
 		-- Lua dispatch is synchronous: all validation precedes these plain-table
 		-- writes. No callbacks or Java operations occur inside this commit.
@@ -264,12 +288,8 @@ function Transactions.dispatch(command, player, args, networkId)
 		revision = network.routingRevision
 	end
 	-- Record before any send/notification (SP may dispatch back synchronously).
-	local result = { routingResult = true, requestId = args.requestId, requestSeq = args.requestSeq,
-		configEpoch = state.epoch, networkId = networkId, ok = changes ~= nil,
-		reason = reason or "committed", routingRevision = revision,
-		message = GlobalStorageSiK.I18n.remote(changes and "IGUI_GS_RoutingSaved" or "IGUI_GS_RoutingRejected", reason or "") }
 	remember(state, args.requestSeq, signature, result)
-	context.send(player, "actionResult", Protocol.copy(result))
+	context.send(player, "actionResult", wireResult)
 	if changes then context.committed(player, networkId, command, clean) end
 	return true
 end

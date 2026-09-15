@@ -232,6 +232,7 @@ function TabWarehouseContext.create(terminal, panel)
 				headerActions = { redistribution.action },
 				capacity = CapacityPresentation.fromState(
 					terminal.terminalState and terminal.terminalState.capacity, {
+						partial = terminal.terminalState and terminal.terminalState.replicaPartial == true,
 						count = itemCount,
 						typeCount = terminal.terminalState and terminal.terminalState.itemTypeCount,
 					}),

@@ -371,9 +371,13 @@ function Client.update(timestamp)
 					elseif slot.confirmed and not allowed(slot.confirmed,playerNum) then
 						-- The authority-loss path already fenced and closed this slot.
 					elseif batch and batch.decoder then
+						-- Authorization may itself exceed the time slice. Give each
+						-- accepted batch one bounded step, then enforce wall time.
+						local stepped = false
 						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
-							and work < 8192 and now() - started < 4 do
+							and work < 8192 and (not stepped or now() - started < 4) do
 							local value, reason, done = Codec.stepDecode(batch.decoder, 1024)
+							stepped = true
 							work = work + 1024
 							if reason then fail(playerNum, reason); break end
 							batch.progress = timestamp

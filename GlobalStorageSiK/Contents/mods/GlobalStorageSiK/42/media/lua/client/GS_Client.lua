@@ -120,8 +120,36 @@ local function inventoryCatalogKey(playerNum, networkId)
 	return tostring(tonumber(playerNum) or 0) .. "\30" .. tostring(networkId or "")
 end
 
+-- Inventory and topology may finish after a newer routing ACK. Preserve only
+-- confirmed configuration for matching IDs; additions/removals and counts still
+-- come from the incoming topology. Never mutate retained replica metadata.
+local function preserveConfirmedRouting(incoming, previous)
+	if not incoming or not previous or incoming.networkId ~= previous.networkId
+		or incoming.configEpoch ~= previous.configEpoch
+		or (tonumber(incoming.routingRevision) or 0) >= (tonumber(previous.routingRevision) or 0) then return end
+	for _, kind in ipairs({"zones", "nodes"}) do
+		local oldById, merged = {}, {}
+		for _, entry in ipairs(previous[kind] or {}) do oldById[entry.id] = entry end
+		for _, entry in ipairs(incoming[kind] or {}) do
+			local old = oldById[entry.id]
+			if old then
+				local copy = {}; for key, value in pairs(entry) do copy[key] = value end
+				local fields = kind == "zones" and {"rules", "name", "priority", "enabled"}
+					or {"rules", "displayName", "notes", "priority", "categories", "filters", "enabled", "membership"}
+				for _, field in ipairs(fields) do copy[field] = old[field] end
+				entry = copy
+			end
+			merged[#merged + 1] = entry
+		end
+		if incoming[kind] ~= nil then incoming[kind] = merged end
+	end
+	incoming.routingRevision = previous.routingRevision
+end
+
 local function applyInventoryCatalog(incoming, playerNum)
 	if not incoming or not incoming.networkId then return incoming end
+	preserveConfirmedRouting(incoming, GlobalStorageSiK.Client.terminalStateByPlayer
+		and GlobalStorageSiK.Client.terminalStateByPlayer[playerNum])
 	-- This private stamp describes actual catalog contents, not a generic
 	-- state/ACK revision. A failed notModified restore must not inherit it.
 	incoming._gsAppliedCatalogRevision = -1
@@ -258,6 +286,8 @@ local function applyTopologyMetadata(payload,metadata,additive)
 			if not found then state.zones[#state.zones+1]=zone end
 		end
 	else state.zones,state.nodes=metadata.zones,metadata.nodes end
+	state.routingRevision=metadata.routingRevision or payload.routingRevision
+	preserveConfirmedRouting(state,previous)
 	local ui=terminalUiForPlayer(n)
 	local accepted,reason=paintTopology(ui,previous,state)
 	if accepted==false then return false,reason end
@@ -365,6 +395,7 @@ local function applyCatalogDelta(payload,replicaRows)
 	local addonsChanged=replicaRows and (not sameAddonValue(state.installedAddons,payload.installedAddons,0)
 		or state.craftTabEnabled~=payload.craftTabEnabled or state.buildTabEnabled~=payload.buildTabEnabled)
 	local nextCache, nextState = {}, {}
+	local previousState = state
 	for k,v in pairs(cache) do nextCache[k]=v end
 	for k,v in pairs(state) do nextState[k]=v end
 	cache, state = nextCache, nextState
@@ -384,6 +415,7 @@ local function applyCatalogDelta(payload,replicaRows)
 		preserveLiveScan(payload,playerNum)
 		local fields=(require "GS_ManifestProtocol").METADATA_FIELDS
 		for i=1,#fields do state[fields[i]]=payload[fields[i]] end
+		preserveConfirmedRouting(state,previousState)
 	end
 	cache.state = state
 	GlobalStorageSiK.Client.inventoryCatalogByPlayerNetwork[key] = cache

@@ -138,6 +138,10 @@ local function resumeTerminal(terminal)
 	end
 	if terminal._gsZonePickWasVisible ~= false then
 		terminal:setVisible(true)
+		-- The idle watcher detaches while the picker hides the terminal. Resume
+		-- it with the retained view so queued manifests can decode and ACK.
+		local guard = GlobalStorageSiK.TerminalAccessGuard
+		if guard and guard.ensure then guard.ensure() end
 	end
 	terminal._gsZonePickWasVisible = nil
 	if terminal.bringToTop then

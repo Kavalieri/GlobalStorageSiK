@@ -152,7 +152,8 @@ local function nodeRow(node, zoneRules)
 	local x,y,z=coordinate(node.x),coordinate(node.y),coordinate(node.z)
 	local details={}
 	if x and y and z then
-		details[#details+1]=T("IGUI_GS_ColTerminalCoords")..": X "..x.." · Y "..y.." · Z "..z
+		local separator=" "..T("IGUI_GS_PunctuationMiddleDot").." "
+		details[#details+1]=T("IGUI_GS_ColTerminalCoords")..": X "..x..separator.."Y "..y..separator.."Z "..z
 		local compartment=coordinate(node.containerIndex)
 		if compartment and node.containerIndex>=0 then
 			details[#details+1]=T("IGUI_GS_ContainerCompartment")..": "..compartment

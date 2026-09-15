@@ -439,7 +439,7 @@ function TabOptionsContext.create(terminal)
 					zonesStatus = status(text("IGUI_GS_StatsZones", zoneCount)),
 					resourceSummary = status(text("IGUI_GS_StatsNodes", nodeCount)),
 					accessStatus = status(text("IGUI_GS_StatsMembers", #members)),
-					capacity = CapacityPresentation.fromState(capacity, { count = itemCount(state) }),
+					capacity = CapacityPresentation.fromState(capacity, { count = itemCount(state), partial = state.replicaPartial == true }),
 					terminalRange = status(text("IGUI_GS_DistTerminalUse", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getTerminalProximityRange and GlobalStorageSiK.Sandbox.getTerminalProximityRange() or 0)),
 					networkRange = status(text("IGUI_GS_DistNetworkReach", GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.getContainerMaxDistance and GlobalStorageSiK.Sandbox.getContainerMaxDistance() or 0)),
 					antennaRange = status(text("IGUI_GS_DistWifiReach", antennaRange)), palettes = paletteRows(terminal.playerNum),
