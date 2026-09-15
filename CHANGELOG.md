@@ -1,11 +1,20 @@
 # Changelog
 
-## 1.5.6-dev1 - 2026-09-14
+## 1.5.6 - 2026-09-15
 
-- Authorized zone additions advance the open session scope while retaining confirmed node blocks and the visible catalog; real access revocation still purges the replica.
-- Establish topology revisions before starting directed scans and report accepted running scans as successful actions.
-- Refresh affected zone/container rule rows after an ACK while preserving unrelated rows, drafts on rejection and newer acknowledgements.
-- Category coalescence, volatile manifest classification and editor resize remain pending.
+### Global Storage SiK
+
+- Preserves confirmed catalog replicas across authorized topology changes and temporary loss of range, while real permission, network and identity revocations still purge them.
+- Converges zone additions, removals and directed scans without rebuilding unaffected node blocks; stale sessions, manifests and acknowledgements are fenced by authoritative identity and revision.
+- Uses adaptive scan budgets and bounded validation for dense tiles, sharing work fairly across active networks without publishing incomplete captures.
+- Applies authoritative rule identities after acknowledgements and retains newer routing metadata when older catalog views arrive.
+- Keeps progressive inventory summaries internally consistent and updates categories, addons and physical deltas without downloading unchanged nodes.
+- Restores exact floor, parent-row and detail-row transfers after topology changes, with idempotent receipts and selective node invalidation.
+- Adds container-coordinate tooltips and preserves the approved terminal layout while using the corrected Framework popup lifecycle.
+
+### Craft 1.5.3 and Builder 1.5.3
+
+- Refresh all seven derived terminal surfaces against the approved master and current Framework manifest while preserving existing crafting, building, loan and return behavior.
 
 ## 1.5.5 - 2026-09-14
 

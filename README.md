@@ -11,11 +11,11 @@ physical instances and auto-sort them through an authoritative SP/MP path.
 
 | Product | Version | Mod ID | Workshop ID | Dependency |
 | --- | --- | --- | --- | --- |
-| Core | 1.5.4 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
-| Craft | 1.5.2 | GSSiK_Addon_Craft | [3752379654](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654) | SiKUIFramework, GlobalStorageSiK |
-| Builder | 1.5.2 | GSSiK_Addon_Builder | [3752437465](https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465) | SiKUIFramework, GlobalStorageSiK |
+| Core | 1.5.6 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
+| Craft | 1.5.3 | GSSiK_Addon_Craft | [3752379654](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654) | SiKUIFramework, GlobalStorageSiK |
+| Builder | 1.5.3 | GSSiK_Addon_Builder | [3752437465](https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465) | SiKUIFramework, GlobalStorageSiK |
 | Tablet | 1.5.2 | GSSiK_Addon_Tablet | [3752379947](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947) | SiKUIFramework, GlobalStorageSiK |
-| Multimedia | 0.1.0 | GSSiK_Addon_Multimedia | [3798890105](https://steamcommunity.com/sharedfiles/filedetails/?id=3798890105) | SiKUIFramework, GlobalStorageSiK |
+| Multimedia | 0.1.1 | GSSiK_Addon_Multimedia | [3798890105](https://steamcommunity.com/sharedfiles/filedetails/?id=3798890105) | SiKUIFramework, GlobalStorageSiK |
 
 <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158"><img src="docs/assets/global-storage-sik-banner.png" alt="Global Storage SiK" width="180"></a>
 <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654"><img src="docs/assets/craft-banner.png" alt="GSSiK Addon - Craft" width="180"></a>
