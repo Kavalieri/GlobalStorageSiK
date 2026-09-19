@@ -9,6 +9,8 @@ local context
 local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
 local TIMEOUT_MS = 60000
+local ACK_RETRY_MS = 1500
+local MAX_SEND_PASSES = 3
 local RESPONSE_DEADLINE_MS = 10000
 local counters = {full=0, delta=0, notModified=0, details=0, manifests=0, nodes=0, completed=0, discarded=0, rejected=0, coalesced=0}
 local lastDiscardLog = 0
@@ -283,7 +285,8 @@ local function copyMetadata(value, depth, active)
     active[value]=true
     local result={}
     for key, child in pairs(value) do
-        if depth==0 and (key=="items" or key=="changedRows" or key=="nodeSnapshot") then result[key]=child
+        if depth==0 and (key=="items" or key=="changedRows" or key=="nodeSnapshot"
+            or key=="nodeDelta") then result[key]=child
         else result[key]=copyMetadata(child,depth+1,active) end
     end
     active[value]=nil
@@ -329,6 +332,7 @@ local function queue(player, payload, rows, builder)
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
+        sendPasses=1,
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
@@ -557,6 +561,17 @@ function Server.update()
                 if ok then job.lastProgressAt=timestamp end
                 sent=sent+1
                 if not ok then failure(player,sendReason,frame.batchId) end
+            elseif (job.sendPasses or 1)<MAX_SEND_PASSES
+                and timestamp-job.lastProgressAt>=ACK_RETRY_MS then
+                -- Delivery acceptance only confirms that PZ accepted the command.
+                -- A missing fragment leaves the server waiting forever until the
+                -- broad stall timeout. Replay the immutable batch; the client
+                -- deduplicates exact fragments and only the missing part advances.
+                job.sendPasses=(job.sendPasses or 1)+1
+                job.nextPart=1
+                job.lastProgressAt=timestamp
+                log("retry",description(job.envelope).." pass="..tostring(job.sendPasses)
+                    .." parts="..tostring(job.envelope.total))
             end
             computeMs=computeMs+math.max(0,now()-workStarted)
             -- The response target is not a lifetime for shared catalog work.

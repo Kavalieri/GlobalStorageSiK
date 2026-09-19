@@ -56,12 +56,24 @@ end
 function R.capture(player,payload)
     local state=actors[player]
     local entry=state and payload and state.entries[payload.withdrawId]
-    if not entry or entry.result or state.active~=payload.withdrawId then return end
-    state.active=nil
+    if not entry or entry.result
+        or state.active~=payload.withdrawId and entry.deferred~=true then return end
+    if state.active==payload.withdrawId then state.active=nil end
+    entry.deferred=nil
     local copy,signature=GlobalStorageSiK.RoutingProtocol.copy(payload)
     if copy and #signature<=4096 then entry.result=copy end
     -- If a response exceeds the receipt budget, leave it pending. A retry
     -- must fail closed rather than execute an uncertain physical mutation.
+end
+-- Background tasks keep the original request pending until their single final
+-- actionResult. Heartbeats never retire or mutate the receipt.
+function R.defer(player,withdrawId)
+    local state=actors[player]
+    local entry=state and state.entries[withdrawId]
+    if not entry or state.active~=withdrawId then return false end
+    entry.deferred=true
+    state.active=nil
+    return true
 end
 function R.finish(player)
     if actors[player] then actors[player].active=nil end

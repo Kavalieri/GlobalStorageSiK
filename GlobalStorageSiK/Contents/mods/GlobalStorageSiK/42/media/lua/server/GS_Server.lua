@@ -36,6 +36,7 @@ require "GS_Network"
 
 require "GS_Index"
 require "GS_WithdrawSelectionTickets"
+require "GS_WithdrawTasks"
 require "GS_NetworkReadLoans"
 require "GS_RuleSanitizer"
 require "GS_RuleIdentity"
@@ -59,6 +60,7 @@ require "GS_ZoneScanJob"
 require "GS_Bulk"
 
 require "GS_Deposit"
+require "GS_DepositTasks"
 
 require "GS_Categories"
 require "GS_CraftCatalog"
@@ -2042,6 +2044,128 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 			.. " watcherSyncs=" .. tostring(watcherCount))
 end
 
+-- Cierre unico de una seleccion de deposito retenida por el servidor. Conserva
+-- el actionResult historico para que clientes 1.5.6 entiendan el resultado final,
+-- pero ya no intercambia remainingIds ni necesita un RTT por slice.
+local function completeDepositTask(player, networkId, meta, summary)
+	meta, summary = meta or {}, summary or {}
+	local msg = GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
+	local logFn = summary.reason and GlobalStorageSiK.Log.detail or GlobalStorageSiK.Log.info
+	logFn("DepositTasks", "complete origin=" .. tostring(meta.origin)
+		.. " operationId=" .. tostring(meta.operationId)
+		.. " queueId=" .. tostring(meta.queueId)
+		.. " requested=" .. tostring(meta.requested)
+		.. " processed=" .. tostring(summary.processed or 0)
+		.. " moved=" .. tostring(summary.moved or 0)
+		.. " skipped=" .. tostring(summary.skipped or 0)
+		.. " failed=" .. tostring(summary.failed or 0)
+		.. " cancelled=" .. tostring(summary.cancelled or 0)
+		.. " reason=" .. tostring(summary.reason),
+		GlobalStorageSiK.OperationPacing.describe(meta.pacing))
+	GlobalStorageSiK.OperationPacing.release(meta.pacingKey)
+	if not summary.replay and ((summary.moved or 0) > 0 or summary.reconcile) then
+		afterTransferSync(player, networkId, meta.searchQuery, {
+			snapshotsUpdated = summary.snapshotsUpdated,
+			touchedNodeIds = summary.touchedNodeIds,
+		})
+	end
+	summary.touchedNodeIds = nil
+	gsSendServerCommand(player, "actionResult", {
+		ok = (summary.moved or 0) > 0 and summary.reconcile ~= true
+			and (summary.failed or 0) == 0 and (summary.missing or 0) == 0
+			and (summary.skipped or 0) == 0 and (summary.cancelled or 0) == 0,
+		message = msg,
+		queueId = meta.queueId,
+		deposit = summary,
+		transfer = {
+			op = "deposit", networkId = networkId,
+			moved = summary.moved or 0, skipped = summary.skipped or 0,
+			failed = summary.failed or 0, origin = meta.origin,
+			operationId = meta.operationId,
+			inventoryRevision = summary.inventoryRevision
+				or GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			reason = summary.reason, deferInventoryPull = true,
+		},
+	})
+end
+
+GlobalStorageSiK.DepositTasks.configure({
+	validate = function(player, networkId)
+		if select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId)) ~= true then
+			return false, "no_access"
+		end
+		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		local allowed, _, _, reason = GlobalStorageSiK.TerminalAccess.evaluate(
+			player, networkId, anchor, { sessionLock = anchor ~= nil, strictDistance = true })
+		return allowed == true, reason
+	end,
+	progress = function(player, networkId, meta, summary, total)
+		gsSendServerCommand(player, "depositProgress", {
+			queueId = meta and meta.queueId or nil, networkId = networkId,
+			processed = summary and summary.processed or 0,
+			moved = summary and summary.moved or 0, total = total,
+		})
+	end,
+	complete = completeDepositTask,
+})
+
+local function completeWithdrawTask(player, networkId, meta, summary, silent)
+	meta, summary = meta or {}, summary or {}
+	GlobalStorageSiK.OperationPacing.release(meta.pacingKey)
+	if not silent and (summary.moved or 0) > 0 then
+		afterTransferSync(player, networkId, meta.searchQuery, {
+			snapshotsUpdated = summary.snapshotsUpdated,
+			touchedNodeIds = summary.touchedNodeIds,
+		})
+	end
+	local reason = summary.reason
+	local ok = (summary.moved or 0) > 0
+		and reason ~= "cancelled" and reason ~= "player_dead"
+		and reason ~= "terminal_closed"
+	GlobalStorageSiK.Log.info("WithdrawTasks", "complete withdrawId="
+		.. tostring(meta.withdrawId) .. " requested=" .. tostring(meta.requested)
+		.. " moved=" .. tostring(summary.moved or 0)
+		.. " slices=" .. tostring(summary.slices or 0)
+		.. " reason=" .. tostring(reason))
+	if silent then return end
+	gsSendServerCommand(player, "actionResult", {
+		ok = ok,
+		message = ok
+			and GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(summary.moved or 0))
+			or GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawErrorReason", tostring(reason or "not_found")),
+		withdrawId = meta.withdrawId, transferOp = "withdrawItem",
+		transfer = {
+			op = "withdraw", networkId = networkId, fullType = summary.fullType,
+			requested = meta.requested or 0, moved = summary.moved or 0,
+			inventoryRevision = summary.inventoryRevision
+				or GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			reason = reason, selectionMode = "exact_group",
+			deferInventoryPull = true, serverOwned = true,
+			ticketRemaining = 0, selectionCount = meta.selectionCount,
+			slices = summary.slices or 0,
+		},
+	})
+end
+
+GlobalStorageSiK.WithdrawTasks.configure({
+	validate = function(player, networkId)
+		if select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId)) ~= true then
+			return false, "no_access"
+		end
+		local anchor = GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		local allowed, _, _, reason = GlobalStorageSiK.TerminalAccess.evaluate(
+			player, networkId, anchor, { sessionLock = anchor ~= nil, strictDistance = true })
+		return allowed == true, reason
+	end,
+	progress = function(player, networkId, meta, summary, total)
+		gsSendServerCommand(player, "withdrawProgress", {
+			withdrawId = meta and meta.withdrawId or nil, networkId = networkId,
+			moved = summary and summary.moved or 0, total = total,
+		})
+	end,
+	complete = completeWithdrawTask,
+})
+
 -- Coalesced metadata notifications for direct WorkSession mutations. This does
 -- not capture content; the source/target snapshot was committed before calling.
 function GlobalStorageSiK.Server.notifyNodeMutation(player, networkId)
@@ -3410,7 +3534,22 @@ local function handleWithdrawItemCommand(player, args, networkId, searchQuery)
 	if not requireTerminalAccess(player, networkId, withdrawMeta) then return end
 	local decision,receipt=GlobalStorageSiK.WithdrawReceipts.begin(player,args,networkId)
 	if decision=="replayed" then gsSendServerCommand(player,"actionResult",receipt);return end
+	-- Una tarea server-owned conserva este recibo pendiente y renueva el timeout
+	-- con heartbeats. Un reintento identico no debe convertirla en fallo ni
+	-- capturar una respuesta negativa antes de que termine la mutacion fisica.
+	if decision=="request_pending" then return end
 	if decision~="new" then sendWithdrawFailure(player,networkId,withdrawId,nil,0,decision);return end
+	local taskApplicable, taskStarted, taskReason =
+		GlobalStorageSiK.WithdrawTasks.start(player, args, networkId)
+	if taskApplicable then
+		if taskStarted then
+			GlobalStorageSiK.WithdrawReceipts.defer(player, withdrawId)
+		else
+			sendWithdrawFailure(player, networkId, withdrawId, args.fullType, 0, taskReason)
+		end
+		GlobalStorageSiK.WithdrawReceipts.finish(player)
+		return
+	end
 	runLockedTransfer(player, networkId, "withdrawItem", function()
 		local sourceNodeId = args.sourceNodeId
 		if sourceNodeId ~= nil then
@@ -3700,6 +3839,8 @@ local function onClientCommand(module, command, player, args)
 	elseif command == "closeTerminal" then
 		clearTerminalWatcher(player)
 		GlobalStorageSiK.TerminalAccess.clearSession(player)
+		GlobalStorageSiK.DepositTasks.cancelForPlayer(player, "terminal_closed")
+		GlobalStorageSiK.WithdrawTasks.cancelForPlayer(player, "terminal_closed")
 		GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player,
 			GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player))
 
@@ -3707,6 +3848,7 @@ local function onClientCommand(module, command, player, args)
 		GlobalStorageSiK.CatalogServer.receipt(player, args)
 
 	elseif command == "cancelWithdrawSelection" then
+		GlobalStorageSiK.WithdrawTasks.cancel(player, args.withdrawId, "cancelled")
 		GlobalStorageSiK.Server.releaseWithdrawTicketPacing(player,
 			GlobalStorageSiK.WithdrawSelectionTickets.cancel(player, args.selectionTicket))
 
@@ -4488,6 +4630,48 @@ local function onClientCommand(module, command, player, args)
 			transferOp = "depositItems",
 		}
 		if not requireTerminalAccess(player, networkId, depositMeta) then
+			return
+		end
+		-- La seleccion ordinaria se sella una sola vez. Rutas con semantica fisica,
+		-- parcial, de contenedor o de devolucion de lectura conservan su contrato
+		-- sincrono y sus comprobaciones especializadas.
+		local taskOrigins = { player = true, player_queue = true,
+			operation_abort_return = true, operation_complete_return = true,
+			operation_result_deposit = true, operation_timeout_return = true,
+			network_read_return = true }
+		local taskOrigin = type(args.origin) == "string" and args.origin or "player"
+		if not taskOrigins[taskOrigin] then taskOrigin = "player" end
+		local taskIds = type(args.itemIds) == "table" and args.itemIds or nil
+		if args.mode == nil and args.sourceKey == nil and taskOrigin ~= "network_read_return"
+			and taskIds and #taskIds > 0
+			and (type(args.depositId) == "string" or type(args.queueId) == "string") then
+			local taskQueueId = depositMeta.queueId
+			local taskOperationId = type(args.operationId) == "string"
+				and string.sub(args.operationId, 1, 96) or nil
+			local taskDepositId = type(args.depositId) == "string"
+				and string.sub(args.depositId, 1, 96) or nil
+			local taskPacingKey = GlobalStorageSiK.Server.operationPacingKey(player, "deposit",
+				taskDepositId or taskQueueId or taskOperationId, networkId)
+			local taskPacing = GlobalStorageSiK.OperationPacing.forOperation(taskPacingKey,
+				{ operationType = "deposit" })
+			local started, reason = GlobalStorageSiK.DepositTasks.start(player, networkId, taskIds, {
+				depositId = taskDepositId, queueId = taskQueueId,
+				batchUnits = taskPacing.batchUnits,
+				meta = {
+					queueId = taskQueueId, depositId = taskDepositId,
+					operationId = taskOperationId, origin = taskOrigin,
+					searchQuery = searchQuery, requested = #taskIds,
+					pacingKey = taskPacingKey, pacing = taskPacing,
+				},
+			})
+			if not started then
+				GlobalStorageSiK.OperationPacing.release(taskPacingKey)
+				completeDepositTask(player, networkId, {
+					queueId = taskQueueId, operationId = taskOperationId,
+					origin = taskOrigin, searchQuery = searchQuery,
+					requested = #taskIds, pacing = taskPacing,
+				}, { moved = 0, skipped = 0, failed = 1, processed = 0, reason = reason })
+			end
 			return
 		end
 
@@ -5822,6 +6006,7 @@ Events.OnClientCommand.Add(onClientCommand)
 -- Un unico flush de snapshots como maximo por tick, compartido por todas las
 -- redes. Cuando no hay transferencias pendientes el coste es solo recorrer
 -- una tabla vacia.
+local transferTaskTurn = 0
 if Events and Events.OnTick then
 	Events.OnTick.Add(function()
 		if not GlobalStorageSiK.isAuthoritative() then return end
@@ -5837,6 +6022,26 @@ if Events and Events.OnTick then
 			end)
 		end
 		GlobalStorageSiK.WithdrawSelectionTickets.update()
+		-- Deposits and withdrawals share one global allowance: at most two slices
+		-- and 5 ms per tick. When both queues are active each receives one slice;
+		-- the first queue alternates so neither direction monopolizes the budget.
+		local depositPending = GlobalStorageSiK.DepositTasks.pendingCount() > 0
+		local withdrawPending = GlobalStorageSiK.WithdrawTasks.pendingCount() > 0
+		local transferDeadline = serverNowMs() + 5
+		if depositPending and withdrawPending then
+			transferTaskTurn = (transferTaskTurn + 1) % 2
+			if transferTaskTurn == 0 then
+				GlobalStorageSiK.DepositTasks.update(1, transferDeadline)
+				GlobalStorageSiK.WithdrawTasks.update(1, transferDeadline)
+			else
+				GlobalStorageSiK.WithdrawTasks.update(1, transferDeadline)
+				GlobalStorageSiK.DepositTasks.update(1, transferDeadline)
+			end
+		elseif depositPending then
+			GlobalStorageSiK.DepositTasks.update(2, transferDeadline)
+		elseif withdrawPending then
+			GlobalStorageSiK.WithdrawTasks.update(2, transferDeadline)
+		end
 		GlobalStorageSiK.NativeWorldOverrideCommands.flushPublications(publishTaxonomyOverride)
 		flushPendingSnapshotSync()
 		if flushPendingTerminalRefreshes then
@@ -5903,6 +6108,8 @@ if Events and Events.OnPlayerDeath then
 		end
 		GlobalStorageSiK.Server.releaseWithdrawTicketsPacing(player,
 			GlobalStorageSiK.WithdrawSelectionTickets.cancelForPlayer(player))
+		GlobalStorageSiK.DepositTasks.cancelForPlayer(player, "player_dead")
+		GlobalStorageSiK.WithdrawTasks.cancelForPlayer(player, "player_dead", true)
 		local charName = GlobalStorageSiK.Permissions.getCharacterName(player)
 		if GlobalStorageSiK.Log then
 			GlobalStorageSiK.Log.warn("Permissions", "OnPlayerDeath charName=" .. tostring(charName)

@@ -92,7 +92,8 @@ local function showProgress(force)
 	operation.lastProgressMs = now
 	local player = pendingJob and pendingJob.player
 	if not player then return end
-	local moved = (operation.totalMoved or 0) + (pendingJob and pendingJob.totalMoved or 0)
+	local moved = (operation.totalMoved or 0) + (pendingJob
+		and math.max(pendingJob.totalMoved or 0, pendingJob.remoteMoved or 0) or 0)
 	local text = GlobalStorageSiK.I18n.text("IGUI_GS_DepositPending")
 	if (operation.totalExpected or 0) > 0 then
 		text = text .. " " .. tostring(moved) .. "/" .. tostring(operation.totalExpected)
@@ -209,7 +210,11 @@ local function activateJob(job, firstRequestInFlight)
 		nextRunMs = math.huge
 	else
 		responseDeadlineMs = 0
-		nextRunMs = (getTimestampMs and getTimestampMs() or 0) + batchDelayMs()
+		-- A physical gesture has already been fully captured and validated locally.
+		-- Dispatch its first immutable batch immediately; pacing still applies to
+		-- later floor entries and retries.
+		nextRunMs = (getTimestampMs and getTimestampMs() or 0)
+			+ (job.type == "physical" and 0 or batchDelayMs())
 	end
 	ensureTickInstalled()
 	return true
@@ -312,9 +317,26 @@ local function dispatchJob(job)
 	if job.type == "physical" then
 		local entry = job.physicalItems[job.physicalIndex]
 		if not entry then return false end
+		local itemIds = { entry.itemId }
+		local batchCount = 1
+		-- Container entries share the ordinary exact-ID contract. Coalesce the
+		-- contiguous run into one server-owned task; floor entries retain their
+		-- one-item physical locator and non-replayable semantics.
+		if entry.kind == "container" then
+			itemIds = {}
+			local index = job.physicalIndex
+			while index <= #job.physicalItems
+				and job.physicalItems[index].kind == "container" do
+				itemIds[#itemIds + 1] = job.physicalItems[index].itemId
+				index = index + 1
+			end
+			batchCount = #itemIds
+		end
+		job.physicalBatchCount = batchCount
+		job.physicalBatchKind = entry.kind
 		return GlobalStorageSiK.NetClient.sendCommand("depositItems", {
 			mode = entry.kind == "floor" and "floor" or nil,
-			sourceKey = entry.sourceKey, fullType = entry.fullType, itemIds = { entry.itemId },
+			sourceKey = entry.sourceKey, fullType = entry.fullType, itemIds = itemIds,
 			origin = "player_queue", queueId = job.queueId, depositId = job.gestureId,
 			networkId = job.networkId,
 		}, job.player)
@@ -374,6 +396,19 @@ function Q.isResponseExpected(args)
         and args.queueId == pendingJob.queueId and playerValid(pendingJob)
 end
 
+-- Heartbeat compacto de una tarea retenida por el servidor. Renueva el timeout
+-- sin convertir cada slice en un actionResult ni volver a enviar identidades.
+function Q.onProgress(args)
+	if not Q.isResponseExpected(args) then return false end
+	local processed, moved, total = tonumber(args.processed), tonumber(args.moved), tonumber(args.total)
+	if not processed or not moved or not total or processed < 0 or moved < 0
+		or total < 1 or processed > total or moved > processed then return false end
+	pendingJob.remoteMoved = math.floor(moved)
+	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
+	showProgress(true)
+	return true
+end
+
 function Q.onTick()
 	if not pendingJob then
 		return
@@ -382,7 +417,8 @@ function Q.onTick()
 	local now = getTimestampMs and getTimestampMs() or 0
 	if inFlight then
 		if now < responseDeadlineMs then return end
-		if pendingJob.type == "partial" or pendingJob.type == "physical" then
+		if pendingJob.type == "partial" or (pendingJob.type == "physical"
+			and pendingJob.physicalBatchKind == "floor") then
 			-- Un depósito parcial puede conservar el mismo itemId con un count
 			-- reducido. Reenviarlo a ciegas movería otra porción, así que ante una
 			-- respuesta perdida se termina sin reintento (misma regla que retiro).
@@ -469,6 +505,7 @@ function Q.onActionResult(args)
 	end
 	inFlight = false
 	responseDeadlineMs = 0
+	pendingJob.remoteMoved = nil
 	pendingJob.timeoutRetries = 0
 	pendingJob.totalMoved = (pendingJob.totalMoved or 0) + (summary.moved or 0)
 	pendingJob.totalSkipped = (pendingJob.totalSkipped or 0) + (summary.skipped or 0)
@@ -489,9 +526,11 @@ function Q.onActionResult(args)
 	end
 	if pendingJob.type == "physical" then
 		local entry = pendingJob.physicalItems[pendingJob.physicalIndex]
+		local batchCount = pendingJob.physicalBatchCount or 1
 		local ids = summary.itemIds
-		if args.ok ~= true or summary.reconcile == true or summary.moved ~= 1
+		if args.ok ~= true or summary.reconcile == true or summary.moved ~= batchCount
 			or (summary.failed or 0) > 0 or (summary.skipped or 0) > 0
+			or (summary.missing or 0) > 0
 			or (entry.kind == "floor" and (type(ids) ~= "table" or #ids ~= 1 or ids[1] ~= entry.itemId)) then
 			args.ok = false
 			args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_TransferWarning")
@@ -502,7 +541,9 @@ function Q.onActionResult(args)
 			Q.clear(args.transfer.reason, true)
 			return false
 		end
-		pendingJob.physicalIndex = pendingJob.physicalIndex + 1
+		pendingJob.physicalIndex = pendingJob.physicalIndex + batchCount
+		pendingJob.physicalBatchCount = nil
+		pendingJob.physicalBatchKind = nil
 		if pendingJob.physicalIndex <= #pendingJob.physicalItems then
 			scheduleRetry(pendingJob)
 			showProgress(false)

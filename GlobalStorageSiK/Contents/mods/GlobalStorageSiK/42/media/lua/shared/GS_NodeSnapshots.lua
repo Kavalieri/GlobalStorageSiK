@@ -1,9 +1,91 @@
 -- The confirmed container is the authoritative unit of inventory replication.
 -- itemSnapshot remains the compatibility field consumed by public Core APIs.
 require "GS_Config"
+local Codec = require "GS_CatalogCodec"
 GlobalStorageSiK.NodeSnapshots = {}
 local Snapshots = GlobalStorageSiK.NodeSnapshots
 Snapshots.SCHEMA = 1
+local MAX_DELTAS_PER_NODE = 8
+local MAX_DELTA_ROWS = 4096
+local MAX_DELTA_BYTES = 1024 * 1024
+local MAX_HISTORY_BYTES = 16 * 1024 * 1024
+local MAX_HISTORY_ENTRIES = 1024
+local histories, historyOrder, historyBytes = {}, {}, 0
+
+local function removeDelta(history, delta)
+	for i = 1, #history.deltas do
+		if history.deltas[i] == delta then
+			table.remove(history.deltas, i)
+			history.bytes = math.max(0, history.bytes - delta.estimatedBytes)
+			historyBytes = math.max(0, historyBytes - delta.estimatedBytes)
+			return
+		end
+	end
+end
+
+local function trimHistory()
+	while #historyOrder > MAX_HISTORY_ENTRIES or historyBytes > MAX_HISTORY_BYTES do
+		local retired = table.remove(historyOrder, 1)
+		if retired and retired.history then removeDelta(retired.history, retired.delta) end
+	end
+end
+
+local function clearHistory(id)
+	local history = histories[id]
+	if not history then return end
+	while #history.deltas > 0 do removeDelta(history, history.deltas[1]) end
+	for i = #historyOrder, 1, -1 do
+		if historyOrder[i].history == history then table.remove(historyOrder, i) end
+	end
+	histories[id] = nil
+end
+
+local function recordDelta(entry, previous, snapshot, baseRevision, revision, fullBytes)
+	if not entry.id or type(snapshot) ~= "table" then return end
+	if type(previous) ~= "table" then clearHistory(tostring(entry.id)); return end
+	local changed, removed, changedCount, estimated = {}, {}, 0, 0
+	for key, row in pairs(snapshot) do
+		local old = previous[key]
+		local signature = GlobalStorageSiK.Index.rowSignature(row)
+		if not old or GlobalStorageSiK.Index.rowSignature(old) ~= signature then
+			changed[key] = row
+			changedCount = changedCount + 1
+			estimated = estimated + #tostring(key) + #(signature or "") + 16
+		end
+	end
+	for key in pairs(previous) do
+		if snapshot[key] == nil then
+			removed[#removed + 1] = key
+			estimated = estimated + #tostring(key) + 8
+		end
+	end
+	local rowCount = changedCount + #removed
+	local id = tostring(entry.id)
+	if rowCount == 0 or rowCount > MAX_DELTA_ROWS or estimated > MAX_DELTA_BYTES
+		or estimated >= fullBytes then
+		clearHistory(id)
+		return
+	end
+	local fullWireBytes = Codec and Codec.size and Codec.size(snapshot) or fullBytes
+	if type(fullWireBytes) ~= "number" then clearHistory(id); return end
+	local history = histories[id]
+	if not history or history.entry ~= entry then
+		if history then clearHistory(id) end
+		history = { entry = entry, deltas = {}, bytes = 0,
+			fullBytes = fullBytes, fullWireBytes = fullWireBytes }
+		histories[id] = history
+	end
+	local delta = { baseRevision = baseRevision, revision = revision,
+		changedRows = changed, removedRowKeys = removed, estimatedBytes = estimated }
+	history.deltas[#history.deltas + 1] = delta
+	history.bytes = history.bytes + estimated
+	history.fullBytes = fullBytes
+	history.fullWireBytes = fullWireBytes
+	historyBytes = historyBytes + estimated
+	historyOrder[#historyOrder + 1] = { history = history, delta = delta }
+	while #history.deltas > MAX_DELTAS_PER_NODE do removeDelta(history, history.deltas[1]) end
+	trimHistory()
+end
 
 local function networkFor(entry)
 	local registry = GlobalStorageSiK.Network.getRegistry()
@@ -43,19 +125,62 @@ function Snapshots.commit(entry, snapshot, reason, canonical, prepared)
 			rows = rows + 1
 		end
 	end
+	local previous = entry.itemSnapshot
+	local baseRevision = tonumber(entry.contentRevision) or 0
 	entry.itemSnapshot = snapshot
-	entry.contentRevision = (tonumber(entry.contentRevision) or 0) + 1
+	entry.contentRevision = baseRevision + 1
 	entry.snapshotSchema = Snapshots.SCHEMA
 	entry.snapshotSignature = signature
 	entry.snapshotUnits, entry.snapshotRows, entry.snapshotWeight = units, rows, weight
 	entry.snapshotConfirmedAt = getTimestampMs and getTimestampMs() or 0
 	entry.snapshotReason = reason or "capture"
+	recordDelta(entry, previous, snapshot, baseRevision, entry.contentRevision,
+		math.max(1, #(canonical or "")))
 	local network, networkId = networkFor(entry)
 	if network then network.contentWatermark = (tonumber(network.contentWatermark) or 0) + 1 end
 	if GlobalStorageSiK.CatalogReconciler and GlobalStorageSiK.CatalogReconciler.confirmed then
 		GlobalStorageSiK.CatalogReconciler.confirmed(entry.id, entry.contentRevision)
 	end
 	return true, true, networkId
+end
+
+-- Compose a bounded contiguous history. Callers send the full immutable
+-- snapshot whenever the client base is absent, retired or no longer cheaper.
+function Snapshots.delta(entry, baseRevision)
+	if type(entry) ~= "table" or not entry.id or type(baseRevision) ~= "number"
+		or baseRevision ~= math.floor(baseRevision) then return nil end
+	local history = histories[tostring(entry.id)]
+	if not history or history.entry ~= entry or baseRevision >= (entry.contentRevision or 0) then return nil end
+	local current, changed, removed, estimated = baseRevision, {}, {}, 0
+	for i = 1, #history.deltas do
+		local delta = history.deltas[i]
+		if delta.baseRevision == current then
+			for key, row in pairs(delta.changedRows) do changed[key], removed[key] = row, nil end
+			for j = 1, #delta.removedRowKeys do
+				local key = delta.removedRowKeys[j]
+				changed[key], removed[key] = nil, true
+			end
+			current = delta.revision
+			estimated = estimated + delta.estimatedBytes
+			if current == entry.contentRevision then break end
+		end
+	end
+	if current ~= entry.contentRevision or estimated >= (history.fullBytes or 0) then return nil end
+	local removedKeys = {}
+	for key in pairs(removed) do removedKeys[#removedKeys + 1] = key end
+	table.sort(removedKeys, function(a, b) return tostring(a) < tostring(b) end)
+	local wireBytes = Codec and Codec.size and Codec.size({
+		changedRows = changed, removedRowKeys = removedKeys }) or estimated
+	if type(wireBytes) ~= "number" or wireBytes >= (history.fullWireBytes or 0) then return nil end
+	return { baseRevision = baseRevision, revision = current,
+		changedRows = changed, removedRowKeys = removedKeys,
+		estimatedBytes = estimated, wireBytes = wireBytes,
+		fullWireBytes = history.fullWireBytes }
+end
+
+function Snapshots.deltaDiagnostics()
+	return { retainedBytes = historyBytes, entries = #historyOrder,
+		maxBytes = MAX_HISTORY_BYTES, maxEntries = MAX_HISTORY_ENTRIES }
 end
 
 -- The caller has already performed the physical mutation and captured its

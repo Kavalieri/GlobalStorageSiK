@@ -46,6 +46,13 @@ GlobalStorageSiK.Bulk = {}
 
 local function depositFromContainers(player, networkId, containers, scope, summary, maxPerTick)
 	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	local function finish()
+		local snapshotsUpdated, touchedNodeIds =
+			GlobalStorageSiK.Transfer.flushDepositSessionSnapshots(routingSession)
+		summary.snapshotsUpdated = snapshotsUpdated
+		summary.touchedNodeIds = touchedNodeIds
+		return summary
+	end
 
 	for s = 1, #(containers or {}) do
 
@@ -59,7 +66,7 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 				summary.reason = "limit"
 
-				return summary
+				return finish()
 
 			end
 			summary.processed = summary.processed + 1
@@ -76,6 +83,7 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 					local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
+						deferSnapshot = true,
 					})
 
 					if ok then
@@ -108,7 +116,7 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 	end
 
-	return summary
+	return finish()
 
 end
 

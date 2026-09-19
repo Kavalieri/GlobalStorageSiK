@@ -94,10 +94,10 @@ function Replica.new(options)
 			for _,record in ipairs(entry.records) do
 				local id=record.nodeId
 				if removedZones[record.zoneId] or removedNodes[id] then
-					local block=entry.blocks[id]
+					local block=entry.blocks[id] or entry.baseBlocks[id]
 					local released=1024+(block and block.bytes or 0)
 					entry.bytes=entry.bytes-released;bytes=bytes-released
-					entry.blocks[id]=nil;entry.byId[id]=nil;entry.changedNodeIds[id]=true
+					entry.blocks[id]=nil;entry.baseBlocks[id]=nil;entry.byId[id]=nil;entry.changedNodeIds[id]=true
 				else records[#records+1]=record end
 			end
 			entry.records=records;entry.token=nil;entry.topologySequence=meta.topologySequence
@@ -116,6 +116,7 @@ function Replica.new(options)
 		if reason then return nil,reason end
 		local entry={key=key,epoch=meta.replicaEpoch,playerNum=meta.playerNum,networkId=meta.networkId,
 			scope=meta.catalogScope,token=meta.manifestToken,records=records,byId=byId,blocks={},
+			baseBlocks={},
 			changedNodeIds={},bytes=4096+#records*1024,topologySequence=meta.topologySequence,
 			authorization=authorization or meta}
 		-- A draft never replaces the token or rows of the last accepted image.
@@ -139,9 +140,11 @@ function Replica.new(options)
 			if not Protocol.sameBlock(previous,record) or previous.enabled~=record.enabled then
 				entry.changedNodeIds[record.nodeId]=true
 			end
-			local block=old and old.blocks[record.nodeId]
+			local block=old and (old.blocks[record.nodeId] or old.baseBlocks[record.nodeId])
 			if block and Protocol.sameBlock(block.record,record) then
 				entry.blocks[record.nodeId]=block; entry.bytes=entry.bytes+block.bytes
+			elseif block then
+				entry.baseBlocks[record.nodeId]=block; entry.bytes=entry.bytes+block.bytes
 			end
 		end
 		-- Reservations may evict unrelated networks, never the previous same-key image.
@@ -156,18 +159,51 @@ function Replica.new(options)
 		if not entry or entry.token~=meta.manifestToken
 			or (entry.topologySequence or 0)~=(meta.topologySequence or 0) then return false,"manifest_changed" end
 		local record=Protocol.record(meta.nodeRecord)
-		if not record or not record.confirmed or not Protocol.sameBlock(record,entry.byId[record.nodeId])
-			or type(meta.nodeSnapshot)~="table" or getmetatable(meta.nodeSnapshot)~=nil then return false,"node_revision" end
+		if not record or not record.confirmed or not Protocol.sameBlock(record,entry.byId[record.nodeId]) then
+			return false,"node_revision"
+		end
+		local snapshot = meta.nodeSnapshot
+		local base = entry.baseBlocks[record.nodeId]
+		if meta.nodeDelta ~= nil then
+			local delta = meta.nodeDelta
+			if type(delta)~="table" or getmetatable(delta)~=nil or not base
+				or not Protocol.integer(delta.baseRevision,0,9007199254740991)
+				or delta.baseRevision~=base.record.revision or delta.revision~=record.revision
+				or type(delta.changedRows)~="table" or getmetatable(delta.changedRows)~=nil
+				or type(delta.removedRowKeys)~="table" or getmetatable(delta.removedRowKeys)~=nil
+				or #delta.removedRowKeys>500000 then return false,"node_delta_base" end
+			snapshot={}
+			for key,row in pairs(base.snapshot) do snapshot[key]=row end
+			for i=1,#delta.removedRowKeys do
+				local key=delta.removedRowKeys[i]
+				if type(key)~="string" then return false,"node_delta_schema" end
+				snapshot[key]=nil
+			end
+			local changedCount=0
+			for key,row in pairs(delta.changedRows) do
+				changedCount=changedCount+1
+				if changedCount>500000 or type(key)~="string" or type(row)~="table"
+					or getmetatable(row)~=nil then return false,"node_delta_schema" end
+				snapshot[key]=row
+			end
+		elseif type(snapshot)~="table" or getmetatable(snapshot)~=nil then
+			return false,"node_revision"
+		end
 		-- Caller supplies the verified codec reservation, not a field from the packet.
 		if not Protocol.integer(retainedBytes,1,maxBytes) then return false,"replica_budget" end
 		local old=entry.blocks[record.nodeId]
 		if old and Protocol.sameBlock(old.record,record) then touch(entry);return true,"duplicate" end
-		local delta=retainedBytes-(old and old.bytes or 0)
+		local delta=retainedBytes-(old and old.bytes or base and base.bytes or 0)
 		if not reserve(delta,key) then return false,"replica_budget" end
-		entry.blocks[record.nodeId]={record=record,snapshot=meta.nodeSnapshot,bytes=retainedBytes}
+		entry.blocks[record.nodeId]={record=record,snapshot=snapshot,bytes=retainedBytes}
+		entry.baseBlocks[record.nodeId]=nil
 		entry.changedNodeIds[record.nodeId]=true
 		entry.bytes=entry.bytes+delta;bytes=bytes+delta;touch(entry)
 		return true
+	end
+	function api.baseRevision(entry,nodeId)
+		local block=entry and entry.baseBlocks and entry.baseBlocks[nodeId]
+		return block and block.record and block.record.revision or nil
 	end
 	function api.missing(entry, limit)
 		local missing={}

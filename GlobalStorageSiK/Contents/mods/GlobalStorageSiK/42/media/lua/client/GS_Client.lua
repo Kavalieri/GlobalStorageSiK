@@ -439,6 +439,12 @@ local function applyCatalogDelta(payload,replicaRows)
 			payload.networkId, nextRows, payload.inventoryRevision, playerNum, true,
 			payload.changedRows, payload.removedRowKeys)
 	end
+	-- Progressive replicas install their final state without going through
+	-- TerminalUI.refreshFromState(). Repaint the warehouse summary explicitly so
+	-- the partial "loading inventory" presentation cannot survive ui_ready.
+	if matchingUi and ui.applyCapacityState then
+		catalogConsumer("TerminalUI.applyCapacityState", false, ui.applyCapacityState, ui, state.capacity)
+	end
 	if matchingUi and addonsChanged and ui.refreshAddonMetadata then
 		if activeCatalogTransaction then activeCatalogTransaction.addonMetadataChanged=true end
 		catalogConsumer("TerminalUI.refreshAddonMetadata",false,ui.refreshAddonMetadata,ui)
@@ -549,6 +555,16 @@ local function onServerCommand(module, command, args)
 				ui._gsScanStatusRefreshMs = now + 1000
 				GlobalStorageSiK.TerminalNetwork.refreshActiveTab(ui, ui.terminalState)
 			end
+		end
+		return
+	elseif command == "depositProgress" then
+		if GlobalStorageSiK.TransferQueue and GlobalStorageSiK.TransferQueue.onProgress then
+			GlobalStorageSiK.TransferQueue.onProgress(args)
+		end
+		return
+	elseif command == "withdrawProgress" then
+		if GlobalStorageSiK.WithdrawClient and GlobalStorageSiK.WithdrawClient.onProgress then
+			GlobalStorageSiK.WithdrawClient.onProgress(args)
 		end
 		return
 	elseif command == "actionResult" then

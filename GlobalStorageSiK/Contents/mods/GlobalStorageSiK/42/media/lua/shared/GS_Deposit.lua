@@ -127,13 +127,39 @@ end
 ---@param itemId number
 ---@return InventoryItem|nil
 ---@return ItemContainer|nil
-function GlobalStorageSiK.Deposit.createSearchSnapshot(player)
-	return {
+function GlobalStorageSiK.Deposit.createSearchSnapshot(player, selectedIds)
+	local snapshot = {
 		-- La topología se puede reutilizar dentro de una operación corta, pero no
 		-- contiene contenido ni permisos congelados: ambos se vuelven a leer al
 		-- resolver cada ítem.
 		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player),
+		byId = {},
 	}
+	local wanted = nil
+	if type(selectedIds) == "table" then
+		wanted = {}
+		for i = 1, #selectedIds do wanted[selectedIds[i]] = true end
+	end
+	local visited = {}
+	local function indexContainer(container, depth)
+		if not container or visited[container] or depth > 10 then return end
+		visited[container] = true
+		local items = container.getItems and container:getItems() or nil
+		if not items then return end
+		for i = 0, items:size() - 1 do
+			local item = items:get(i)
+			local id = GlobalStorageSiK.Deposit.getItemId(item)
+			if id and (not wanted or wanted[id]) and not snapshot.byId[id] then
+				snapshot.byId[id] = { item = item, container = container }
+			end
+			local sub = item and item.getInventory and item:getInventory() or nil
+			if sub then indexContainer(sub, depth + 1) end
+		end
+	end
+	if wanted then
+		for i = 1, #snapshot.containers do indexContainer(snapshot.containers[i], 0) end
+	end
+	return snapshot
 end
 
 --- Busca un ítem dentro de una instantánea topológica ya creada. Permisos y
@@ -152,6 +178,13 @@ function GlobalStorageSiK.Deposit.findItemByIdInSnapshot(player, itemId, snapsho
 	local containers = snapshot and snapshot.containers or nil
 	if type(containers) ~= "table" then
 		containers = GlobalStorageSiK.Deposit.collectSearchContainers(player)
+	end
+	local indexed = snapshot and snapshot.byId and snapshot.byId[itemId] or nil
+	if indexed and indexed.item and indexed.container
+		and GlobalStorageSiK.Deposit.getItemId(indexed.item) == itemId
+		and indexed.item.getContainer and indexed.item:getContainer() == indexed.container
+		and GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, indexed.container) then
+		return indexed.item, indexed.container
 	end
 	for c = 1, #containers do
 		local container = containers[c]
@@ -274,7 +307,10 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 	local maxPerTick = math.max(1, math.floor(tonumber(options and options.maxItemsPerTick)
 		or GlobalStorageSiK.Sandbox.getMaxItemsPerBulkTick()))
 	local seenIds = {}
-	local routingSession = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	local routingSession = options and options.routingSession
+		or GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	local searchSnapshot = options and options.searchSnapshot
+		or GlobalStorageSiK.Deposit.createSearchSnapshot(player, itemIds)
 
 	for i = 1, #itemIds do
 		if summary.processed >= maxPerTick then
@@ -306,7 +342,7 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 		local itemId = itemIds[i]
 		if itemId and not seenIds[itemId] then
 			seenIds[itemId] = true
-			local item, container = GlobalStorageSiK.Deposit.findItemById(player, itemId)
+			local item, container = GlobalStorageSiK.Deposit.findItemById(player, itemId, searchSnapshot)
 			if not item or not container then
 				-- remainingIds ya impide reenviar objetos resueltos. Un ID
 				-- ausente en una petición vigente revela un inventario cliente
@@ -329,6 +365,7 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 					local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
 						preferredNodeId = options and options.preferredNodeId or nil,
+						deferSnapshot = true,
 					})
 					if ok then
 						summary.moved = summary.moved + 1
@@ -359,6 +396,12 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 				end
 			end
 		end
+	end
+	if not (options and options.deferSnapshotFlush == true) then
+		local snapshotsUpdated, touchedNodeIds =
+			GlobalStorageSiK.Transfer.flushDepositSessionSnapshots(routingSession)
+		summary.snapshotsUpdated = snapshotsUpdated
+		summary.touchedNodeIds = touchedNodeIds
 	end
 
 	return summary
@@ -418,6 +461,7 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		if candidate and candidate:getContainer() == container then
 			local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
 				session = routingSession,
+				deferSnapshot = true,
 			})
 			if ok then
 				summary.moved = summary.moved + 1
@@ -452,6 +496,9 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 			end
 		end
 	end
+	local snapshotsUpdated, touchedNodeIds = GlobalStorageSiK.Transfer.flushDepositSessionSnapshots(routingSession)
+	summary.snapshotsUpdated = snapshotsUpdated
+	summary.touchedNodeIds = touchedNodeIds
 
 	return summary
 end

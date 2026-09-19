@@ -314,6 +314,11 @@ local function dispatchCurrent()
 		selectionRevision = not current.selectionTicket and current.rowData.selectionRevision or nil,
 		selectionTicket = current.selectionTicket,
 		selectionSequence = current.selectionSequence,
+		-- El servidor 1.5.7+ sella y avanza exact_group completo. Cero conserva
+		-- la semantica historica de "toda la fila"; servidores anteriores ignoran
+		-- este campo y siguen confirmando un microlote por RTT.
+		taskAmount = current.selectionMode == "exact_group"
+			and (current.quantityLimit or 0) or nil,
 		amount = requested,
 		targetKey = current.targetKey,
 		searchQuery = current.searchQuery or "",
@@ -382,10 +387,12 @@ function worker.cancelAll(reason)
 	local cancelledCurrent = current
 	local cancelledQueue = queue
 	GlobalStorageSiK.UIFeedback.finishOperation(context.playerNum, context.operationId)
-	if cancelledCurrent and cancelledCurrent.selectionTicket then
+	if cancelledCurrent and (cancelledCurrent.selectionTicket
+		or cancelledCurrent.sentPayload and cancelledCurrent.sentPayload.taskAmount ~= nil) then
 		sendCommand("cancelWithdrawSelection", {
 			networkId = cancelledCurrent.networkId,
 			selectionTicket = cancelledCurrent.selectionTicket,
+			withdrawId = cancelledCurrent.requestId,
 		})
 	end
 	if operation then
@@ -749,7 +756,7 @@ function worker.onActionResult(args)
 		current.pendingItemIds = pending
 		current.remaining = #pending
 		appendItemIds(current.movedItemIds, confirmedIds)
-	elseif selectionMode == "exact_group" then
+	elseif selectionMode == "exact_group" and transfer.serverOwned ~= true then
 		local confirmedIds = transfer.itemIds or {}
 		if #confirmedIds ~= moved or moved > (current.batchRequested or 0) then
 			GlobalStorageSiK.Log.error("WithdrawClient", "group response identity mismatch",
@@ -867,6 +874,22 @@ function worker.onActionResult(args)
 	GlobalStorageSiK.UIFeedback.finishOperation(context.playerNum, context.operationId)
 	runCompletion(completedRequest, completionResult.moved > 0, completionResult)
 	return false
+end
+
+function worker.onProgress(args)
+	if not current or not args or args.withdrawId ~= current.requestId
+		or args.networkId ~= current.networkId then return false end
+	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
+	local moved = math.max(0, math.floor(tonumber(args.moved) or 0))
+	local expected = operation and operation.totalExpected or tonumber(args.total) or 0
+	local displayed = (operation and operation.totalMoved or current.totalMoved or 0) + moved
+	local player = currentPlayer()
+	if player then
+		GlobalStorageSiK.UIFeedback.updateOperation(context.playerNum, context.operationId,
+			GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawPending") .. " "
+				.. tostring(displayed) .. "/" .. tostring(expected), displayed, expected)
+	end
+	return true
 end
 
 function worker.matchesResponse(args)

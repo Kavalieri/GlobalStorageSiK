@@ -235,7 +235,8 @@ local function logWithdrawCapacity(source, dest, item, sourceNodeId, networkId, 
 			.. " result=" .. tostring(result))
 end
 
-local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, requestedSourceNodeId)
+local deferDepositSnapshot
+local function withdrawUnits(player, fullType, networkId, units, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, requestedSourceNodeId, snapshotSession)
 
 	destContainer = destContainer or player:getInventory()
 
@@ -396,7 +397,10 @@ local function withdrawUnits(player, fullType, networkId, units, destContainer, 
 	-- realmente afectados en este micro-lote, una vez cada uno (no por item),
 	-- sin repetir getLiveContainers() para toda la red en afterTransferSync.
 	for _, touched in pairs(touchedNodes) do
-		if GlobalStorageSiK.Index.syncNodeSnapshot(touched.entry, touched.container) ~= true then
+		local updated = snapshotSession
+			and deferDepositSnapshot(snapshotSession, touched.entry, touched.container)
+			or GlobalStorageSiK.Index.syncNodeSnapshot(touched.entry, touched.container) == true
+		if updated ~= true then
 			snapshotsUpdated = false
 		end
 	end
@@ -436,7 +440,51 @@ function GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 		networkId = networkId,
 		liveNodes = live,
 		affinityIndex = GlobalStorageSiK.Router.buildAffinityIndex(live),
+		pendingSnapshotByNodeId = {},
+		pendingSnapshotOrder = {},
 	}
+end
+
+function GlobalStorageSiK.Transfer.createSnapshotSession(networkId)
+	return { networkId = networkId, pendingSnapshotByNodeId = {}, pendingSnapshotOrder = {} }
+end
+
+--- Retiene un nodo mutado para capturarlo una sola vez al cerrar el micro-lote.
+---@param session table
+---@param entry table
+---@param container ItemContainer
+deferDepositSnapshot = function(session, entry, container)
+	local nodeId = entry and entry.id and tostring(entry.id) or nil
+	if not nodeId or not container then return false end
+	if not session.pendingSnapshotByNodeId[nodeId] then
+		session.pendingSnapshotOrder[#session.pendingSnapshotOrder + 1] = nodeId
+	end
+	session.pendingSnapshotByNodeId[nodeId] = { entry = entry, container = container }
+	return true
+end
+
+--- Captura los nodos mutados por una sesión de depósito y vacía su journal.
+---@param session table|nil
+---@return boolean snapshotsUpdated
+---@return string[] touchedNodeIds
+function GlobalStorageSiK.Transfer.flushDepositSessionSnapshots(session)
+	if type(session) ~= "table" then return false, {} end
+	local pending = session.pendingSnapshotByNodeId or {}
+	local order = session.pendingSnapshotOrder or {}
+	local updated, touchedNodeIds = true, {}
+	for i = 1, #order do
+		local nodeId = order[i]
+		local record = pending[nodeId]
+		if record then
+			touchedNodeIds[#touchedNodeIds + 1] = nodeId
+			if GlobalStorageSiK.Index.syncNodeSnapshot(record.entry, record.container) ~= true then
+				updated = false
+			end
+		end
+	end
+	session.pendingSnapshotByNodeId = {}
+	session.pendingSnapshotOrder = {}
+	return updated, touchedNodeIds
 end
 
 --- Deposita un ítem del jugador en la red.
@@ -447,7 +495,7 @@ end
 
 ---@param networkId string|nil
 
----@param options table|nil { session=table, preferredNodeId=string }
+---@param options table|nil { session=table, preferredNodeId=string, deferSnapshot=boolean }
 
 ---@return boolean ok
 
@@ -542,7 +590,12 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 		-- nodo, ya resuelto aqui mismo - evita repetir el barrido de
 		-- getLiveContainers() que afterTransferSync hacia antes para toda la
 		-- red (hasta 64 nodos) solo para volver a encontrar este mismo nodo.
-		local snapshotsUpdated = GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container) == true
+		local snapshotsUpdated
+		if options.deferSnapshot == true then
+			snapshotsUpdated = deferDepositSnapshot(session, target.entry, target.container)
+		else
+			snapshotsUpdated = GlobalStorageSiK.Index.syncNodeSnapshot(target.entry, target.container) == true
+		end
 
 		return true, nil, snapshotsUpdated, targetId and tostring(targetId) or nil
 
@@ -576,7 +629,7 @@ end
 
 ---@return string[] sourceNodeIds
 
-function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, maxUnits, sourceNodeId)
+function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amount, destContainer, mediaTitle, dynamicSignature, requestedItemIds, mediaIndex, familyFullTypes, maxUnits, sourceNodeId, options)
 
 	if not player or not fullType or fullType == "" then
 
@@ -612,7 +665,8 @@ function GlobalStorageSiK.Transfer.withdrawType(player, fullType, networkId, amo
 
 	local moved, reason, movedItemIds, sourceNodeIds, snapshotsUpdated = withdrawUnits(
 		player, fullType, networkId, target, destContainer, mediaTitle, dynamicSignature,
-		requestedItemIds, mediaIndex, familyFullTypes, sourceNodeId)
+		requestedItemIds, mediaIndex, familyFullTypes, sourceNodeId,
+		options and options.snapshotSession)
 
 	if moved > 0 then
 

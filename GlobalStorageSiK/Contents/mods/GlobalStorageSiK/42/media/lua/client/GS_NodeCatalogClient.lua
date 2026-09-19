@@ -146,6 +146,7 @@ local function nextNode(state,receivedBlock)
 	local bootstrapWindow=not state.hasPresented and (state.receivedBlocks or 0)>=4
 	if missing and not bootstrapWindow and (not state.request or state.request.nodeId~=missing.nodeId) then
 		local args=intent(state);args.nodeId=missing.nodeId;args.manifestToken=state.entry.token
+		args.nodeBaseRevision=cache.baseRevision(state.entry,missing.nodeId)
 		trace("node requested",args,"node="..args.nodeId.." nodeRevision="..tostring(missing.revision))
 		state.request=args;state.sentAt=now()
 		if not send(state,"terminalNodeRequest",args) then return false,"node_send" end
@@ -335,8 +336,10 @@ local function apply(state)
 	state.phase=nil;state.previous=state.rows;state.view=nil;state.completed=true
 	if not state.notModified and (state.partial or state.buildVersion~=state.blockVersion) then
 		state.completed=false
-		if state.buildVersion~=state.blockVersion then return nextNode(state,true) end
-		return true
+		-- Tras publicar la primera ventana parcial hay que pedir inmediatamente el
+		-- siguiente nodo. Dejar el estado sin build, phase ni request lo aparcaba
+		-- hasta el watchdog de 10 s y mantenia capacidad en «Cargando».
+		return nextNode(state,true)
 	end
 	state.hasComplete=true
 	local args=intent(state);args.manifestToken=state.manifest.manifestToken;args.inventoryRevision=payload.inventoryRevision

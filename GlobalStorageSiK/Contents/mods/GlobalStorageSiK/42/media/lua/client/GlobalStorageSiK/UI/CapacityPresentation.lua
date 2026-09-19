@@ -81,6 +81,7 @@ function CapacityPresentation.fromState(capacity, options)
 
 	return {
 		value = total > 0 and percent / 100 or 0,
+		mode = "determinate",
 		label = label,
 		text = label,
 		status = status,

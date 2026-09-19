@@ -129,7 +129,7 @@ end
 
 function Manifest.diagnostics() return {retainedBytes=retainedBytes,topologyBytes=topologyBytes,networks=topologyCount} end
 
-function Manifest.block(player, meta, nodeId, token)
+function Manifest.block(player, meta, nodeId, token, baseRevision)
 	local valid,reason=authorized(player,meta)
 	if not valid then Manifest.clear(player);return nil,reason or "catalog_access_changed" end
 	local state=sessions[player]
@@ -146,9 +146,15 @@ function Manifest.block(player, meta, nodeId, token)
 	if not record.confirmed then return nil,"node_unconfirmed" end
 	-- Published snapshots are replaced, never mutated. The transport holds this
 	-- one reference until ACK; newer commits cannot alter the encoded block.
-	return {catalogNode=true,manifestSchema=Protocol.SCHEMA,replicaEpoch=meta.replicaEpoch,
+	local delta = Snapshots.delta(node, baseRevision)
+	local payload = {catalogNode=true,manifestSchema=Protocol.SCHEMA,replicaEpoch=meta.replicaEpoch,
 		manifestToken=token,networkId=meta.networkId,catalogScope=meta.catalogScope,topologySequence=meta.topologySequence,
-		inventoryRevision=state.revision,nodeRecord=record,nodeSnapshot=node.itemSnapshot}
+		inventoryRevision=state.revision,nodeRecord=record}
+	if delta then
+		payload.nodeDelta={baseRevision=delta.baseRevision,revision=delta.revision,
+			changedRows=delta.changedRows,removedRowKeys=delta.removedRowKeys}
+	else payload.nodeSnapshot=node.itemSnapshot end
+	return payload
 end
 
 return Manifest

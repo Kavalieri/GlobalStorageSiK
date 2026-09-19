@@ -113,7 +113,10 @@ function Server.dispatch(command,player,args)
 		if not state.roundActive or not state.manifest or args.manifestToken~=state.manifest.manifestToken then return true end
 		-- Reliable unordered commands may precede the manifest receipt. Retain one
 		-- descriptor and serve it only after the previous frame job is released.
-		if not state.request then state.request={nodeId=args.nodeId,token=args.manifestToken} end
+		if args.nodeBaseRevision~=nil
+			and not Protocol.integer(args.nodeBaseRevision,0,9007199254740991) then return true end
+		if not state.request then state.request={nodeId=args.nodeId,token=args.manifestToken,
+			baseRevision=args.nodeBaseRevision} end
 	elseif state.roundActive and state.manifest and args.manifestToken==state.manifest.manifestToken
 		and args.inventoryRevision==state.manifest.inventoryRevision then
 		state.ready={token=args.manifestToken,revision=args.inventoryRevision}
@@ -150,7 +153,8 @@ function Server.update()
 			elseif state.refreshPending and not state.roundActive then refresh(player,state)
 			elseif state.request and now()>=(state.request.due or 0) then
 				local request=state.request;state.request=nil
-				local payload,reason=Manifest.block(player,state.session,request.nodeId,request.token)
+				local payload,reason=Manifest.block(player,state.session,request.nodeId,
+					request.token,request.baseRevision)
 				if payload then
 					payload.catalogSource="node_block";state.lastPayload=payload
 					context.queue(player,payload)

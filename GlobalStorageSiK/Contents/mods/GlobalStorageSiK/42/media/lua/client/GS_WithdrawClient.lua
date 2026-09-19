@@ -272,6 +272,18 @@ function Client.onActionResult(args)
 	end
 	return false
 end
+function Client.onProgress(args)
+	for i = 0, 3 do
+		local state = queues[i]
+		local entry = state and state.entries[1]
+		local worker = entry and entry.worker
+		if worker and worker.matchesResponse(args)
+			and (args.playerNum == nil or tonumber(args.playerNum) == i) then
+			return worker.onProgress(args)
+		end
+	end
+	return false
+end
 function Client.onTerminalState(state)
 	local playerNum = state and numberOf(state.playerNum)
 	local queue = playerNum ~= nil and queues[playerNum]
