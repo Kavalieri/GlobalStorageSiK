@@ -1733,6 +1733,22 @@ GlobalStorageSiK.CatalogClient.configure({
 			consumerRejected=consumerRejected==true,
 		}, meta.playerNum)
 	end,
+	reassembled=function(meta)
+		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			topologySequence=meta.topologySequence,
+			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
+			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
+			reassembled=true,
+		}, meta.playerNum)
+	end,
+	missing=function(meta,parts)
+		GlobalStorageSiK.NetClient.sendCommand("terminalCatalogAck", {
+			topologySequence=meta.topologySequence,
+			networkId=meta.networkId, openSeq=meta.openSeq, batchId=meta.batchId,
+			inventoryRevision=meta.inventoryRevision, catalogScope=meta.catalogScope,
+			missingParts=parts,
+		}, meta.playerNum)
+	end,
 	replicaReject=function(meta)
 		GlobalStorageSiK.NetClient.sendCommand("terminalReplicaReject", meta, meta.playerNum)
 	end,

@@ -9,10 +9,10 @@ local context
 local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
 local TIMEOUT_MS = 60000
-local ACK_RETRY_MS = 1500
-local MAX_SEND_PASSES = 3
 local RESPONSE_DEADLINE_MS = 10000
-local counters = {full=0, delta=0, notModified=0, details=0, manifests=0, nodes=0, completed=0, discarded=0, rejected=0, coalesced=0}
+local counters = {full=0, delta=0, notModified=0, details=0, manifests=0, nodes=0,
+    completed=0, discarded=0, rejected=0, coalesced=0, reassembled=0,
+    missingRequests=0, uniqueFrameBytes=0, retransmittedFrameBytes=0}
 local lastDiscardLog = 0
 local lastProgressLog = 0
 local function now() return getTimestampMs and getTimestampMs() or 0 end
@@ -332,7 +332,6 @@ local function queue(player, payload, rows, builder)
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
-        sendPasses=1,
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
@@ -389,8 +388,36 @@ function Server.receipt(player,payload)
 			recoverOnce(player,session,rejectReason)
 		end
 		return
+	end
+    if job.builder or job.encoder or job.framer or not job.firstPassComplete then discard("premature"); return end
+    if payload.reassembled==true then
+        if not job.reassembled then counters.reassembled=counters.reassembled+1 end
+        job.reassembled=true;job.lastProgressAt=now()
+        log("reassembled",description(meta).." parts="..tostring(meta.total))
+        return
     end
-    if job.builder or job.encoder or job.framer or job.nextPart<=meta.total then discard("premature"); return end
+    if payload.missingParts~=nil then
+        if type(payload.missingParts)~="table" or #payload.missingParts<1
+            or #payload.missingParts>meta.total or getmetatable(payload.missingParts)~=nil then
+            discard("missing_schema");return
+        end
+        local requested,seen={},{ }
+        local supplied=0
+        for key in pairs(payload.missingParts) do
+            supplied=supplied+1
+            if not Codec.integer(key,1,#payload.missingParts) then discard("missing_schema");return end
+        end
+        if supplied~=#payload.missingParts then discard("missing_schema");return end
+        for i=1,#payload.missingParts do
+            local part=payload.missingParts[i]
+            if not Codec.integer(part,1,meta.total) or seen[part] then discard("missing_schema");return end
+            seen[part]=true;requested[#requested+1]=part
+        end
+        job.resendParts=requested;job.resendCursor=1;job.lastProgressAt=now()
+        counters.missingRequests=counters.missingRequests+1
+        log("missing_requested",description(meta).." missing="..tostring(#requested))
+        return
+    end
     if not job.detail and not job.nodeTransfer then
         retainedBytes=math.max(0,retainedBytes-(session.baseBytes or 0))
         session.baseBytes=job.baseEstimate or 0
@@ -404,6 +431,8 @@ function Server.receipt(player,payload)
     if job.nodeTransfer then session.recoveryUsed=nil end
     log("completed",description(meta) .. " kind=" .. tostring(job.kind) .. " rows=" .. tostring(job.rows)
         .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs)
+        .. " uniqueFrameBytes="..tostring(job.uniqueFrameBytes or 0)
+        .. " retransmittedFrameBytes="..tostring(job.retransmittedFrameBytes or 0)
         .. " elapsedMs=" .. tostring(now()-job.startedAt))
     release(player)
     if context.received then context.received(player,job.payload) end
@@ -554,24 +583,33 @@ function Server.update()
                         work=work+1024
                     until work>=8192 or jobs[player]~=job or not job.encoder or now()-workStarted>=encodeSlice
                 end
+            elseif job.resendParts and job.resendCursor<=#job.resendParts then
+                local part=job.resendParts[job.resendCursor]
+                local frame=Codec.frame(job.envelope,job.chunks[part],part)
+                job.resendCursor=job.resendCursor+1 -- SP receipt can be synchronous.
+                local ok,sendReason=send(player,"terminalCatalogChunk",frame)
+                local frameBytes=Codec.frameSize(frame) or 0
+                if ok then
+                    job.lastProgressAt=timestamp
+                    job.retransmittedFrameBytes=(job.retransmittedFrameBytes or 0)+frameBytes
+                    counters.retransmittedFrameBytes=counters.retransmittedFrameBytes+frameBytes
+                    if job.resendCursor>#job.resendParts then job.resendParts=nil;job.resendCursor=nil end
+                end
+                sent=sent+1
+                if not ok then failure(player,sendReason,frame.batchId) end
             elseif job.nextPart<=job.envelope.total then
                 local frame=Codec.frame(job.envelope,job.chunks[job.nextPart],job.nextPart)
                 job.nextPart=job.nextPart+1 -- SP receipt can be synchronous.
+                if job.nextPart>job.envelope.total then job.firstPassComplete=true end
                 local ok,sendReason=send(player,"terminalCatalogChunk",frame)
-                if ok then job.lastProgressAt=timestamp end
+                local frameBytes=Codec.frameSize(frame) or 0
+                if ok then
+                    job.lastProgressAt=timestamp
+                    job.uniqueFrameBytes=(job.uniqueFrameBytes or 0)+frameBytes
+                    counters.uniqueFrameBytes=counters.uniqueFrameBytes+frameBytes
+                end
                 sent=sent+1
                 if not ok then failure(player,sendReason,frame.batchId) end
-            elseif (job.sendPasses or 1)<MAX_SEND_PASSES
-                and timestamp-job.lastProgressAt>=ACK_RETRY_MS then
-                -- Delivery acceptance only confirms that PZ accepted the command.
-                -- A missing fragment leaves the server waiting forever until the
-                -- broad stall timeout. Replay the immutable batch; the client
-                -- deduplicates exact fragments and only the missing part advances.
-                job.sendPasses=(job.sendPasses or 1)+1
-                job.nextPart=1
-                job.lastProgressAt=timestamp
-                log("retry",description(job.envelope).." pass="..tostring(job.sendPasses)
-                    .." parts="..tostring(job.envelope.total))
             end
             computeMs=computeMs+math.max(0,now()-workStarted)
             -- The response target is not a lifetime for shared catalog work.

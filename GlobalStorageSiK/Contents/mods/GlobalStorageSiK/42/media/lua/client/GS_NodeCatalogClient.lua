@@ -109,7 +109,8 @@ function Client.confirm(ack)
 	local entry,reason=cache.confirm(ack)
 	if reason then return false,reason end
 	if entry then entry.topologySequence=ack.topologySequence or 0 end
-	trace(entry and "clientCacheHit" or "clientCacheMiss",ack,entry and "reason=identity_confirmed" or "reason=no_confirmed_view")
+	trace(entry and "clientCacheHit" or "clientCacheMiss",ack,entry and
+		("reason=identity_confirmed cachedToken="..tostring(entry.token)) or "reason=no_confirmed_view")
 	local current=ack.topologyTransition and context.currentState(ack.playerNum)
 	slots[ack.playerNum]={ack=ack,entry=entry,previous=entry and entry.rows,previousMetadata=entry and entry.metadata,
 		store=entry and entry.rows and entry.rowStore,hasComplete=entry and entry.rows~=nil,
@@ -124,6 +125,11 @@ function Client.negotiate(ack)
 	if not state or state.ack~=ack then return false end
 	local args=intent(state)
 	if state.entry and state.entry.confirmed then args.knownManifestToken=state.entry.confirmed.token end
+	if state.entry and not state.entry.confirmed and state.entry.token then
+		-- A draft token is only a resume hint. The server still captures and
+		-- verifies the authoritative manifest before any cached block is reused.
+		args.resumeManifestToken=state.entry.token
+	end
 	return send(state,"terminalManifestRequest",args)
 end
 local function missingNode(state)
@@ -230,6 +236,10 @@ function Client.consume(value,retainedBytes)
 	elseif value.catalogNode then
 		local accepted,reason=cache.block(value,retainedBytes)
 		if not accepted then return false,reason end
+		if reason=="duplicate" then
+			trace("node duplicate",value,"node="..tostring(value.nodeRecord and value.nodeRecord.nodeId))
+			return nextNode(state,false)
+		end
 		state.pendingNodeIds[value.nodeRecord.nodeId]=true
 		state.blockVersion=(state.blockVersion or 0)+1
 		state.retries=0
@@ -339,7 +349,7 @@ local function apply(state)
 		-- Tras publicar la primera ventana parcial hay que pedir inmediatamente el
 		-- siguiente nodo. Dejar el estado sin build, phase ni request lo aparcaba
 		-- hasta el watchdog de 10 s y mantenia capacidad en «Cargando».
-		return nextNode(state,true)
+		return nextNode(state,false)
 	end
 	state.hasComplete=true
 	local args=intent(state);args.manifestToken=state.manifest.manifestToken;args.inventoryRevision=payload.inventoryRevision

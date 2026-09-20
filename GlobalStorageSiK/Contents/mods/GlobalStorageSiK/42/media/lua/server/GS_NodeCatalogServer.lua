@@ -79,7 +79,8 @@ function Server.queueState(player,payload)
 		trace.write("Manifest: decision","network="..tostring(manifest.networkId)
 			.." token="..tostring(manifest.manifestToken).." revision="..tostring(manifest.inventoryRevision)
 			.." notModified="..tostring(manifest.manifestNotModified==true)
-			.." reason="..(manifest.manifestNotModified and "confirmed_token" or state.knownToken and "manifest_changed" or "bootstrap_or_recovery")
+			.." reason="..(manifest.manifestNotModified and "confirmed_token" or state.knownToken and "manifest_changed"
+				or state.resumeToken==manifest.manifestToken and "partial_resume_verified" or "bootstrap_or_recovery")
 			.." records="..tostring(#(manifest.nodeManifest or {})))
 	end
 	local accepted,queueReason=context.queue(player,manifest)
@@ -106,7 +107,8 @@ function Server.dispatch(command,player,args)
 	if state.rejected then return true end
 	if command=="terminalManifestRequest" then
 		if args.knownManifestToken~=nil and not Protocol.id(args.knownManifestToken) then return true end
-		state.negotiated=true;state.knownToken=args.knownManifestToken
+		if args.resumeManifestToken~=nil and not Protocol.id(args.resumeManifestToken) then return true end
+		state.negotiated=true;state.knownToken=args.knownManifestToken;state.resumeToken=args.resumeManifestToken
 		refresh(player,state)
 	elseif command=="terminalNodeRequest" then
 		if not state.negotiated or not Protocol.id(args.nodeId) or not Protocol.id(args.manifestToken) then return true end
@@ -144,12 +146,15 @@ function Server.update()
 				local accepted=context.completed(player,state.ready.revision,state.session.catalogScope)
 				if accepted~=false and states[player]==state then
 					state.knownToken=state.ready.token;state.ready=nil;state.retries=0
+					state.resumeToken=nil
 					state.roundActive=nil;state.request=nil
 					if state.refreshPending then refresh(player,state) end
 				end
 			elseif state.retry then
 				state.retry=nil
-				state.knownToken=nil;refresh(player,state)
+				-- Preserve the last declared compatibility tokens. Manifest.capture
+				-- remains authoritative and will reject or replace stale revisions.
+				refresh(player,state)
 			elseif state.refreshPending and not state.roundActive then refresh(player,state)
 			elseif state.request and now()>=(state.request.due or 0) then
 				local request=state.request;state.request=nil
