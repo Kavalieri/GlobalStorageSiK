@@ -11,6 +11,11 @@ local FRAGMENT_RETRY_MS = 1500
 local APPLIED_WINDOW = 8
 local PLAYER_BYTES, GLOBAL_BYTES = 32*1024*1024, 64*1024*1024
 local function now() return getTimestampMs and getTimestampMs() or 0 end
+local function diagnosticsEnabled()
+    local sandbox=GlobalStorageSiK.Sandbox
+    return GlobalStorageSiK.Log and sandbox and sandbox.debugMode()
+        and sandbox.debugCategoryEnabled("CatalogTransport")
+end
 function Client.configure(value) context = value end
 function Client.clear(playerNum, sequence)
 	if playerNum == nil then
@@ -180,6 +185,15 @@ local function applyReady(playerNum, slot)
 			.. " decodeMs=" .. tostring((batch.decodeFinished or applyStarted)-decodeStarted)
 			.. " applyMs=" .. tostring(now()-applyStarted))
 	end
+	if batch.profile and GlobalStorageSiK.Log then
+		local profile=batch.profile
+		GlobalStorageSiK.Log.debug("CatalogTransport","profile_client",
+			"player="..tostring(playerNum).." openSeq="..tostring(slot.sequence).." batch="..tostring(batch.meta.batchId)
+			.." sizeMs="..tostring(profile.sizeMs).." sizeMaxMs="..tostring(profile.sizeMaxMs)
+			.." decodeActiveMs="..tostring(profile.decodeMs).." decodeMaxMs="..tostring(profile.decodeMaxMs)
+			.." decodeSteps="..tostring(profile.steps).." wallYields="..tostring(profile.wallYields)
+			.." unitYields="..tostring(profile.unitYields).." applyMs="..tostring(now()-applyStarted))
+	end
 	context.receipt(batch.meta)
 end
 function Client.ack(payload)
@@ -238,7 +252,9 @@ function Client.receive(payload)
 	if slot.confirmed and (slot.confirmed.networkId ~= payload.networkId
 		or slot.confirmed.catalogScope ~= payload.catalogScope) then return end
 	if slot.completedRevision and payload.inventoryRevision < slot.completedRevision then return end
-	local size = Codec.frameSize(payload)
+	local sizeStarted=diagnosticsEnabled() and now()
+	local size,_,chunkBytes = Codec.frameSize(payload)
+	local sizingMs=sizeStarted and math.max(0,now()-sizeStarted) or nil
 	if not size or size > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
 	local completed=slot.completedBatches and slot.completedBatches[payload.batchId]
 	if completed then
@@ -276,7 +292,12 @@ function Client.receive(payload)
 	end
 	batch.parts[payload.part] = payload.data
 	batch.count, batch.tokens = batch.count + 1, batch.tokens + count
-	batch.bytes = batch.bytes + (Codec.size(payload.data) or Codec.MAX_BATCH_BYTES + 1)
+	batch.bytes = batch.bytes + chunkBytes
+	if sizingMs then
+		batch.profile=batch.profile or {sizeMs=0,sizeMaxMs=0,decodeMs=0,decodeMaxMs=0,steps=0,wallYields=0,unitYields=0}
+		batch.profile.sizeMs=batch.profile.sizeMs+sizingMs
+		batch.profile.sizeMaxMs=math.max(batch.profile.sizeMaxMs,sizingMs)
+	end
 	local reservation = batch.bytes*2 + batch.tokens*64 + Codec.STRING_CACHE_BYTES + (slot.retainedBytes or 0)
 	local globalReservation = reservation
 	for n=0,3 do
@@ -415,7 +436,14 @@ function Client.update(timestamp)
 						local stepped = false
 						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
 							and work < 8192 and (not stepped or now() - started < 4) do
+							local decodeStarted=batch.profile and now()
 							local value, reason, done = Codec.stepDecode(batch.decoder, 1024)
+							if decodeStarted then
+								local elapsed=math.max(0,now()-decodeStarted)
+								batch.profile.decodeMs=batch.profile.decodeMs+elapsed
+								batch.profile.decodeMaxMs=math.max(batch.profile.decodeMaxMs,elapsed)
+								batch.profile.steps=batch.profile.steps+1
+							end
 							stepped = true
 							work = work + 1024
 							if reason then fail(playerNum, reason); break end
@@ -428,6 +456,10 @@ function Client.update(timestamp)
 								applyReady(playerNum, slot)
 								break
 							end
+						end
+						if slot.batch==batch and batch.decoder and batch.profile then
+							local reason=work>=8192 and "unitYields" or "wallYields"
+							batch.profile[reason]=batch.profile[reason]+1
 						end
 					end
 				end

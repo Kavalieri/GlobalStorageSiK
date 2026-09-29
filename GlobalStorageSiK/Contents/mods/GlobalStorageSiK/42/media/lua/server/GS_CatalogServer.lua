@@ -19,6 +19,46 @@ local function now() return getTimestampMs and getTimestampMs() or 0 end
 local function log(event, data)
     if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport", event, data) end
 end
+local function diagnosticsEnabled()
+    local sandbox=GlobalStorageSiK.Sandbox
+    return GlobalStorageSiK.Log and sandbox and sandbox.debugMode()
+        and sandbox.debugCategoryEnabled("CatalogTransport")
+end
+local function recordWork(job,phase,started)
+    local profile=job and job.profile
+    if not profile then return end
+    local elapsed=math.max(0,now()-started)
+    profile[phase]=(profile[phase] or 0)+elapsed
+    profile[phase.."Max"]=math.max(profile[phase.."Max"] or 0,elapsed)
+    profile[phase.."Calls"]=(profile[phase.."Calls"] or 0)+1
+end
+local function reportProfile(job,reason)
+    if not job.profile then return end
+    if job.inSend then job.profileEnd=reason;return end
+    local profile=job.profile
+    local identity="player="..tostring(job.envelope.playerNum).." openSeq="..tostring(job.envelope.openSeq)
+        .." batch="..tostring(job.envelope.batchId).." reason="..tostring(reason)
+    local work={}
+    for _,phase in ipairs({"validate","build","encode","frame","size","send"}) do
+        work[#work+1]=phase.."Ms="..tostring(profile[phase] or 0)
+        work[#work+1]=phase.."MaxMs="..tostring(profile[phase.."Max"] or 0)
+        work[#work+1]=phase.."Calls="..tostring(profile[phase.."Calls"] or 0)
+    end
+    log("profile_work",identity.." "..table.concat(work," "))
+    local yields={}
+    for _,reasonKey in ipairs({"wall","compute","units","frames","visits","ack"}) do
+        yields[#yields+1]=reasonKey.."="..tostring(profile[reasonKey] or 0)
+    end
+    for _,phase in ipairs({"build","encode","frame","send","ack"}) do
+        for _,reasonKey in ipairs({"wall","compute","units","frames","visits","ack"}) do
+            local key=phase.."_"..reasonKey
+            if profile[key] then yields[#yields+1]=key.."="..tostring(profile[key]) end
+        end
+    end
+    log("profile_yields",identity.." "..table.concat(yields," ")
+        .." ticks="..tostring(profile.ticks or 0).." schedulerMaxMs="..tostring(profile.schedulerMaxMs or 0).." elapsedMs="..tostring(now()-job.startedAt))
+    job.profile=nil;job.profileEnd=nil
+end
 local function description(meta)
     return "player=" .. tostring(meta.playerNum) .. " network=" .. tostring(meta.networkId)
         .. " openSeq=" .. tostring(meta.openSeq) .. " batch=" .. tostring(meta.batchId)
@@ -28,6 +68,7 @@ end
 local function release(player, reason)
     local job = jobs[player]
     if job then
+        reportProfile(job,reason or "released")
         if job.builder and job.builder.cancel then
             log("detached",description(job.envelope).." phase=preparation reason="..tostring(reason or "recipient_detached"))
             job.builder.cancel(reason or "recipient_detached")
@@ -90,9 +131,11 @@ function Server.clear(player)
     for i=#order,1,-1 do if order[i]==player then table.remove(order,i) end end
     if cursor>#order then cursor=0 end
 end
-local function send(player, command, payload)
+local function send(player, command, payload, job)
+    local sizeStarted=job and job.profile and now()
     local size,reason,chunkBytes,payloadBytes=Codec.frameSize(payload)
-    if command=="terminalCatalogChunk" then
+    if sizeStarted then recordWork(job,"size",sizeStarted) end
+    if command=="terminalCatalogChunk" and diagnosticsEnabled() then
         log("frame",description(payload).." part="..tostring(payload.part).." total="..tostring(payload.total)
             .." frameBytes="..tostring(size).." frameBudget="..tostring(Codec.FRAME_BYTES)
             .." payloadBytes="..tostring(payloadBytes).." chunkBytes="..tostring(chunkBytes)
@@ -100,8 +143,15 @@ local function send(player, command, payload)
             .." accepted="..tostring(size~=nil and size<=Codec.FRAME_BYTES))
     end
     if not size or size>Codec.FRAME_BYTES then return false, reason or "catalog_budget" end
+    local sendStarted=job and job.profile and now()
+    if job then job.inSend=true end
     local ok, accepted = pcall(context.send, player, command, payload)
-    return ok and accepted ~= false, (not ok or accepted == false) and "catalog_send" or nil
+    if job then
+        job.inSend=nil
+        if sendStarted then recordWork(job,"send",sendStarted) end
+        if job.profileEnd then reportProfile(job,job.profileEnd) end
+    end
+    return ok and accepted ~= false, (not ok or accepted == false) and "catalog_send" or nil, size
 end
 local function recoverOnce(player, session, reason)
     if session.recoveryUsed then return end
@@ -340,6 +390,7 @@ local function queue(player, payload, rows, builder)
         or payload.catalogDetail and "details" or payload.catalogDelta and "delta"
         or payload.notModified and "notModified" or "full"
     jobs[player].kind=kind
+    if diagnosticsEnabled() then jobs[player].profile={} end
     counters[kind]=counters[kind]+1
     log("queued",description(envelope) .. " kind=" .. kind .. " rows=" .. tostring(payload.itemTypeCount or 0))
     return true
@@ -441,6 +492,7 @@ local function encodeStep(player,job,session)
     local started=now()
     local encoded,reason,done=Codec.stepEncode(job.encoder,1024)
     job.encodeMs=job.encodeMs+math.max(0,now()-started)
+    recordWork(job,"encode",started)
     local state=job.encoder
     local bytes=state.totalBytes or (encoded and encoded.totalBytes) or 0
     local tokens=state.tokenCount or (encoded and encoded.tokenCount) or 0
@@ -460,7 +512,9 @@ local function encodeStep(player,job,session)
         job.envelope.total=#encoded.chunks
         job.envelope.totalBytes=encoded.totalBytes
         job.envelope.tokenCount=encoded.tokenCount
+        local framingStarted=job.profile and now()
         job.framer,reason=Codec.beginFraming(encoded,job.envelope)
+        if framingStarted then recordWork(job,"frame",framingStarted) end
         if not job.framer then failure(player,reason,job.envelope.batchId);return end
         job.framingBaseBytes=job.bytes
         job.baseEstimate=(job.detail or job.nodeTransfer) and 0 or math.min(reservation,encoded.totalBytes*2+job.rows*256)
@@ -470,7 +524,9 @@ local function encodeStep(player,job,session)
     end
 end
 local function framingStep(player,job,session)
+    local framingStarted=job.profile and now()
     local framed,reason,done=Codec.stepFraming(job.framer,1024)
+    if framingStarted then recordWork(job,"frame",framingStarted) end
     if reason then failure(player,reason,job.envelope.batchId);return end
     -- Repartitioning temporarily retains both source and destination arrays.
     local extra=job.framer.chunks==job.chunks and 0 or #job.framer.chunks*128
@@ -492,6 +548,7 @@ end
 local function buildStep(player,job,session,budget,millis)
     local started=now()
     local ok,done,payload,rows,stats=pcall(job.builder.step,budget,millis)
+    recordWork(job,"build",started)
     local diagnostic=job.builder.error and job.builder.error()
     stats=stats or {}
     local used=math.max(1,math.min(budget,stats.workLastStep or budget))
@@ -563,6 +620,7 @@ function Server.update()
                 validations[player]={job=job,session=session,valid=valid,reason=reason}
             end
             job.validationMs=(job.validationMs or 0)+math.max(0,now()-validationStarted)
+            recordWork(job,"validate",validationStarted)
             local workStarted=now()
             if timestamp<job.lastProgressAt then job.lastProgressAt=timestamp end
             if not valid then
@@ -587,8 +645,8 @@ function Server.update()
                 local part=job.resendParts[job.resendCursor]
                 local frame=Codec.frame(job.envelope,job.chunks[part],part)
                 job.resendCursor=job.resendCursor+1 -- SP receipt can be synchronous.
-                local ok,sendReason=send(player,"terminalCatalogChunk",frame)
-                local frameBytes=Codec.frameSize(frame) or 0
+                local ok,sendReason,frameBytes=send(player,"terminalCatalogChunk",frame,job)
+                frameBytes=frameBytes or 0
                 if ok then
                     job.lastProgressAt=timestamp
                     job.retransmittedFrameBytes=(job.retransmittedFrameBytes or 0)+frameBytes
@@ -601,8 +659,8 @@ function Server.update()
                 local frame=Codec.frame(job.envelope,job.chunks[job.nextPart],job.nextPart)
                 job.nextPart=job.nextPart+1 -- SP receipt can be synchronous.
                 if job.nextPart>job.envelope.total then job.firstPassComplete=true end
-                local ok,sendReason=send(player,"terminalCatalogChunk",frame)
-                local frameBytes=Codec.frameSize(frame) or 0
+                local ok,sendReason,frameBytes=send(player,"terminalCatalogChunk",frame,job)
+                frameBytes=frameBytes or 0
                 if ok then
                     job.lastProgressAt=timestamp
                     job.uniqueFrameBytes=(job.uniqueFrameBytes or 0)+frameBytes
@@ -639,6 +697,30 @@ function Server.update()
                     .." remaining="..tostring(stats.remaining).." work="..tostring(stats.work)
                     .." baseRetained="..tostring(session.confirmed~=nil).." validationMs="..tostring(job.validationMs))
             end
+        end
+    end
+    if not diagnosticsEnabled() then return end
+    -- One aggregate per pending batch/update, never a log per tick. Reasons
+    -- describe the shared scheduler limit, not exclusive per-player CPU time.
+    for _,player in ipairs(order) do
+        local job=jobs[player]
+        local profile=job and job.profile
+        if profile then
+            local reason
+            if not job.builder and not job.encoder and not job.framer and job.firstPassComplete
+                and not job.resendParts then reason="ack"
+            elseif sent>=4 then reason="frames"
+            elseif computeMs>=4 then reason="compute"
+            elseif now()-timestamp>=4 then reason="wall"
+            elseif (job.builder and buildWork>=4096) or ((job.encoder or job.framer) and work>=8192) then reason="units"
+            else reason="visits" end
+            profile[reason]=(profile[reason] or 0)+1
+            profile.ticks=(profile.ticks or 0)+1
+            local phase=job.builder and "build" or job.encoder and "encode" or job.framer and "frame"
+                or reason=="ack" and "ack" or "send"
+            local key=phase.."_"..reason
+            profile[key]=(profile[key] or 0)+1
+            profile.schedulerMaxMs=math.max(profile.schedulerMaxMs or 0,math.max(0,now()-timestamp))
         end
     end
 end

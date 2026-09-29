@@ -488,3 +488,43 @@ catalog or a restarted `ZoneScanJob`. `delta_fallback` followed by `queued` is
 valid only when there is no exact cached base or the complete delta exceeds the
 safe frame budget. Preserve the same client/server logs; no detail category is
 needed.
+
+## Core 1.5.8-dev1: measured sizing and opt-in phase profiles
+
+Final frame validation now computes envelope and data bytes in one traversal.
+The sender and receiver reuse that result for accounting instead of validating
+and counting the same data again. Unicode, depth, cycle, type and byte limits
+remain unchanged. No frame size, send cap, work budget, request window, snapshot
+format or progressive-view cadence has been increased.
+
+With both Debug mode and Catalog transport diagnostics enabled, each server
+batch records `profile_work` (validate/build/encode/frame/size/send active elapsed
+milliseconds, maximum call and call count) and `profile_yields` (shared scheduler
+exit reason, phase at exit, pending updates and maximum transport update time).
+The client records `profile_client` after successful consumer application with
+unique accepted fragment sizing, active decode work/maxima/steps, decode yields
+and consumer dispatch time. Existing failed/rejected events retain error evidence.
+
+These measurements use the process millisecond clock, not a CPU profiler.
+`frame` covers framing initialization and framing steps; `validate` covers update
+validation visits, including cached visits. `send` includes the engine port and
+may include nested client work under synchronous SP callbacks; do not sum nested
+server/client timings as independent CPU. A scheduler maximum is not a whole PZ
+tick or rendered frame. Yield counters describe a shared limit encountered while
+a batch remains pending, not work uniquely charged to that recipient. ACK waits
+are separate from ready-to-send work. A zero millisecond sample can be below timer
+resolution. Wall latency and active work must remain separate.
+
+No profile table is created when the existing diagnostic gate is off. Profiles
+are bounded by the existing session/job lifetime and known phase/reason keys;
+there is no timer, item log, persistent cache or network payload addition. Final
+send profiling survives a synchronous receipt. Category quotas remain in force:
+a trace containing `diagnostics throttled` or missing terminal profiles is an
+incomplete measurement, not a zero-cost phase. Compare an equivalent run with
+traces disabled and retain all incomplete/error runs.
+
+The development Lua 5.1 fixtures preserve byte counts, exact limits, cache reuse,
+permission fences and four observer progress. Native Kahlua/TableNetworkUtils
+checks validate serialization, not dedicated runtime speed. Dedicated TEST must
+first prove server/client parity against the candidate; cold replication and
+physical capture are separate experiments. Keep issue #1 open and credit iceriny.

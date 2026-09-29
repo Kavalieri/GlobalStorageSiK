@@ -76,15 +76,18 @@ local function wireSize(value, depth, active)
 	elseif kind ~= "table" then error("catalog_schema", 0) end
 	if depth > Codec.MAX_DEPTH or active[value] then error("catalog_schema", 0) end
 	active[value] = true
-	local size = 4
+	local size, chunkBytes = 4, 0
 	for key, item in pairs(value) do
 		if type(key) ~= "string" and type(key) ~= "number" then error("catalog_schema", 0) end
-		size = size + wireSize(key, depth + 1, active) + wireSize(item, depth + 1, active)
+		local keyBytes = wireSize(key, depth + 1, active)
+		local itemBytes = wireSize(item, depth + 1, active)
+		if depth == 0 and key == "data" and item then chunkBytes = itemBytes end
+		size = size + keyBytes + itemBytes
 		if type(item) == "table" then size = size + 1 end
 		if size > Codec.MAX_BATCH_BYTES then error("catalog_budget", 0) end
 	end
 	active[value] = nil
-	return size
+	return size, chunkBytes
 end
 
 function Codec.size(value)
@@ -104,10 +107,8 @@ end
 -- One wire-size contract for final framing and both transport endpoints.
 Codec.COMMAND_BYTES = 128
 function Codec.frameSize(frame)
-	local payloadBytes,reason=Codec.size(frame)
-	if not payloadBytes then return nil,reason end
-	local chunkBytes=frame.data and Codec.size(frame.data) or 0
-	if not chunkBytes then return nil,"catalog_schema" end
+	local ok,payloadBytes,chunkBytes=pcall(wireSize,frame,0,{})
+	if not ok then return nil,payloadBytes end
 	return payloadBytes+Codec.COMMAND_BYTES,nil,chunkBytes,payloadBytes
 end
 function Codec.frame(envelope,data,part)
