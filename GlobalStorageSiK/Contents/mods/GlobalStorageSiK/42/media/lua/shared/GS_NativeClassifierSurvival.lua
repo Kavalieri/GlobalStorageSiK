@@ -93,12 +93,11 @@ local SECURITY_TOKENS = toSet({ "padlock" })
 ---@return table|nil evidence
 local function classifySurvival(fullType, si)
 	if not si then return nil end
-	-- The seed tag proves identity even if a modded name also contains
-	-- battery/radio/engine, or the type name cannot be read at all.
-	-- Original regression: RyeSeed/CornSeed are seeds, while edible SeedPaste
-	-- has no isseed tag. Food explicitly yields to this same structural signal.
+	-- IsSeed includes fresh edible crops; Food owns that structural identity.
+	-- Other tagged seeds retain farming even with ambiguous or missing names.
 	local isSeedTag = U.tagByLocation("base", "isseed")
 	if isSeedTag and U.hasTag(si, isSeedTag) then
+		if U.isFreshPlantableFood(si) then return nil end
 		return { l1 = "survival_outdoors", l2 = "farming", l3 = nil }, {}, {}, U.evidence("script_tag_isseed", 95)
 	end
 	-- B42 marks complete vehicle tires with WholeTire. Their metal content

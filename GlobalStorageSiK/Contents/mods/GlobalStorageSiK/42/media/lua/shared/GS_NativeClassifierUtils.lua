@@ -170,6 +170,21 @@ function GlobalStorageSiK.NativeClassifierUtils.itemTypeLower(si)
 	return it and string.lower(tostring(it)) or ""
 end
 
+--- IsSeed denotes planting capability, including fresh edible crops. Require
+--- explicit edible Food and finite shelf life so true seeds (even edible dry
+--- seeds) retain farming identity. Missing engine metadata does not prove food.
+--- Uses static ScriptItem getters only; never creates an InventoryItem.
+---@param si table|nil
+---@return boolean
+function GlobalStorageSiK.NativeClassifierUtils.isFreshPlantableFood(si)
+	local U = GlobalStorageSiK.NativeClassifierUtils
+	local seedTag = U.tagByLocation("base", "isseed")
+	if not seedTag or not U.hasTag(si, seedTag) or U.itemTypeLower(si) ~= "base:food" then return false end
+	if safeCall(function() return si:isCantEat() end) ~= false then return false end
+	local days = safeCall(function() return si:getDaysFresh() end)
+	return type(days) == "number" and days > 0 and days < 1000000
+end
+
 --- DisplayCategory estructural del ScriptItem, normalizado a minusculas.
 ---@param si table|nil
 ---@return string

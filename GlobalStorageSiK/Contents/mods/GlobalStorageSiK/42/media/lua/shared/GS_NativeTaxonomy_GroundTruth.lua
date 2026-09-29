@@ -78,7 +78,8 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth = GlobalStorageSiK.NativeTaxonomyGrou
 -- estructural CanBeEquipped de B42. No reutilizar v12 con otro contenido.
 -- 1.5.1-dev1: v14 adds canonical identities and structural weapon parts from B42.
 -- 1.5.2-dev1: actual canonical evidence, home/vehicle samples and PROD regressions.
-GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "16"
+-- v17: Kava/Annana correction, fresh edible plantable crops are produce.
+GlobalStorageSiK.NativeTaxonomyGroundTruth.VERSION = "17"
 
 GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId = "v16_ammo_bullets357carton", fullType = "Base.Bullets357Carton", block = "combat", presence = "required",
@@ -3153,7 +3154,9 @@ GlobalStorageSiK.NativeTaxonomyGroundTruth.cases = {
 	{ caseId="v6_survival_trapping_collision", fullType="Base.TrapCrate", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_over_container", collisionWith="containers", criticalAnchor=true },
 	{ caseId="v6_survival_camping_collision", fullType="Base.SleepingBag_HighQuality_Brown", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="camping", expectedL3=false, minConfidence=30, expectedSource="name_survival_camping", expectationSource="product_policy:camping_over_container", collisionWith="containers" },
 	{ caseId="v6_survival_security", fullType="Base.Padlock", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="security", expectedL3=false, minConfidence=30, expectedSource="name_survival_security", expectationSource="product_policy:security_name" },
-	{ caseId="v6_survival_strong_seed", fullType="Base.Corn", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=95, expectedSource="script_tag_isseed", expectationSource="product_policy:script_seed_tag", criticalAnchor=true },
+	{ caseId="v6_survival_strong_seed", fullType="Base.Corn", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_fresh_plantable_food", expectationSource="Kava_Annana:B42.21:edible_fresh_crop_not_seed", criticalAnchor=true },
+	{ caseId="v17_food_garlic", fullType="Base.Garlic", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_fresh_plantable_food", expectationSource="Kava_Annana:B42.21:edible_fresh_crop_not_seed", criticalAnchor=true },
+	{ caseId="v17_food_onion", fullType="Base.Onion", block="food_drink", presence="required", expectedL1="food_drink", expectedL2="perishable", expectedL3="produce", minConfidence=100, expectedSource="script_fresh_plantable_food", expectationSource="Kava_Annana:B42.21:edible_fresh_crop_not_seed", criticalAnchor=true },
 	{ caseId="v6_survival_modded", fullType="AuthenticZClothing.FlameTrapRemote", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="trapping", expectedL3=false, minConfidence=30, expectedSource="name_survival_trapping", expectationSource="product_policy:trap_name", moddedOrigin="AuthenticZClothing" },
 	{ caseId="v6_survival_farming_weak", fullType="Base.LemonGrassBagSeed", block="survival_outdoors", presence="required", expectedL1="survival_outdoors", expectedL2="farming", expectedL3=false, minConfidence=100, expectedSource="script_gardening_seed_packet", expectationSource="product_policy:seed_name" },
 	{ caseId="v12_matches_exact", fullType="Base.Matches", block="combat", presence="required", expectedL1="combat", expectedL2="explosive", expectedL3="incendiary", minConfidence=100, expectedSource="exact_fulltype_incendiary", expectationSource="systems_contract:known_native_item_leaf", criticalAnchor=true, includeInTaxonomyPreview=false },

@@ -17,6 +17,11 @@ GlobalStorageSiK.NetworkResolve.SESSION_EXEMPT = {
 	getRemoteNetworkCandidates = true,
 	prepareTerminalPlacement = true,
 	registerTerminal = true,
+	-- Installation targets explicit world coordinates and (for link) a network.
+	-- An old terminal session must neither supply its network nor block sending
+	-- this request while access is revalidated after changing floors. The server
+	-- independently checks proximity, items, membership and network coverage.
+	installTerminalReader = true,
 	getNetworkList = true,
 	getRecoveryNetworks = true,
 	createNetwork = true,

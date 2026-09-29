@@ -199,13 +199,14 @@ local function classifyFood(fullType, si)
 		return nil
 	end
 
-	-- dev17: veto por tag oficial confirmado - una semilla real para
-	-- plantar nunca es Alimentos, sea cual sea su ItemType. Se comprueba
-	-- ANTES de la identidad confirmada por ItemType (RyeSeed es
-	-- ItemType=base:food Y base:isseed a la vez - la señal de "es semilla"
-	-- gana).
+	-- Plantable fresh crops are food, not seeds: IsSeed also marks garlic,
+	-- onions and corn. Real seeds retain the historical farming route.
 	local isSeedTag = U.tagByLocation("base", "isseed")
 	if isSeedTag and U.hasTag(si, isSeedTag) then
+		if U.isFreshPlantableFood(si) then
+			return { l1 = "food_drink", l2 = "perishable", l3 = "produce" }, {}, {},
+				U.evidence("script_fresh_plantable_food", 100)
+		end
 		return nil
 	end
 
