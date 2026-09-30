@@ -39,7 +39,8 @@ function Metrics.begin(role,meta)
 		serverTickP95Ms=NULL,serverTickP99Ms=NULL,serverTickMaxMs=NULL,
 		clientFrameP95Ms=NULL,clientFrameP99Ms=NULL,clientFrameMaxMs=NULL,heapPeakBytes=NULL,
 		gcPauseMaxMs=NULL,gcPauseRateMsPerSecond=NULL,physicalCaptureMs=NULL,
-		uniqueFullTypes=NULL,inventoryDigest=NULL,pressureCoverage=0,
+		uniqueFullTypes=NULL,inventoryDigest=NULL,pressureCoverage=0,scopeHash=NULL,
+		catalogScope=NULL,scopeComplete=false,scopeChanged=false,
 		unknownReasons="engine pressure sampler and inventory oracle required from Systems; physical capture is separate"}}
 	for phase in pairs(phases) do state.data.phases[phase]={activeMs=0,maxMs=0,calls=0} end
 	for counter in pairs(counters) do state.data.counts[counter]=0 end
@@ -47,6 +48,17 @@ function Metrics.begin(role,meta)
 end
 function Metrics.bind(state,meta)
 	if not state or state.finished then return end
+	local scope=meta.catalogScope
+	if type(scope)=="string" then
+		if state.scope~=nil and state.scope~=scope then state.data.scopeChanged=true end
+		if state.scope==nil then
+			-- Preserve exact source bytes for the offline SHA-256 normalizer. Never
+			-- disguise a truncated scope or a non-cryptographic fingerprint as a hash.
+			state.scope=scope;state.data.scopeLength=#scope
+			state.data.scopeComplete=#scope<=1024
+			state.data.catalogScope=#scope<=1024 and scope or NULL
+		end
+	end
 	for _,key in ipairs({"networkId","replicaEpoch","manifestToken","inventoryRevision","topologySequence"}) do
 		local value=meta[key]
 		if type(value)=="number" then state.data[key]=value
@@ -107,7 +119,7 @@ function Metrics.finish(state,outcome,reason)
 	state.data.reason=tostring(reason or ""):sub(1,128)
 	state.data.firstAppliedViewMs=state.data.firstAppliedViewMs or NULL
 	state.data.completeUsableMs=state.data.completeUsableMs or NULL
-	state.data.phaseCoverage=1
+	state.data.phaseCoverage=state.data.scopeComplete and not state.data.scopeChanged and 1 or 0
 	local log=GlobalStorageSiK.Log
 	if log and log.initialLoadSummary then state.exported=log.initialLoadSummary(state.data.role,json(state.data))==true end
 	return state.exported
