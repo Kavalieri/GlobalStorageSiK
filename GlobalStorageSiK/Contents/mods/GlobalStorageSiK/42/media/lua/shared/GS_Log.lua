@@ -232,6 +232,26 @@ end
 -- Diagnostics are opt-in and bounded even when an existing caller logs in a
 -- loop. Fixed category keys bound memory; no timer/listener is installed.
 local normalBudget = {}
+local initialLoadSink={startedAt=0,count=0,serial=0}
+-- Reserved terminal lane: 64 records/minute, 64 rotating files per role,
+-- <=16 KiB each (2 MiB disk ceiling in synchronous SP). No relay or queue.
+function GlobalStorageSiK.Log.initialLoadSummary(role,text)
+	if role~="client" and role~="server" then return false end
+	if not GlobalStorageSiK.Sandbox.debugMode()
+		or not GlobalStorageSiK.Sandbox.debugCategoryEnabled("CatalogTransport") then return false end
+	if type(text)~="string" or #text>16384 or not getFileWriter then return false end
+	local timestamp=getTimestampMs and getTimestampMs() or 0
+	local sink=initialLoadSink
+	if timestamp<sink.startedAt or timestamp-sink.startedAt>=60000 then sink.startedAt=timestamp;sink.count=0 end
+	if sink.count>=64 then return false end
+	sink.count=sink.count+1;sink.serial=sink.serial+1
+	local path=string.format("SiKDiagnostics/GlobalStorageSiK/initial-load/%s-%02d.json",role,sink.serial%64)
+	local opened,writer=pcall(getFileWriter,path,true,false)
+	if not opened or not writer then return false end
+	local written=pcall(function() writer:write(text.."\n") end)
+	local closed=pcall(function() writer:close() end)
+	return written and closed
+end
 local function writeNormal(level, category, area, message, detail)
 	local now = getTimestampMs and tonumber(getTimestampMs()) or 0
 	local bucket = normalBudget[category]

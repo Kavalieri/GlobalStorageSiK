@@ -528,3 +528,14 @@ permission fences and four observer progress. Native Kahlua/TableNetworkUtils
 checks validate serialization, not dedicated runtime speed. Dedicated TEST must
 first prove server/client parity against the candidate; cold replication and
 physical capture are separate experiments. Keep issue #1 open and credit iceriny.
+## Core 1.5.8-dev2: bounded continuation and terminal measurements
+
+The research selector defaults to control. With Debug mode and Catalog transport diagnostics enabled, call GlobalStorageSiK.InitialLoadProfile.select("drain1024") or select("drain4096") on the authoritative process before opening. Selection does not change existing openings. Each acknowledged opening pins a profile ID/hash and correlation ID. The selector is private and does not replace the player performance profiles.
+
+The two variants continue existing 256-work catalog-build steps within one shared 2 ms client slice, up to 1024 or 4096 work. Four local observers still rotate through that same slice. A step can overrun the soft deadline; the next step then stops. Node requests, 24 KB frames, server limits and cache budgets retain the control values. Work ceilings are experimental, not approved dedicated pressure limits.
+
+A terminal JSON summary is written once per role and opening to SiKDiagnostics/GlobalStorageSiK/initial-load/client-XX.json or server-XX.json under the process Lua cache directory. It bypasses progress-log throttling, retains at most 64 files per role, caps records at 16 KiB and shares a 64-record/minute allowance. Archive files before rotation or process restart. Failed exports or missing/corrupt/correlated summaries invalidate a measurement. There is no live relay.
+
+Summaries contain active phase durations, scheduler exit counts, byte reservations, queue/receive/ACK waits, manifest metadata counts and first applied/full usable boundaries. Metadata totals accumulate inside existing manifest loops; diagnostic code never scans inventory contents. Zero calls means unobserved/inapplicable, not evidence of zero cost. phaseCoverage covers these replication instrumentation points only; physical capture, whole-engine tick/frame, JVM heap/GC, unique item types and inventory digest remain unknown until independently observed. Wall time and nested active work must not be summed as independent CPU.
+
+Local fixtures are screening evidence only. Dedicated improvement, first-view equivalence, pressure and gameplay regressions remain pending. Keep issue #1 open; original analysis credited to iceriny.

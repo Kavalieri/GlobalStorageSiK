@@ -1,5 +1,6 @@
 -- Session cache with byte LRU. No age expiry and no revision-indexed copies.
 local Protocol = require "GS_ManifestProtocol"
+local Metrics = require "GS_InitialLoadMetrics"
 local Replica = {}
 GlobalStorageSiK.NodeReplica = Replica
 
@@ -134,8 +135,10 @@ function Replica.new(options)
 			end
 			for id in pairs(old.byId) do if not byId[id] then entry.changedNodeIds[id]=true end end
 		end
+		local manifestStats=Metrics.manifestAccumulator()
 		for i=1,#records do
 			local record=records[i]
+			Metrics.manifestRecord(manifestStats,record)
 			local previous=old and old.byId[record.nodeId]
 			if not Protocol.sameBlock(previous,record) or previous.enabled~=record.enabled then
 				entry.changedNodeIds[record.nodeId]=true
@@ -151,6 +154,7 @@ function Replica.new(options)
 		if not reserve(entry.bytes-(old and old.bytes or 0),key) then return nil,"replica_budget" end
 		bytes=bytes-(old and old.bytes or 0)+entry.bytes
 		entries[key]=entry;touch(entry)
+		if manifestStats then manifestStats.seenZones=nil;entry.manifestStats=manifestStats end
 		return entry
 	end
 	function api.block(meta, retainedBytes)

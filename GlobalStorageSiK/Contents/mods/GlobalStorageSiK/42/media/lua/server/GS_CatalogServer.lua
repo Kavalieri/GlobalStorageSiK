@@ -1,10 +1,12 @@
 -- One immutable, acknowledged catalog job per authorized recipient.
 local Codec = require "GS_CatalogCodec"
 local AccessPolicy = require "GS_ManifestProtocol"
+local Metrics=require "GS_InitialLoadMetrics"
 local Server = {}
 GlobalStorageSiK.CatalogServer = Server
 local sessions, jobs, order = {}, {}, {}
 local serial, cursor, retainedBytes, lastPrune = 0, 0, 0, 0
+local openingSerial=0
 local context
 local SESSION_LIMIT = 256
 local GLOBAL_BYTES, PLAYER_BYTES = 64*1024*1024, 32*1024*1024
@@ -25,6 +27,7 @@ local function diagnosticsEnabled()
         and sandbox.debugCategoryEnabled("CatalogTransport")
 end
 local function recordWork(job,phase,started)
+    if job then Metrics.work(job.summary,phase,now()-started) end
     local profile=job and job.profile
     if not profile then return end
     local elapsed=math.max(0,now()-started)
@@ -87,8 +90,10 @@ function Server.replicaReady(player,revision,scope)
     session.forceFull=nil;session.recoveryUsed=nil
     session.topologyBaseScope=nil;session.topologyZones=nil;session.topologyBaseSequence=nil
     session.removedTopologyZones=nil;session.removedTopologyNodes=nil
+    Metrics.finish(session.summary,"complete","replica_ready_received")
     return true
 end
+function Server.metrics(player) return sessions[player] and sessions[player].summary end
 function Server.isOpening(player) return sessions[player] and sessions[player].openUi == true end
 function Server.hasJob(player) return jobs[player] ~= nil end
 function Server.fenceConsumer(player,reason)
@@ -96,6 +101,7 @@ function Server.fenceConsumer(player,reason)
 	if not session then return false end
 	release(player,reason or "catalog_consumer")
 	session.consumerRejected=true;session.forceFull=true;session.recoveryUsed=true
+    Metrics.finish(session.summary,"failed",reason or "catalog_consumer")
 	if context and context.rejectNode then context.rejectNode(player) end
 	return true
 end
@@ -125,6 +131,7 @@ end
 function Server.clear(player)
     release(player)
     local session = sessions[player]
+    Metrics.finish(session and session.summary,"cancelled","session_closed")
     retainedBytes = math.max(0, retainedBytes-(session and session.baseBytes or 0))
     sessions[player] = nil
     if context and context.closed then context.closed(player) end
@@ -144,6 +151,9 @@ local function send(player, command, payload, job)
     end
     if not size or size>Codec.FRAME_BYTES then return false, reason or "catalog_budget" end
     local sendStarted=job and job.profile and now()
+    local summary=job and job.summary
+    local retransmitting=job and job.resendParts~=nil
+    Metrics.enter(summary)
     if job then job.inSend=true end
     local ok, accepted = pcall(context.send, player, command, payload)
     if job then
@@ -151,6 +161,11 @@ local function send(player, command, payload, job)
         if sendStarted then recordWork(job,"send",sendStarted) end
         if job.profileEnd then reportProfile(job,job.profileEnd) end
     end
+    if ok and accepted~=false and command=="terminalCatalogChunk" then
+        Metrics.count(summary,"fragments")
+        Metrics.count(summary,retransmitting and "retransmittedFrameBytes" or "uniqueFrameBytes",size)
+    end
+    Metrics.leave(summary)
     return ok and accepted ~= false, (not ok or accepted == false) and "catalog_send" or nil, size
 end
 local function recoverOnce(player, session, reason)
@@ -163,6 +178,9 @@ end
 local function failure(player, reason, batchId)
     local session = sessions[player]
     if not session then return end
+    if AccessPolicy.accessLoss(reason) then Metrics.finish(session.summary,"cancelled",reason)
+    elseif reason=="catalog_timeout" or reason=="catalog_stalled" then Metrics.finish(session.summary,"timeout",reason)
+    else Metrics.count(session.summary,"recoveries") end
     local active = jobs[player]
     if active and active.envelope then batchId=active.envelope.batchId
     else serial=serial+1; batchId=serial end
@@ -207,7 +225,7 @@ local function completeTopology(prepared,zoneId,zoneMetadata,removedNodes,remove
                 local confirmation={}
                 for _,key in ipairs({"playerNum","openSeq","networkId","replicaEpoch","manifestSchema",
                     "accessMode","terminalAnchor","confirmedProximityRange","confirmedWirelessRange",
-                    "inventoryRevision","protocol"}) do confirmation[key]=session[key] end
+                    "inventoryRevision","protocol","initialLoadProfile","initialLoadProfileHash","initialLoadRunId"}) do confirmation[key]=session[key] end
                 confirmation.catalogScope=scope
                 if expected~=scope or not context.valid(player,confirmation,confirmation) then
                     failure(player,"catalog_access_changed")
@@ -310,7 +328,11 @@ function Server.begin(player, confirmation)
         return false
     end
     confirmation.openUi=true
+    openingSerial=openingSerial+1
+    confirmation.initialLoadRunId=tostring(now())..":"..openingSerial..":"..confirmation.playerNum..":"..confirmation.openSeq
     sessions[player]=confirmation
+    confirmation.summary=Metrics.begin("server",confirmation)
+    -- Private state must never leak into the access confirmation payload.
     order[#order+1]=player
     if resume then
         active.envelope.openSeq=confirmation.openSeq
@@ -320,7 +342,9 @@ function Server.begin(player, confirmation)
         log("resumed",description(active.envelope).." phase=preparation reason=reopen")
     end
     if context.opened then context.opened(player,confirmation) end
-    local ok=send(player,"terminalOpenAck",confirmation)
+    local ack={};for key,value in pairs(confirmation) do if key~="summary" then ack[key]=value end end
+    Metrics.bind(confirmation.summary,ack)
+    local ok=send(player,"terminalOpenAck",ack)
     if not ok then
         Server.clear(player)
         if context.abort then context.abort(player) end
@@ -381,6 +405,7 @@ local function queue(player, payload, rows, builder)
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
+        summary=session.summary,
         frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
@@ -391,6 +416,7 @@ local function queue(player, payload, rows, builder)
         or payload.notModified and "notModified" or "full"
     jobs[player].kind=kind
     if diagnosticsEnabled() then jobs[player].profile={} end
+    Metrics.bind(session.summary,payload);Metrics.count(session.summary,"batches")
     counters[kind]=counters[kind]+1
     log("queued",description(envelope) .. " kind=" .. kind .. " rows=" .. tostring(payload.itemTypeCount or 0))
     return true
@@ -479,6 +505,8 @@ function Server.receipt(player,payload)
         session.recoveryUsed=nil
     end
     counters.completed=counters.completed+1
+    Metrics.count(job.summary,"ackWaitMs",now()-(job.lastFrameAt or now()))
+    if job.payload.catalogNode then Metrics.count(job.summary,"nodeBodies") end
     if job.nodeTransfer then session.recoveryUsed=nil end
     log("completed",description(meta) .. " kind=" .. tostring(job.kind) .. " rows=" .. tostring(job.rows)
         .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs)
@@ -503,6 +531,7 @@ local function encodeStep(player,job,session)
     end
     retainedBytes=retainedBytes-job.bytes+reservation
     job.bytes=reservation
+    Metrics.peak(job.summary,reservation)
     if reason then failure(player,reason,job.envelope.batchId); return end
     job.lastProgressAt=now()
     if done then
@@ -657,6 +686,7 @@ function Server.update()
                 if not ok then failure(player,sendReason,frame.batchId) end
             elseif job.nextPart<=job.envelope.total then
                 local frame=Codec.frame(job.envelope,job.chunks[job.nextPart],job.nextPart)
+                job.lastFrameAt=now()
                 job.nextPart=job.nextPart+1 -- SP receipt can be synchronous.
                 if job.nextPart>job.envelope.total then job.firstPassComplete=true end
                 local ok,sendReason,frameBytes=send(player,"terminalCatalogChunk",frame,job)
@@ -699,6 +729,12 @@ function Server.update()
             end
         end
     end
+    for _,player in ipairs(order) do
+        local session=sessions[player]
+        if session and session.summary and session.summary.completePending and not jobs[player] then
+            Metrics.finish(session.summary,"complete","replica_ready_received")
+        end
+    end
     if not diagnosticsEnabled() then return end
     -- One aggregate per pending batch/update, never a log per tick. Reasons
     -- describe the shared scheduler limit, not exclusive per-player CPU time.
@@ -715,6 +751,8 @@ function Server.update()
             elseif (job.builder and buildWork>=4096) or ((job.encoder or job.framer) and work>=8192) then reason="units"
             else reason="visits" end
             profile[reason]=(profile[reason] or 0)+1
+            local summaryKey={wall="wallYields",compute="computeYields",units="unitYields",frames="frameYields",visits="visitYields",ack="ackYields"}
+            Metrics.count(job.summary,summaryKey[reason])
             profile.ticks=(profile.ticks or 0)+1
             local phase=job.builder and "build" or job.encoder and "encode" or job.framer and "frame"
                 or reason=="ack" and "ack" or "send"

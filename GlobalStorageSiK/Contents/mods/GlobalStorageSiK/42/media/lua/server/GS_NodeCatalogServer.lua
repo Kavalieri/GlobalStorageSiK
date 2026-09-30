@@ -1,15 +1,25 @@
 -- Post-access negotiation and bounded one-block-at-a-time requests.
 local Protocol=require "GS_ManifestProtocol"
 local Manifest=require "GS_NodeManifest"
+local Profile=require "GS_InitialLoadProfile"
+local Metrics=require "GS_InitialLoadMetrics"
 local Server={}
 GlobalStorageSiK.NodeCatalogServer=Server
 local context,states=nil,{}
 local metadataFields=Protocol.METADATA_FIELDS
 local function now() return getTimestampMs and getTimestampMs() or 0 end
+local function summary(player)
+	local transport=GlobalStorageSiK.CatalogServer
+	return transport and transport.metrics and transport.metrics(player)
+end
 function Server.configure(value) context=value end
 function Server.clear(player) states[player]=nil end
 function Server.opened(player,session)
-	if session.replicaEpoch then states[player]={session=session,started=now()} end
+	if session.replicaEpoch then
+		local profile=Profile.snapshot(session.initialLoadProfile)
+		session.initialLoadProfile=profile.id;session.initialLoadProfileHash=profile.hash
+		states[player]={session=session,started=now()}
+	end
 end
 function Server.active(player) return states[player]~=nil end
 function Server.negotiated(player) return states[player] and states[player].negotiated==true end
@@ -57,9 +67,13 @@ function Server.queueState(player,payload)
 			or current.reconcilePending~=payload.reconcilePending then state.refreshPending=true end
 		return true,"manifest_coalesced"
 	end
-	local manifest,reason=Manifest.capture(player,state.session,state.knownToken)
+	local started=now()
+	local manifest,reason,manifestStats=Manifest.capture(player,state.session,state.knownToken)
+	Metrics.work(summary(player),"manifest",now()-started)
 	if not manifest then return false,reason end
 	state.manifest=manifest
+	Metrics.bind(summary(player),manifest)
+	Metrics.manifest(summary(player),manifestStats)
 	state.request=nil
 	-- Control metadata is fresh even when the complete set of blocks is stable.
 	manifest.terminalMetadata=metadata
@@ -118,7 +132,7 @@ function Server.dispatch(command,player,args)
 		if args.nodeBaseRevision~=nil
 			and not Protocol.integer(args.nodeBaseRevision,0,9007199254740991) then return true end
 		if not state.request then state.request={nodeId=args.nodeId,token=args.manifestToken,
-			baseRevision=args.nodeBaseRevision} end
+			baseRevision=args.nodeBaseRevision,queuedAt=now()};Metrics.count(summary(player),"requests") end
 	elseif state.roundActive and state.manifest and args.manifestToken==state.manifest.manifestToken
 		and args.inventoryRevision==state.manifest.inventoryRevision then
 		state.ready={token=args.manifestToken,revision=args.inventoryRevision}
@@ -158,8 +172,11 @@ function Server.update()
 			elseif state.refreshPending and not state.roundActive then refresh(player,state)
 			elseif state.request and now()>=(state.request.due or 0) then
 				local request=state.request;state.request=nil
+				local started=now()
+				Metrics.count(summary(player),"queueWaitMs",now()-(request.queuedAt or now()))
 				local payload,reason=Manifest.block(player,state.session,request.nodeId,
 					request.token,request.baseRevision)
+				Metrics.work(summary(player),"prepare",now()-started)
 				if payload then
 					payload.catalogSource="node_block";state.lastPayload=payload
 					context.queue(player,payload)

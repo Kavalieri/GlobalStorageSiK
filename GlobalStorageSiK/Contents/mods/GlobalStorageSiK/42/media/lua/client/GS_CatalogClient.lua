@@ -1,6 +1,7 @@
 -- Private reassembly: no partial table reaches the inventory/UI consumers.
 local Codec = require "GS_CatalogCodec"
 local AccessPolicy = require "GS_ManifestProtocol"
+local Metrics=require "GS_InitialLoadMetrics"
 local Client = {}
 GlobalStorageSiK.CatalogClient = Client
 local slots = {}
@@ -19,9 +20,11 @@ end
 function Client.configure(value) context = value end
 function Client.clear(playerNum, sequence)
 	if playerNum == nil then
+		for n=0,3 do Metrics.finish(slots[n] and slots[n].summary,"cancelled","session_closed") end
 		if GlobalStorageSiK.NodeCatalogClient then for n=0,3 do GlobalStorageSiK.NodeCatalogClient.clear(n,false) end end
 		slots = {}
 	elseif sequence == nil or (slots[playerNum] and slots[playerNum].sequence == sequence) then
+		Metrics.finish(slots[playerNum] and slots[playerNum].summary,"cancelled","session_closed")
 		if GlobalStorageSiK.NodeCatalogClient then GlobalStorageSiK.NodeCatalogClient.clear(playerNum,false) end
 		slots[playerNum] = nil
 	end
@@ -31,8 +34,20 @@ function Client.replicaApplied(playerNum,revision)
 	if slot then slot.completedRevision=revision;slot.applied=true;slot.recoveryUsed=nil;slot.started=now() end
 end
 function Client.start(playerNum, sequence)
+	Metrics.finish(slots[playerNum] and slots[playerNum].summary,"cancelled","reopened")
 	if GlobalStorageSiK.NodeCatalogClient then GlobalStorageSiK.NodeCatalogClient.clear(playerNum,false) end
-	slots[playerNum] = {sequence=sequence, latest=0, started=now(),completedBatches={},completedOrder={}}
+	slots[playerNum] = {sequence=sequence, latest=0, started=now(),completedBatches={},completedOrder={},
+		summary=Metrics.begin("client",{playerNum=playerNum,openSeq=sequence})}
+end
+function Client.metrics(playerNum) return slots[playerNum] and slots[playerNum].summary end
+function Client.recordReplicaView(playerNum,rows,complete)
+	local slot=slots[playerNum]
+	if not slot then return end
+	Metrics.view(slot.summary,rows,complete)
+	if complete and slot.summary then slot.summary.completePending=true end
+end
+function Client.recordReplicaComplete(playerNum)
+	Metrics.complete(Client.metrics(playerNum))
 end
 local function slotFor(payload)
 	if type(payload) ~= "table" or not Codec.integer(payload.playerNum, 0, 3) then return end
@@ -51,8 +66,10 @@ local function fail(playerNum, reason, serverError, consumerRejected)
 		and reason~="catalog_budget" and not slot.consumerRejected and context.nodeRecover then
 		slot.batch=nil
 		if rejected and not serverError and context.reject then context.reject(rejected,reason,false) end
-		if context.nodeRecover(playerNum) then slot.started=now();return end
+		if context.nodeRecover(playerNum) then Metrics.count(slot.summary,"recoveries");slot.started=now();return end
 	end
+	Metrics.finish(slot.summary,AccessPolicy.accessLoss(reason) and "cancelled"
+		or reason=="catalog_timeout" and "timeout" or "failed",reason)
 	if recoverable then slot.batch = nil else slots[playerNum] = nil end
 	if rejected and not serverError and not AccessPolicy.accessLoss(reason) and context.reject
 		and not slot.rejectionSent then context.reject(rejected,reason,slot.consumerRejected==true);slot.rejectionSent=true end
@@ -72,7 +89,9 @@ local function fail(playerNum, reason, serverError, consumerRejected)
 	end
 end
 local function allowed(payload, playerNum)
+	local started=now()
 	local accepted, reason = context.allowed(payload)
+	Metrics.work(Client.metrics(playerNum),"validate",now()-started)
 	if not accepted then
 		fail(playerNum, AccessPolicy.suspendsAccess(reason) and reason or "catalog_access_changed")
 	end
@@ -136,7 +155,8 @@ local function applyReady(playerNum, slot)
 			if not decoder then fail(playerNum, reason); return end
 			batch.decoder, batch.decodeStarted = decoder, now()
 			if not batch.reassembled then
-				batch.reassembled=true
+			batch.reassembled=true
+			Metrics.count(slot.summary,"receiveWaitMs",now()-batch.started)
 				if context.reassembled then context.reassembled(batch.meta) end
 			end
 		end
@@ -163,7 +183,10 @@ local function applyReady(playerNum, slot)
 		or value.catalogDetail == true and context.applyDetail
 		or value.catalogDelta == true and context.applyDelta or context.apply
 	local applyStarted=now()
+	Metrics.enter(slot.summary)
 	local ok, accepted, applyReason, stage = pcall(consumer, value,batch.bytes*2+batch.tokens*64)
+	Metrics.work(slot.summary,"dispatch",now()-applyStarted)
+	Metrics.leave(slot.summary)
 	-- Consumer callbacks may close/reopen synchronously (including SP).
 	-- Completion of the old request cannot fail or acknowledge its replacement.
 	if slots[playerNum] ~= slot then return end
@@ -224,6 +247,7 @@ function Client.ack(payload)
 	end
 	if slots[payload.playerNum] ~= slot then return end
 	slot.confirmed = payload
+	Metrics.bind(slot.summary,payload)
 	slot.started = now()
 	if (context.hasCache and context.hasCache(payload))
 		or (context.hasPreview and context.hasPreview(payload)) then slot.applied = true end
@@ -270,6 +294,7 @@ function Client.receive(payload)
 		if slot.batch then return end
 		slot.latest = payload.batchId
 		slot.batch = {meta=payload, parts={}, count=0, bytes=0, tokens=0, started=now(), progress=now()}
+		Metrics.count(slot.summary,"batches")
 	end
 	local batch = slot.batch
 	if not same(batch.meta, payload) then fail(payload.playerNum, "catalog_schema"); return end
@@ -293,6 +318,8 @@ function Client.receive(payload)
 	batch.parts[payload.part] = payload.data
 	batch.count, batch.tokens = batch.count + 1, batch.tokens + count
 	batch.bytes = batch.bytes + chunkBytes
+	Metrics.work(slot.summary,"size",sizingMs or 0)
+	Metrics.count(slot.summary,"fragments");Metrics.count(slot.summary,"uniqueFrameBytes",size)
 	if sizingMs then
 		batch.profile=batch.profile or {sizeMs=0,sizeMaxMs=0,decodeMs=0,decodeMaxMs=0,steps=0,wallYields=0,unitYields=0}
 		batch.profile.sizeMs=batch.profile.sizeMs+sizingMs
@@ -311,6 +338,7 @@ function Client.receive(payload)
 	if reservation > PLAYER_BYTES or globalReservation > GLOBAL_BYTES then
 		fail(payload.playerNum, "catalog_budget"); return
 	end
+	Metrics.peak(slot.summary,reservation)
 	batch.progress = now()
 	slot.started = batch.progress
 	if batch.tokens > batch.meta.tokenCount or batch.bytes > batch.meta.totalBytes then
@@ -411,7 +439,8 @@ function Client.update(timestamp)
 	for playerNum = 0, 3 do
 		local slot = slots[playerNum]
 		if slot then
-			if not context.current(playerNum, slot.sequence) then slots[playerNum] = nil
+			if not context.current(playerNum, slot.sequence) then
+				Metrics.finish(slot.summary,"cancelled","intent_replaced");slots[playerNum] = nil
 			else
 				local batch = slot.batch
 				if batch or (slot.confirmed and context.pending(playerNum)) then
@@ -438,6 +467,8 @@ function Client.update(timestamp)
 							and work < 8192 and (not stepped or now() - started < 4) do
 							local decodeStarted=batch.profile and now()
 							local value, reason, done = Codec.stepDecode(batch.decoder, 1024)
+							Metrics.work(slot.summary,"decode",decodeStarted and now()-decodeStarted or 0)
+							Metrics.count(slot.summary,"decodeSteps")
 							if decodeStarted then
 								local elapsed=math.max(0,now()-decodeStarted)
 								batch.profile.decodeMs=batch.profile.decodeMs+elapsed
@@ -460,11 +491,16 @@ function Client.update(timestamp)
 						if slot.batch==batch and batch.decoder and batch.profile then
 							local reason=work>=8192 and "unitYields" or "wallYields"
 							batch.profile[reason]=batch.profile[reason]+1
+							Metrics.count(slot.summary,reason)
 						end
 					end
 				end
 			end
 		end
+	end
+	for n=0,3 do
+		local slot=slots[n]
+		if slot and slot.summary and slot.summary.completePending and not slot.batch then Metrics.finish(slot.summary,"complete","full_view_committed") end
 	end
 	return active
 end

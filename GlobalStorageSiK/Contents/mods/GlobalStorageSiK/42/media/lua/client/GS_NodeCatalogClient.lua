@@ -1,6 +1,8 @@
 local Protocol=require "GS_ManifestProtocol"
 local Replica=require "GS_NodeReplica"
 local Rows=require "GS_CatalogRows"
+local Profile=require "GS_InitialLoadProfile"
+local Metrics=require "GS_InitialLoadMetrics"
 require "GS_Index"
 local Client={}
 GlobalStorageSiK.NodeCatalogClient=Client
@@ -30,6 +32,10 @@ local cache=Replica.new({evicted=function(entry,reason)
 	if context and context.evicted then context.evicted(entry,reason) end
 end})
 local function now() return getTimestampMs and getTimestampMs() or 0 end
+local function metric(state)
+	local transport=GlobalStorageSiK.CatalogClient
+	return transport and transport.metrics and transport.metrics(state.ack.playerNum)
+end
 local function shallow(value) local out={};for k,v in pairs(value or {}) do out[k]=v end;return out end
 local function intent(state)
 	local ack=state.ack
@@ -63,6 +69,7 @@ local function publishProgress(state,ready)
 end
 local function send(state,command,args)
 	args=args or intent(state)
+	if command=="terminalNodeRequest" then Metrics.count(metric(state),"requests") end
 	return context.send(command,args,state.ack.playerNum)
 end
 local function failureIdentity(state)
@@ -100,6 +107,9 @@ local function allowed(state)
 end
 function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
+	local profile=Profile.snapshot(ack.initialLoadProfile or "control")
+	if not profile then return false,"manifest_protocol" end
+	if ack.initialLoadProfileHash~=nil and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
 	if not currentOwner(ack.playerNum) then return false,"catalog_access_changed" end
 	Client.clear(ack.playerNum,false)
 	if ack.topologyTransition then
@@ -112,7 +122,7 @@ function Client.confirm(ack)
 	trace(entry and "clientCacheHit" or "clientCacheMiss",ack,entry and
 		("reason=identity_confirmed cachedToken="..tostring(entry.token)) or "reason=no_confirmed_view")
 	local current=ack.topologyTransition and context.currentState(ack.playerNum)
-	slots[ack.playerNum]={ack=ack,entry=entry,previous=entry and entry.rows,previousMetadata=entry and entry.metadata,
+	slots[ack.playerNum]={ack=ack,profile=profile,entry=entry,previous=entry and entry.rows,previousMetadata=entry and entry.metadata,
 		store=entry and entry.rows and entry.rowStore,hasComplete=entry and entry.rows~=nil,
 		hasPresented=entry and entry.rows~=nil,receivedBlocks=0,
 		derivedGeneration=entry and entry.rows and entry.derivedGeneration,
@@ -181,6 +191,7 @@ function Client.consume(value,retainedBytes)
 		or (state.ack.topologySequence or 0)~=(value.topologySequence or 0) then return false,"manifest_identity" end
 	state.started=now()
 	if value.catalogManifest then
+		Metrics.bind(metric(state),value);Metrics.manifest(metric(state),state.entry and state.entry.manifestStats)
 		trace("manifest received",value,"notModified="..tostring(value.manifestNotModified==true))
 		state.completed=false
 		state.blockVersion=(state.blockVersion or 0)+1
@@ -240,6 +251,7 @@ function Client.consume(value,retainedBytes)
 			trace("node duplicate",value,"node="..tostring(value.nodeRecord and value.nodeRecord.nodeId))
 			return nextNode(state,false)
 		end
+		Metrics.count(metric(state),"nodeBodies")
 		state.pendingNodeIds[value.nodeRecord.nodeId]=true
 		state.blockVersion=(state.blockVersion or 0)+1
 		state.retries=0
@@ -332,6 +344,9 @@ local function apply(state)
 	if not commit() then return false,"manifest_changed" end
 	state.cancelStage=nil
 	state.undo=nil;state.viewSequence=payload.viewSequence;state.hasPresented=true
+	if GlobalStorageSiK.CatalogClient and GlobalStorageSiK.CatalogClient.recordReplicaView then
+		GlobalStorageSiK.CatalogClient.recordReplicaView(payload.playerNum,#state.rows,false)
+	end
 	state.derivedGeneration=generation;state.buildNodeIds=nil
 	if GlobalStorageSiK.NetTrace and GlobalStorageSiK.NetTrace.isEnabled() then
 		local stats=state.notModified and {} or state.stats or {}
@@ -354,6 +369,9 @@ local function apply(state)
 	state.hasComplete=true
 	local args=intent(state);args.manifestToken=state.manifest.manifestToken;args.inventoryRevision=payload.inventoryRevision
 	local ready=send(state,"terminalReplicaReady",args)
+	if ready and GlobalStorageSiK.CatalogClient and GlobalStorageSiK.CatalogClient.recordReplicaComplete then
+		GlobalStorageSiK.CatalogClient.recordReplicaComplete(payload.playerNum)
+	end
 	payload._gsAwaitReplicaReady=nil
 	if ready then publishProgress(state,true) end
 	return ready
@@ -373,10 +391,20 @@ function Client.update()
 			elseif state.build then
 				active=true
 				local phaseStarted=now()
-				local done,rows,stats=GlobalStorageSiK.Index.stepCatalogBuild(state.build,256,2)
+				local done,rows,stats
+				local work=0
+				local build=state.build
+				repeat
+					local remaining=math.max(1,2-(now()-phaseStarted))
+					done,rows,stats=GlobalStorageSiK.Index.stepCatalogBuild(build,256,remaining)
+					work=work+256
+				until done or build.error or build.cancelled or slots[n]~=state or state.build~=build
+					or work>=state.profile.buildWork or now()-phaseStarted>=2
+				Metrics.work(metric(state),"build",now()-phaseStarted)
 				state.buildMs=(state.buildMs or 0)+now()-phaseStarted
-				if state.build.error then
-					local reason,identity=state.build.error,failureIdentity(state)
+				if slots[n]~=state or state.build~=build then -- Reentrant replacement owns its own work.
+				elseif build.error then
+					local reason,identity=build.error,failureIdentity(state)
 					Client.clear(n,false);context.failed(n,reason,identity)
 				elseif done then
 					state.build=nil
@@ -384,13 +412,17 @@ function Client.update()
 				end
 			elseif state.phase=="apply" then
 				active=true
+				local summary,phaseStarted=metric(state),now()
+				Metrics.enter(summary)
 				local ok,accepted,reason=pcall(apply,state)
+				Metrics.work(summary,"apply",now()-phaseStarted)
 				if not ok or accepted==false then
 					if slots[n]==state then
 						local identity=failureIdentity(state)
 						Client.clear(n,false);context.failed(n,ok and reason or accepted,identity)
 					end
 				end
+				Metrics.leave(summary)
 			end
 		end
 		if active then cursor=(n+1)%4;break end

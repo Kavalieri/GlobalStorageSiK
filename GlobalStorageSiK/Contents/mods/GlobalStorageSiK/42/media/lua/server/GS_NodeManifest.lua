@@ -1,6 +1,7 @@
 -- Manifests inspect confirmed metadata only. No ItemContainer or item traversal.
 local Protocol = require "GS_ManifestProtocol"
 local Snapshots = require "GS_NodeSnapshots"
+local Metrics = require "GS_InitialLoadMetrics"
 local Manifest = {}
 GlobalStorageSiK.NodeManifest = Manifest
 local context, sessions, serial = nil, {}, 0
@@ -84,8 +85,10 @@ function Manifest.capture(player, meta, knownToken)
 	append(parts,network.topologyRevision)
 	-- The token describes reusable blocks, not scan/control or presentation.
 	-- Access is still validated above and before every individual block.
+	local manifestStats=Metrics.manifestAccumulator()
 	for i=1,#records do
 		local record=records[i]
+		Metrics.manifestRecord(manifestStats,record)
 		append(parts,record.nodeId);append(parts,record.zoneId);append(parts,record.revision)
 		append(parts,record.signature);append(parts,record.schema);append(parts,record.enabled)
 		append(parts,record.confirmed);append(parts,record.availability)
@@ -124,7 +127,8 @@ function Manifest.capture(player, meta, knownToken)
 		inventoryRevision=context.inventoryRevision(meta.networkId),catalogManifest=true}
 	if knownToken==previous.token then result.manifestNotModified=true
 	else result.nodeManifest=previous.records end
-	return result
+	if manifestStats then manifestStats.seenZones=nil end
+	return result,nil,manifestStats
 end
 
 function Manifest.diagnostics() return {retainedBytes=retainedBytes,topologyBytes=topologyBytes,networks=topologyCount} end
