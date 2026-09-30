@@ -4,6 +4,6 @@ description=Build 42.20+ v1.5.8-dev3. Todos los contenedores de tu base en un in
 poster=poster.png
 icon=icon.png
 author=SiK
-modversion=1.5.8-dev2
+modversion=1.5.8-dev3
 versionMin=42.20.0
 require=SiKUIFramework
