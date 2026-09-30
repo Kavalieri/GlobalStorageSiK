@@ -196,4 +196,27 @@ function Server.update()
 		Server.clear(retired[i].player)
 	end
 end
+
+function Server.initialLoadBusy()
+	for _,state in pairs(states) do
+		if state.roundActive or state.request or state.ready or state.retry or state.refreshPending then return true end
+	end
+	return false
+end
+function Server.oracleImage(player)
+	local state=states[player]
+	if Server.initialLoadBusy() or not state or state.roundActive or state.request or state.ready or state.retry or state.refreshPending
+		or context.hasJob(player) or not valid(player,state.session) or not state.manifest then return nil,"oracle_busy" end
+	local meta={}
+	for key,value in pairs(state.session) do if type(value)~="table" then meta[key]=value end end
+	for _,key in ipairs({"manifestToken","inventoryRevision","snapshotCertified","reconcilePending"}) do meta[key]=state.manifest[key] end
+	local image,reason=Manifest.oracleImage(player,meta,meta.manifestToken)
+	if not image then return nil,reason end
+	return image,nil,function()
+		return states[player]==state and not state.roundActive and not state.refreshPending
+			and not context.hasJob(player) and valid(player,state.session)~=nil
+			and Manifest.oracleCurrent(player,meta,meta.manifestToken)
+			and state.manifest.manifestToken==meta.manifestToken and state.manifest.inventoryRevision==meta.inventoryRevision
+	end
+end
 return Server

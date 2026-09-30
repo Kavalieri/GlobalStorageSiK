@@ -191,7 +191,7 @@ function Client.consume(value,retainedBytes)
 		or (state.ack.topologySequence or 0)~=(value.topologySequence or 0) then return false,"manifest_identity" end
 	state.started=now()
 	if value.catalogManifest then
-		Metrics.bind(metric(state),value);Metrics.manifest(metric(state),state.entry and state.entry.manifestStats)
+		Metrics.bind(metric(state),value)
 		trace("manifest received",value,"notModified="..tostring(value.manifestNotModified==true))
 		state.completed=false
 		state.blockVersion=(state.blockVersion or 0)+1
@@ -216,6 +216,7 @@ function Client.consume(value,retainedBytes)
 				local accepted,reason=context.topology(value,value.terminalMetadata,false)
 				if accepted==false then return false,reason end
 			end
+			Metrics.manifest(metric(state),entry.manifestStats)
 			if entry.viewStamp~=value.viewStamp then
 				state.derivedGeneration=nil;state.notModified=nil
 				for _,record in ipairs(entry.records) do state.pendingNodeIds[record.nodeId]=true end
@@ -239,6 +240,7 @@ function Client.consume(value,retainedBytes)
 		end
 		for id in pairs(entry.changedNodeIds) do state.pendingNodeIds[id]=true end
 		state.entry=entry;state.manifest=value;state.metadata=value.terminalMetadata;state.notModified=nil
+		Metrics.manifest(metric(state),entry.manifestStats)
 		state.rows=nil;state.phase=nil;state.view=nil;state.buildRows=nil;state.request=nil
 		state.progressDone=1
 		state.progressTotal=remainingBlocks(state)+2
@@ -442,4 +444,32 @@ function Client.recover(playerNum)
 	return send(state,"terminalManifestRequest",args)
 end
 function Client.diagnostics() return cache.diagnostics() end
+
+-- Diagnostic references only; exported after the timed complete boundary.
+function Client.oracleImage(playerNum)
+	local state=slots[playerNum]
+	if not state or not state.completed or not state.hasComplete or state.partial
+		or not context.current(playerNum,state.ack.openSeq) or not context.allowed(state.ack)
+		or not cache.acceptView(state.entry) then return nil,"oracle_incomplete" end
+	local entry=state.entry
+	if not entry.confirmed or entry.confirmed.token~=state.manifest.manifestToken then return nil,"oracle_token" end
+	local meta=shallow(state.ack)
+	meta.manifestToken=state.manifest.manifestToken;meta.inventoryRevision=state.manifest.inventoryRevision
+	meta.snapshotCertified=state.manifest.snapshotCertified;meta.reconcilePending=state.manifest.reconcilePending
+	local nodes={}
+	for _,record in ipairs(entry.records) do
+		if record.enabled then
+			local block=entry.blocks[record.nodeId]
+			if not record.confirmed or not block then return nil,"oracle_unconfirmed" end
+			nodes[#nodes+1]={record=record,snapshot=block.snapshot}
+		end
+	end
+	return {meta=meta,nodes=nodes},nil,function()
+		return slots[playerNum]==state and state.completed and state.hasComplete and not state.partial
+			and state.manifest and state.manifest.snapshotCertified==true and state.manifest.reconcilePending~=true
+			and state.manifest.inventoryRevision==meta.inventoryRevision and state.manifest.manifestToken==meta.manifestToken
+			and context.current(playerNum,meta.openSeq) and context.allowed(state.ack)
+			and cache.acceptView(entry) and entry.confirmed and entry.confirmed.token==meta.manifestToken
+	end
+end
 return Client

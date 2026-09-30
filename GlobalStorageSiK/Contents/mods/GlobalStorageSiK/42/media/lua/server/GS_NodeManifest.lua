@@ -161,4 +161,25 @@ function Manifest.block(player, meta, nodeId, token, baseRevision)
 	return payload
 end
 
+
+function Manifest.oracleCurrent(player,meta,token)
+	local accepted=authorized(player,meta)
+	local state=sessions[player]
+	return accepted and state and state.token==token and state.revision==meta.inventoryRevision
+		and context.inventoryRevision(meta.networkId)==meta.inventoryRevision
+end
+
+function Manifest.oracleImage(player,meta,token)
+	local state=sessions[player]
+	if not state or state.token~=token or state.revision~=meta.inventoryRevision then return nil,"oracle_token" end
+	local nodes={}
+	for _,record in ipairs(state.records) do
+		if record.enabled then
+			local block,reason=Manifest.block(player,meta,record.nodeId,token)
+			if not block then return nil,reason end
+			nodes[#nodes+1]={record=record,snapshot=block.nodeSnapshot}
+		end
+	end
+	return {meta=meta,nodes=nodes}
+end
 return Manifest

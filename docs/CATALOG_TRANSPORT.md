@@ -282,3 +282,11 @@ Summaries contain active phase durations, scheduler exit counts, byte reservatio
 Local fixtures are screening evidence only. Dedicated improvement, first-view equivalence, pressure and gameplay regressions remain pending. Keep issue #1 open; original analysis credited to iceriny.
 
 Scope correlation in dev2 preserves the exact scope up to 1024 Lua string units. The raw scopeHash is unknown until the offline collector computes SHA-256 of its UTF-8 representation. A changed or oversized scope marks coverage incomplete and cannot qualify; never hash a truncated prefix. The collector must match both role summaries and retain their source hashes.
+
+## Core 1.5.8-dev3: diagnostic preparation
+
+Client manifest totals are now read from the accepted replica, including cold bootstrap and notModified. The private client console helpers GlobalStorageSiK.InitialLoadDiagnostics.select(0,"control"), exportClient(0), and exportServer(0) provide an admin-only research path; the server revalidates admin/debug/input and rejects active replication. Selection is proved by the server response and the next pinned opening ACK, not by the local send return. No gameplay UI or budget changes.
+
+Oracles export already confirmed snapshots after the measured complete boundary. The native codec preserves fullType/count/itemIds and all row fields, with exact opening/scope/token/revision/profile identity. Export is cancellable on lost validity, bounded to one process job, 128 encode work or at most 32 tokens/32 KiB conservative write per tick, 16 MiB codec, 64 MiB file, four files per role and a 120 s timeout/60 s throttle. Footer records success/failure and encode/write maxima; atomic engine/file operations may overrun a soft time budget. Archive the returned oracle path before rotation. There is no automatic physical scan or inventory relay. Offline snapshot agreement is not physical freshness, pressure, gameplay or dedicated performance proof.
+
+For cold-replica comparison, use one remote client with one local player, archive evidence, exit and restart only that client; keep server snapshots unchanged. Dedicated engine/JVM capture and pressure policy remain external. Technical fixture tests do not establish the >=50% target, runtime API availability or first-view/pressure equivalence. Issue #1 remains open; credit iceriny.

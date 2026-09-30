@@ -6199,3 +6199,5 @@ Events.OnInitGlobalModData.Add(function(isNewGame)
 		installCraftDiagnostics()
 	end
 end)
+
+require "GS_InitialLoadDiagnosticsServer"

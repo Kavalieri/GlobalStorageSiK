@@ -1838,3 +1838,5 @@ Events.OnGameStart.Add(logClientRuntimeIdentity)
 --- a esta funcion directamente, en el mismo proceso, con los mismos
 --- argumentos que recibiria via Events.OnServerCommand.
 GlobalStorageSiK.Client.dispatchServerCommand = onServerCommand
+
+require "GS_InitialLoadDiagnosticsClient"
