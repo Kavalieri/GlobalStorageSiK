@@ -2,6 +2,7 @@
 local Codec = require "GS_CatalogCodec"
 local AccessPolicy = require "GS_ManifestProtocol"
 local Metrics=require "GS_InitialLoadMetrics"
+local Profile=require "GS_InitialLoadProfile"
 local Client = {}
 GlobalStorageSiK.CatalogClient = Client
 local slots = {}
@@ -151,7 +152,7 @@ local function applyReady(playerNum, slot)
 	-- watcher performs bounded codec work; no callback decodes a whole catalog.
 	if not batch.decoded then
 		if not batch.decoder then
-			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount)
+			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes)
 			if not decoder then fail(playerNum, reason); return end
 			batch.decoder, batch.decodeStarted = decoder, now()
 			if not batch.reassembled then
@@ -238,6 +239,8 @@ function Client.ack(payload)
 		fail(payload.playerNum, "catalog_access_changed"); return
 	end
 	if not allowed(payload,payload.playerNum) then return end
+	local profile=Profile.snapshot(payload.initialLoadProfile or "control")
+	if not profile or (payload.initialLoadProfileHash and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
 	local confirmed,accepted,reason=pcall(context.confirm,payload)
 	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
 	if accepted == false then
@@ -247,6 +250,7 @@ function Client.ack(payload)
 	end
 	if slots[payload.playerNum] ~= slot then return end
 	slot.confirmed = payload
+	slot.profile=profile
 	Metrics.bind(slot.summary,payload)
 	slot.started = now()
 	if (context.hasCache and context.hasCache(payload))
@@ -279,7 +283,7 @@ function Client.receive(payload)
 	local sizeStarted=diagnosticsEnabled() and now()
 	local size,_,chunkBytes = Codec.frameSize(payload)
 	local sizingMs=sizeStarted and math.max(0,now()-sizeStarted) or nil
-	if not size or size > Codec.FRAME_BYTES then fail(payload.playerNum, "catalog_budget"); return end
+	if not size or size > (slot.profile and slot.profile.frameBytes or Codec.FRAME_BYTES) then fail(payload.playerNum, "catalog_budget"); return end
 	local completed=slot.completedBatches and slot.completedBatches[payload.batchId]
 	if completed then
 		if not same(completed,payload) then fail(payload.playerNum,"catalog_schema");return end

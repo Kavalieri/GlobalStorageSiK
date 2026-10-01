@@ -163,6 +163,13 @@ local function nextNode(state,receivedBlock)
 	if missing and not bootstrapWindow and (not state.request or state.request.nodeId~=missing.nodeId) then
 		local args=intent(state);args.nodeId=missing.nodeId;args.manifestToken=state.entry.token
 		args.nodeBaseRevision=cache.baseRevision(state.entry,missing.nodeId)
+		if state.hasPresented and not state.hasComplete and state.profile.groupCredits>1 and args.nodeBaseRevision==nil then
+			local missingNodes=cache.missing(state.entry,state.profile.groupCredits)
+			if #missingNodes>1 then
+				args.nodeCount=#missingNodes
+				for i=2,#missingNodes do args["nodeId"..i]=missingNodes[i].nodeId end
+			end
+		end
 		trace("node requested",args,"node="..args.nodeId.." nodeRevision="..tostring(missing.revision))
 		state.request=args;state.sentAt=now()
 		if not send(state,"terminalNodeRequest",args) then return false,"node_send" end
@@ -247,6 +254,37 @@ function Client.consume(value,retainedBytes)
 		publishProgress(state,false)
 		return nextNode(state)
 	elseif value.catalogNode then
+		if value.nodeBlocks~=nil then
+			local blocks=value.nodeBlocks
+			if type(blocks)~="table" or getmetatable(blocks)~=nil or #blocks<1 or #blocks>state.profile.groupCredits
+				or not Protocol.integer(retainedBytes,1,32*1024*1024) then return false,"node_group" end
+			local seen,count={},0
+			for key in pairs(blocks) do
+				if not Protocol.integer(key,1,#blocks) then return false,"node_group" end
+				count=count+1
+			end
+			if count~=#blocks then return false,"node_group" end
+			for i=1,#blocks do
+				local block=blocks[i]
+				local record=type(block)=="table" and getmetatable(block)==nil and Protocol.record(block.nodeRecord)
+				if not record or not record.confirmed or seen[record.nodeId] or not Protocol.sameBlock(record,state.entry.byId[record.nodeId])
+					or type(block.nodeSnapshot)~="table" or getmetatable(block.nodeSnapshot)~=nil or block.nodeDelta~=nil then return false,"node_group" end
+				seen[record.nodeId]=true
+			end
+			local changed=false
+			for i=1,#blocks do
+				local block=blocks[i];local meta=shallow(value)
+				meta.nodeBlocks=nil;meta.nodeRecord=block.nodeRecord;meta.nodeSnapshot=block.nodeSnapshot
+				local accepted,reason=cache.block(meta,math.ceil(retainedBytes/#blocks))
+				if not accepted then return false,reason end
+				if reason~="duplicate" then
+					changed=true;state.pendingNodeIds[block.nodeRecord.nodeId]=true
+					state.receivedBlocks=(state.receivedBlocks or 0)+1;Metrics.count(metric(state),"nodeBodies")
+				end
+			end
+			if changed then state.blockVersion=(state.blockVersion or 0)+1;state.retries=0;publishProgress(state,false) end
+			return nextNode(state,changed)
+		end
 		local accepted,reason=cache.block(value,retainedBytes)
 		if not accepted then return false,reason end
 		if reason=="duplicate" then
@@ -378,6 +416,17 @@ local function apply(state)
 	if ready then publishProgress(state,true) end
 	return ready
 end
+local function applyChecked(state,n)
+	local summary,phaseStarted=metric(state),now()
+	Metrics.enter(summary)
+	local ok,accepted,reason=pcall(apply,state)
+	Metrics.work(summary,"apply",now()-phaseStarted)
+	if (not ok or accepted==false) and slots[n]==state then
+		local identity=failureIdentity(state)
+		Client.clear(n,false);context.failed(n,ok and reason or accepted,identity)
+	end
+	Metrics.leave(summary)
+end
 function Client.update()
 	local active=false
 	for offset=0,3 do
@@ -411,20 +460,11 @@ function Client.update()
 				elseif done then
 					state.build=nil
 					state.buildRows=rows;state.stats=stats;state.phase="apply"
+					-- Apply remains indivisible; start it in its own next update.
 				end
 			elseif state.phase=="apply" then
 				active=true
-				local summary,phaseStarted=metric(state),now()
-				Metrics.enter(summary)
-				local ok,accepted,reason=pcall(apply,state)
-				Metrics.work(summary,"apply",now()-phaseStarted)
-				if not ok or accepted==false then
-					if slots[n]==state then
-						local identity=failureIdentity(state)
-						Client.clear(n,false);context.failed(n,ok and reason or accepted,identity)
-					end
-				end
-				Metrics.leave(summary)
+				applyChecked(state,n)
 			end
 		end
 		if active then cursor=(n+1)%4;break end
@@ -446,6 +486,20 @@ end
 function Client.diagnostics() return cache.diagnostics() end
 
 -- Diagnostic references only; exported after the timed complete boundary.
+function Client.oracleStatus(playerNum)
+	local state=slots[playerNum]
+	if not state then return {playerNum=playerNum,completed=false,hasComplete=false} end
+	local status=shallow(state.ack)
+	for _,key in ipairs({"manifestToken","inventoryRevision","snapshotRevision","snapshotCertified","reconcilePending"}) do
+		status[key]=state.manifest and state.manifest[key]
+	end
+	status.completed=state.completed==true;status.hasComplete=state.hasComplete==true;status.partial=state.partial==true
+	status.contextCurrent=context.current(playerNum,state.ack.openSeq)==true
+	status.accessAllowed=context.allowed(state.ack)==true
+	status.cacheAccepted=state.entry~=nil and cache.acceptView(state.entry)==true
+	status.confirmedToken=state.entry and state.entry.confirmed and state.entry.confirmed.token or nil
+	return status
+end
 function Client.oracleImage(playerNum)
 	local state=slots[playerNum]
 	if not state or not state.completed or not state.hasComplete or state.partial

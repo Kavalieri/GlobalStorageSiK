@@ -133,10 +133,7 @@ end
 
 function Manifest.diagnostics() return {retainedBytes=retainedBytes,topologyBytes=topologyBytes,networks=topologyCount} end
 
-function Manifest.block(player, meta, nodeId, token, baseRevision)
-	local valid,reason=authorized(player,meta)
-	if not valid then Manifest.clear(player);return nil,reason or "catalog_access_changed" end
-	local state=sessions[player]
+local function prepareBlock(player,meta,nodeId,token,baseRevision,state)
 	if not state or state.epoch~=meta.replicaEpoch or state.networkId~=meta.networkId
 		or state.token~=token or not Protocol.id(nodeId) then return nil,"manifest_changed" end
 	local record=state.byId[nodeId]
@@ -158,6 +155,33 @@ function Manifest.block(player, meta, nodeId, token, baseRevision)
 		payload.nodeDelta={baseRevision=delta.baseRevision,revision=delta.revision,
 			changedRows=delta.changedRows,removedRowKeys=delta.removedRowKeys}
 	else payload.nodeSnapshot=node.itemSnapshot end
+	return payload
+end
+
+function Manifest.block(player,meta,nodeId,token,baseRevision)
+	local valid,reason=authorized(player,meta)
+	if not valid then Manifest.clear(player);return nil,reason or "catalog_access_changed" end
+	return prepareBlock(player,meta,nodeId,token,baseRevision,sessions[player])
+end
+-- One synchronous authorization observation; every zone and node stays fenced.
+function Manifest.blocks(player,meta,nodeIds,token)
+	if type(nodeIds)~="table" or getmetatable(nodeIds)~=nil or #nodeIds<1 or #nodeIds>4 then return nil,"node_request" end
+	local count,seen=0,{}
+	for key,nodeId in pairs(nodeIds) do
+		if type(key)~="number" or key%1~=0 or key<1 or key>#nodeIds or not Protocol.id(nodeId) or seen[nodeId] then return nil,"node_request" end
+		count=count+1;seen[nodeId]=true
+	end
+	if count~=#nodeIds then return nil,"node_request" end
+	local valid,reason=authorized(player,meta)
+	if not valid then Manifest.clear(player);return nil,reason or "catalog_access_changed" end
+	local payload,blocks=nil,{}
+	for i=1,#nodeIds do
+		local block,why=prepareBlock(player,meta,nodeIds[i],token,nil,sessions[player])
+		if not block then return nil,why end
+		payload=payload or block
+		blocks[i]={nodeRecord=block.nodeRecord,nodeSnapshot=block.nodeSnapshot}
+	end
+	payload.nodeRecord=nil;payload.nodeSnapshot=nil;payload.nodeDelta=nil;payload.nodeBlocks=blocks
 	return payload
 end
 

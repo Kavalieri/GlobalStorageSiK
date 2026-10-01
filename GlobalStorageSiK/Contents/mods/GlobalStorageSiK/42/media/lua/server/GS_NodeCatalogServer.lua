@@ -18,7 +18,7 @@ function Server.opened(player,session)
 	if session.replicaEpoch then
 		local profile=Profile.snapshot(session.initialLoadProfile)
 		session.initialLoadProfile=profile.id;session.initialLoadProfileHash=profile.hash
-		states[player]={session=session,started=now()}
+		states[player]={session=session,profile=profile,started=now()}
 	end
 end
 function Server.active(player) return states[player]~=nil end
@@ -131,8 +131,19 @@ function Server.dispatch(command,player,args)
 		-- descriptor and serve it only after the previous frame job is released.
 		if args.nodeBaseRevision~=nil
 			and not Protocol.integer(args.nodeBaseRevision,0,9007199254740991) then return true end
+		local nodeIds
+		if args.nodeCount~=nil then
+			if not Protocol.integer(args.nodeCount,1,state.profile.groupCredits) or args.nodeBaseRevision~=nil then return true end
+			nodeIds={args.nodeId};local seen={[args.nodeId]=true}
+			for i=2,args.nodeCount do
+				local id=args["nodeId"..i]
+				if not Protocol.id(id) or seen[id] then return true end
+				seen[id]=true;nodeIds[i]=id
+			end
+			if state.groupFallback then nodeIds={args.nodeId} end
+		end
 		if not state.request then state.request={nodeId=args.nodeId,token=args.manifestToken,
-			baseRevision=args.nodeBaseRevision,queuedAt=now()};Metrics.count(summary(player),"requests") end
+			nodeIds=nodeIds,baseRevision=args.nodeBaseRevision,queuedAt=now()};Metrics.count(summary(player),"requests") end
 	elseif state.roundActive and state.manifest and args.manifestToken==state.manifest.manifestToken
 		and args.inventoryRevision==state.manifest.inventoryRevision then
 		state.ready={token=args.manifestToken,revision=args.inventoryRevision}
@@ -174,8 +185,9 @@ function Server.update()
 				local request=state.request;state.request=nil
 				local started=now()
 				Metrics.count(summary(player),"queueWaitMs",now()-(request.queuedAt or now()))
-				local payload,reason=Manifest.block(player,state.session,request.nodeId,
-					request.token,request.baseRevision)
+				local payload,reason
+				if request.nodeIds then payload,reason=Manifest.blocks(player,state.session,request.nodeIds,request.token)
+				else payload,reason=Manifest.block(player,state.session,request.nodeId,request.token,request.baseRevision) end
 				Metrics.work(summary(player),"prepare",now()-started)
 				if payload then
 					payload.catalogSource="node_block";state.lastPayload=payload
@@ -195,6 +207,11 @@ function Server.update()
 		context.failed(retired[i].player,retired[i].reason)
 		Server.clear(retired[i].player)
 	end
+end
+
+function Server.groupFallback(player)
+	local state=states[player]
+	if state then state.groupFallback=true end
 end
 
 function Server.initialLoadBusy()
@@ -218,5 +235,18 @@ function Server.oracleImage(player)
 			and Manifest.oracleCurrent(player,meta,meta.manifestToken)
 			and state.manifest.manifestToken==meta.manifestToken and state.manifest.inventoryRevision==meta.inventoryRevision
 	end
+end
+function Server.oracleStatus(player)
+	local state=states[player]
+	if not state then return {globalBusy=Server.initialLoadBusy()} end
+	local status={}
+	for key,value in pairs(state.session) do if type(value)~="table" then status[key]=value end end
+	for _,key in ipairs({"manifestToken","inventoryRevision","snapshotRevision","snapshotCertified","reconcilePending"}) do
+		status[key]=state.manifest and state.manifest[key]
+	end
+	status.roundActive=state.roundActive==true;status.requestPending=state.request~=nil
+	status.readyPending=state.ready~=nil;status.retryPending=state.retry==true;status.refreshPending=state.refreshPending==true
+	status.transportBusy=context.hasJob(player)==true;status.globalBusy=Server.initialLoadBusy()
+	return status
 end
 return Server

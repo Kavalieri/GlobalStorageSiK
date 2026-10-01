@@ -2,6 +2,7 @@
 local Codec = require "GS_CatalogCodec"
 local AccessPolicy = require "GS_ManifestProtocol"
 local Metrics=require "GS_InitialLoadMetrics"
+local Profile=require "GS_InitialLoadProfile"
 local Server = {}
 GlobalStorageSiK.CatalogServer = Server
 local sessions, jobs, order = {}, {}, {}
@@ -140,16 +141,20 @@ function Server.clear(player)
 end
 local function send(player, command, payload, job)
     local sizeStarted=job and job.profile and now()
-    local size,reason,chunkBytes,payloadBytes=Codec.frameSize(payload)
+    local size,reason,chunkBytes,payloadBytes
+    local limit=job and job.frameBytes or Codec.FRAME_BYTES
+    if command=="terminalCatalogChunk" and job and job.reuseSnapshots and job.chunkSizes and job.chunkSizes[payload.part] then
+        chunkBytes=job.chunkSizes[payload.part];size=job.envelopeBytes+chunkBytes-4;payloadBytes=size-Codec.COMMAND_BYTES
+    else size,reason,chunkBytes,payloadBytes=Codec.frameSize(payload) end
     if sizeStarted then recordWork(job,"size",sizeStarted) end
     if command=="terminalCatalogChunk" and diagnosticsEnabled() then
         log("frame",description(payload).." part="..tostring(payload.part).." total="..tostring(payload.total)
-            .." frameBytes="..tostring(size).." frameBudget="..tostring(Codec.FRAME_BYTES)
+            .." frameBytes="..tostring(size).." frameBudget="..tostring(limit)
             .." payloadBytes="..tostring(payloadBytes).." chunkBytes="..tostring(chunkBytes)
             .." overheadBytes="..tostring(size and chunkBytes and size-chunkBytes)
-            .." accepted="..tostring(size~=nil and size<=Codec.FRAME_BYTES))
+            .." accepted="..tostring(size~=nil and size<=limit))
     end
-    if not size or size>Codec.FRAME_BYTES then return false, reason or "catalog_budget" end
+    if not size or size>limit then return false, reason or "catalog_budget" end
     local sendStarted=job and job.profile and now()
     local summary=job and job.summary
     local retransmitting=job and job.resendParts~=nil
@@ -353,15 +358,15 @@ function Server.begin(player, confirmation)
 end
 -- Catalog rows are immutable Index outputs. Copy the small state envelope:
 -- configuration and zone metadata can otherwise mutate while encoding yields.
-local function copyMetadata(value, depth, active)
+local function copyMetadata(value, depth, active,retainBlocks)
     if type(value)~="table" then return value end
     if depth>Codec.MAX_DEPTH or active[value] then error("catalog_schema",0) end
     active[value]=true
     local result={}
     for key, child in pairs(value) do
         if depth==0 and (key=="items" or key=="changedRows" or key=="nodeSnapshot"
-            or key=="nodeDelta") then result[key]=child
-        else result[key]=copyMetadata(child,depth+1,active) end
+            or key=="nodeDelta" or (key=="nodeBlocks" and retainBlocks)) then result[key]=child
+        else result[key]=copyMetadata(child,depth+1,active,retainBlocks) end
     end
     active[value]=nil
     return result
@@ -380,7 +385,9 @@ local function queue(player, payload, rows, builder)
         counters.coalesced=counters.coalesced+1
         return false,"catalog_inflight"
     end
-    local copied, immutable=pcall(copyMetadata,payload,0,{})
+    local research=Profile.snapshot(session.initialLoadProfile or "control")
+    if not research then return false,"catalog_profile" end
+    local copied, immutable=pcall(copyMetadata,payload,0,{},research.reuseSnapshots)
     if not copied then failure(player,"catalog_schema",serial); return false end
     payload=immutable
     serial=serial+1
@@ -401,12 +408,13 @@ local function queue(player, payload, rows, builder)
     local overhead=Codec.frameSize(Codec.frame(envelope,{},1))
     if not overhead then failure(player,"catalog_budget",serial); return false end
     local encoder, reason
-    if not builder then encoder,reason=Codec.beginEncode(payload,Codec.FRAME_BYTES-overhead+4) end
+    if not builder then encoder,reason=Codec.beginEncode(payload,research.frameBytes-overhead+4,research.frameBytes) end
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         summary=session.summary,
-        frameBudget=Codec.FRAME_BYTES-overhead+4,bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
+        frameBudget=research.frameBytes-overhead+4,frameBytes=research.frameBytes,envelopeBytes=overhead,reuseSnapshots=research.reuseSnapshots,
+        bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
         confirmedRows=rows or payload.items or (session.confirmed and session.confirmed.rows)}
@@ -506,7 +514,7 @@ function Server.receipt(player,payload)
     end
     counters.completed=counters.completed+1
     Metrics.count(job.summary,"ackWaitMs",now()-(job.lastFrameAt or now()))
-    if job.payload.catalogNode then Metrics.count(job.summary,"nodeBodies") end
+    if job.payload.catalogNode then Metrics.count(job.summary,"nodeBodies",job.payload.nodeBlocks and #job.payload.nodeBlocks or 1) end
     if job.nodeTransfer then session.recoveryUsed=nil end
     log("completed",description(meta) .. " kind=" .. tostring(job.kind) .. " rows=" .. tostring(job.rows)
         .. " bytes=" .. tostring(job.wireBytes) .. " encodeMs=" .. tostring(job.encodeMs)
@@ -526,6 +534,18 @@ local function encodeStep(player,job,session)
     local tokens=state.tokenCount or (encoded and encoded.tokenCount) or 0
     local chunks=state.chunks or (encoded and encoded.chunks) or {}
     local reservation=math.max(4096,bytes*2+tokens*64+#chunks*128+(state.memoBytes or 0))
+    if (reason=="catalog_budget" or reservation+(session.baseBytes or 0)>PLAYER_BYTES or retainedBytes-job.bytes+reservation>GLOBAL_BYTES)
+        and job.payload.nodeBlocks and #job.payload.nodeBlocks>1 then
+        -- Retry one immutable block in the same acknowledged job. Future
+        -- requests in this opening remain single-block; no credit is dropped.
+        job.payload.nodeBlocks={job.payload.nodeBlocks[1]}
+        local encoder,why=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes)
+        if not encoder then failure(player,why,job.envelope.batchId);return end
+        job.encoder=encoder;job.lastProgressAt=now()
+        if context.groupFallback then context.groupFallback(player) end
+        log("node_group_fallback",description(job.envelope).." reason=budget")
+        return
+    end
     if reservation+(session.baseBytes or 0)>PLAYER_BYTES or retainedBytes-job.bytes+reservation>GLOBAL_BYTES then
         failure(player,"catalog_busy",job.envelope.batchId); return
     end
@@ -542,7 +562,7 @@ local function encodeStep(player,job,session)
         job.envelope.totalBytes=encoded.totalBytes
         job.envelope.tokenCount=encoded.tokenCount
         local framingStarted=job.profile and now()
-        job.framer,reason=Codec.beginFraming(encoded,job.envelope)
+        job.framer,reason=Codec.beginFraming(encoded,job.envelope,job.frameBytes)
         if framingStarted then recordWork(job,"frame",framingStarted) end
         if not job.framer then failure(player,reason,job.envelope.batchId);return end
         job.framingBaseBytes=job.bytes
@@ -567,6 +587,7 @@ local function framingStep(player,job,session)
     job.lastProgressAt=now()
     if done then
         job.chunks=framed.chunks
+        job.chunkSizes=framed.chunkSizes
         job.envelope.total=#framed.chunks
         job.envelope.totalBytes=framed.totalBytes
         job.wireBytes=framed.totalBytes
@@ -611,7 +632,7 @@ local function buildStep(player,job,session,budget,millis)
         local kind=job.payload.catalogDetail and "details" or job.payload.notModified and "notModified"
             or job.payload.catalogDelta and "delta" or "full"
         if kind~=job.kind then counters[job.kind]=counters[job.kind]-1;counters[kind]=counters[kind]+1;job.kind=kind end
-        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget)
+        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes)
         if not encoder then failure(player,reason,job.envelope.batchId); return used end
         job.encoder=encoder
         job.encodeStarted=now()

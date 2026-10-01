@@ -5,6 +5,13 @@ local definitions={
 	control={id="control",buildWork=256,hash="74c19fadb29e2b4dc67a6d5ab9abc4393c9d5eca7d143d457444628e1384e34a"},
 	drain1024={id="drain1024",buildWork=1024,hash="b467ce2ae6c883767a65b644b5dd6f34c8d9d39e178398a35fa8d6dfacaa001f"},
 	drain4096={id="drain4096",buildWork=4096,hash="162f4a66f08b2fbddc411da166a94b6c06be7eaab8ce821afc068fe151cdc38c"},
+	group2={id="group2",buildWork=1024,groupCredits=2,frameBytes=24000,hash="dfad15b35ca28ae7bafcf7114f8e4d13cc6a0cd8093de83113d85d6481ada21e"},
+	group4={id="group4",buildWork=1024,groupCredits=4,frameBytes=24000,hash="1936fedec0c88b97ca6eef592a2e5a2f553dd67cae86b59a3e4d9ea918010393"},
+	frame32={id="frame32",buildWork=1024,frameBytes=32000,hash="9a3a481263e56477885f2163e3125579b13b9be77fb76c2f6f7f954a5db1e935"},
+	frame48={id="frame48",buildWork=1024,frameBytes=48000,hash="4c50e28120ee13e1463ace4a58edbef0903f2ca55b9691c2ae5ab496da2cd0dc"},
+	reuse4={id="reuse4",buildWork=1024,groupCredits=4,reuseSnapshots=true,hash="99a979e43391b62197d246d73f1c03464ce5f36dbb03c5d3e0af8dd8eb8a804e"},
+	combined2={id="combined2",buildWork=1024,groupCredits=2,frameBytes=32000,reuseSnapshots=true,hash="5f4cbacac8fbfe29f3c81fb14df8d2cd18e1826544f9bfce7bd79ac9d9c99da5"},
+	combined4={id="combined4",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,hash="3a60a53d053a3b0d02162ebb2bcf9db4eb43bcab520e0352dfbed78b0cea61bd"},
 }
 local selected="control"
 function Profile.select(id)
@@ -22,6 +29,7 @@ function Profile.snapshot(id)
 	end
 	local value=definitions[id]
 	if not value then return nil end
-	return {id=value.id,buildWork=value.buildWork,hash=value.hash}
+	return {id=value.id,buildWork=value.buildWork,hash=value.hash,groupCredits=value.groupCredits or 1,
+		frameBytes=value.frameBytes or 24000,reuseSnapshots=value.reuseSnapshots==true}
 end
 return Profile

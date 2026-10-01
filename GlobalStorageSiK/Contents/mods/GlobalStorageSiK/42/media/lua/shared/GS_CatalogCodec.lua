@@ -5,6 +5,7 @@ GlobalStorageSiK = GlobalStorageSiK or {}
 local Codec = {}
 GlobalStorageSiK.CatalogCodec = Codec
 Codec.FRAME_BYTES = 24000
+Codec.MAX_RESEARCH_FRAME_BYTES = 48000
 Codec.MAX_BATCH_BYTES = 16 * 1024 * 1024
 Codec.MAX_TOKENS = 500000
 Codec.MAX_CHUNKS = 4096
@@ -117,24 +118,26 @@ function Codec.frame(envelope,data,part)
 	frame.data,frame.part=data,part
 	return frame
 end
-function Codec.beginFraming(encoded,envelope)
+function Codec.beginFraming(encoded,envelope,frameBytes)
+	frameBytes=frameBytes or Codec.FRAME_BYTES
+	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES) then return nil,"catalog_budget" end
 	local empty=Codec.frame(envelope,{},1)
 	local bytes,reason=Codec.frameSize(empty)
 	if not bytes then return nil,reason end
-	local budget=Codec.FRAME_BYTES-bytes+4
+	local budget=frameBytes-bytes+4
 	if budget<=4 then return nil,"catalog_frame_envelope" end
 	local fits=encoded.chunkSizes and #encoded.chunkSizes==#encoded.chunks
 	if fits then
 		for i=1,#encoded.chunkSizes do if encoded.chunkSizes[i]>budget then fits=false;break end end
 	end
-	if fits then return {done=true,source={},chunks=encoded.chunks,totalBytes=encoded.totalBytes,
+	if fits then return {done=true,source={},chunks=encoded.chunks,chunkSizes=encoded.chunkSizes,totalBytes=encoded.totalBytes,
 		tokenCount=encoded.tokenCount,work=0,budget=budget} end
 	local chunk={}
-	return {source=encoded.chunks,sourcePart=1,sourceAt=1,chunks={chunk},chunk=chunk,
+	return {source=encoded.chunks,sourcePart=1,sourceAt=1,chunks={chunk},chunkSizes={4},chunk=chunk,
 		chunkBytes=4,totalBytes=4,tokenCount=0,budget=budget,work=0}
 end
 function Codec.stepFraming(state,maxWork)
-	if state.done then return {chunks=state.chunks,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
+	if state.done then return {chunks=state.chunks,chunkSizes=state.chunkSizes,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
 	local ok,reason=pcall(function()
 		for i=1,maxWork do
 			local source=state.source[state.sourcePart]
@@ -151,6 +154,7 @@ function Codec.stepFraming(state,maxWork)
 				end
 				state.chunk[#state.chunk+1]=token
 				state.chunkBytes=state.chunkBytes+cost;state.totalBytes=state.totalBytes+cost
+				state.chunkSizes[#state.chunks]=state.chunkBytes
 				state.tokenCount=state.tokenCount+1;state.sourceAt=state.sourceAt+1
 				if state.totalBytes>Codec.MAX_BATCH_BYTES then error("catalog_budget",0) end
 			end
@@ -158,7 +162,7 @@ function Codec.stepFraming(state,maxWork)
 		end
 	end)
 	if not ok then return nil,reason,true end
-	if state.done then return {chunks=state.chunks,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
+	if state.done then return {chunks=state.chunks,chunkSizes=state.chunkSizes,totalBytes=state.totalBytes,tokenCount=state.tokenCount},nil,true end
 	return nil,nil,false
 end
 
@@ -265,8 +269,10 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget)
-	if not integer(budget, 4200, Codec.FRAME_BYTES) then return nil, "catalog_budget" end
+function Codec.beginEncode(value, budget,frameBytes)
+	frameBytes=frameBytes or Codec.FRAME_BYTES
+	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
+		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
 	local chunk = {}
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
@@ -346,7 +352,7 @@ local function validationAction(state)
 	local key, token = check.iterator(check.subject, check.key)
 	if key == nil then
 		if check.count ~= check.maximum then error("catalog_schema", 0) end
-		if check.bytes > Codec.FRAME_BYTES then error("catalog_budget", 0) end
+		if check.bytes > state.frameBytes then error("catalog_budget", 0) end
 		state.totalBytes = state.totalBytes + check.bytes
 		state.validatedTokens = state.validatedTokens + check.count
 		if state.totalBytes > Codec.MAX_BATCH_BYTES or state.validatedTokens > state.expected
@@ -475,12 +481,14 @@ local function parseAction(state)
 	else error("catalog_schema", 0) end
 end
 
-function Codec.beginDecode(chunks, expected)
+function Codec.beginDecode(chunks, expected,frameBytes)
+	frameBytes=frameBytes or Codec.FRAME_BYTES
+	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES) then return nil,"catalog_budget" end
 	if type(chunks) ~= "table" or not integer(expected, 1, Codec.MAX_TOKENS) then
 		return nil, "catalog_schema"
 	end
 	local iterator, subject, key = pairs(chunks)
-	return { mode = "decode", chunks = chunks, expected = expected, phase = "outer",
+	return { mode = "decode", chunks = chunks, expected = expected, phase = "outer",frameBytes=frameBytes,
 		outerIterator = iterator, outerSubject = subject, outerKey = key,
 		outerCount = 0, outerMaximum = 0, lengths = {}, validatedTokens = 0,
 		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0 }

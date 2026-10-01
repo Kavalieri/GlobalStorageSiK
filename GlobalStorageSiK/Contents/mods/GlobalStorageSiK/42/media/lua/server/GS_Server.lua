@@ -5876,6 +5876,7 @@ GlobalStorageSiK.CatalogServer.configure({
 	nodeRecover=GlobalStorageSiK.NodeCatalogServer.recover,
 	rejectNode=GlobalStorageSiK.NodeCatalogServer.reject,
 	received=GlobalStorageSiK.NodeCatalogServer.received,
+	groupFallback=GlobalStorageSiK.NodeCatalogServer.groupFallback,
 	send=gsSendServerCommand,
 	visit=forEachOnlinePlayer,
 	abort=function(player)
