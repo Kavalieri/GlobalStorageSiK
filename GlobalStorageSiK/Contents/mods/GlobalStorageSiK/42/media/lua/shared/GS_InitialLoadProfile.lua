@@ -12,6 +12,8 @@ local definitions={
 	reuse4={id="reuse4",buildWork=1024,groupCredits=4,reuseSnapshots=true,hash="99a979e43391b62197d246d73f1c03464ce5f36dbb03c5d3e0af8dd8eb8a804e"},
 	combined2={id="combined2",buildWork=1024,groupCredits=2,frameBytes=32000,reuseSnapshots=true,hash="5f4cbacac8fbfe29f3c81fb14df8d2cd18e1826544f9bfce7bd79ac9d9c99da5"},
 	combined4={id="combined4",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,hash="3a60a53d053a3b0d02162ebb2bcf9db4eb43bcab520e0352dfbed78b0cea61bd"},
+	wire2={id="wire2",buildWork=1024,groupCredits=2,frameBytes=32000,reuseSnapshots=true,optimizedCodec=true,hash="3e6266527e7bee08aeb9359bd6081c1856fbdca2dd5ea856df9a178a883cd9a1"},
+	wire4={id="wire4",buildWork=1024,groupCredits=4,frameBytes=32000,reuseSnapshots=true,optimizedCodec=true,hash="a07b26355b4e7eb98f374f941852a6006b97ac920f37f7443b92bdacc54a41f1"},
 }
 local selected="control"
 function Profile.select(id)
@@ -30,6 +32,6 @@ function Profile.snapshot(id)
 	local value=definitions[id]
 	if not value then return nil end
 	return {id=value.id,buildWork=value.buildWork,hash=value.hash,groupCredits=value.groupCredits or 1,
-		frameBytes=value.frameBytes or 24000,reuseSnapshots=value.reuseSnapshots==true}
+		frameBytes=value.frameBytes or 24000,reuseSnapshots=value.reuseSnapshots==true,optimizedCodec=value.optimizedCodec==true}
 end
 return Profile

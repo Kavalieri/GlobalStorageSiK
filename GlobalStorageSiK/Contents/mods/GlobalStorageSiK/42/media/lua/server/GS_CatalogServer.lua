@@ -408,12 +408,12 @@ local function queue(player, payload, rows, builder)
     local overhead=Codec.frameSize(Codec.frame(envelope,{},1))
     if not overhead then failure(player,"catalog_budget",serial); return false end
     local encoder, reason
-    if not builder then encoder,reason=Codec.beginEncode(payload,research.frameBytes-overhead+4,research.frameBytes) end
+    if not builder then encoder,reason=Codec.beginEncode(payload,research.frameBytes-overhead+4,research.frameBytes,research.optimizedCodec) end
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         summary=session.summary,
-        frameBudget=research.frameBytes-overhead+4,frameBytes=research.frameBytes,envelopeBytes=overhead,reuseSnapshots=research.reuseSnapshots,
+        frameBudget=research.frameBytes-overhead+4,frameBytes=research.frameBytes,envelopeBytes=overhead,reuseSnapshots=research.reuseSnapshots,optimizedCodec=research.optimizedCodec,
         bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
@@ -524,9 +524,9 @@ function Server.receipt(player,payload)
     release(player)
     if context.received then context.received(player,job.payload) end
 end
-local function encodeStep(player,job,session)
+local function encodeStep(player,job,session,quantum,deadline)
     local started=now()
-    local encoded,reason,done=Codec.stepEncode(job.encoder,1024)
+    local encoded,reason,done=Codec.stepEncode(job.encoder,quantum or 1024,deadline)
     job.encodeMs=job.encodeMs+math.max(0,now()-started)
     recordWork(job,"encode",started)
     local state=job.encoder
@@ -539,7 +539,7 @@ local function encodeStep(player,job,session)
         -- Retry one immutable block in the same acknowledged job. Future
         -- requests in this opening remain single-block; no credit is dropped.
         job.payload.nodeBlocks={job.payload.nodeBlocks[1]}
-        local encoder,why=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes)
+        local encoder,why=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec)
         if not encoder then failure(player,why,job.envelope.batchId);return end
         job.encoder=encoder;job.lastProgressAt=now()
         if context.groupFallback then context.groupFallback(player) end
@@ -572,9 +572,9 @@ local function encodeStep(player,job,session)
             .. " elapsedMs=" .. tostring(now()-job.startedAt))
     end
 end
-local function framingStep(player,job,session)
+local function framingStep(player,job,session,quantum)
     local framingStarted=job.profile and now()
-    local framed,reason,done=Codec.stepFraming(job.framer,1024)
+    local framed,reason,done=Codec.stepFraming(job.framer,quantum or 1024)
     if framingStarted then recordWork(job,"frame",framingStarted) end
     if reason then failure(player,reason,job.envelope.batchId);return end
     -- Repartitioning temporarily retains both source and destination arrays.
@@ -632,7 +632,7 @@ local function buildStep(player,job,session,budget,millis)
         local kind=job.payload.catalogDetail and "details" or job.payload.notModified and "notModified"
             or job.payload.catalogDelta and "delta" or "full"
         if kind~=job.kind then counters[job.kind]=counters[job.kind]-1;counters[kind]=counters[kind]+1;job.kind=kind end
-        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes)
+        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec)
         if not encoder then failure(player,reason,job.envelope.batchId); return used end
         job.encoder=encoder
         job.encodeStarted=now()
@@ -682,13 +682,18 @@ function Server.update()
                     buildWork=buildWork+buildStep(player,job,session,4096-buildWork,slice)
                 end
             elseif job.framer then
-                if work<8192 then framingStep(player,job,session);work=work+1024 end
+                if work<8192 then
+                    local quantum=math.min(1024,8192-work)
+                    framingStep(player,job,session,quantum);work=work+quantum
+                end
             elseif job.encoder then
                 if work<8192 then
                     local encodeSlice=math.max(1,math.min(4-computeMs,4-(now()-timestamp)))
                     repeat
-                        encodeStep(player,job,session)
-                        work=work+1024
+                        local quantum=math.min(job.optimizedCodec and 128 or 1024,8192-work)
+                        local encoder=job.encoder
+                        encodeStep(player,job,session,quantum,job.optimizedCodec and timestamp+4 or nil)
+                        work=work+(job.optimizedCodec and encoder.workLastStep or quantum)
                     until work>=8192 or jobs[player]~=job or not job.encoder or now()-workStarted>=encodeSlice
                 end
             elseif job.resendParts and job.resendCursor<=#job.resendParts then

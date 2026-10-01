@@ -211,10 +211,25 @@ local function encodeAction(state)
 		elseif kind == "table" then
 			if frame.depth > Codec.MAX_DEPTH or state.active[frame.value] then error("catalog_schema", 0) end
 			state.active[frame.value] = true
-			frame.kind = "table"
+			frame.kind = state.optimized and "arrayScan" or "table"
 			frame.iterator, frame.subject, frame.key = pairs(frame.value)
-			emit(state, "u", 1)
+			frame.count,frame.maximum=0,0
+			if not state.optimized then emit(state, "u", 1) end
 		else error("catalog_schema", 0) end
+	elseif frame.kind == "arrayScan" then
+		-- Detection is incremental and charged to the same global work slice.
+		local key=frame.iterator(frame.subject,frame.key)
+		if key==nil then
+			if frame.count>=3 and frame.count==frame.maximum then
+				frame.kind,frame.index="array",0;emit(state,"a",1);emit(state,frame.count)
+			else frame.kind="table";frame.iterator,frame.subject,frame.key=pairs(frame.value);emit(state,"u",1) end
+		elseif not integer(key,1,Codec.MAX_TOKENS) then
+			frame.kind="table";frame.iterator,frame.subject,frame.key=pairs(frame.value);emit(state,"u",1)
+		else frame.key=key;frame.count=frame.count+1;frame.maximum=math.max(frame.maximum,key) end
+	elseif frame.kind == "array" then
+		frame.index=frame.index+1
+		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
+		else pushValue(state,frame.value[frame.index],frame.depth+1) end
 	elseif frame.kind == "table" then
 		local key, value = frame.iterator(frame.subject, frame.key)
 		if key == nil then
@@ -225,7 +240,11 @@ local function encodeAction(state)
 			if type(key) ~= "string" and not finite(key) then error("catalog_schema", 0) end
 			frame.key = key
 			pushValue(state, value, frame.depth + 1)
-			pushValue(state, key, frame.depth + 1)
+			-- Keys are scalar. Avoid a temporary stack frame when already validated.
+			if state.optimized and finite(key) then emit(state,key)
+			elseif state.optimized and state.memo[key] then
+				local cached=state.memo[key];emit(state,cached.token,cached.bytes+1)
+			else pushValue(state, key, frame.depth + 1) end
 		end
 	elseif frame.kind == "string" then
 		if frame.phase == "scan" then
@@ -269,26 +288,32 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes)
+function Codec.beginEncode(value, budget,frameBytes,optimized)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
 	local chunk = {}
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
-		memo={},memoCount=0,memoBytes=0 }
+		memo={},memoCount=0,memoBytes=0,optimized=optimized==true }
 	pushValue(state, value, 0)
 	return state
 end
 
-function Codec.stepEncode(state, maxWork)
+function Codec.stepEncode(state, maxWork,deadline)
 	if type(state) ~= "table" or state.mode ~= "encode"
 		or not integer(maxWork, 1, Codec.MAX_TOKENS) then return nil, "catalog_schema", true end
 	if state.error then return nil, state.error, true end
 	if state.result then return state.result, nil, true end
 	local ok, reason = pcall(function()
 		local work = 0
-		while work < maxWork and not encodeAction(state) do work = work + 1 end
+		if state.optimized then
+			repeat
+				work=work+1
+				if encodeAction(state) then break end
+			until work>=maxWork or (deadline and work%32==0 and getTimestampMs and getTimestampMs()>=deadline)
+		else while work < maxWork and not encodeAction(state) do work = work + 1 end end
+		state.workLastStep=work
 		if #state.stack == 0 then
 			state.result = { chunks = state.chunks, totalBytes = state.totalBytes,
 				tokenCount = state.tokenCount,chunkSizes=state.chunkSizes }
@@ -338,9 +363,12 @@ local function validationAction(state)
 	if state.scanToken then
 		local scan = state.scanToken
 		if scan.at <= #scan.value then
-			local following, cost = codepoint(scan.value, scan.at)
-			scan.at, scan.bytes = following, scan.bytes + cost
-			if scan.bytes > 32767 then error("catalog_string_size", 0) end
+			for i=1,(state.optimized and 32 or 1) do
+				if scan.at>#scan.value then break end
+				local following, cost = codepoint(scan.value, scan.at)
+				scan.at, scan.bytes = following, scan.bytes + cost
+				if scan.bytes > 32767 then error("catalog_string_size", 0) end
+			end
 		else
 			state.chunkValidation.bytes = state.chunkValidation.bytes + 12 + scan.bytes
 			rememberString(state,scan.value,scan.bytes)
@@ -395,12 +423,17 @@ local function acceptValue(state, value)
 			state.result = value
 			return
 		end
-		if frame.expectKey then
+		if frame.array then
+			frame.index=frame.index+1;frame.value[frame.index]=value;frame.remaining=frame.remaining-1
+			if frame.remaining==0 then state.stack[#state.stack]=nil;value=frame.value
+			else return end
+		elseif frame.expectKey then
 			if type(value) ~= "string" and not finite(value) then error("catalog_schema", 0) end
 			if frame.value[value] ~= nil then error("catalog_schema", 0) end
 			frame.key, frame.expectKey = value, false
 			return
 		end
+		if not frame.array then
 		frame.value[frame.key] = value
 		frame.key, frame.expectKey = nil, true
 		if frame.remaining then
@@ -410,12 +443,13 @@ local function acceptValue(state, value)
 				value = frame.value
 			else return end
 		else return end
+		end
 	end
 end
 
-local function startTable(state, remaining)
+local function startTable(state, remaining,array)
 	if #state.stack + 1 > Codec.MAX_DEPTH + 1 then error("catalog_schema", 0) end
-	local frame = { value = {}, expectKey = true, remaining = remaining }
+	local frame = { value = {}, expectKey = true, remaining = remaining,array=array,index=0 }
 	if remaining == 0 then acceptValue(state, frame.value)
 	else state.stack[#state.stack + 1] = frame end
 end
@@ -453,9 +487,9 @@ local function parseAction(state)
 		elseif mode == "boolean" then
 			if type(token) ~= "boolean" then error("catalog_schema", 0) end
 			acceptValue(state, token)
-		elseif mode == "table" then
+		elseif mode == "table" or mode == "array" then
 			if not integer(token, 0, Codec.MAX_TOKENS) then error("catalog_schema", 0) end
-			startTable(state, token)
+			startTable(state, token,mode=="array")
 		elseif mode == "string" then
 			if not integer(token, 1, Codec.MAX_TOKENS) then error("catalog_schema", 0) end
 			state.stringMode = { remaining = token, parts = {} }
@@ -470,6 +504,7 @@ local function parseAction(state)
 	elseif token == "n" then state.rawMode = "number"
 	elseif token == "b" then state.rawMode = "boolean"
 	elseif token == "t" then state.rawMode = "table"
+	elseif token == "a" and state.optimized then state.rawMode = "array"
 	elseif token == "s" then state.rawMode = "string"
 	elseif token == "S" then state.stringMode = { parts = {} }
 	elseif token == "u" then startTable(state, nil)
@@ -481,7 +516,7 @@ local function parseAction(state)
 	else error("catalog_schema", 0) end
 end
 
-function Codec.beginDecode(chunks, expected,frameBytes)
+function Codec.beginDecode(chunks, expected,frameBytes,optimized)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES) then return nil,"catalog_budget" end
 	if type(chunks) ~= "table" or not integer(expected, 1, Codec.MAX_TOKENS) then
@@ -491,10 +526,10 @@ function Codec.beginDecode(chunks, expected,frameBytes)
 	return { mode = "decode", chunks = chunks, expected = expected, phase = "outer",frameBytes=frameBytes,
 		outerIterator = iterator, outerSubject = subject, outerKey = key,
 		outerCount = 0, outerMaximum = 0, lengths = {}, validatedTokens = 0,
-		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0 }
+		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0,optimized=optimized==true }
 end
 
-function Codec.stepDecode(state, maxWork)
+function Codec.stepDecode(state, maxWork,deadline)
 	if type(state) ~= "table" or state.mode ~= "decode"
 		or not integer(maxWork, 1, Codec.MAX_TOKENS) then return nil, "catalog_schema", true end
 	if state.error then return nil, state.error, true end
@@ -504,7 +539,9 @@ function Codec.stepDecode(state, maxWork)
 		while work < maxWork and not state.done do
 			if state.phase == "parse" then parseAction(state) else validationAction(state) end
 			work = work + 1
+			if deadline and work%32==0 and getTimestampMs and getTimestampMs()>=deadline then break end
 		end
+		state.workLastStep=work
 	end)
 	if not ok then state.error = reason; return nil, reason, true end
 	if state.done then return state.result, nil, true end

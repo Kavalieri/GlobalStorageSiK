@@ -152,7 +152,7 @@ local function applyReady(playerNum, slot)
 	-- watcher performs bounded codec work; no callback decodes a whole catalog.
 	if not batch.decoded then
 		if not batch.decoder then
-			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes)
+			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes,slot.profile and slot.profile.optimizedCodec)
 			if not decoder then fail(playerNum, reason); return end
 			batch.decoder, batch.decodeStarted = decoder, now()
 			if not batch.reassembled then
@@ -240,7 +240,7 @@ function Client.ack(payload)
 	end
 	if not allowed(payload,payload.playerNum) then return end
 	local profile=Profile.snapshot(payload.initialLoadProfile or "control")
-	if not profile or (payload.initialLoadProfileHash and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
+	if not profile or ((profile.optimizedCodec or payload.initialLoadProfileHash) and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
 	local confirmed,accepted,reason=pcall(context.confirm,payload)
 	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
 	if accepted == false then
@@ -470,7 +470,8 @@ function Client.update(timestamp)
 						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
 							and work < 8192 and (not stepped or now() - started < 4) do
 							local decodeStarted=batch.profile and now()
-							local value, reason, done = Codec.stepDecode(batch.decoder, 1024)
+							local quantum=math.min(slot.profile and slot.profile.optimizedCodec and 128 or 1024,8192-work)
+							local value, reason, done = Codec.stepDecode(batch.decoder, quantum,slot.profile and slot.profile.optimizedCodec and started+4 or nil)
 							Metrics.work(slot.summary,"decode",decodeStarted and now()-decodeStarted or 0)
 							Metrics.count(slot.summary,"decodeSteps")
 							if decodeStarted then
@@ -480,7 +481,7 @@ function Client.update(timestamp)
 								batch.profile.steps=batch.profile.steps+1
 							end
 							stepped = true
-							work = work + 1024
+							work = work + (slot.profile and slot.profile.optimizedCodec and batch.decoder and batch.decoder.workLastStep or quantum)
 							if reason then fail(playerNum, reason); break end
 							batch.progress = timestamp
 							if done then

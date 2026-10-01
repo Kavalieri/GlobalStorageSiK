@@ -109,7 +109,7 @@ function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
 	local profile=Profile.snapshot(ack.initialLoadProfile or "control")
 	if not profile then return false,"manifest_protocol" end
-	if ack.initialLoadProfileHash~=nil and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
+	if (profile.optimizedCodec or ack.initialLoadProfileHash~=nil) and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
 	if not currentOwner(ack.playerNum) then return false,"catalog_access_changed" end
 	Client.clear(ack.playerNum,false)
 	if ack.topologyTransition then
