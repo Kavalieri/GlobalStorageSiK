@@ -2727,6 +2727,24 @@ local function cloneCatalogRows(rows)
 end
 GlobalStorageSiK.TerminalItems.copyRowsForPresentation = cloneCatalogRows
 
+-- Native category/search filters only select rows. RecordedMedia localization
+-- is their sole mutation: isolate those rows before filtering, then the model
+-- still takes its complete private copy for overlays and visual fields.
+function GlobalStorageSiK.TerminalItems.copyRowsForFiltering(rows)
+	local result={}
+	for index=1,#(rows or {}) do
+		local row=rows[index]
+		local mutable=tonumber(row.mediaIndex)~=nil
+		if not mutable then
+			for _,variant in ipairs(row.variantSummary or {}) do
+				if tonumber(variant.mediaIndex)~=nil then mutable=true;break end
+			end
+		end
+		result[index]=mutable and cloneCatalogRow(row) or row
+	end
+	return result
+end
+
 local function presentationBefore(left, right, panel, terminal)
 	local av = sortKeyValue(left, panel.itemsSortKey, terminal)
 	local bv = sortKeyValue(right, panel.itemsSortKey, terminal)

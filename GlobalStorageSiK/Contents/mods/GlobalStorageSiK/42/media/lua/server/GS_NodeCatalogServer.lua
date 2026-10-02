@@ -82,6 +82,14 @@ function Server.queueState(player,payload)
 	manifest.viewStamp=Protocol.metadataSignature({classification=manifest.classificationEpoch,
 		routing=manifest.routingRevision,categories=metadata.categories,configEpoch=metadata.configEpoch})
 	if not manifest.viewStamp then return false,"manifest_metadata_budget" end
+	if state.profile.compactTables then
+		local token,view=Manifest.stamps(player,signature,manifest.viewStamp)
+		if not token then return false,view end
+		manifest.metadataToken=token;manifest.viewStamp=view
+		if manifest.manifestNotModified and state.knownMetadataToken==token then
+			manifest.terminalMetadata=nil;manifest.metadataNotModified=true
+		end
+	end
 	manifest.catalogSource=manifest.manifestNotModified and "manifest_not_modified" or "node_manifest"
 	manifest.snapshotRevision=payload.snapshotRevision
 	manifest.snapshotCertified=payload.snapshotCertified
@@ -133,11 +141,13 @@ function Server.dispatch(command,player,args)
 	if state.rejected then return true end
 	if command=="terminalManifestRequest" then
 		if args.knownManifestToken~=nil and not Protocol.id(args.knownManifestToken) then return true end
+		if args.knownMetadataToken~=nil and not Protocol.id(args.knownMetadataToken) then return true end
 		if args.resumeManifestToken~=nil and not Protocol.id(args.resumeManifestToken) then return true end
 		-- Replica recovery counts validated client intents, once here. A server
 		-- error and its synchronous response must not count as two recoveries.
 		if args.replicaRecovery==true then Metrics.count(summary(player),"recoveries") end
 		state.negotiated=true;state.knownToken=args.knownManifestToken;state.resumeToken=args.resumeManifestToken
+		state.knownMetadataToken=args.knownMetadataToken
 		refresh(player,state)
 	elseif command=="terminalNodeRequest" then
 		if not state.negotiated or not Protocol.id(args.nodeId) or not Protocol.id(args.manifestToken) then return true end
@@ -186,6 +196,7 @@ function Server.update()
 				local accepted=context.completed(player,state.ready.revision,state.session.catalogScope)
 				if accepted~=false and states[player]==state then
 					state.knownToken=state.ready.token;state.ready=nil;state.retries=0
+					state.knownMetadataToken=state.manifest.metadataToken
 					state.resumeToken=nil
 					state.roundActive=nil;state.request=nil
 					state.responseRequired=nil

@@ -1,5 +1,7 @@
 -- Private terminal transport codec. Values stay native (including doubles).
 -- Compact tokens: native number/boolean, ":text", u table e, S fragments e.
+-- Exact final7 negotiation additionally permits R/r schemas, dense arrays,
+-- !id:text definitions and @id references, local to one bounded batch.
 -- Decoder also accepts the 1.5.3 legacy n/b/s/t token format.
 GlobalStorageSiK = GlobalStorageSiK or {}
 local Codec = {}
@@ -13,6 +15,17 @@ Codec.MAX_DEPTH = 32
 local PART_BYTES = 4096
 local UTF16 = #"é" == 1
 Codec.STRING_CACHE_BYTES = 256 * 1024
+Codec.SCHEMA_CACHE_BYTES = 64 * 1024
+Codec.TEXT_CACHE_BYTES = 256 * 1024
+
+-- Count implicit keys as well as wire tokens. Compact records must not turn a
+-- small wire body into an unaccounted replica allocation.
+local function expand(state, count)
+	local total=(state.expandedKeys or 0)+count
+	if total+(state.expected or state.tokenCount)>Codec.MAX_TOKENS then error("catalog_budget",0) end
+	if state.reserveExpanded and not state.reserveExpanded(total) then error("catalog_budget",0) end
+	state.expandedKeys=total
+end
 
 local function rememberString(state,value,bytes,token)
 	local cost=160+#value*4
@@ -182,7 +195,7 @@ local function emit(state, token, knownBytes)
 	state.chunkSizes[#state.chunks]=state.chunkBytes
 	state.totalBytes = state.totalBytes + cost
 	state.tokenCount = state.tokenCount + 1
-	if state.totalBytes > Codec.MAX_BATCH_BYTES or state.tokenCount > Codec.MAX_TOKENS then
+	if state.totalBytes > Codec.MAX_BATCH_BYTES or state.tokenCount+(state.expandedKeys or 0) > Codec.MAX_TOKENS then
 		error("catalog_budget", 0)
 	end
 end
@@ -201,8 +214,11 @@ local function encodeAction(state)
 		elseif kind == "boolean" then
 			emit(state, frame.value); state.stack[#state.stack] = nil
 		elseif kind == "string" then
+			local textId=state.compactTables and state.texts[frame.value]
 			local cached=state.memo[frame.value]
-			if cached then
+			if textId then
+				emit(state,"@"..tostring(textId));state.stack[#state.stack]=nil
+			elseif cached then
 				emit(state,cached.token,cached.bytes+1);state.stack[#state.stack]=nil
 			else
 				frame.kind, frame.at, frame.startAt, frame.bytes = "string", 1, 1, 0
@@ -211,11 +227,51 @@ local function encodeAction(state)
 		elseif kind == "table" then
 			if frame.depth > Codec.MAX_DEPTH or state.active[frame.value] then error("catalog_schema", 0) end
 			state.active[frame.value] = true
-			frame.kind = state.optimized and "arrayScan" or "table"
+			frame.kind = state.compactTables and "shapeScan" or state.optimized and "arrayScan" or "table"
 			frame.iterator, frame.subject, frame.key = pairs(frame.value)
 			frame.count,frame.maximum=0,0
-			if not state.optimized then emit(state, "u", 1) end
+			frame.keys,frame.keyBytes,frame.dense,frame.record={},0,true,true
+			if not state.optimized and not state.compactTables then emit(state, "u", 1) end
 		else error("catalog_schema", 0) end
+	elseif frame.kind == "shapeScan" then
+		local key=frame.iterator(frame.subject,frame.key)
+		if key~=nil then
+			frame.key=key;frame.count=frame.count+1
+			if integer(key,1,Codec.MAX_TOKENS) then frame.maximum=math.max(frame.maximum,key)
+			else frame.dense=false end
+			if type(key)=="string" and #key<=256 and frame.count<=128 then
+				frame.keys[#frame.keys+1]=key;frame.keyBytes=frame.keyBytes+#key*4+160
+			else frame.record=false end
+			if not frame.record and not frame.dense then
+				frame.kind="table";frame.iterator,frame.subject,frame.key=pairs(frame.value);emit(state,"u",1)
+			end
+		elseif frame.dense and frame.count>=3 and frame.count==frame.maximum then
+			expand(state,frame.count);frame.kind,frame.index="array",0;emit(state,"a",1);emit(state,frame.count)
+		elseif frame.record and frame.count>=2 then
+			-- At most 128 short keys; the inventory traversal itself stays sliced.
+			table.sort(frame.keys)
+			local parts={}
+			for i=1,#frame.keys do parts[i]=tostring(#frame.keys[i])..":"..frame.keys[i] end
+			local signature=table.concat(parts)
+			local schema=state.schemas[signature]
+			if not schema and state.schemaCount<128 and state.schemaBytes+frame.keyBytes+#signature*4<=Codec.SCHEMA_CACHE_BYTES then
+				state.schemaCount=state.schemaCount+1
+				schema={id=state.schemaCount,keys=frame.keys};state.schemas[signature]=schema
+				state.schemaBytes=state.schemaBytes+frame.keyBytes+#signature*4
+				frame.kind,frame.index="schemaKeys",0
+				emit(state,"R",1);emit(state,schema.id);emit(state,frame.count)
+			elseif schema then frame.kind,frame.index="record",0;emit(state,"r",1);emit(state,schema.id)
+			else frame.kind="table";frame.iterator,frame.subject,frame.key=pairs(frame.value);emit(state,"u",1) end
+			if schema then frame.keys=schema.keys;expand(state,frame.count) end
+		else frame.kind="table";frame.iterator,frame.subject,frame.key=pairs(frame.value);emit(state,"u",1) end
+	elseif frame.kind == "schemaKeys" then
+		frame.index=frame.index+1
+		if frame.index>frame.count then frame.kind,frame.index="record",0
+		else local key=frame.keys[frame.index];emit(state,":"..key,textBytes(key)+1) end
+	elseif frame.kind == "record" then
+		frame.index=frame.index+1
+		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
+		else pushValue(state,frame.value[frame.keys[frame.index]],frame.depth+1) end
 	elseif frame.kind == "arrayScan" then
 		-- Detection is incremental and charged to the same global work slice.
 		local key=frame.iterator(frame.subject,frame.key)
@@ -277,8 +333,16 @@ local function encodeAction(state)
 			else frame.phase = "scan" end
 		elseif frame.phase == "short" then
 			local token=":"..frame.value
-			emit(state,token,frame.bytes+1)
-			rememberString(state,frame.value,frame.bytes,token)
+			local prefix=1
+			local cost=160+#frame.value*4
+			if state.compactTables and #frame.value>=24 and #frame.value<=2048 and state.textCount<2048
+				and state.textBytes+cost<=Codec.TEXT_CACHE_BYTES then
+				state.textCount=state.textCount+1;state.texts[frame.value]=state.textCount;state.textBytes=state.textBytes+cost
+				local header="!"..tostring(state.textCount)..":"
+				token=header..frame.value;prefix=#header
+			end
+			emit(state,token,frame.bytes+prefix)
+			rememberString(state,frame.value,frame.bytes,":"..frame.value)
 			state.stack[#state.stack] = nil
 		elseif frame.phase == "endMarker" then
 			emit(state, "e", 1)
@@ -288,14 +352,15 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes,optimized)
+function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
 	local chunk = {}
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
-		memo={},memoCount=0,memoBytes=0,optimized=optimized==true }
+		memo={},memoCount=0,memoBytes=0,optimized=optimized==true,compactTables=compactTables==true,
+		schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 	pushValue(state, value, 0)
 	return state
 end
@@ -316,7 +381,7 @@ function Codec.stepEncode(state, maxWork,deadline)
 		state.workLastStep=work
 		if #state.stack == 0 then
 			state.result = { chunks = state.chunks, totalBytes = state.totalBytes,
-				tokenCount = state.tokenCount,chunkSizes=state.chunkSizes }
+				tokenCount = state.tokenCount,chunkSizes=state.chunkSizes,expandedKeys=state.expandedKeys }
 		end
 	end)
 	if not ok then state.error = reason; return nil, reason, true end
@@ -363,7 +428,7 @@ local function validationAction(state)
 	if state.scanToken then
 		local scan = state.scanToken
 		if scan.at <= #scan.value then
-			for i=1,(state.optimized and 32 or 1) do
+			for i=1,((state.optimized or state.compactTables) and 32 or 1) do
 				if scan.at>#scan.value then break end
 				local following, cost = codepoint(scan.value, scan.at)
 				scan.at, scan.bytes = following, scan.bytes + cost
@@ -423,8 +488,8 @@ local function acceptValue(state, value)
 			state.result = value
 			return
 		end
-		if frame.array then
-			frame.index=frame.index+1;frame.value[frame.index]=value;frame.remaining=frame.remaining-1
+		if frame.array or frame.keys then
+			frame.index=frame.index+1;frame.value[frame.keys and frame.keys[frame.index] or frame.index]=value;frame.remaining=frame.remaining-1
 			if frame.remaining==0 then state.stack[#state.stack]=nil;value=frame.value
 			else return end
 		elseif frame.expectKey then
@@ -433,7 +498,7 @@ local function acceptValue(state, value)
 			frame.key, frame.expectKey = value, false
 			return
 		end
-		if not frame.array then
+		if not frame.array and not frame.keys then
 		frame.value[frame.key] = value
 		frame.key, frame.expectKey = nil, true
 		if frame.remaining then
@@ -447,9 +512,10 @@ local function acceptValue(state, value)
 	end
 end
 
-local function startTable(state, remaining,array)
+local function startTable(state, remaining,array,keys)
 	if #state.stack + 1 > Codec.MAX_DEPTH + 1 then error("catalog_schema", 0) end
-	local frame = { value = {}, expectKey = true, remaining = remaining,array=array,index=0 }
+	if state.compactTables and (array or keys) then expand(state,remaining) end
+	local frame = { value = {}, expectKey = true, remaining = remaining,array=array,keys=keys,index=0 }
 	if remaining == 0 then acceptValue(state, frame.value)
 	else state.stack[#state.stack + 1] = frame end
 end
@@ -463,6 +529,36 @@ local function parseAction(state)
 		return
 	end
 	local token = nextToken(state)
+	if state.schemaMode then
+		local mode=state.schemaMode
+		if mode.phase=="id" then
+			if not integer(token,1,128) then error("catalog_schema",0) end
+			mode.id=token
+			if mode.definition then
+				if token~=state.schemaCount+1 then error("catalog_schema",0) end
+				mode.phase="count"
+			else
+				local keys=state.schemas[token]
+				if not keys then error("catalog_schema",0) end
+				state.schemaMode=nil;startTable(state,#keys,false,keys)
+			end
+		elseif mode.phase=="count" then
+			if not integer(token,2,128) then error("catalog_schema",0) end
+			mode.count,mode.keys,mode.phase=token,{},"keys"
+		else
+			if type(token)~="string" or string.sub(token,1,1)~=":" or #token>257 then error("catalog_schema",0) end
+			local key=string.sub(token,2);local last=mode.keys[#mode.keys]
+			if last and key<=last then error("catalog_schema",0) end
+			state.schemaBytes=state.schemaBytes+160+#key*4
+			if state.schemaBytes>Codec.SCHEMA_CACHE_BYTES then error("catalog_budget",0) end
+			mode.keys[#mode.keys+1]=key
+			if #mode.keys==mode.count then
+				state.schemas[mode.id]=mode.keys;state.schemaCount=mode.id
+				state.schemaMode=nil;startTable(state,mode.count,false,mode.keys)
+			end
+		end
+		return
+	end
 	if state.stringMode then
 		local mode = state.stringMode
 		if mode.remaining then
@@ -504,7 +600,22 @@ local function parseAction(state)
 	elseif token == "n" then state.rawMode = "number"
 	elseif token == "b" then state.rawMode = "boolean"
 	elseif token == "t" then state.rawMode = "table"
-	elseif token == "a" and state.optimized then state.rawMode = "array"
+	elseif token == "a" and (state.optimized or state.compactTables) then state.rawMode = "array"
+	elseif (token=="R" or token=="r") and state.compactTables then state.schemaMode={phase="id",definition=token=="R"}
+	elseif string.sub(token,1,1)=="!" and state.compactTables then
+		local separator=string.find(token,":",2,true)
+		local id=separator and tonumber(string.sub(token,2,separator-1))
+		if not integer(id,1,2048) or id~=state.textCount+1
+			or string.sub(token,1,separator)~="!"..tostring(id)..":" then error("catalog_schema",0) end
+		local text=string.sub(token,separator+1)
+		if #text<24 or #text>2048 then error("catalog_schema",0) end
+		state.textBytes=state.textBytes+160+#text*4
+		if state.textBytes>Codec.TEXT_CACHE_BYTES then error("catalog_budget",0) end
+		state.textCount=id;state.texts[id]=text;acceptValue(state,text)
+	elseif string.sub(token,1,1)=="@" and state.compactTables then
+		local id=tonumber(string.sub(token,2))
+		if not integer(id,1,2048) or token~="@"..tostring(id) or not state.texts[id] then error("catalog_schema",0) end
+		acceptValue(state,state.texts[id])
 	elseif token == "s" then state.rawMode = "string"
 	elseif token == "S" then state.stringMode = { parts = {} }
 	elseif token == "u" then startTable(state, nil)
@@ -516,7 +627,7 @@ local function parseAction(state)
 	else error("catalog_schema", 0) end
 end
 
-function Codec.beginDecode(chunks, expected,frameBytes,optimized)
+function Codec.beginDecode(chunks, expected,frameBytes,optimized,compactTables,reserveExpanded)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES) then return nil,"catalog_budget" end
 	if type(chunks) ~= "table" or not integer(expected, 1, Codec.MAX_TOKENS) then
@@ -526,7 +637,9 @@ function Codec.beginDecode(chunks, expected,frameBytes,optimized)
 	return { mode = "decode", chunks = chunks, expected = expected, phase = "outer",frameBytes=frameBytes,
 		outerIterator = iterator, outerSubject = subject, outerKey = key,
 		outerCount = 0, outerMaximum = 0, lengths = {}, validatedTokens = 0,
-		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0,optimized=optimized==true }
+		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0,optimized=optimized==true,
+		compactTables=compactTables==true,reserveExpanded=reserveExpanded,
+		schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 end
 
 function Codec.stepDecode(state, maxWork,deadline)

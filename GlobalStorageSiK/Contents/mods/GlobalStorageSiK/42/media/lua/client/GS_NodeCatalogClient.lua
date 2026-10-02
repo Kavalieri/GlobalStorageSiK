@@ -109,7 +109,7 @@ function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
 	local profile=Profile.snapshot(ack.initialLoadProfile or "control")
 	if not profile then return false,"manifest_protocol" end
-	if (profile.id=="final4" or profile.optimizedCodec or ack.initialLoadProfileHash~=nil) and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
+	if (profile.id=="final4" or profile.compactTables or profile.optimizedCodec or ack.initialLoadProfileHash~=nil) and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
 	if not currentOwner(ack.playerNum) then return false,"catalog_access_changed" end
 	Client.clear(ack.playerNum,false)
 	if ack.topologyTransition then
@@ -134,7 +134,10 @@ function Client.negotiate(ack)
 	local state=slots[ack.playerNum]
 	if not state or state.ack~=ack then return false end
 	local args=intent(state)
-	if state.entry and state.entry.confirmed then args.knownManifestToken=state.entry.confirmed.token end
+	if state.entry and state.entry.confirmed then
+		args.knownManifestToken=state.entry.confirmed.token
+		args.knownMetadataToken=state.entry.confirmed.metadataToken
+	end
 	if state.entry and not state.entry.confirmed and state.entry.token then
 		-- A draft token is only a resume hint. The server still captures and
 		-- verifies the authoritative manifest before any cached block is reused.
@@ -215,6 +218,19 @@ function Client.consume(value,retainedBytes)
 		state.buildNodeIds=nil
 		state.buildRows=nil;state.phase=nil;state.view=nil;state.request=nil
 		local entry=cache.get(value)
+		if value.metadataNotModified then
+			local confirmed=entry and entry.confirmed
+			if not value.manifestNotModified or value.terminalMetadata~=nil or not Protocol.id(value.metadataToken)
+				or not confirmed or confirmed.token~=value.manifestToken
+				or confirmed.metadataToken~=value.metadataToken or not confirmed.metadata then
+				-- A missing confirmed control base requests the full envelope once,
+				-- with no known tokens. It never borrows controls from a draft view.
+				if Client.recover(value.playerNum) then return true end
+				return false,"manifest_cache_miss"
+			end
+			-- Reconstruct a fresh envelope; retained control data is read-only.
+			value.terminalMetadata=confirmed.metadata
+		elseif state.profile.compactTables and not Protocol.id(value.metadataToken) then return false,"manifest_metadata" end
 		state.previous=entry and entry.rows or state.previous
 		state.previousMetadata=entry and entry.metadata or state.previousMetadata
 		if value.manifestNotModified then
@@ -389,6 +405,7 @@ local function apply(state)
 	if not context.current(payload.playerNum,state.ack.openSeq) then Client.clear(payload.playerNum,false);return true end
 	if not allowed(state) then return true end
 	if not commit() then return false,"manifest_changed" end
+	if not state.partial and state.entry.confirmed then state.entry.confirmed.metadataToken=state.manifest.metadataToken end
 	state.cancelStage=nil
 	state.undo=nil;state.viewSequence=payload.viewSequence;state.hasPresented=true
 	state.presentedBlocks=state.buildPresentedBlocks or state.receivedBlocks or 0

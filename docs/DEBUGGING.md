@@ -567,3 +567,9 @@ Use the delivered check-initial-load-oracle-results.js with explicit client resu
 ### Combined initial-load research profiles (r4)
 
 Debug CatalogTransport selection now includes group2/group4 (logical credits per batch), frame32/frame48, reuse4 and combined2/combined4. Control remains one node and 24 KB. Cold grouping starts after the first partial view; warm reopen and deltas keep their existing path. There is still one acknowledged job per recipient and unchanged global four-frame/4-ms server and shared 2-ms client budgets. Batch limit remains 16 MiB. Immutable node snapshots avoid redundant deep copies and permit exact cached token/frame sizing on the trusted server producer; clients fully validate every received frame and block. A group that exceeds retention/batch quota falls back to one block for that opening. Transfer item availability and authoritative commit checks remain unchanged. Apply remains a separate indivisible update; no handoff pressure guarantee is claimed. Only measured local screening and native serializer checks are available; dedicated pressure, first view and >=50% A/B remain pending. Select control to roll back the opt-in experiment.
+
+## Core 1.5.8-dev3 r7: compact complete replication
+
+Normal openings use `final7` without requiring debug mode. Each acknowledged opening pins its profile ID/hash and correlation ID. Debug diagnostics may select a research profile before opening; selection does not change active openings. Compact transport retains complete item data and the 1024-action quantum. Compression and technical checks do not certify ingame duration.
+
+For r7 comparison, capture the full opening and warm reopening with the same physical inventory and player access as r6. Preserve first-view, full-usable, bytes, recoveries and console evidence. Do not infer runtime improvement from the standalone fixtures.

@@ -381,8 +381,13 @@ function sync.applyCatalogRows(networkId, items, revision, catalogApply, changed
 		end
 		return true
 	end
-	local presentationItems = GlobalStorageSiK.TerminalItems.copyRowsForPresentation
-		and GlobalStorageSiK.TerminalItems.copyRowsForPresentation(items) or items
+	local copier=GlobalStorageSiK.TerminalItems.copyRowsForPresentation
+	if GS_TerminalUI and GS_TerminalUI.isNativeItemsFilter
+		and GS_TerminalUI.isNativeItemsFilter(ui.applyItemsFilter)
+		and GlobalStorageSiK.TerminalItems.copyRowsForFiltering then
+		copier=GlobalStorageSiK.TerminalItems.copyRowsForFiltering
+	end
+	local presentationItems=copier and copier(items) or items
 	local filtered = ui.applyItemsFilter and ui:applyItemsFilter(presentationItems) or presentationItems
 	local model = GlobalStorageSiK.TerminalItems.presentationModel(panel, ui, filtered)
 	if not model then return false end

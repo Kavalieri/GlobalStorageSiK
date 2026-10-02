@@ -105,15 +105,19 @@ function Manifest.capture(player, meta, knownToken)
 		end
 		for i=1,#retired do Manifest.clear(retired[i]) end
 		if not previous and count>=128 then return nil,"manifest_busy" end
-		local reservation=#signature*2+#records*1024+4096
+		local carry=previous and previous.networkId==meta.networkId and previous.epoch==meta.replicaEpoch
+			and previous.scope==meta.catalogScope and previous or nil
+		local reservation=#signature*2+#records*1024+4096+(carry and carry.stampBytes or 0)
 		if reservation>8*1024*1024 then return nil,"manifest_budget" end
 		if retainedBytes-(previous and previous.bytes or 0)+reservation>32*1024*1024 then
 			return nil,"manifest_busy"
 		end
 		serial=serial+1
-		previous={networkId=meta.networkId,epoch=meta.replicaEpoch,signature=signature,
+		previous={networkId=meta.networkId,epoch=meta.replicaEpoch,scope=meta.catalogScope,signature=signature,
 			token=meta.replicaEpoch..":"..tostring(serial),records=records,byId={},bytes=reservation,
-			revision=context.inventoryRevision(meta.networkId)}
+			revision=context.inventoryRevision(meta.networkId),stampBytes=carry and carry.stampBytes,
+			controlSignature=carry and carry.controlSignature,viewSignature=carry and carry.viewSignature,
+			metadataToken=carry and carry.metadataToken,viewToken=carry and carry.viewToken}
 		for i=1,#records do previous.byId[records[i].nodeId]=records[i] end
 		Manifest.clear(player);retainedBytes=retainedBytes+reservation
 		sessions[player]=previous
@@ -132,6 +136,24 @@ function Manifest.capture(player, meta, knownToken)
 end
 
 function Manifest.diagnostics() return {retainedBytes=retainedBytes,topologyBytes=topologyBytes,networks=topologyCount} end
+
+-- Short identities are assigned after exact canonical comparison, not a weak
+-- digest. They live in the same authorized, bounded session as the block token.
+function Manifest.stamps(player,control,view)
+	local state=sessions[player]
+	if not state or type(control)~="string" or type(view)~="string" then return nil,"manifest_metadata" end
+	local bytes=(#control+#view)*4+512
+	local delta=bytes-(state.stampBytes or 0)
+	if state.bytes+delta>8*1024*1024 or retainedBytes+delta>32*1024*1024 then return nil,"manifest_budget" end
+	if state.controlSignature~=control then
+		serial=serial+1;state.metadataToken=state.epoch..":m:"..tostring(serial);state.controlSignature=control
+	end
+	if state.viewSignature~=view then
+		serial=serial+1;state.viewToken=state.epoch..":v:"..tostring(serial);state.viewSignature=view
+	end
+	state.bytes=state.bytes+delta;retainedBytes=retainedBytes+delta;state.stampBytes=bytes
+	return state.metadataToken,state.viewToken
+end
 
 local function prepareBlock(player,meta,nodeId,token,baseRevision,state)
 	if not state or state.epoch~=meta.replicaEpoch or state.networkId~=meta.networkId

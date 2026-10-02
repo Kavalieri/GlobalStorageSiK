@@ -408,12 +408,12 @@ local function queue(player, payload, rows, builder)
     local overhead=Codec.frameSize(Codec.frame(envelope,{},1))
     if not overhead then failure(player,"catalog_budget",serial); return false end
     local encoder, reason
-    if not builder then encoder,reason=Codec.beginEncode(payload,research.frameBytes-overhead+4,research.frameBytes,research.optimizedCodec) end
+    if not builder then encoder,reason=Codec.beginEncode(payload,research.frameBytes-overhead+4,research.frameBytes,research.optimizedCodec,research.compactTables) end
     if not builder and not encoder then failure(player,reason,serial); return false end
     if retainedBytes+4096>GLOBAL_BYTES then failure(player,"catalog_busy",serial); return false end
     jobs[player]={envelope=envelope,encoder=encoder,builder=builder,payload=payload,
         summary=session.summary,
-        frameBudget=research.frameBytes-overhead+4,frameBytes=research.frameBytes,envelopeBytes=overhead,reuseSnapshots=research.reuseSnapshots,optimizedCodec=research.optimizedCodec,
+        frameBudget=research.frameBytes-overhead+4,frameBytes=research.frameBytes,envelopeBytes=overhead,reuseSnapshots=research.reuseSnapshots,optimizedCodec=research.optimizedCodec,compactTables=research.compactTables,
         bytes=4096,nextPart=1,lastProgressAt=now(),startedAt=builder and builder.startedAt or now(),lastDiagnosticAt=now(),
         encodeStarted=now(),encodeMs=0,rows=payload.itemTypeCount or 0,
         detail=payload.catalogDetail==true, nodeTransfer=payload.catalogManifest==true or payload.catalogNode==true,
@@ -533,13 +533,13 @@ local function encodeStep(player,job,session,quantum,deadline)
     local bytes=state.totalBytes or (encoded and encoded.totalBytes) or 0
     local tokens=state.tokenCount or (encoded and encoded.tokenCount) or 0
     local chunks=state.chunks or (encoded and encoded.chunks) or {}
-    local reservation=math.max(4096,bytes*2+tokens*64+#chunks*128+(state.memoBytes or 0))
+    local reservation=math.max(4096,bytes*2+(tokens+(state.expandedKeys or 0))*64+#chunks*128+(state.memoBytes or 0)+(state.schemaBytes or 0)+(state.textBytes or 0))
     if (reason=="catalog_budget" or reservation+(session.baseBytes or 0)>PLAYER_BYTES or retainedBytes-job.bytes+reservation>GLOBAL_BYTES)
         and job.payload.nodeBlocks and #job.payload.nodeBlocks>1 then
         -- Retry one immutable block in the same acknowledged job. Future
         -- requests in this opening remain single-block; no credit is dropped.
         job.payload.nodeBlocks={job.payload.nodeBlocks[1]}
-        local encoder,why=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec)
+        local encoder,why=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec,job.compactTables)
         if not encoder then failure(player,why,job.envelope.batchId);return end
         job.encoder=encoder;job.lastProgressAt=now()
         if context.groupFallback then context.groupFallback(player) end
@@ -632,7 +632,7 @@ local function buildStep(player,job,session,budget,millis)
         local kind=job.payload.catalogDetail and "details" or job.payload.notModified and "notModified"
             or job.payload.catalogDelta and "delta" or "full"
         if kind~=job.kind then counters[job.kind]=counters[job.kind]-1;counters[kind]=counters[kind]+1;job.kind=kind end
-        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec)
+        local encoder,reason=Codec.beginEncode(job.payload,job.frameBudget,job.frameBytes,job.optimizedCodec,job.compactTables)
         if not encoder then failure(player,reason,job.envelope.batchId); return used end
         job.encoder=encoder
         job.encodeStarted=now()

@@ -1243,6 +1243,14 @@ function GS_TerminalUI:applyItemsFilter(rows)
 	return GlobalStorageSiK.Index.filterRows(rows, q)
 end
 
+-- Capture before addons can decorate the class method.
+do
+	local nativeItemsFilter = GS_TerminalUI.applyItemsFilter
+	function GS_TerminalUI.isNativeItemsFilter(filter)
+		return filter == nativeItemsFilter
+	end
+end
+
 --- Clave de categoría principal activa (vacío = todas).
 ---@return string
 function GS_TerminalUI:getMainCategoryFilterKey()

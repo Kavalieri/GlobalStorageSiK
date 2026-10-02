@@ -150,6 +150,25 @@ local function rememberApplied(slot,meta)
 	end
 	slot.completedBatches[id]=retained
 end
+local function payloadReservation(batch,expanded)
+	return batch.bytes*2+(batch.tokens+(expanded or batch.expandedKeys or 0))*64
+end
+local function reservationFor(batch,expanded)
+	return payloadReservation(batch,expanded)+Codec.STRING_CACHE_BYTES+Codec.SCHEMA_CACHE_BYTES+Codec.TEXT_CACHE_BYTES
+end
+local function reserveBatch(slot,batch,expanded)
+	local reservation=reservationFor(batch,expanded)+(slot.retainedBytes or 0)
+	local global=reservation
+	for n=0,3 do
+		local other=slots[n]
+		if other and other~=slot then global=global+(other.retainedBytes or 0)
+			+(other.batch and reservationFor(other.batch) or 0) end
+	end
+	if reservation>PLAYER_BYTES or global>GLOBAL_BYTES then return false end
+	batch.expandedKeys=expanded or batch.expandedKeys or 0
+	Metrics.peak(slot.summary,reservation)
+	return true
+end
 local function applyReady(playerNum, slot)
 	local batch = slot.batch
 	if not slot.confirmed or not batch or batch.count ~= batch.meta.total then return end
@@ -163,7 +182,9 @@ local function applyReady(playerNum, slot)
 	-- watcher performs bounded codec work; no callback decodes a whole catalog.
 	if not batch.decoded then
 		if not batch.decoder then
-			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes,slot.profile and slot.profile.optimizedCodec)
+			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes,
+				slot.profile and slot.profile.optimizedCodec,slot.profile and slot.profile.compactTables,
+				function(expanded) return slots[playerNum]==slot and slot.batch==batch and reserveBatch(slot,batch,expanded) end)
 			if not decoder then fail(playerNum, reason); return end
 			batch.decoder, batch.decodeStarted = decoder, now()
 			if not batch.reassembled then
@@ -196,7 +217,7 @@ local function applyReady(playerNum, slot)
 		or value.catalogDelta == true and context.applyDelta or context.apply
 	local applyStarted=now()
 	Metrics.enter(slot.summary)
-	local ok, accepted, applyReason, stage = pcall(consumer, value,batch.bytes*2+batch.tokens*64)
+	local ok, accepted, applyReason, stage = pcall(consumer, value,payloadReservation(batch))
 	Metrics.work(slot.summary,"dispatch",now()-applyStarted)
 	Metrics.leave(slot.summary)
 	-- Consumer callbacks may close/reopen synchronously (including SP).
@@ -211,7 +232,7 @@ local function applyReady(playerNum, slot)
 	if value.catalogDetail ~= true and not value.catalogManifest and not value.catalogNode then
 		slot.completedRevision, slot.applied = value.inventoryRevision, true
 		slot.recoveryUsed = nil
-		if value.catalogDelta ~= true then slot.retainedBytes = batch.bytes*2 end
+		if value.catalogDelta ~= true then slot.retainedBytes = payloadReservation(batch) end
 	end
 	if GlobalStorageSiK.Log then
 		GlobalStorageSiK.Log.debug("CatalogTransport", "applied", "player=" .. tostring(playerNum)
@@ -251,7 +272,7 @@ function Client.ack(payload)
 	end
 	if not allowed(payload,payload.playerNum) then return end
 	local profile=Profile.snapshot(payload.initialLoadProfile or "control")
-	if not profile or ((profile.id=="final4" or profile.optimizedCodec or payload.initialLoadProfileHash) and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
+	if not profile or ((profile.id=="final4" or profile.compactTables or profile.optimizedCodec or payload.initialLoadProfileHash) and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
 	local confirmed,accepted,reason=pcall(context.confirm,payload)
 	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
 	if accepted == false then
@@ -340,20 +361,9 @@ function Client.receive(payload)
 		batch.profile.sizeMs=batch.profile.sizeMs+sizingMs
 		batch.profile.sizeMaxMs=math.max(batch.profile.sizeMaxMs,sizingMs)
 	end
-	local reservation = batch.bytes*2 + batch.tokens*64 + Codec.STRING_CACHE_BYTES + (slot.retainedBytes or 0)
-	local globalReservation = reservation
-	for n=0,3 do
-		local other = slots[n]
-		if other and other ~= slot then
-			local pending = other.batch
-			globalReservation = globalReservation + (other.retainedBytes or 0)
-				+ (pending and (pending.bytes*2 + pending.tokens*64 + Codec.STRING_CACHE_BYTES) or 0)
-		end
-	end
-	if reservation > PLAYER_BYTES or globalReservation > GLOBAL_BYTES then
+	if not reserveBatch(slot,batch) then
 		fail(payload.playerNum, "catalog_budget"); return
 	end
-	Metrics.peak(slot.summary,reservation)
 	batch.progress = now()
 	slot.started = batch.progress
 	slot.replicaProgressAt = batch.progress
