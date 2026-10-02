@@ -109,7 +109,7 @@ function Client.confirm(ack)
 	if ack.manifestSchema~=Protocol.SCHEMA or not Protocol.id(ack.replicaEpoch) then return false,"manifest_protocol" end
 	local profile=Profile.snapshot(ack.initialLoadProfile or "control")
 	if not profile then return false,"manifest_protocol" end
-	if (profile.optimizedCodec or ack.initialLoadProfileHash~=nil) and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
+	if (profile.id=="final4" or profile.optimizedCodec or ack.initialLoadProfileHash~=nil) and ack.initialLoadProfileHash~=profile.hash then return false,"manifest_protocol" end
 	if not currentOwner(ack.playerNum) then return false,"catalog_access_changed" end
 	Client.clear(ack.playerNum,false)
 	if ack.topologyTransition then
@@ -177,8 +177,14 @@ local function nextNode(state,receivedBlock)
 	if not missing then state.request=nil end
 	if state.build or state.phase then return true end
 	if missing and (not receivedBlock or state.hasComplete) then return true end
+	-- Keep the first useful view and the final complete view unconditional.
+	-- Intermediate bodies are already validated/ACKable; accumulate their node
+	-- contributions without making the transport wait for every visual apply.
+	if missing and state.hasPresented and not state.hasComplete
+		and (state.receivedBlocks or 0)-(state.presentedBlocks or 0)<state.profile.viewBlocks then return true end
 	state.partial=missing~=nil
 	state.buildVersion=state.blockVersion
+	state.buildPresentedBlocks=state.receivedBlocks or 0
 	local changedIds=state.pendingNodeIds or {}
 	state.buildNodeIds=changedIds;state.pendingNodeIds={}
 	local entry,partial=state.entry,state.partial
@@ -197,6 +203,7 @@ function Client.consume(value,retainedBytes)
 		or state.ack.catalogScope~=value.catalogScope
 		or (state.ack.topologySequence or 0)~=(value.topologySequence or 0) then return false,"manifest_identity" end
 	state.started=now()
+	state.recovering=nil
 	if value.catalogManifest then
 		Metrics.bind(metric(state),value)
 		trace("manifest received",value,"notModified="..tostring(value.manifestNotModified==true))
@@ -384,6 +391,7 @@ local function apply(state)
 	if not commit() then return false,"manifest_changed" end
 	state.cancelStage=nil
 	state.undo=nil;state.viewSequence=payload.viewSequence;state.hasPresented=true
+	state.presentedBlocks=state.buildPresentedBlocks or state.receivedBlocks or 0
 	if GlobalStorageSiK.CatalogClient and GlobalStorageSiK.CatalogClient.recordReplicaView then
 		GlobalStorageSiK.CatalogClient.recordReplicaView(payload.playerNum,#state.rows,false)
 	end
@@ -436,7 +444,13 @@ function Client.update()
 		if state then
 			if not context.current(n,state.ack.openSeq) then Client.clear(n,false)
 			elseif not allowed(state) then -- Access loss already cancelled this round.
-			elseif not state.completed and not state.build and not state.phase and now()-state.started>10000 then
+			else
+			local timestamp=now()
+			if timestamp<state.started then state.started=timestamp end
+			local transport=GlobalStorageSiK.CatalogClient
+			local progressed=transport and transport.replicaProgress and transport.replicaProgress(state.ack)
+			if progressed and progressed<=timestamp and progressed>state.started then state.started=progressed end
+			if not state.completed and not state.build and not state.phase and timestamp-state.started>10000 then
 				active=true
 				if not Client.recover(n) then Client.clear(n,false);context.failed(n,"catalog_timeout") end
 			elseif state.build then
@@ -466,6 +480,7 @@ function Client.update()
 				active=true
 				applyChecked(state,n)
 			end
+			end
 		end
 		if active then cursor=(n+1)%4;break end
 	end
@@ -474,6 +489,9 @@ end
 function Client.recover(playerNum)
 	local state=slots[playerNum]
 	if not state then return false end
+	-- Multiple failure paths may observe the same in-flight recovery. Retain one
+	-- intent until a verified payload arrives; the watchdog can retry a real stall.
+	if state.recovering and now()-state.started<=10000 then return true end
 	state.retries=state.retries+1
 	trace("recovery",state.ack,"attempt="..state.retries.." reason=incomplete_transfer preserveConfirmed=true")
 	if state.retries>2 then return false end
@@ -481,7 +499,10 @@ function Client.recover(playerNum)
 	-- Successfully installed blocks survive. Request a fresh manifest; matching
 	-- revisions will be reused even if one fragment or derived view failed.
 	local args=intent(state)
-	return send(state,"terminalManifestRequest",args)
+	args.replicaRecovery=true
+	local accepted=send(state,"terminalManifestRequest",args)
+	if accepted then state.recovering=true;Metrics.count(metric(state),"recoveries") end
+	return accepted
 end
 function Client.diagnostics() return cache.diagnostics() end
 

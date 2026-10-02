@@ -6051,8 +6051,10 @@ if Events and Events.OnTick then
 				GlobalStorageSiK.Log.error("Server", "terminalRefreshQueue", tostring(err))
 			end
 		end
-		GlobalStorageSiK.CatalogServer.update()
 		GlobalStorageSiK.NodeCatalogServer.update()
+		-- A retained node request can enter this same bounded transport pass once
+		-- its predecessor has been acknowledged; never run the sender twice.
+		GlobalStorageSiK.CatalogServer.update()
 		GlobalStorageSiK.NodeViewServer.update()
 		GlobalStorageSiK.CatalogPreparation.update()
 		GlobalStorageSiK.CatalogReconciler.update()

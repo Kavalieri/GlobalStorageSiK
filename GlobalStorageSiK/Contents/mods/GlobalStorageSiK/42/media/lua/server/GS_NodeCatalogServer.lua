@@ -18,7 +18,7 @@ function Server.opened(player,session)
 	if session.replicaEpoch then
 		local profile=Profile.snapshot(session.initialLoadProfile)
 		session.initialLoadProfile=profile.id;session.initialLoadProfileHash=profile.hash
-		states[player]={session=session,profile=profile,started=now()}
+		states[player]={session=session,profile=profile,started=now(),responseRequired=true}
 	end
 end
 function Server.active(player) return states[player]~=nil end
@@ -43,6 +43,7 @@ local function valid(player,args)
 	return state
 end
 local function refresh(player,state)
+	state.responseRequired=true
 	-- A recovery cannot replace an unacknowledged frame. Keep one intent and
 	-- retry after its receipt; ordinary refreshes remain coalesced until ready.
 	if context.hasJob(player) then state.retry=true;return end
@@ -71,6 +72,7 @@ function Server.queueState(player,payload)
 	local manifest,reason,manifestStats=Manifest.capture(player,state.session,state.knownToken)
 	Metrics.work(summary(player),"manifest",now()-started)
 	if not manifest then return false,reason end
+	local previous=state.manifest
 	state.manifest=manifest
 	Metrics.bind(summary(player),manifest)
 	Metrics.manifest(summary(player),manifestStats)
@@ -87,6 +89,16 @@ function Server.queueState(player,payload)
 	for _,record in ipairs(manifest.nodeManifest or {}) do
 		if record.enabled and not record.confirmed then manifest.snapshotCertified=false;manifest.reconcilePending=true end
 	end
+	-- Only a spontaneous refresh of an acknowledged, unchanged complete replica
+	-- can be omitted. Explicit opens/recoveries always receive their response.
+	if not state.responseRequired and not state.request and not state.retry and not state.ready
+		and not state.refreshPending and previous and state.knownToken==previous.manifestToken
+		and manifest.manifestToken==previous.manifestToken and state.controlStamp==signature
+		and manifest.inventoryRevision==previous.inventoryRevision
+		and manifest.snapshotRevision==previous.snapshotRevision
+		and manifest.snapshotCertified==previous.snapshotCertified
+		and manifest.reconcilePending==previous.reconcilePending
+		and manifest.viewStamp==previous.viewStamp then return true,"manifest_noop" end
 	state.lastPayload=manifest
 	local trace=GlobalStorageSiK.NetTrace
 	if trace and trace.isEnabled() then
@@ -122,6 +134,9 @@ function Server.dispatch(command,player,args)
 	if command=="terminalManifestRequest" then
 		if args.knownManifestToken~=nil and not Protocol.id(args.knownManifestToken) then return true end
 		if args.resumeManifestToken~=nil and not Protocol.id(args.resumeManifestToken) then return true end
+		-- Replica recovery counts validated client intents, once here. A server
+		-- error and its synchronous response must not count as two recoveries.
+		if args.replicaRecovery==true then Metrics.count(summary(player),"recoveries") end
 		state.negotiated=true;state.knownToken=args.knownManifestToken;state.resumeToken=args.resumeManifestToken
 		refresh(player,state)
 	elseif command=="terminalNodeRequest" then
@@ -173,6 +188,7 @@ function Server.update()
 					state.knownToken=state.ready.token;state.ready=nil;state.retries=0
 					state.resumeToken=nil
 					state.roundActive=nil;state.request=nil
+					state.responseRequired=nil
 					if state.refreshPending then refresh(player,state) end
 				end
 			elseif state.retry then

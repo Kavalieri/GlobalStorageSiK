@@ -41,6 +41,17 @@ function Client.start(playerNum, sequence)
 		summary=Metrics.begin("client",{playerNum=playerNum,openSeq=sequence})}
 end
 function Client.metrics(playerNum) return slots[playerNum] and slots[playerNum].summary end
+-- Accepted progress belongs to one negotiated opening. Presence of a batch,
+-- repeated fragments and another split-screen player's work are not progress.
+function Client.replicaProgress(ack)
+	local slot=slots[ack.playerNum]
+	local confirmed=slot and slot.confirmed
+	if confirmed and slot.sequence==ack.openSeq and confirmed.networkId==ack.networkId
+		and confirmed.replicaEpoch==ack.replicaEpoch and confirmed.catalogScope==ack.catalogScope
+		and (confirmed.topologySequence or 0)==(ack.topologySequence or 0) then
+		return slot.replicaProgressAt
+	end
+end
 function Client.recordReplicaView(playerNum,rows,complete)
 	local slot=slots[playerNum]
 	if not slot then return end
@@ -67,7 +78,7 @@ local function fail(playerNum, reason, serverError, consumerRejected)
 		and reason~="catalog_budget" and not slot.consumerRejected and context.nodeRecover then
 		slot.batch=nil
 		if rejected and not serverError and context.reject then context.reject(rejected,reason,false) end
-		if context.nodeRecover(playerNum) then Metrics.count(slot.summary,"recoveries");slot.started=now();return end
+		if context.nodeRecover(playerNum) then slot.started=now();return end
 	end
 	Metrics.finish(slot.summary,AccessPolicy.accessLoss(reason) and "cancelled"
 		or reason=="catalog_timeout" and "timeout" or "failed",reason)
@@ -240,7 +251,7 @@ function Client.ack(payload)
 	end
 	if not allowed(payload,payload.playerNum) then return end
 	local profile=Profile.snapshot(payload.initialLoadProfile or "control")
-	if not profile or ((profile.optimizedCodec or payload.initialLoadProfileHash) and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
+	if not profile or ((profile.id=="final4" or profile.optimizedCodec or payload.initialLoadProfileHash) and payload.initialLoadProfileHash~=profile.hash) then fail(payload.playerNum,"catalog_profile");return end
 	local confirmed,accepted,reason=pcall(context.confirm,payload)
 	if not confirmed then consumerFailure(payload.playerNum,slot,payload,false,accepted,nil,"catalogAccessConfirm"); return end
 	if accepted == false then
@@ -345,6 +356,7 @@ function Client.receive(payload)
 	Metrics.peak(slot.summary,reservation)
 	batch.progress = now()
 	slot.started = batch.progress
+	slot.replicaProgressAt = batch.progress
 	if batch.tokens > batch.meta.tokenCount or batch.bytes > batch.meta.totalBytes then
 		fail(payload.playerNum, "catalog_budget"); return
 	end
@@ -419,6 +431,7 @@ end
 function Client.waiting(payload)
 	local slot=slotFor(payload)
 	if not slot or not slot.confirmed or not context.allowed(slot.confirmed)
+		or payload.replicaEpoch~=slot.confirmed.replicaEpoch
 		or (slot.confirmed.topologySequence or 0)~=(payload.topologySequence or 0)
 		or payload.networkId~=slot.confirmed.networkId or payload.catalogScope~=slot.confirmed.catalogScope
 		or not Codec.integer(payload.batchId,1,9007199254740991)
@@ -428,6 +441,7 @@ function Client.waiting(payload)
 	if previous and (payload.batchId<previous.batchId or (payload.batchId==previous.batchId and payload.work<=previous.work)) then return end
 	slot.waiting={batchId=payload.batchId,work=payload.work}
 	slot.started=now()
+	slot.replicaProgressAt=slot.started
 	if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport","request_timeout",
 		"recoverable=true phase="..tostring(payload.phase).." work="..tostring(payload.work)) end
 end
@@ -484,6 +498,7 @@ function Client.update(timestamp)
 							work = work + (slot.profile and slot.profile.optimizedCodec and batch.decoder and batch.decoder.workLastStep or quantum)
 							if reason then fail(playerNum, reason); break end
 							batch.progress = timestamp
+							if (batch.decoder.workLastStep or 0)>0 or done then slot.replicaProgressAt=now() end
 							if done then
 								batch.decoded, batch.decoder, batch.decodeFinished = value, nil, now()
 								if GlobalStorageSiK.Log then GlobalStorageSiK.Log.debug("CatalogTransport","decoded",

@@ -185,7 +185,7 @@ local function failure(player, reason, batchId)
     if not session then return end
     if AccessPolicy.accessLoss(reason) then Metrics.finish(session.summary,"cancelled",reason)
     elseif reason=="catalog_timeout" or reason=="catalog_stalled" then Metrics.finish(session.summary,"timeout",reason)
-    else Metrics.count(session.summary,"recoveries") end
+    elseif not session.replicaEpoch then Metrics.count(session.summary,"recoveries") end
     local active = jobs[player]
     if active and active.envelope then batchId=active.envelope.batchId
     else serial=serial+1; batchId=serial end
@@ -644,11 +644,16 @@ local function buildStep(player,job,session,budget,millis)
     end
     return used
 end
+local function waitingReceipt(job)
+    return job and not job.builder and not job.encoder and not job.framer
+        and not job.resendParts and job.firstPassComplete and job.nextPart>job.envelope.total
+end
 function Server.update()
     if not context or #order==0 then return end
     local timestamp,visited,sent,work=now(),0,0,0
     local buildWork,computeMs=0,0
     local validations={}
+    local idleJobs={}
     if timestamp<lastPrune or timestamp-lastPrune>=1000 then lastPrune=timestamp; prune() end
     local visitBudget=math.max(#order*4,8)
     -- Always permit one useful visit: validation may itself cross 4 ms. Stop
@@ -659,7 +664,7 @@ function Server.update()
         local player=order[cursor]
         local job,session=jobs[player],sessions[player]
         visited=visited+1
-        if job and session then
+        if job and session and not (idleJobs[job] and waitingReceipt(job)) then
             local validationStarted=now()
             local cached=validations[player]
             local valid,reason
@@ -735,6 +740,7 @@ function Server.update()
                 if not job.pendingWork or progress>job.pendingWork then
                     local pending={}
                     for key,value in pairs(job.envelope) do pending[key]=value end
+                    pending.replicaEpoch=session.replicaEpoch
                     pending.reason,pending.recoverable,pending.work="request_timeout",true,progress
                     pending.phase=job.builder and "preparation" or (job.encoder and "encoding" or (job.framer and "framing" or "sending"))
                     local ok=send(player,"terminalCatalogPending",pending)
@@ -753,6 +759,17 @@ function Server.update()
                     .." remaining="..tostring(stats.remaining).." work="..tostring(stats.work)
                     .." baseRetained="..tostring(session.confirmed~=nil).." validationMs="..tostring(job.validationMs))
             end
+            if jobs[player]==job and waitingReceipt(job) then idleJobs[job]=true end
+        end
+        -- A callback may remove or replace jobs synchronously. Enumerate the
+        -- current queue rather than assuming the original observer count.
+        if cursor==1 then
+            local allIdle=#order>0
+            for _,observer in ipairs(order) do
+                local current=jobs[observer]
+                if current and (not idleJobs[current] or not waitingReceipt(current)) then allIdle=false;break end
+            end
+            if allIdle then break end
         end
     end
     for _,player in ipairs(order) do
