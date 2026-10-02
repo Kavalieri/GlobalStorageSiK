@@ -73,7 +73,9 @@ end
 local function textBytes(s)
 	local at, bytes = 1, 0
 	while at <= #s do
-		local following, cost = codepoint(s, at)
+		local following, cost
+		if string.byte(s,at)<128 then following,cost=at+1,1
+		else following,cost=codepoint(s,at) end
 		at, bytes = following, bytes + cost
 	end
 	return bytes
@@ -275,18 +277,42 @@ local function packedRecord(state,value,depth)
  key=iterator(subject,key)
  local schema=key~=nil and state.shapeHints[key]
  if not schema or #schema.keys>8 then return false end
- local count=0
+ local count,cost=0,31 -- r marker and native schema id
  while key~=nil do
   count=count+1
   if count>#schema.keys or not schema.keySet[key] then return false end
   local scalar=value[key];local kind=type(scalar)
   if not ((kind=="number" and finite(scalar)) or kind=="boolean"
    or (kind=="string" and (state.texts[scalar] or state.memo[scalar]))) then return false end
+  if kind=="number" then cost=cost+18
+  elseif kind=="boolean" then cost=cost+11
+  elseif state.texts[scalar] then cost=cost+12+#state.texts[scalar]
+  else cost=cost+13+state.memo[scalar].bytes end
   key=iterator(subject,key)
  end
  if count~=#schema.keys then return false end
- expand(state,count);emit(state,"r",1);emit(state,schema.id)
- for i=1,count do emitScalar(state,value[schema.keys[i]]) end
+ expand(state,count)
+ -- Commit accounting once when the whole validated record fits this chunk.
+ -- Boundary/error paths retain the token-by-token emitter and exact framing.
+ if state.recordAccounting and state.chunkBytes+cost<=state.budget and state.totalBytes+cost<=Codec.MAX_BATCH_BYTES
+  and state.tokenCount+count+2+state.expandedKeys<=Codec.MAX_TOKENS then
+  local chunk,index=state.chunk,#state.chunk
+  chunk[index+1],chunk[index+2]="r",schema.id
+  for i=1,count do
+   local scalar=value[schema.keys[i]]
+   if type(scalar)=="string" then
+    local reference=state.texts[scalar]
+    if reference then scalar=reference;state.fastStats.references=state.fastStats.references+1
+    else scalar=state.memo[scalar].token end
+   end
+   chunk[index+2+i]=scalar
+  end
+  state.chunkBytes=state.chunkBytes+cost;state.chunkSizes[#state.chunks]=state.chunkBytes
+  state.totalBytes=state.totalBytes+cost;state.tokenCount=state.tokenCount+count+2
+ else
+  emit(state,"r",1);emit(state,schema.id)
+  for i=1,count do emitScalar(state,value[schema.keys[i]]) end
+ end
  state.fastStats.records=state.fastStats.records+1
  return true
 end
@@ -496,7 +522,7 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient,streamlined,packedRecords)
+function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient,streamlined,packedRecords,recordAccounting)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
@@ -504,7 +530,7 @@ function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,effi
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
 		memo={},memoCount=0,memoBytes=0,optimized=optimized==true,compactTables=compactTables==true,
-		efficient=efficient==true,streamlined=streamlined==true and efficient==true,packedRecords=packedRecords==true and streamlined==true and efficient==true and compactTables==true,fastStats={keys=0,references=0,strings=0,closures=0,records=0},shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
+		efficient=efficient==true,streamlined=streamlined==true and efficient==true,packedRecords=packedRecords==true and streamlined==true and efficient==true and compactTables==true,recordAccounting=recordAccounting==true,fastStats={keys=0,references=0,strings=0,closures=0,records=0},shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 	pushValue(state, value, 0)
 	return state
 end
@@ -574,7 +600,9 @@ local function validationAction(state)
 		if scan.at <= #scan.value then
 			for i=1,((state.optimized or state.compactTables) and 32 or 1) do
 				if scan.at>#scan.value then break end
-				local following, cost = codepoint(scan.value, scan.at)
+				local following,cost
+    if string.byte(scan.value,scan.at)<128 then following,cost=scan.at+1,1
+    else following,cost=codepoint(scan.value,scan.at) end
 				scan.at, scan.bytes = following, scan.bytes + cost
 				if scan.bytes > 32767 then error("catalog_string_size", 0) end
 			end
@@ -664,6 +692,45 @@ local function startTable(state, remaining,array,keys)
 	else state.stack[#state.stack + 1] = frame end
 end
 
+-- Only admitted record keys, validated tokens and already defined text ids.
+-- No lookahead allocation/cache: complex tokens remain on the normal parser.
+local function scalarToken(state,token)
+ local kind=type(token)
+ if kind=="number" or kind=="boolean" then return token,true end
+ if kind~="string" then return nil,false end
+ local prefix=string.sub(token,1,1)
+ if prefix==":" and #token<=257 then return string.sub(token,2),true end
+ if prefix=="@" then
+  local id=tonumber(string.sub(token,2))
+  if integer(id,1,2048) and token=="@"..tostring(id) and state.texts[id] then return state.texts[id],true end
+ end
+ return nil,false
+end
+local function packedValues(state,token)
+ if not state.packedValues then return false end
+ local frame=state.stack[#state.stack]
+ if not frame or not frame.keys or #frame.keys>8 then return false end
+ local value,accepted=scalarToken(state,token)
+ if not accepted then return false end
+ local count,limit=0,math.min(8,state.parseRemaining)
+ repeat
+  frame.index=frame.index+1;frame.value[frame.keys[frame.index]]=value
+  frame.remaining=frame.remaining-1;count=count+1
+  if frame.remaining==0 then
+   state.stack[#state.stack]=nil;acceptValue(state,frame.value);break
+  end
+  if count>=limit then break end
+  local part,index=state.part,state.index+1
+  while part<=state.chunkCount and index>state.lengths[part] do part,index=part+1,1 end
+  if part>state.chunkCount then break end
+  value,accepted=scalarToken(state,state.chunks[part][index])
+  if not accepted then break end
+  nextToken(state)
+ until count>=limit
+ state.packedScalars=state.packedScalars+count
+ return count
+end
+
 local function parseAction(state)
 	if state.result ~= nil then
 		if state.consumed ~= state.expected or #state.stack ~= 0 or type(state.result) ~= "table" then
@@ -736,6 +803,8 @@ local function parseAction(state)
 		end
 		return
 	end
+	local packed=packedValues(state,token)
+	if packed then return packed end
 	local kind = type(token)
 	if kind == "number" then acceptValue(state, token)
 	elseif kind == "boolean" then acceptValue(state, token)
@@ -771,7 +840,7 @@ local function parseAction(state)
 	else error("catalog_schema", 0) end
 end
 
-function Codec.beginDecode(chunks, expected,frameBytes,optimized,compactTables,reserveExpanded)
+function Codec.beginDecode(chunks, expected,frameBytes,optimized,compactTables,reserveExpanded,packedValues)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES) then return nil,"catalog_budget" end
 	if type(chunks) ~= "table" or not integer(expected, 1, Codec.MAX_TOKENS) then
@@ -782,7 +851,7 @@ function Codec.beginDecode(chunks, expected,frameBytes,optimized,compactTables,r
 		outerIterator = iterator, outerSubject = subject, outerKey = key,
 		outerCount = 0, outerMaximum = 0, lengths = {}, validatedTokens = 0,
 		totalBytes = 0, stack = {},memo={},memoCount=0,memoBytes=0,optimized=optimized==true,
-		compactTables=compactTables==true,reserveExpanded=reserveExpanded,
+		compactTables=compactTables==true,reserveExpanded=reserveExpanded,packedValues=packedValues==true and compactTables==true,packedScalars=0,
 		schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 end
 
@@ -794,8 +863,10 @@ function Codec.stepDecode(state, maxWork,deadline)
 	local ok, reason = pcall(function()
 		local work = 0
 		while work < maxWork and not state.done do
-			if state.phase == "parse" then parseAction(state) else validationAction(state) end
-			work = work + 1
+			if state.phase == "parse" then
+    state.parseRemaining=maxWork-work
+    work=work+(parseAction(state) or 1)
+   else validationAction(state);work=work+1 end
 			if deadline and work%32==0 and getTimestampMs and getTimestampMs()>=deadline then break end
 		end
 		state.workLastStep=work

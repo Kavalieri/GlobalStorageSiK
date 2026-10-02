@@ -184,7 +184,7 @@ local function applyReady(playerNum, slot)
 		if not batch.decoder then
 			local decoder, reason = Codec.beginDecode(batch.parts, batch.meta.tokenCount,slot.profile and slot.profile.frameBytes,
 				slot.profile and slot.profile.optimizedCodec,slot.profile and slot.profile.compactTables,
-				function(expanded) return slots[playerNum]==slot and slot.batch==batch and reserveBatch(slot,batch,expanded) end)
+				function(expanded) return slots[playerNum]==slot and slot.batch==batch and reserveBatch(slot,batch,expanded) end,slot.profile and slot.profile.packedDecode)
 			if not decoder then fail(playerNum, reason); return end
 			batch.decoder, batch.decodeStarted = decoder, now()
 			if not batch.reassembled then
@@ -248,7 +248,10 @@ local function applyReady(playerNum, slot)
 			.." sizeMs="..tostring(profile.sizeMs).." sizeMaxMs="..tostring(profile.sizeMaxMs)
 			.." decodeActiveMs="..tostring(profile.decodeMs).." decodeMaxMs="..tostring(profile.decodeMaxMs)
 			.." decodeSteps="..tostring(profile.steps).." wallYields="..tostring(profile.wallYields)
-			.." unitYields="..tostring(profile.unitYields).." applyMs="..tostring(now()-applyStarted))
+			.." decodeValidationMs="..tostring(profile.validationMs or 0)
+   .." decodeParseMs="..tostring(profile.parseMs or 0).." decodeMixedMs="..tostring(profile.mixedMs or 0)
+   .." decodeUpdateGapMaxMs="..tostring(profile.updateGapMaxMs or 0).." packedScalars="..tostring(profile.packedScalars or 0)
+   .." unitYields="..tostring(profile.unitYields).." applyMs="..tostring(now()-applyStarted))
 	end
 	context.receipt(batch.meta)
 end
@@ -491,9 +494,16 @@ function Client.update(timestamp)
 						-- Authorization may itself exceed the time slice. Give each
 						-- accepted batch one bounded step, then enforce wall time.
 						local stepped = false
+      if batch.profile then
+       local stamp=now()
+       if batch.lastDecodeUpdate then batch.profile.updateGapMaxMs=math.max(batch.profile.updateGapMaxMs or 0,math.max(0,stamp-batch.lastDecodeUpdate)) end
+       batch.lastDecodeUpdate=stamp
+      end
 						while slots[playerNum] == slot and slot.batch == batch and batch.decoder
 							and work < 8192 and (not stepped or now() - started < 4) do
-							local decodeStarted=batch.profile and now()
+							local decoder=batch.decoder
+       local phase=decoder.phase
+       local decodeStarted=batch.profile and now()
 							local quantum=math.min(slot.profile and slot.profile.optimizedCodec and 128 or 1024,8192-work)
 							local value, reason, done = Codec.stepDecode(batch.decoder, quantum,slot.profile and slot.profile.optimizedCodec and started+4 or nil)
 							Metrics.work(slot.summary,"decode",decodeStarted and now()-decodeStarted or 0)
@@ -502,6 +512,9 @@ function Client.update(timestamp)
 								local elapsed=math.max(0,now()-decodeStarted)
 								batch.profile.decodeMs=batch.profile.decodeMs+elapsed
 								batch.profile.decodeMaxMs=math.max(batch.profile.decodeMaxMs,elapsed)
+        local region=phase=="parse" and "parseMs" or decoder.phase=="parse" and "mixedMs" or "validationMs"
+        batch.profile[region]=(batch.profile[region] or 0)+elapsed
+        batch.profile.packedScalars=decoder.packedScalars or 0
 								batch.profile.steps=batch.profile.steps+1
 							end
 							stepped = true

@@ -784,6 +784,10 @@ function GS_TerminalUI:refreshAddonMetadata()
 end
 
 function GS_TerminalUI:refreshFromState(state)
+ local sandbox=GlobalStorageSiK.Sandbox
+ local measured=getTimestampMs and GlobalStorageSiK.Log and sandbox and sandbox.debugMode
+  and sandbox.debugMode() and sandbox.debugCategoryEnabled and sandbox.debugCategoryEnabled("CatalogTransport")
+ local started=measured and getTimestampMs()
 	local prev = self.terminalState or {}
 	local incoming = state
 	local firstState = self._gsHasAppliedState ~= true
@@ -859,6 +863,7 @@ function GS_TerminalUI:refreshFromState(state)
 		state.headerTransient = prev.headerTransient
 	end
 	self.terminalState = state or prev
+ local mergedAt=measured and getTimestampMs()
 	self:syncHeaderChrome()
 	if capacityChanged then self:applyCapacityState(self.terminalState.capacity) end
 	-- BUG REAL reportado por el usuario (2026-08-26): sin energia, el
@@ -890,6 +895,7 @@ function GS_TerminalUI:refreshFromState(state)
 		self._warehouseQuery = self.searchEntry and self.searchEntry:getText() or ""
 	end
 	self:refreshNetworkPanel(capacityChanged)
+ local chromeAt=measured and getTimestampMs()
 	local cap = self.terminalState.capacity
 	if cap and not self._capacityHaloShown then
 		local st = cap.status
@@ -930,6 +936,7 @@ function GS_TerminalUI:refreshFromState(state)
 	elseif not builtNow and GlobalStorageSiK.TerminalExtensions then
 		GlobalStorageSiK.TerminalExtensions.refreshActive(self, tab)
 	end
+ local tabAt=measured and getTimestampMs()
 	-- Programación va ANTES que Craft/Build para que, si el periférico Reader
 	-- ya está instalado cuando el terminal abre por primera vez, su pestaña
 	-- reclame su hueco en self.dynamicSlots (append-only, ver
@@ -945,6 +952,17 @@ function GS_TerminalUI:refreshFromState(state)
 		GlobalStorageSiK.NodeHighlight.reapplyAfterRefresh(self.terminalState and self.terminalState.nodes)
 	end
 	self._gsHasAppliedState = true
+ if measured then
+  local finished=getTimestampMs()
+  GlobalStorageSiK.Log.debug("CatalogTransport","profile_view_refresh",
+   "player="..tostring(self.playerNum).." first="..tostring(firstState).." tab="..tostring(tab)
+   .." rows="..tostring(#(self.terminalState.items or {}))
+   .." mergeMs="..tostring(math.max(0,mergedAt-started))
+   .." chromeMs="..tostring(math.max(0,chromeAt-mergedAt))
+   .." activeTabMs="..tostring(math.max(0,tabAt-chromeAt))
+   .." extensionsMs="..tostring(math.max(0,finished-tabAt))
+   .." totalMs="..tostring(math.max(0,finished-started)))
+ end
 end
 
 --- Compatibilidad con API de ventana bloqueada integrada.
