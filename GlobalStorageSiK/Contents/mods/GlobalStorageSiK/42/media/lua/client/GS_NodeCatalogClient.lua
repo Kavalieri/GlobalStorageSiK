@@ -158,7 +158,7 @@ local function missingNode(state)
 	end
 	return missing[1]
 end
-local function nextNode(state,receivedBlock)
+local function nextNode(state,receivedBlock,flushView)
 	local missing=missingNode(state)
 	-- A warm refresh retains its complete image until all replacement blocks
 	-- arrive. Bootstrap publishes each verified block before requesting more.
@@ -189,13 +189,14 @@ local function nextNode(state,receivedBlock)
 	end
 	if not missing then state.request=nil end
 	if state.build or state.phase then return true end
-	if missing and (not receivedBlock or state.hasComplete) then return true end
+	if missing and ((not receivedBlock and not flushView) or state.hasComplete) then return true end
 	-- Keep the first useful view and the final complete view unconditional.
 	-- Intermediate bodies are already validated/ACKable; accumulate their node
 	-- contributions without making the transport wait for every visual apply.
 	if missing and state.hasPresented and not state.hasComplete
-		and (state.receivedBlocks or 0)-(state.presentedBlocks or 0)<state.profile.viewBlocks then return true end
+		and not flushView and (state.receivedBlocks or 0)-(state.presentedBlocks or 0)<state.profile.viewBlocks then return true end
 	state.partial=missing~=nil
+	state.dirtySince=nil
 	state.buildVersion=state.blockVersion
 	state.buildPresentedBlocks=state.receivedBlocks or 0
 	local changedIds=state.pendingNodeIds or {}
@@ -222,7 +223,7 @@ function Client.consume(value,retainedBytes)
 		trace("manifest received",value,"notModified="..tostring(value.manifestNotModified==true))
 		state.completed=false
 		state.blockVersion=(state.blockVersion or 0)+1
-		state.roundStarted=now();state.buildMs=0;state.viewMs=0
+		state.roundStarted=now();state.buildMs=0;state.viewMs=0;state.dirtySince=nil
 		if state.build then GlobalStorageSiK.Index.cancelCatalogBuild(state.build);state.build=nil end
 		for id in pairs(state.buildNodeIds or {}) do state.pendingNodeIds[id]=true end
 		state.buildNodeIds=nil
@@ -315,7 +316,7 @@ function Client.consume(value,retainedBytes)
 					state.receivedBlocks=(state.receivedBlocks or 0)+1;Metrics.count(metric(state),"nodeBodies")
 				end
 			end
-			if changed then state.blockVersion=(state.blockVersion or 0)+1;state.retries=0;publishProgress(state,false) end
+			if changed then state.dirtySince=state.dirtySince or now();state.blockVersion=(state.blockVersion or 0)+1;state.retries=0;publishProgress(state,false) end
 			return nextNode(state,changed)
 		end
 		local accepted,reason=cache.block(value,retainedBytes)
@@ -325,6 +326,7 @@ function Client.consume(value,retainedBytes)
 			return nextNode(state,false)
 		end
 		Metrics.count(metric(state),"nodeBodies")
+		state.dirtySince=state.dirtySince or now()
 		state.pendingNodeIds[value.nodeRecord.nodeId]=true
 		state.blockVersion=(state.blockVersion or 0)+1
 		state.retries=0
@@ -482,6 +484,20 @@ function Client.update()
 			else
 			local timestamp=now()
 			if timestamp<state.started then state.started=timestamp end
+			-- O(1) soft deadline while the next body is in flight. Never expose a
+			-- partial replacement of a warm complete view or overlap view builds.
+			if state.dirtySince and timestamp<state.dirtySince then state.dirtySince=timestamp end
+			if state.profile.viewDelayMs and state.dirtySince and state.hasPresented
+				and not state.hasComplete and not state.build and not state.phase and state.manifest
+				and timestamp-state.dirtySince>=state.profile.viewDelayMs then
+				active=true
+				local ok,accepted,reason=pcall(nextNode,state,false,true)
+				if (not ok or accepted==false) and slots[n]==state then
+					local identity=failureIdentity(state)
+					Client.clear(n,false);context.failed(n,ok and reason or accepted,identity)
+				end
+			end
+			if slots[n]~=state then break end
 			local transport=GlobalStorageSiK.CatalogClient
 			local progressed=transport and transport.replicaProgress and transport.replicaProgress(state.ack)
 			if progressed and progressed<=timestamp and progressed>state.started then state.started=progressed end

@@ -2,6 +2,7 @@
 local Profile={}
 GlobalStorageSiK.InitialLoadProfile=Profile
 local definitions={
+	final10={id="final10",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,viewBlocks=8,viewDelayMs=1000,compactTables=true,efficientCodec=true,streamlinedCodec=true,packedRecords=true,hash="90949a5bee798570092c5c0e8dde180a3e1181fe91b103b3e0e96b0ac35bf2fc"},
 	final9={id="final9",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,viewBlocks=8,compactTables=true,efficientCodec=true,streamlinedCodec=true,hash="7433f11fd3427f775bc6f0ad4aee2bf33eec4142fc8d5d0ee1d4def35d03b150"},
 	final8={id="final8",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,viewBlocks=8,compactTables=true,efficientCodec=true,hash="6d4bdd53a4dc6e8ad331409b4cc3cb51b6bd5ef475c649ce28578a1cbcc5fc67"},
 	final7={id="final7",buildWork=1024,groupCredits=4,frameBytes=48000,reuseSnapshots=true,viewBlocks=8,compactTables=true,hash="d1aa832a8a119601725614b137ebba230a481a4a260424d4eb42854250676e5c"},
@@ -19,7 +20,7 @@ local definitions={
 	wire2={id="wire2",buildWork=1024,groupCredits=2,frameBytes=32000,reuseSnapshots=true,optimizedCodec=true,hash="3e6266527e7bee08aeb9359bd6081c1856fbdca2dd5ea856df9a178a883cd9a1"},
 	wire4={id="wire4",buildWork=1024,groupCredits=4,frameBytes=32000,reuseSnapshots=true,optimizedCodec=true,hash="a07b26355b4e7eb98f374f941852a6006b97ac920f37f7443b92bdacc54a41f1"},
 }
-local selected="final9"
+local selected="final10"
 function Profile.select(id)
 	local sandbox=GlobalStorageSiK.Sandbox
 	if not definitions[id] or not sandbox or not sandbox.debugMode()
@@ -31,12 +32,12 @@ end
 function Profile.snapshot(id)
 	if id==nil then
 		local sandbox=GlobalStorageSiK.Sandbox
-		id=sandbox and sandbox.debugMode() and sandbox.debugCategoryEnabled("CatalogTransport") and selected or "final9"
+		id=sandbox and sandbox.debugMode() and sandbox.debugCategoryEnabled("CatalogTransport") and selected or "final10"
 	end
 	local value=definitions[id]
 	if not value then return nil end
 	return {id=value.id,buildWork=value.buildWork,hash=value.hash,groupCredits=value.groupCredits or 1,
 		frameBytes=value.frameBytes or 24000,reuseSnapshots=value.reuseSnapshots==true,optimizedCodec=value.optimizedCodec==true,
-		viewBlocks=value.viewBlocks or 1,compactTables=value.compactTables==true,efficientCodec=value.efficientCodec==true,streamlinedCodec=value.streamlinedCodec==true}
+		viewBlocks=value.viewBlocks or 1,compactTables=value.compactTables==true,efficientCodec=value.efficientCodec==true,streamlinedCodec=value.streamlinedCodec==true,packedRecords=value.packedRecords==true,viewDelayMs=value.viewDelayMs}
 end
 return Profile

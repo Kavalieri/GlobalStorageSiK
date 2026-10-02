@@ -582,4 +582,8 @@ Existing NetTrace can report group units/rows/largest node, preparation/staging/
 
 ## Core 1.5.8-dev3 r9: streamlined short strings
 
-Normal openings use final9. Short strings fuse initialization, bounded UTF scanning and final emission. Validated keys/references reuse exact accounted tokens; containers close early only after their final immediate scalar. Wire data, dictionary admission, global quotas and final8 pins remain unchanged. Existing NetTrace can emit one aggregate encoder_fastpath per batch. Terminal state refresh applies capacity once while external and inventory-only refreshes still update counts. Offline work reductions do not establish ingame latency or pressure acceptance.
+The r9 candidate uses final9. Short strings fuse initialization, bounded UTF scanning and final emission. Validated keys/references reuse exact accounted tokens; containers close early only after their final immediate scalar. Wire data, dictionary admission, global quotas and final8 pins remain unchanged. Existing NetTrace can emit one aggregate encoder_fastpath per batch. Terminal state refresh applies capacity once while external and inventory-only refreshes still update counts. Offline work reductions do not establish ingame latency or pressure acceptance.
+
+## Core 1.5.8-dev3 r10: bounded repeated records and partial view deadline
+
+Normal openings use final10. Repeated scalar records with up to eight keys reuse an admitted schema only after exact key/cardinality and value validation, preserving wire tokens and accounting. Earlier profiles retain their paths and pins. Partial bootstrap views also flush on a soft one-second deadline while the next body is in flight; warm complete views remain atomic. Credits, frame sizes and global budgets remain unchanged. Existing encoder_fastpath includes the fused record count. Offline equality/work checks do not establish ingame latency or pressure acceptance.

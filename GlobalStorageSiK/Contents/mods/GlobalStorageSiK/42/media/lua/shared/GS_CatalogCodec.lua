@@ -266,6 +266,31 @@ local function scanString(state,frame)
  end
 end
 
+-- A bounded repeated scalar record needs no temporary frame/key array. The
+-- existing admitted schema is used only after exact key/cardinality checks.
+-- Failed probes emit nothing; containers/new strings use the incremental path.
+local function packedRecord(state,value,depth)
+ if not state.packedRecords then return false end
+ local iterator,subject,key=pairs(value)
+ key=iterator(subject,key)
+ local schema=key~=nil and state.shapeHints[key]
+ if not schema or #schema.keys>8 then return false end
+ local count=0
+ while key~=nil do
+  count=count+1
+  if count>#schema.keys or not schema.keySet[key] then return false end
+  local scalar=value[key];local kind=type(scalar)
+  if not ((kind=="number" and finite(scalar)) or kind=="boolean"
+   or (kind=="string" and (state.texts[scalar] or state.memo[scalar]))) then return false end
+  key=iterator(subject,key)
+ end
+ if count~=#schema.keys then return false end
+ expand(state,count);emit(state,"r",1);emit(state,schema.id)
+ for i=1,count do emitScalar(state,value[schema.keys[i]]) end
+ state.fastStats.records=state.fastStats.records+1
+ return true
+end
+
 local function pushValue(state, value, depth)
 	state.stack[#state.stack + 1] = { kind = "value", value = value, depth = depth }
 end
@@ -311,6 +336,9 @@ local function encodeAction(state)
 			end
 		elseif kind == "table" then
 			if frame.depth > Codec.MAX_DEPTH or state.active[frame.value] then error("catalog_schema", 0) end
+			if packedRecord(state,frame.value,frame.depth) then
+    state.stack[#state.stack]=nil;return #state.stack==0
+   end
 			state.active[frame.value] = true
 			frame.kind = state.compactTables and "shapeScan" or state.optimized and "arrayScan" or "table"
 			frame.iterator, frame.subject, frame.key = pairs(frame.value)
@@ -468,7 +496,7 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient,streamlined)
+function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient,streamlined,packedRecords)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
@@ -476,7 +504,7 @@ function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,effi
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
 		memo={},memoCount=0,memoBytes=0,optimized=optimized==true,compactTables=compactTables==true,
-		efficient=efficient==true,streamlined=streamlined==true and efficient==true,fastStats={keys=0,references=0,strings=0,closures=0},shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
+		efficient=efficient==true,streamlined=streamlined==true and efficient==true,packedRecords=packedRecords==true and streamlined==true and efficient==true and compactTables==true,fastStats={keys=0,references=0,strings=0,closures=0,records=0},shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 	pushValue(state, value, 0)
 	return state
 end
