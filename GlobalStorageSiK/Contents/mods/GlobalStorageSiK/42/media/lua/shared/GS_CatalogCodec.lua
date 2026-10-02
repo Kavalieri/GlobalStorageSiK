@@ -204,6 +204,21 @@ local function pushValue(state, value, depth)
 	state.stack[#state.stack + 1] = { kind = "value", value = value, depth = depth }
 end
 
+-- Already validated scalars/references need no stack frame or second action.
+-- New strings and containers retain the incremental validator and depth fence.
+local function pushChild(state,value,depth)
+ if state.efficient then
+  if finite(value) or type(value)=="boolean" then emit(state,value);return end
+  if type(value)=="string" then
+   local id=state.compactTables and state.texts[value]
+   local cached=state.memo[value]
+   if id then emit(state,"@"..tostring(id));return end
+   if cached then emit(state,cached.token,cached.bytes+1);return end
+  end
+ end
+ pushValue(state,value,depth)
+end
+
 local function encodeAction(state)
 	local frame = state.stack[#state.stack]
 	if not frame then return true end
@@ -237,6 +252,10 @@ local function encodeAction(state)
 		local key=frame.iterator(frame.subject,frame.key)
 		if key~=nil then
 			frame.key=key;frame.count=frame.count+1
+   if state.efficient then
+    if frame.count==1 then frame.candidate=state.shapeHints[key] end
+    if frame.candidate and not frame.candidate.keySet[key] then frame.candidate=nil end
+   end
 			if integer(key,1,Codec.MAX_TOKENS) then frame.maximum=math.max(frame.maximum,key)
 			else frame.dense=false end
 			if type(key)=="string" and #key<=256 and frame.count<=128 then
@@ -249,15 +268,26 @@ local function encodeAction(state)
 			expand(state,frame.count);frame.kind,frame.index="array",0;emit(state,"a",1);emit(state,frame.count)
 		elseif frame.record and frame.count>=2 then
 			-- At most 128 short keys; the inventory traversal itself stays sliced.
-			table.sort(frame.keys)
-			local parts={}
-			for i=1,#frame.keys do parts[i]=tostring(#frame.keys[i])..":"..frame.keys[i] end
-			local signature=table.concat(parts)
-			local schema=state.schemas[signature]
-			if not schema and state.schemaCount<128 and state.schemaBytes+frame.keyBytes+#signature*4<=Codec.SCHEMA_CACHE_BYTES then
+			local schema=frame.candidate
+   if schema and #schema.keys~=frame.count then schema=nil end
+   local signature
+   if not schema then
+    table.sort(frame.keys)
+    local parts={}
+    for i=1,#frame.keys do parts[i]=tostring(#frame.keys[i])..":"..frame.keys[i] end
+    signature=table.concat(parts);schema=state.schemas[signature]
+   end
+   -- The hint/set are batch-local and charged before allocation. A hint is
+   -- usable only after every unique key and the exact cardinality match.
+   local hintBytes=state.efficient and (frame.count*256+160) or 0
+   if not schema and state.schemaCount<128 and state.schemaBytes+frame.keyBytes+#signature*4+hintBytes<=Codec.SCHEMA_CACHE_BYTES then
 				state.schemaCount=state.schemaCount+1
 				schema={id=state.schemaCount,keys=frame.keys};state.schemas[signature]=schema
-				state.schemaBytes=state.schemaBytes+frame.keyBytes+#signature*4
+				state.schemaBytes=state.schemaBytes+frame.keyBytes+#signature*4+hintBytes
+    if state.efficient then
+     schema.keySet={}
+     for i=1,#schema.keys do local key=schema.keys[i];schema.keySet[key]=true;state.shapeHints[key]=schema end
+    end
 				frame.kind,frame.index="schemaKeys",0
 				emit(state,"R",1);emit(state,schema.id);emit(state,frame.count)
 			elseif schema then frame.kind,frame.index="record",0;emit(state,"r",1);emit(state,schema.id)
@@ -271,7 +301,7 @@ local function encodeAction(state)
 	elseif frame.kind == "record" then
 		frame.index=frame.index+1
 		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
-		else pushValue(state,frame.value[frame.keys[frame.index]],frame.depth+1) end
+		else pushChild(state,frame.value[frame.keys[frame.index]],frame.depth+1) end
 	elseif frame.kind == "arrayScan" then
 		-- Detection is incremental and charged to the same global work slice.
 		local key=frame.iterator(frame.subject,frame.key)
@@ -285,7 +315,7 @@ local function encodeAction(state)
 	elseif frame.kind == "array" then
 		frame.index=frame.index+1
 		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
-		else pushValue(state,frame.value[frame.index],frame.depth+1) end
+		else pushChild(state,frame.value[frame.index],frame.depth+1) end
 	elseif frame.kind == "table" then
 		local key, value = frame.iterator(frame.subject, frame.key)
 		if key == nil then
@@ -352,7 +382,7 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables)
+function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
@@ -360,7 +390,7 @@ function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables)
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
 		memo={},memoCount=0,memoBytes=0,optimized=optimized==true,compactTables=compactTables==true,
-		schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
+		efficient=efficient==true,shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 	pushValue(state, value, 0)
 	return state
 end
@@ -372,11 +402,11 @@ function Codec.stepEncode(state, maxWork,deadline)
 	if state.result then return state.result, nil, true end
 	local ok, reason = pcall(function()
 		local work = 0
-		if state.optimized then
+		if state.optimized or state.efficient then
 			repeat
 				work=work+1
 				if encodeAction(state) then break end
-			until work>=maxWork or (deadline and work%32==0 and getTimestampMs and getTimestampMs()>=deadline)
+			until work>=maxWork or (state.optimized and deadline and work%32==0 and getTimestampMs and getTimestampMs()>=deadline)
 		else while work < maxWork and not encodeAction(state) do work = work + 1 end end
 		state.workLastStep=work
 		if #state.stack == 0 then

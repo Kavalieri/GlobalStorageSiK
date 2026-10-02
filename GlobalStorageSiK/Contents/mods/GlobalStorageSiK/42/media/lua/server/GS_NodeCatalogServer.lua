@@ -83,9 +83,17 @@ function Server.queueState(player,payload)
 		routing=manifest.routingRevision,categories=metadata.categories,configEpoch=metadata.configEpoch})
 	if not manifest.viewStamp then return false,"manifest_metadata_budget" end
 	if state.profile.compactTables then
-		local token,view=Manifest.stamps(player,signature,manifest.viewStamp)
+		local token,view,previousMetadataToken,changedAt=Manifest.stamps(player,signature,manifest.viewStamp)
 		if not token then return false,view end
 		manifest.metadataToken=token;manifest.viewStamp=view
+  local trace=GlobalStorageSiK.NetTrace
+  if trace and trace.isEnabled() then
+   trace.write("Manifest: metadata","network="..tostring(manifest.networkId)
+    .." openSeq="..tostring(state.session.openSeq).." token="..tostring(manifest.manifestToken)
+    .." known="..tostring(state.knownMetadataToken).." previous="..tostring(previousMetadataToken)
+    .." current="..tostring(token).." signatureBytes="..tostring(#signature)
+    .." firstDifferentByte="..tostring(changedAt))
+  end
 		if manifest.manifestNotModified and state.knownMetadataToken==token then
 			manifest.terminalMetadata=nil;manifest.metadataNotModified=true
 		end

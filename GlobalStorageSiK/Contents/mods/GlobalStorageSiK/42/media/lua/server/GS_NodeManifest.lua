@@ -145,14 +145,32 @@ function Manifest.stamps(player,control,view)
 	local bytes=(#control+#view)*4+512
 	local delta=bytes-(state.stampBytes or 0)
 	if state.bytes+delta>8*1024*1024 or retainedBytes+delta>32*1024*1024 then return nil,"manifest_budget" end
-	if state.controlSignature~=control then
+	local priorToken=state.metadataToken
+ local changedAt
+ local trace=GlobalStorageSiK.NetTrace
+ if trace and trace.isEnabled() and state.controlSignature and state.controlSignature~=control then
+  local before=state.controlSignature
+  local at,limit=1,math.min(#before,#control,2048)
+  -- Diagnostics must not scan a 4 MiB canonical signature on the update path.
+  -- Compare a bounded prefix in chunks, then at most one chunk byte by byte.
+  while at<=limit do
+   local last=math.min(limit,at+63)
+   if string.sub(before,at,last)~=string.sub(control,at,last) then
+    while at<=last and string.byte(before,at)==string.byte(control,at) do at=at+1 end
+    break
+   end
+   at=last+1
+  end
+  changedAt=at<=limit and at or limit<2048 and at or "prefix_scan_truncated"
+ end
+ if state.controlSignature~=control then
 		serial=serial+1;state.metadataToken=state.epoch..":m:"..tostring(serial);state.controlSignature=control
 	end
 	if state.viewSignature~=view then
 		serial=serial+1;state.viewToken=state.epoch..":v:"..tostring(serial);state.viewSignature=view
 	end
 	state.bytes=state.bytes+delta;retainedBytes=retainedBytes+delta;state.stampBytes=bytes
-	return state.metadataToken,state.viewToken
+	return state.metadataToken,state.viewToken,priorToken,changedAt
 end
 
 local function prepareBlock(player,meta,nodeId,token,baseRevision,state)

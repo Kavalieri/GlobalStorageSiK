@@ -570,6 +570,12 @@ Debug CatalogTransport selection now includes group2/group4 (logical credits per
 
 ## Core 1.5.8-dev3 r7: compact complete replication
 
-Normal openings use `final7` without requiring debug mode. Each acknowledged opening pins its profile ID/hash and correlation ID. Debug diagnostics may select a research profile before opening; selection does not change active openings. Compact transport retains complete item data and the 1024-action quantum. Compression and technical checks do not certify ingame duration.
+The r7 candidate uses `final7` without requiring debug mode. Each acknowledged opening pins its profile ID/hash and correlation ID. Debug diagnostics may select a research profile before opening; selection does not change active openings. Compact transport retains complete item data and the 1024-action quantum. Compression and technical checks do not certify ingame duration.
 
 For r7 comparison, capture the full opening and warm reopening with the same physical inventory and player access as r6. Preserve first-view, full-usable, bytes, recoveries and console evidence. Do not infer runtime improvement from the standalone fixtures.
+
+## Core 1.5.8-dev3 r8: fewer encoding resumptions
+
+Normal openings now use `final8`. Complete r7 wire data is retained. Already validated scalar/reference values emit without an extra stack frame; record schemas are reused only after exact key-set and cardinality validation. Batch-local hint memory is included in the existing 64 KiB schema cache and transport reservation. The 1024-action quantum, four credits, 48 KB frames, eight-node view cadence and global budgets remain unchanged. Explicit `final7` and historical profiles retain their pins.
+
+Existing NetTrace can report group units/rows/largest node, preparation/staging/consumer/post-consumer timings, UI construction versus refresh, and known/previous/current metadata tokens. Metadata comparison examines at most 2048 characters; `prefix_scan_truncated` denotes an unknown later difference. These diagnostics neither omit fresh metadata nor authorize preload. Offline reductions in work/calls are not ingame time or pressure acceptance. Normal testing needs no new launcher or preprocessing script.

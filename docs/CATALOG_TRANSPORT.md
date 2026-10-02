@@ -311,6 +311,12 @@ Debug CatalogTransport selection now includes group2/group4 (logical credits per
 
 ## Core 1.5.8-dev3 r7: compact complete replication
 
-Normal openings use `final7`: complete replicas with bounded table/text dictionaries, compact confirmed metadata, four node credits, 48 KB frames and the existing 1024-action quantum. Debug diagnostics can select a research profile before opening; each opening pins its profile ID/hash.
+The r7 candidate uses `final7`: complete replicas with bounded table/text dictionaries, compact confirmed metadata, four node credits, 48 KB frames and the existing 1024-action quantum. Debug diagnostics can select a research profile before opening; each opening pins its profile ID/hash.
 
 Compact decoding preserves every field and physical item identity. Dictionaries are local to one batch and decoded mutable tables remain independent. Implicit keys count toward token and memory limits before allocation. A warm metadata reference requires the exact complete confirmed control base; missing bases request a full envelope. Physical reconciliation remains shared on the server. This policy does not preload client inventory before an authorized opening and does not establish runtime performance.
+
+## Core 1.5.8-dev3 r8: fewer encoding resumptions
+
+Normal openings now use `final8`. Complete r7 wire data is retained. Already validated scalar/reference values emit without an extra stack frame; record schemas are reused only after exact key-set and cardinality validation. Batch-local hint memory is included in the existing 64 KiB schema cache and transport reservation. The 1024-action quantum, four credits, 48 KB frames, eight-node view cadence and global budgets remain unchanged. Explicit `final7` and historical profiles retain their pins.
+
+Existing NetTrace can report group units/rows/largest node, preparation/staging/consumer/post-consumer timings, UI construction versus refresh, and known/previous/current metadata tokens. Metadata comparison examines at most 2048 characters; `prefix_scan_truncated` denotes an unknown later difference. These diagnostics neither omit fresh metadata nor authorize preload. Offline reductions in work/calls are not ingame time or pressure acceptance. Normal testing needs no new launcher or preprocessing script.

@@ -182,6 +182,17 @@ end
 --- Abre o refresca la ventana principal del terminal.
 ---@param state table|nil
 function GlobalStorageSiK.TerminalUI.show(state)
+ local trace=GlobalStorageSiK.NetTrace
+ local measured=state and state._gsCatalogApply and trace and trace.isEnabled() and type(getTimestampMs)=="function"
+ local phaseStarted=measured and getTimestampMs() or nil
+ local function phase(name)
+  if not phaseStarted then return end
+  local at=getTimestampMs()
+  trace.write("Replica: UI phase","phase="..name.." player="..tostring(state.playerNum)
+   .." openSeq="..tostring(state.openSeq).." revision="..tostring(state.inventoryRevision)
+   .." durationMs="..tostring(at-phaseStarted).." rows="..tostring(state.items and #state.items or 0))
+  phaseStarted=getTimestampMs()
+ end
 	local showStartedMs = GlobalStorageSiK.UIDebug and GlobalStorageSiK.UIDebug.enabled()
 		and type(getTimestampMs) == "function" and getTimestampMs() or nil
 	if GlobalStorageSiK.TerminalAccessGuard and GlobalStorageSiK.TerminalAccessGuard.ensure then
@@ -229,7 +240,9 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		if GlobalStorageSiK.TerminalTabs and GlobalStorageSiK.TerminalTabs.applyAccessMode then
 			GlobalStorageSiK.TerminalTabs.applyAccessMode(ui, "full", nil)
 		end
+		phase("reuse_access")
 		applyTerminalState(ui, state)
+		phase("reuse_refresh")
 		ui:setVisible(true)
 		-- Los estados periódicos refrescan datos, no el z-order. Solo una apertura
 		-- explícita o la reaparición de una ventana oculta puede elevar el shell;
@@ -248,6 +261,7 @@ function GlobalStorageSiK.TerminalUI.show(state)
 		return
 	end
 
+	phase("open_access")
 	local rect = resolveShellRect(player)
 	ui = GS_TerminalUI:new(rect.x, rect.y, rect.w, rect.h, playerNum)
 	ui._sikWindowProfile = rect.profile
@@ -255,6 +269,7 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	ui:initialise()
 	ui:show()
 	GlobalStorageSiK.TerminalUI.setInstanceForPlayer(playerNum, ui)
+	phase("construct_shell")
 	GlobalStorageSiK.UIDebug.log("OPEN", "ventana CREADA x=%d y=%d w=%d h=%d",
 		rect.x, rect.y, rect.w, rect.h)
 	if showStartedMs then
@@ -268,7 +283,9 @@ function GlobalStorageSiK.TerminalUI.show(state)
 	-- El shell ya esta en UIManager: construir/refrescar el contenido activo en
 	-- el siguiente tick permite que la ventana se pinte antes del trabajo pesado
 	-- y coalesce cualquier snapshot que llegue durante esa apertura.
+	phase("open_chrome")
 	applyTerminalState(ui, state, true)
+	phase("open_refresh")
 end
 
 --- Muestra ventana bloqueada por acceso denegado (sin round-trip al servidor).

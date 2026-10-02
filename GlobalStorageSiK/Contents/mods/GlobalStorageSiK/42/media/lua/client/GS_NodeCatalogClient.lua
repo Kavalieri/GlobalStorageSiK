@@ -173,7 +173,17 @@ local function nextNode(state,receivedBlock)
 				for i=2,#missingNodes do args["nodeId"..i]=missingNodes[i].nodeId end
 			end
 		end
-		trace("node requested",args,"node="..args.nodeId.." nodeRevision="..tostring(missing.revision))
+        local log=GlobalStorageSiK.NetTrace
+        if log and log.isEnabled() then
+        local units,rows,maximum=0,0,0
+  for i=1,(args.nodeCount or 1) do
+   local record=state.entry.byId and state.entry.byId[i==1 and args.nodeId or args["nodeId"..i]]
+   if record then units=units+(record.units or 0);rows=rows+(record.rows or 0);maximum=math.max(maximum,record.units or 0) end
+  end
+  trace("node requested",args,"node="..args.nodeId.." nodeRevision="..tostring(missing.revision)
+   .." nodes="..tostring(args.nodeCount or 1).." units="..tostring(units).." rows="..tostring(rows)
+   .." maxNodeUnits="..tostring(maximum))
+        end
 		state.request=args;state.sentAt=now()
 		if not send(state,"terminalNodeRequest",args) then return false,"node_send" end
 	end
@@ -352,6 +362,7 @@ local function prepareView(state,rows,stats)
 end
 local function apply(state)
 	local applyStarted=now()
+	local prepareMs,stageMs,consumerMs=0,0,0
 	if state.buildRows then
 		local accepted,reason=prepareView(state,state.buildRows,state.stats)
 		state.buildRows=nil
@@ -393,13 +404,18 @@ local function apply(state)
 		payload.baseViewSequence=current.viewSequence or 0
 		payload.changedRows=state.view.changed;payload.removedRowKeys=state.view.removed
 	end
+	prepareMs=now()-applyStarted
+	local stageStarted=now()
 	local retained=math.max(4096,(state.stats and state.stats.retainedBytes) or #state.rows*1024)
 	local generation=state.stats and state.stats.generation or state.derivedGeneration
 	local commit,storeReason,cancel=cache.stageView(state.entry,state.rows,state.metadata,retained,
 		not state.partial,state.store,generation,state.manifest.manifestToken,state.manifest.viewStamp)
 	if not commit then return false,storeReason end
 	state.cancelStage=cancel
+	stageMs=now()-stageStarted
+	local consumerStarted=now()
 	local accepted,reason=context.apply(payload,delta,state.rows)
+	consumerMs=now()-consumerStarted
 	if accepted==false then return false,reason end
 	if slots[payload.playerNum]~=state then return true end
 	if not context.current(payload.playerNum,state.ack.openSeq) then Client.clear(payload.playerNum,false);return true end
@@ -420,6 +436,8 @@ local function apply(state)
 			.." notModified="..tostring(state.notModified==true).." nodes="..tostring(stats.nodesProcessed or 0)
 			.." parents="..tostring(stats.parentsProcessed or 0).." bytes="..tostring(retained)
 			.." buildMs="..tostring(state.buildMs or 0).." viewMs="..tostring(state.viewMs or 0)
+			.." prepareMs="..tostring(prepareMs).." stageMs="..tostring(stageMs)
+			.." consumerMs="..tostring(consumerMs).." postConsumerMs="..tostring(now()-consumerStarted-consumerMs)
 			.." applyMs="..tostring(now()-applyStarted).." roundMs="..tostring(now()-(state.roundStarted or state.started)))
 	end
 	if slots[payload.playerNum]~=state then return true end
