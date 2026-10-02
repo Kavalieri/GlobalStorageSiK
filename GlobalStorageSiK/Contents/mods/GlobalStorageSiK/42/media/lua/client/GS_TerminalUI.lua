@@ -751,8 +751,10 @@ function GS_TerminalUI:render()
 	UI.Window.callBase(self, "render")
 end
 
-function GS_TerminalUI:refreshNetworkPanel()
-	self:applyCapacityState((self.terminalState or {}).capacity)
+function GS_TerminalUI:refreshNetworkPanel(capacityAlreadyApplied)
+	-- Inventory-only and external refreshes still update counts. Full state
+	-- refreshes can reuse the capacity application performed in this call.
+	if not capacityAlreadyApplied then self:applyCapacityState((self.terminalState or {}).capacity) end
 	local nodes = self.terminalState and self.terminalState.nodes or {}
 	local info = GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo
 		and GlobalStorageSiK.TerminalNodes.getNetworkIncidentInfo(nodes) or { count = 0 }
@@ -887,7 +889,7 @@ function GS_TerminalUI:refreshFromState(state)
 	if self._warehouseQuery == nil then
 		self._warehouseQuery = self.searchEntry and self.searchEntry:getText() or ""
 	end
-	self:refreshNetworkPanel()
+	self:refreshNetworkPanel(capacityChanged)
 	local cap = self.terminalState.capacity
 	if cap and not self._capacityHaloShown then
 		local st = cap.status

@@ -179,8 +179,7 @@ function Codec.stepFraming(state,maxWork)
 	return nil,nil,false
 end
 
-local function emit(state, token, knownBytes)
-	local cost = tokenCost(token, knownBytes)
+local function emitCost(state, token, cost)
 	if cost + 4 > state.budget then error("catalog_budget", 0) end
 	if state.chunkBytes + cost > state.budget then
 		if #state.chunks >= Codec.MAX_CHUNKS then error("catalog_budget", 0) end
@@ -200,6 +199,73 @@ local function emit(state, token, knownBytes)
 	end
 end
 
+local function emit(state, token, knownBytes)
+ emitCost(state,token,tokenCost(token,knownBytes))
+end
+
+-- Private fast path only after the scalar/reference has passed its validator.
+-- Wire/budget accounting stays centralized; new strings retain UTF validation.
+local function emitScalar(state,value)
+ local kind=type(value)
+ if kind=="number" and finite(value) then emitCost(state,value,18);return true end
+ if kind=="boolean" then emitCost(state,value,11);return true end
+ if kind=="string" then
+  local reference=state.compactTables and state.texts[value]
+  if reference then
+   emitCost(state,reference,12+#reference)
+   state.fastStats.references=state.fastStats.references+1;return true
+  end
+  local cached=state.memo[value]
+  if cached then emitCost(state,cached.token,13+cached.bytes);return true end
+ end
+ return false
+end
+
+local function finishShortString(state,frame)
+ local token=":"..frame.value
+ local prefix,cost=1,160+#frame.value*4
+ if state.compactTables and #frame.value>=24 and #frame.value<=2048 and state.textCount<2048
+  and state.textBytes+cost<=Codec.TEXT_CACHE_BYTES then
+  state.textCount=state.textCount+1
+  -- One bounded ASCII token replaces the numeric map value, no extra cache.
+  -- The existing 160-byte entry overhead covers its maximum five characters.
+  state.texts[frame.value]="@"..tostring(state.textCount)
+  state.textBytes=state.textBytes+cost
+  local header="!"..tostring(state.textCount)..":"
+  token=header..frame.value;prefix=#header
+ end
+ emit(state,token,frame.bytes+prefix)
+ rememberString(state,frame.value,frame.bytes,":"..frame.value)
+ state.stack[#state.stack]=nil
+ state.fastStats.strings=state.fastStats.strings+1
+end
+
+local function scanString(state,frame)
+ local length=#frame.value
+ -- Same 32 codepoint ceiling and fragment boundary as the original scanner.
+ for i=1,32 do
+  if frame.at>length then break end
+  local following,cost
+  local first=string.byte(frame.value,frame.at)
+  if first<128 then following,cost=frame.at+1,1
+  else following,cost=codepoint(frame.value,frame.at) end
+  if frame.bytes+cost>PART_BYTES then
+   frame.pending=string.sub(frame.value,frame.startAt,frame.at-1)
+   frame.pendingBytes,frame.startAt,frame.bytes=frame.bytes,frame.at,0
+   if not frame.long then frame.long,frame.phase=true,"startMarker"
+   else frame.phase="fragment" end
+   return
+  end
+  frame.at,frame.bytes=following,frame.bytes+cost
+ end
+ if frame.at>length then
+  if frame.long then
+   frame.pending,frame.pendingBytes=string.sub(frame.value,frame.startAt),frame.bytes
+   frame.phase="finalFragment"
+  else finishShortString(state,frame) end
+ end
+end
+
 local function pushValue(state, value, depth)
 	state.stack[#state.stack + 1] = { kind = "value", value = value, depth = depth }
 end
@@ -207,13 +273,14 @@ end
 -- Already validated scalars/references need no stack frame or second action.
 -- New strings and containers retain the incremental validator and depth fence.
 local function pushChild(state,value,depth)
+ if state.streamlined and emitScalar(state,value) then return true end
  if state.efficient then
-  if finite(value) or type(value)=="boolean" then emit(state,value);return end
+  if finite(value) or type(value)=="boolean" then emit(state,value);return true end
   if type(value)=="string" then
    local id=state.compactTables and state.texts[value]
    local cached=state.memo[value]
-   if id then emit(state,"@"..tostring(id));return end
-   if cached then emit(state,cached.token,cached.bytes+1);return end
+   if id then emit(state,"@"..tostring(id));return true end
+   if cached then emit(state,cached.token,cached.bytes+1);return true end
   end
  end
  pushValue(state,value,depth)
@@ -224,7 +291,9 @@ local function encodeAction(state)
 	if not frame then return true end
 	if frame.kind == "value" then
 		local kind = type(frame.value)
-		if kind == "number" and finite(frame.value) then
+		if state.streamlined and emitScalar(state,frame.value) then
+   state.stack[#state.stack]=nil
+  elseif kind == "number" and finite(frame.value) then
 			emit(state, frame.value); state.stack[#state.stack] = nil
 		elseif kind == "boolean" then
 			emit(state, frame.value); state.stack[#state.stack] = nil
@@ -238,6 +307,7 @@ local function encodeAction(state)
 			else
 				frame.kind, frame.at, frame.startAt, frame.bytes = "string", 1, 1, 0
 				frame.phase, frame.long = "scan", false
+    if state.streamlined then scanString(state,frame) end
 			end
 		elseif kind == "table" then
 			if frame.depth > Codec.MAX_DEPTH or state.active[frame.value] then error("catalog_schema", 0) end
@@ -301,7 +371,13 @@ local function encodeAction(state)
 	elseif frame.kind == "record" then
 		frame.index=frame.index+1
 		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
-		else pushChild(state,frame.value[frame.keys[frame.index]],frame.depth+1) end
+		else
+   local immediate=pushChild(state,frame.value[frame.keys[frame.index]],frame.depth+1)
+   if state.streamlined and immediate and frame.index==frame.count then
+    state.active[frame.value]=nil;state.stack[#state.stack]=nil
+    state.fastStats.closures=state.fastStats.closures+1
+   end
+  end
 	elseif frame.kind == "arrayScan" then
 		-- Detection is incremental and charged to the same global work slice.
 		local key=frame.iterator(frame.subject,frame.key)
@@ -315,7 +391,13 @@ local function encodeAction(state)
 	elseif frame.kind == "array" then
 		frame.index=frame.index+1
 		if frame.index>frame.count then state.active[frame.value]=nil;state.stack[#state.stack]=nil
-		else pushChild(state,frame.value[frame.index],frame.depth+1) end
+		else
+   local immediate=pushChild(state,frame.value[frame.index],frame.depth+1)
+   if state.streamlined and immediate and frame.index==frame.count then
+    state.active[frame.value]=nil;state.stack[#state.stack]=nil
+    state.fastStats.closures=state.fastStats.closures+1
+   end
+  end
 	elseif frame.kind == "table" then
 		local key, value = frame.iterator(frame.subject, frame.key)
 		if key == nil then
@@ -327,13 +409,17 @@ local function encodeAction(state)
 			frame.key = key
 			pushValue(state, value, frame.depth + 1)
 			-- Keys are scalar. Avoid a temporary stack frame when already validated.
-			if state.optimized and finite(key) then emit(state,key)
+			if state.streamlined and emitScalar(state,key) then
+    state.fastStats.keys=state.fastStats.keys+1
+   elseif state.optimized and finite(key) then emit(state,key)
 			elseif state.optimized and state.memo[key] then
 				local cached=state.memo[key];emit(state,cached.token,cached.bytes+1)
 			else pushValue(state, key, frame.depth + 1) end
 		end
 	elseif frame.kind == "string" then
-		if frame.phase == "scan" then
+		if state.streamlined and frame.phase=="scan" then
+   scanString(state,frame)
+  elseif frame.phase == "scan" then
 			if frame.at > #frame.value then
 				if frame.long then
 					frame.pending, frame.pendingBytes = string.sub(frame.value, frame.startAt), frame.bytes
@@ -382,7 +468,7 @@ local function encodeAction(state)
 	return #state.stack == 0
 end
 
-function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient)
+function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,efficient,streamlined)
 	frameBytes=frameBytes or Codec.FRAME_BYTES
 	if not integer(frameBytes,Codec.FRAME_BYTES,Codec.MAX_RESEARCH_FRAME_BYTES)
 		or not integer(budget, 4200,frameBytes) then return nil, "catalog_budget" end
@@ -390,7 +476,7 @@ function Codec.beginEncode(value, budget,frameBytes,optimized,compactTables,effi
 	local state = { mode = "encode", budget = budget, chunks = { chunk }, chunk = chunk,
 		chunkBytes = 4, chunkSizes={4}, totalBytes = 4, tokenCount = 0, active = {}, stack = {},
 		memo={},memoCount=0,memoBytes=0,optimized=optimized==true,compactTables=compactTables==true,
-		efficient=efficient==true,shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
+		efficient=efficient==true,streamlined=streamlined==true and efficient==true,fastStats={keys=0,references=0,strings=0,closures=0},shapeHints={},schemas={},schemaCount=0,schemaBytes=0,expandedKeys=0,texts={},textCount=0,textBytes=0 }
 	pushValue(state, value, 0)
 	return state
 end

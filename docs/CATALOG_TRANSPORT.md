@@ -317,6 +317,10 @@ Compact decoding preserves every field and physical item identity. Dictionaries 
 
 ## Core 1.5.8-dev3 r8: fewer encoding resumptions
 
-Normal openings now use `final8`. Complete r7 wire data is retained. Already validated scalar/reference values emit without an extra stack frame; record schemas are reused only after exact key-set and cardinality validation. Batch-local hint memory is included in the existing 64 KiB schema cache and transport reservation. The 1024-action quantum, four credits, 48 KB frames, eight-node view cadence and global budgets remain unchanged. Explicit `final7` and historical profiles retain their pins.
+The r8 candidate uses `final8`. Complete r7 wire data is retained. Already validated scalar/reference values emit without an extra stack frame; record schemas are reused only after exact key-set and cardinality validation. Batch-local hint memory is included in the existing 64 KiB schema cache and transport reservation. The 1024-action quantum, four credits, 48 KB frames, eight-node view cadence and global budgets remain unchanged. Explicit `final7` and historical profiles retain their pins.
 
 Existing NetTrace can report group units/rows/largest node, preparation/staging/consumer/post-consumer timings, UI construction versus refresh, and known/previous/current metadata tokens. Metadata comparison examines at most 2048 characters; `prefix_scan_truncated` denotes an unknown later difference. These diagnostics neither omit fresh metadata nor authorize preload. Offline reductions in work/calls are not ingame time or pressure acceptance. Normal testing needs no new launcher or preprocessing script.
+
+## Core 1.5.8-dev3 r9: streamlined short strings
+
+Normal openings use final9. Short strings fuse initialization, bounded UTF scanning and final emission. Validated keys/references reuse exact accounted tokens; containers close early only after their final immediate scalar. Wire data, dictionary admission, global quotas and final8 pins remain unchanged. Existing NetTrace can emit one aggregate encoder_fastpath per batch. Terminal state refresh applies capacity once while external and inventory-only refreshes still update counts. Offline work reductions do not establish ingame latency or pressure acceptance.
