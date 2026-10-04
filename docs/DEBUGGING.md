@@ -635,3 +635,51 @@ The r10 candidate uses final10. Repeated scalar records with up to eight keys re
 ## Core 1.5.8-dev3 r11: bounded codec overhead and phase diagnostics
 
 Normal openings use final11. Admitted scalar records can commit identical tokens and accounting once when the complete record fits the current frame. Decoding places up to eight validated record scalars directly, charging every scalar to the unchanged quantum; long literals and complex values retain the general parser. ASCII takes the same exact UTF validation path with less dispatch. Wire values, quotas, permissions, ACK and physical operations remain intact. Existing CatalogTransport diagnostics add decode validation/parse/mixed regions, maximum update gap, packed scalar counts and gated visual refresh phases. These measurements do not attribute gaps to GC/network or establish runtime latency/pressure acceptance. The r10 soft view deadline and atomic warm view remain.
+
+## Core 1.5.8-dev3 routing-r2: deposit decisions and AutoSort costs
+
+The terminal footer identifies the local and server candidate separately. For this
+candidate both must show `routing-r2-20261004`. The initial-load codec remains
+`final11`; a matching version number alone does not identify the routing candidate.
+
+Deposit selection retains per-item order, filter specificity, zone/container
+priorities, live capacity and validated preferred returns. Candidate configuration
+is checked again after task yields and physical attempts, including callbacks.
+Static matches survive only an equivalent candidate configuration and container
+identity. Positive affinity witnesses retain at most two item references per
+node/type, with a 4096-key session cap. Each use verifies physical containment and
+fullType; an invalid witness falls back to a fresh affinity lookup. They never
+certify absence, capacity or a final destination. Full competitors can be pruned
+before affinity work; accepting an item alone does not establish an optimal origin.
+
+Existing debug summaries remain aggregate. `Router depositComplete` reports
+`selectionMs` and `mutationMs`, static `planBuilds/planHits`, candidate-list
+`candidateListHits/candidateListRebuilds`, `matching`, `candidateVisits`,
+`physicalValidations`, `affinityReads`, `witnessHits/witnessMisses` and
+`capacityPrunes`. `noMatch`, `full`, `noDestination` and `refMissing` distinguish
+rejections and missing input references; the last does not assert physical loss.
+This terminal summary covers deposit tasks, including their cancellation/replay
+contract; other existing synchronous internal deposit paths do not emit it.
+
+AutoSort `finishJob` separates `attempted`, successful `moved`, `failed` and
+`skipped`. Skip causes are `optimal`, `noDestination`, `full`, `absent` and
+`sourceUnavailable`. Only `optimal` means the selected origin was best under the
+rules observed at that check. `routingCost` adds witness and capacity-pruning
+counts; `replicaCost` retains publication nodes/windows, recovery and replica time.
+No-op steps have no movement pause. Physical attempts, including failed attempts
+or exceptions, consume the existing bounded quota and shared movement window.
+Waiting networks retain their cursor and recompute selection after yielding.
+
+`activeMs`, `selectionMs` and `mutationMs` use the process millisecond clock,
+not a CPU profiler. `waitMs` is wall duration minus instrumented active work;
+`plannedWaitMs` and its `moveWaitMs/creditWaitMs/readerWaitMs` breakdown are planned
+delays already inside wall time, not additive measured waits. `busyWaitMs` records
+lock retry delays separately. `affinityReads` counts explicit inventory traversal
+items, not native containment cost or all physical work. A deadline is soft: one
+selection or engine call can overrun it. No increase of server work budgets,
+movement quotas or replication windows is implied. Global recovery remains when
+required; existing scan/replica revisions do not certify universal physical freshness.
+
+Local fixtures and compiler checks establish technical behavior only. Dedicated
+deposit destinations, no-op duration, pressure, custody and final replication
+remain runtime checks. Keep issue #1 open and credit iceriny.

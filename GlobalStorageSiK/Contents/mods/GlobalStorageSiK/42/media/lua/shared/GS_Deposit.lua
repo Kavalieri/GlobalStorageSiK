@@ -309,6 +309,9 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 	local seenIds = {}
 	local routingSession = options and options.routingSession
 		or GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+	if options and options.routingSession then
+		GlobalStorageSiK.Transfer.beginDepositSlice(routingSession, player, networkId)
+	end
 	local searchSnapshot = options and options.searchSnapshot
 		or GlobalStorageSiK.Deposit.createSearchSnapshot(player, itemIds)
 
@@ -364,6 +367,7 @@ function GlobalStorageSiK.Deposit.depositByIds(player, networkId, itemIds, optio
 				else
 					local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
+						withinSlice = true,
 						preferredNodeId = options and options.preferredNodeId or nil,
 						deferSnapshot = true,
 					})
@@ -460,7 +464,8 @@ function GlobalStorageSiK.Deposit.depositFromContainer(player, networkId, refere
 		local candidate = candidates[c]
 		if candidate and candidate:getContainer() == container then
 			local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, candidate, networkId, {
-				session = routingSession,
+					session = routingSession,
+					withinSlice = true,
 				deferSnapshot = true,
 			})
 			if ok then

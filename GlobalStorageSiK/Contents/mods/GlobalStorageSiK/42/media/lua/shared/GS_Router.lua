@@ -462,7 +462,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 	-- una regla de categoria/filtro que el jugador SI configuro a mano
 	-- siempre gana, esto no la pisa.
 	options = options or {}
-    if options.routingPlan and GlobalStorageSiK.Sandbox.autoSortEnabled() then
+    if options.routingPlan then
         local plan = options.routingPlan
         GlobalStorageSiK.RoutingPlan.beginSlice(plan)
         if options.preferredNodeId then
@@ -474,10 +474,13 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
                     and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then return live end
             end
         end
-        local live, _, tier, reason = GlobalStorageSiK.RoutingPlan.pick(plan, liveNodes, item, character, options)
+        local picker = GlobalStorageSiK.Sandbox.autoSortEnabled()
+            and GlobalStorageSiK.RoutingPlan.pick or GlobalStorageSiK.RoutingPlan.pickLegacy
+        local live, _, tier, reason = picker(plan, liveNodes, item, character, options)
         -- Aggregate per session, no per-item or per-node log allocation.
         plan.lastTier, plan.lastReason = tier, reason
-        return live, reason == "no_compatible_destination" and "no_match" or nil
+        return live, reason == "no_compatible_destination" and "no_match"
+            or (reason == "destination_full" and "no_space" or nil)
     end
 	local fullType = item.getFullType and item:getFullType() or nil
 	local affinityIndex = options.affinityIndex or GlobalStorageSiK.Router.buildAffinityIndex(liveNodes)
@@ -508,7 +511,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		local preferredIndex = affinityIndex.nodeIndexById
 			and affinityIndex.nodeIndexById[preferredNodeId] or nil
 		local preferred = preferredIndex and liveNodes[preferredIndex] or nil
-		if preferred and GlobalStorageSiK.Router.matchWithZoneGate(preferred.entry or {}, preferred.zoneRules, preferred.zoneEnabled, item)
+		if preferred and not preferred.unavailable and (not options.validate or options.validate(preferred, preferredIndex) == true)
+			and GlobalStorageSiK.Router.matchWithZoneGate(preferred.entry or {}, preferred.zoneRules, preferred.zoneEnabled, item)
 			and GlobalStorageSiK.Router.containerHasSpace(preferred.container, item, character) then
 			if debugOn then
 				GlobalStorageSiK.Log.debug("Router", "RESULT preferred source nodeId=" .. preferredNodeId)
@@ -556,7 +560,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		for i = 1, #liveNodes do
 			local live = liveNodes[i]
 			local entry = live.entry or {}
-			local matchTier = GlobalStorageSiK.Router.matchWithZoneGate(entry, live.zoneRules, live.zoneEnabled, item)
+			local allowed = not live.unavailable and (not options.validate or options.validate(live, i) == true)
+			local matchTier = allowed and GlobalStorageSiK.Router.matchWithZoneGate(entry, live.zoneRules, live.zoneEnabled, item) or nil
 			local destinationTier = matchTier
 			if matchTier == 4 then
 				destinationTier = GlobalStorageSiK.Router.unrestrictedAffinityTier(item, i, affinityIndex)
@@ -675,6 +680,7 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 		-- como "acepta cualquier cosa" pese a tener restricciones reales.
 		local function nodeUnrestricted(live)
 			if live and live.zoneEnabled == false then return false end
+			if not live or live.unavailable or (options.validate and options.validate(live) ~= true) then return false end
 			local entry = live and live.entry
 			if entry and entry.rules and #entry.rules > 0 then return false end
 			local legacyRules = entry and entry.categories
@@ -702,8 +708,8 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 			end
 		end
 
-		if strictNoMatch and not hasAffinityCandidate then
-			return nil, "no_match"
+		if strictNoMatch then
+			return nil, hasAffinityCandidate and "no_space" or "no_match"
 		end
 
 		for i = 1, #liveNodes do

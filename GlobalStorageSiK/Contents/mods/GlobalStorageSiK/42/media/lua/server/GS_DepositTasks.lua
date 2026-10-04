@@ -122,7 +122,16 @@ local function finish(task, reason, cancelled, silent)
 			.. " failed=" .. tostring(summary.failed or 0) .. " planBuilds=" .. tostring(stats.builds)
 			.. " planHits=" .. tostring(stats.hits) .. " candidateVisits=" .. tostring(stats.visits)
 			.. " matching=" .. tostring(stats.matches) .. " affinityReads=" .. tostring(stats.affinityReads)
-			.. " physicalValidations=" .. tostring(stats.validations))
+			.. " physicalValidations=" .. tostring(stats.validations)
+			.. " witnessHits=" .. tostring(stats.witnessHits) .. " witnessMisses=" .. tostring(stats.witnessMisses)
+			.. " capacityPrunes=" .. tostring(stats.capacityPrunes)
+			.. " candidateListHits=" .. tostring(stats.listHits) .. " candidateListRebuilds=" .. tostring(stats.listRebuilds)
+			.. " noMatch=" .. tostring(task.routingSession.rejectedNoMatch or 0)
+			.. " full=" .. tostring(task.routingSession.rejectedFull or 0)
+			.. " noDestination=" .. tostring(task.routingSession.rejectedNoDestination or 0)
+			.. " refMissing=" .. tostring(summary.missing or 0)
+			.. " selectionMs=" .. tostring(task.routingSession.selectionMs or 0)
+			.. " mutationMs=" .. tostring(task.routingSession.mutationMs or 0))
 	end
 	receipts[task.key] = { createdMs = nowMs(), summary = copySummary(summary), meta = task.meta }
 	receiptOrder[#receiptOrder + 1] = task.key

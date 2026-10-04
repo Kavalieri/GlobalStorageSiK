@@ -32,9 +32,9 @@ local function nowMs()
 end
 
 local function timeBudgetExceeded(startedAt, inspected, pacing)
-	if inspected <= 0 or startedAt <= 0 then return false end
 	local current = nowMs()
-	return current > 0 and current - startedAt >= (pacing.cpuBudgetMs or 5)
+	if pacing.deadline ~= nil and current >= pacing.deadline then return true end
+	return current - startedAt >= (pacing.cpuBudgetMs or 5)
 end
 
 --- Construye tabla zoneId -> zone.priority (1 = zona principal) para la red.
@@ -153,11 +153,12 @@ local function revalidateSession(session, player)
 end
 
 local function stepIndex(session, player, startedAt, pacing)
-	local inspected = 0
+	local inspected, units = 0, 0
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < (pacing.indexItemsPerStep or 50)
+		and units < (pacing.indexItemsPerStep or 50)
 		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
+		units = units + 1
 		local live = session.liveNodes[nodeIndex]
 		local container = live and live.container
 		if session.itemIndex == 0 and not validateNode(session, player, live) then container = nil end
@@ -175,7 +176,7 @@ local function stepIndex(session, player, startedAt, pacing)
 				session.itemRefsByNode[nodeIndex] = session.itemRefsByNode[nodeIndex] or {}
 				local refs = session.itemRefsByNode[nodeIndex]
 				refs[#refs + 1] = item
-
+				GlobalStorageSiK.RoutingPlan.remember(session.plan, nodeIndex, item)
 			end
 		end
 	end
@@ -189,14 +190,15 @@ end
 
 local function stepMoves(session, player, summary, startedAt, pacing)
 	local touched = {}
-	local inspected = 0
+	local inspected, units = 0, 0
 	local sourceValid = {}
 	local maxMoves = pacing.maxMovesPerStep or 2
 	while session.nodeIndex <= #session.liveNodes
-		and inspected < (pacing.inspectedPerStep or 25)
-		and summary.moved < maxMoves
+		and units < (pacing.inspectedPerStep or 25)
+		and summary.attempted < maxMoves
 		and not timeBudgetExceeded(startedAt, inspected, pacing) do
 		local nodeIndex = session.nodeIndex
+		units = units + 1
 		local refs = session.itemRefsByNode[nodeIndex] or {}
 		if session.liveNodes[nodeIndex].unavailable or (session.sourceNodeId
 			and (not session.liveNodes[nodeIndex].entry
@@ -218,10 +220,21 @@ local function stepMoves(session, player, summary, startedAt, pacing)
             if present and sourceValid[nodeIndex] then
 				local target, targetIndex, targetTier, targetReason = pickRedistributeTarget(item, nodeIndex, session, player)
 				if target and target.container and target.container ~= container then
+					if session.moveAllowed and session.moveAllowed() ~= true then
+						-- Selection is not resolved until a physical credit is available.
+						-- Keep its reference/cursor; recompute the winner after the yield.
+						session.itemIndex = session.itemIndex - 1
+						session.processed, inspected = session.processed - 1, inspected - 1
+						summary.moveCreditPending = true
+						break
+					end
+					summary.attempted = summary.attempted + 1
+					if session.onMoveAttempt then session.onMoveAttempt() end
                     local moved = GlobalStorageSiK.InventorySync.moveBetween(container, target.container, item, player)
                     GlobalStorageSiK.RoutingPlan.afterMove(session.plan)
                     sourceValid = {}
-                    if moved then
+					if moved then
+						GlobalStorageSiK.RoutingPlan.remember(session.plan, targetIndex, item)
 						touched[fromLive.entry.id] = fromLive
 						touched[target.entry.id] = target
 						summary.moved = summary.moved + 1
@@ -277,7 +290,7 @@ end
 ---@return table|nil session
 function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, session, pacing, options)
 	local startedAt = nowMs()
-	local summary = { moved = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil, skipReasons = {} }
+	local summary = { moved = 0, attempted = 0, failed = 0, skipped = 0, checked = 0, total = 0, reason = nil, skipReasons = {} }
 	if session and session.networkId ~= networkId then session = nil end
 	if not session then
 		local initial
@@ -288,6 +301,8 @@ function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, se
 		session.deferSnapshots = options and options.deferSnapshots == true
 	end
 	session.onMutation = options and options.onMutation
+	session.moveAllowed = options and options.moveAllowed
+	session.onMoveAttempt = options and options.onMoveAttempt
 	local effectivePacing = session.pacing
 		or pacing or GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	session.pacing = effectivePacing
@@ -295,6 +310,7 @@ function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, se
 		local stepPacing = {}
 		for key, value in pairs(effectivePacing) do stepPacing[key] = value end
 		stepPacing.cpuBudgetMs = math.max(0, math.min(effectivePacing.cpuBudgetMs or 5, options.deadline - startedAt))
+		stepPacing.deadline = options.deadline
 		effectivePacing = stepPacing
 	end
 	if not GlobalStorageSiK.Sandbox.remoteTransferEnabled() then
@@ -316,6 +332,7 @@ function GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, se
 	summary.inspected = inspected or 0
 	summary.budgetExhaustions = budgetExhausted and 1 or 0
 	summary.phase = session.phase
+	summary.cursorProgress = tostring(session.nodeIndex) .. ":" .. tostring(session.itemIndex)
 	summary.checked = session.phase == "index" and session.indexed or session.processed
 	summary.total = session.total
 	if not summary.reason and (session.phase == "index" or session.nodeIndex <= #session.liveNodes) then

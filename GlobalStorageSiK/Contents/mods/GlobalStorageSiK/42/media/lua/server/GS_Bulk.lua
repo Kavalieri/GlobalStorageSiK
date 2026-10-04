@@ -83,6 +83,7 @@ local function depositFromContainers(player, networkId, containers, scope, summa
 
 					local ok, reason, snapshotsUpdated, targetNodeId = GlobalStorageSiK.Transfer.depositItem(player, item, networkId, {
 						session = routingSession,
+						withinSlice = true,
 						deferSnapshot = true,
 					})
 

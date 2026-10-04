@@ -19,9 +19,9 @@ GlobalStorageSiK.RedistributeJob = {}
 -- Cada paso ya tiene presupuesto de inspeccion, tiempo y movimientos en
 -- GS_Redistribute. La pausa adicional deja respirar al resto de simulacion y
 -- evita una rafaga continua de remove/add en servidores con muchos jugadores.
-local INDEX_DELAY_MS = 100
+local INDEX_DELAY_MS = 0
 local MOVE_DELAY_MS = 1000
-local MOVE_IDLE_DELAY_MS = 100
+local MOVE_IDLE_DELAY_MS = 0
 local BUSY_DELAY_MS = 500
 local GLOBAL_STEP_DELAY_MS = 100
 local PROGRESS_INTERVAL_MS = 5000
@@ -32,7 +32,7 @@ local REPLICA_TIMEOUT_MS = 300000
 
 local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped, watchers }
 local tickInstalled = false
-local nextGlobalRunMs = 0
+local nextPhysicalRunMs, sliceSerial, physicalSerial = 0, 0, 0
 local onTick
 
 local function hasJobs()
@@ -46,7 +46,7 @@ local function uninstallTickIfIdle()
 		Events.OnTick.Remove(onTick)
 	end
 	tickInstalled = false
-	nextGlobalRunMs = 0
+	-- Do not refill physical credits merely because a job finished/cancelled.
 end
 
 local function nowMs()
@@ -202,7 +202,7 @@ local function finishJob(networkId, job, reason)
 	local topTypes = topTypeSummary(job.movedByType, 8)
     local identity = tostring(networkId):sub(1,96)
     GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. identity .. " reason=" .. tostring(reason)
-        .. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
+        .. " moved=" .. tostring(job.moved) .. " attempted=" .. tostring(job.attempted or 0) .. " failed=" .. tostring(job.failed)
         .. " skipped=" .. tostring(job.skipped) .. " inspected=" .. tostring(job.inspected or 0)
         .. " batches=" .. tostring(job.steps or 0) .. " budgetExhaustions=" .. tostring(job.budgetExhaustions or 0)
         .. " optimal=" .. tostring(job.skipReasons.origin_optimal or 0)
@@ -213,6 +213,8 @@ local function finishJob(networkId, job, reason)
         .. " activeMs=" .. tostring(job.activeMs or 0)
         .. " waitMs=" .. tostring(math.max(0, nowMs()-job.startedMs-(job.activeMs or 0)))
         .. " plannedWaitMs=" .. tostring(job.plannedWaitMs or 0)
+        .. " moveWaitMs=" .. tostring(job.moveWaitMs or 0) .. " creditWaitMs=" .. tostring(job.creditWaitMs or 0)
+        .. " readerWaitMs=" .. tostring(job.readerWaitMs or 0) .. " busyWaitMs=" .. tostring(job.busyWaitMs or 0)
         .. " durationMs=" .. tostring(nowMs()-job.startedMs))
     local stats = job.session and job.session.plan.stats or {}
     GlobalStorageSiK.Log.debug("RedistributeJob", "routingCost | networkId=" .. identity
@@ -220,6 +222,8 @@ local function finishJob(networkId, job, reason)
         .. " planBuilds=" .. tostring(stats.builds or 0) .. " planHits=" .. tostring(stats.hits or 0)
         .. " candidateVisits=" .. tostring(stats.visits or 0) .. " matching=" .. tostring(stats.matches or 0)
         .. " affinityReads=" .. tostring(stats.affinityReads or 0)
+        .. " witnessHits=" .. tostring(stats.witnessHits or 0) .. " witnessMisses=" .. tostring(stats.witnessMisses or 0)
+        .. " capacityPrunes=" .. tostring(stats.capacityPrunes or 0)
         .. " maxStepMs=" .. tostring(job.maxStepMs or 0) .. " overruns=" .. tostring(job.overruns or 0))
     GlobalStorageSiK.Log.debug("RedistributeJob", "replicaCost | networkId=" .. identity
         .. " publicationNodes=" .. tostring(job.replicationNodes or 0)
@@ -299,29 +303,33 @@ end
 onTick = function(deadline)
 	local now = nowMs()
 	if deadline and now >= deadline then return end
-	if now < nextGlobalRunMs then return end
 	local networkId = nil
 	local job = nil
-	local oldestDueMs = nil
+	local oldestSlice, chosenWaiting, oldestPhysical = nil, nil, nil
 	for candidateId, candidate in pairs(jobs) do
+		local waiting = candidate.moveCreditPending and now >= nextPhysicalRunMs and 0 or 1
+		local served = waiting == 0 and (candidate.lastPhysicalSerial or 0) or 0
 		if now >= candidate.nextRunMs
-			and (oldestDueMs == nil or candidate.nextRunMs < oldestDueMs) then
+			and (oldestSlice == nil or waiting < chosenWaiting
+				or (waiting == chosenWaiting and (served < oldestPhysical
+					or (served == oldestPhysical and ((candidate.lastSliceSerial or 0) < oldestSlice
+						or ((candidate.lastSliceSerial or 0) == oldestSlice and tostring(candidateId) < tostring(networkId))))))) then
 			networkId = candidateId
 			job = candidate
-			oldestDueMs = candidate.nextRunMs
+			oldestSlice = candidate.lastSliceSerial or 0
+			chosenWaiting, oldestPhysical = waiting, served
 		end
 	end
 	if not job then
 		return
 	end
 	-- Presupuesto compartido: aunque haya muchas redes vencidas, todo Auto Sort
-	-- combinado ejecuta como máximo un paso por OnTick. Seguro/Rápido añaden su
-	-- espera; Personalizado puede usar 0 ms para continuar en el tick siguiente,
-	-- nunca dentro de un bucle en este mismo tick. El job elegido queda aplazado
-	-- y los demás se atienden por vencimiento, sin sumar N presupuestos pesados
-	-- en el mismo frame.
-	nextGlobalRunMs = now + (job.pacing and job.pacing.schedulerDelayMs
-		or GLOBAL_STEP_DELAY_MS)
+	-- combinado ejecuta como máximo un paso por OnTick. Lecturas pueden seguir
+	-- en el tick siguiente; movimientos consumen una ventana física global.
+	-- Al abrir crédito tienen prioridad las redes que ya esperaban movimiento,
+	-- con serial físico y de lectura separados para evitar starvation.
+	sliceSerial = sliceSerial + 1
+	job.lastSliceSerial = sliceSerial
 
 	if job.phase == "replica" then
 		if job.holdFailed then
@@ -375,12 +383,16 @@ onTick = function(deadline)
 			return
 		end
 		job.nextRunMs = now + BUSY_DELAY_MS
+		job.busyWaitMs = (job.busyWaitMs or 0) + BUSY_DELAY_MS
 		return
 	end
 	job.busyRetries = 0
 	local stepStarted = nowMs()
 	local options = { sourceNodeId = job.options and job.options.sourceNodeId, deferSnapshots = GlobalStorageSiK.CatalogReconciler and GlobalStorageSiK.CatalogReconciler.holdNode ~= nil }
 	options.deadline = deadline
+	options.moveAllowed = function() return nowMs() >= nextPhysicalRunMs end
+	local attempted = 0
+	options.onMoveAttempt = function() attempted = attempted + 1 end
 	local committed = { moved=0, movedByType={}, movedByTier={} }
 	if options.deferSnapshots then
 		options.onMutation = function(sourceId, targetId, fullType, tier)
@@ -407,6 +419,14 @@ onTick = function(deadline)
 		end)
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
+	job.attempted = (job.attempted or 0) + attempted
+	if attempted > 0 or (ok and (summary.moved or 0) > 0) or committed.moved > 0 then
+		-- One physical window shared by all networks, independent of no-op steps.
+		-- Existing profile scheduler delay and per-job movement pause are retained.
+		nextPhysicalRunMs = nowMs() + (job.pacing and job.pacing.schedulerDelayMs or GLOBAL_STEP_DELAY_MS)
+		physicalSerial = physicalSerial + 1
+		job.lastPhysicalSerial = physicalSerial
+	end
     local stepMs = math.max(0, nowMs() - stepStarted)
     job.activeMs = (job.activeMs or 0) + stepMs
     job.maxStepMs = math.max(job.maxStepMs or 0, stepMs)
@@ -437,6 +457,7 @@ onTick = function(deadline)
 	end
 
 	job.moved   = job.moved   + (summary.moved   or 0)
+	job.moveCreditPending = summary.moveCreditPending == true
 	job.failed  = job.failed  + (summary.failed  or 0)
 	job.blocked = (job.blocked or 0) + (summary.blocked or 0)
 	job.blockedReason = summary.blockedReason or job.blockedReason
@@ -465,7 +486,8 @@ onTick = function(deadline)
     end
 	if summary.reason == "limit" then
 		local progressKey = tostring(summary.phase) .. ":" .. tostring(summary.checked or 0)
-		if progressKey == job.lastProgressKey then
+			.. ":" .. tostring(summary.cursorProgress or "")
+		if progressKey == job.lastProgressKey and not summary.moveCreditPending and (summary.budgetExhaustions or 0) == 0 then
 			job.stalledSteps = (job.stalledSteps or 0) + 1
 		else
 			job.lastProgressKey = progressKey
@@ -484,9 +506,13 @@ onTick = function(deadline)
 		if summary.phase ~= "index" then
 			-- Replicated moves retain their bounded quota and operation-specific pause.
 			-- Un barrido que no movió nada puede continuar antes sin generar red.
-			stepDelay = (summary.moved or 0) > 0
+			stepDelay = (attempted > 0 or (summary.moved or 0) > 0)
 				and (job.pacing and job.pacing.moveDelayMs or MOVE_DELAY_MS) or MOVE_IDLE_DELAY_MS
 		end
+		if summary.moveCreditPending then stepDelay = math.max(stepDelay, nextPhysicalRunMs - nowMs()) end
+		if attempted > 0 or (summary.moved or 0) > 0 then job.moveWaitMs = (job.moveWaitMs or 0) + stepDelay
+		elseif summary.moveCreditPending then job.creditWaitMs = (job.creditWaitMs or 0) + stepDelay
+		else job.readerWaitMs = (job.readerWaitMs or 0) + stepDelay end
 		job.plannedWaitMs = job.plannedWaitMs + stepDelay
 		job.nextRunMs = nowMs() + stepDelay
 		local phaseChanged = summary.phase ~= job.lastPhase
