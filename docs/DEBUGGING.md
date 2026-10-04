@@ -10,8 +10,8 @@ ruta. El servidor sigue validando revisión, permisos, IDs y destino físico.
 
 Una réplica completa comprometida puede renovar por copia el selector consumido
 aunque `snapshotCertified=false` para la captura global. Esta confirmación viaja
-sólo dentro del callback local después de commit/Ready y sus cercas de sesión y
-vista. No cambia la certificación global ni las filas compartidas; no autoriza
+dentro del callback local después de commit/Ready y sus cercas de sesión y
+vista, o se reutiliza mediante una prueba local de ese mismo commit vigente. No cambia la certificación global ni las filas compartidas; no autoriza
 vistas parciales, rechazadas o sustituidas. Se conserva un único retry.
 
 Con NetTrace habilitado, `Withdraw: selection refresh` registra como máximo el
@@ -20,6 +20,19 @@ motivo, último descarte, revisión del snapshot/inventario/fila, apertura, secu
 de vista, parcialidad y confirmación de réplica. `retry_scheduled` significa que
 el selector está listo; `withdrawItem` y su ACK acreditan envío y resultado.
 Los descartes del catálogo son sólo diagnóstico y nunca reanudan la retirada.
+
+ACK y NACK correlacionados elevan el mínimo `requiredRevision` de la operación.
+Una vista completa más antigua no consume el retry ni prolonga su espera. Antes
+de enviar otra fila retenida, se reutiliza el commit vigente si alcanza ese mínimo;
+en otro caso se pide un refresco y se espera. El token del delta identifica las
+mismas filas comprometidas. La prueba se invalida al cambiar jugador, apertura,
+red, ámbito, época, topología, filas o confirmación de caché.
+
+La traza incluye `requiredRevision`, `refreshReason`, `refreshWaitMs` y `retryCount`.
+`continuation_scheduled` distingue la renovación preventiva entre filas del
+`retry_scheduled` posterior a un NACK. Las respuestas duplicadas o sin el ID de
+retirada en vuelo no consumen la espera. Los tiempos pertenecen al reloj cliente;
+no son un benchmark ni deben combinarse con timestamps de servidor.
 
 Los logs de diagnóstico y el relé están desactivados por defecto. El servidor permite suscribirse y recibir únicamente a administradores; revalida en cada envío y elimina la suscripción al perder acceso o desconectarse. No debe existir ningún `print()` suelto fuera del logger o del receptor de una línea remota ya formada.
 

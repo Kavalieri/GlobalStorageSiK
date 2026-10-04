@@ -43,6 +43,7 @@ local nextDispatchMs = 0
 local responseDeadlineMs = 0
 local operation = nil
 local traceSelectionRefresh
+local beginSelectionRefresh
 
 local function copyItemIds(itemIds, limit)
 	local copied = {}
@@ -171,6 +172,32 @@ end
 
 local function activeNetworkId() return context.networkId end
 
+local function revisionNumber(value)
+ local revision=tonumber(value)
+ if not revision or revision~=revision or revision<0 or revision==math.huge
+  or revision~=math.floor(revision) then return nil end
+ return revision
+end
+local function catalogState()
+ local client=GlobalStorageSiK.Client
+ return client and client.terminalStateByPlayer and client.terminalStateByPlayer[context.playerNum]
+end
+local function sameOpening(state)
+ if not currentPlayer() or not operation then return false end
+ local identity=operation.catalogIdentity
+ local live=catalogState()
+ if identity then
+  if not live or live.networkId~=operation.networkId then return false end
+  local client=GlobalStorageSiK.Client
+  if identity.openSeq~=nil and client.terminalOpenSeqByPlayer
+   and client.terminalOpenSeqByPlayer[context.playerNum]~=identity.openSeq then return false end
+  for key,value in pairs(identity) do
+   if live[key]~=value or state and state[key]~=nil and state[key]~=value then return false end
+  end
+ end
+ return not state or state.playerNum==nil or tonumber(state.playerNum)==context.playerNum
+end
+
 ---@param networkId string|nil
 ---@param searchQuery string|nil
 ---@return table|nil
@@ -186,7 +213,14 @@ local function ensureOperation(networkId, searchQuery)
 		end
 		return nil
 	end
+	local live=catalogState()
+	local identity=nil
+	if live and live.networkId==networkId then
+		identity={}
+		for _,key in ipairs({"openSeq","catalogScope","replicaEpoch","topologySequence"}) do identity[key]=live[key] end
+	end
 	operation = {
+		catalogIdentity = identity,
 		totalMoved = 0,
 		totalExpected = 0,
 		rowsTotal = 0,
@@ -255,6 +289,18 @@ end
 
 local function dispatchCurrent()
 	if not current then return end
+	-- An ACK proves that the inventory changed, not the contents of another row.
+	-- Reuse a complete current view or wait before sending an avoidable stale intent.
+	if current.selectionMode=="exact_group" and not current.selectionTicket
+		and operation and operation.lastRevision
+		and (revisionNumber(current.rowData.selectionRevision) or -1)<operation.lastRevision then
+		beginSelectionRefresh("continuation")
+		return
+	end
+	if current.retryOnDispatch then
+		current.staleRetryCount=(current.staleRetryCount or 0)+1
+		current.retryOnDispatch=nil
+	end
 	current.sequence = current.sequence + 1
 	local batchUnits = operation and operation.pacing and operation.pacing.batchUnits or 10
 	if GlobalStorageSiK.FloorTargets and GlobalStorageSiK.FloorTargets.isKey(current.targetKey) then
@@ -277,6 +323,7 @@ local function dispatchCurrent()
 	local expectedRequestId = current.requestId
 	-- Armar ANTES del envío: en SP/host el bypass local puede entregar y
 	-- resolver actionResult de forma síncrona dentro de sendCommand.
+	current.responsePending = true
 	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
 	nextDispatchMs = math.huge
 	GlobalStorageSiK.Log.debug("WithdrawClient", "withdraw-intent mode="
@@ -465,6 +512,10 @@ traceSelectionRefresh = function(state, stage, reason, final, completeReplica)
 		.. " snapshotCertified=" .. tostring(state.snapshotCertified)
 		.. " snapshotRevision=" .. tostring(state.snapshotRevision)
 		.. " inventoryRevision=" .. tostring(state.inventoryRevision)
+		.. " requiredRevision=" .. tostring(operation and operation.lastRevision)
+		.. " refreshReason=" .. tostring(current.refreshReason)
+		.. " refreshWaitMs=" .. tostring(math.max(0, nowMs()-(current.refreshStartedMs or nowMs())))
+		.. " retryCount=" .. tostring(current.staleRetryCount or 0)
 		.. " staleRevision=" .. tostring(current.staleSelectionRevision)
 		.. " rowRevision=" .. tostring(rowRevision)
 		.. " openSeq=" .. tostring(state.openSeq) .. " viewSequence=" .. tostring(state.viewSequence)
@@ -486,11 +537,13 @@ function worker.onTerminalState(state, completeReplica)
 	-- callback. It is never inferred from a server payload or stored on a row.
 	local selectorCertified = state.snapshotCertified == true or completeReplica == true
 	if state.networkId ~= current.networkId then return reject("network") end
+	if not sameOpening(state) then return reject("opening") end
 	if state.replicaPartial == true then return reject("partial") end
 	if state.snapshotCertified == false and not selectorCertified then return reject("uncertified") end
-	local freshRevision = tonumber(state.inventoryRevision)
-	local staleRevision = tonumber(current.staleSelectionRevision)
-	if not freshRevision or (staleRevision and freshRevision < staleRevision) then return reject("revision") end
+	local freshRevision = revisionNumber(state.inventoryRevision)
+	local staleRevision = revisionNumber(current.staleSelectionRevision)
+	local requiredRevision = math.max(staleRevision or 0, operation and operation.lastRevision or 0)
+	if not freshRevision or freshRevision < requiredRevision then return reject("revision") end
 	if staleRevision == freshRevision and not selectorCertified then return reject("uncertified") end
 	if state.sourceNodeId ~= current.rowData.sourceNodeId then
 		if current.rowData.sourceNodeId and state.sourceNodeId == nil
@@ -545,16 +598,55 @@ function worker.onTerminalState(state, completeReplica)
 		operation.totalExpected = math.max(0,
 			(operation.totalExpected or 0) - previousExpected + current.expectedCount)
 	end
-	traceSelectionRefresh(state, "selector", "retry_scheduled", true, completeReplica)
+	traceSelectionRefresh(state, "selector", current.refreshReason=="continuation" and "continuation_scheduled" or "retry_scheduled", true, completeReplica)
 	current.awaitingFreshSelection = false
 	current.staleSelectionRevision = nil
 	responseDeadlineMs = 0
 	nextDispatchMs = nowMs()
 	ensureTickInstalled()
-	GlobalStorageSiK.Log.debug("WithdrawClient", "fresh selection received; retrying once",
+	GlobalStorageSiK.Log.debug("WithdrawClient", "fresh selection received; continuing",
 		"rowKey=" .. tostring(freshRow.rowKey)
 			.. " revision=" .. tostring(freshRevision))
 	return true
+end
+
+
+-- Arm the wait before any getter or send: local authority may deliver synchronously.
+beginSelectionRefresh = function(reason)
+ local waiting=current
+ if not waiting or not sameOpening() then worker.cancelAll("selection_refresh_failed");return false end
+ waiting.awaitingFreshSelection=true
+ waiting.refreshReason=reason;waiting.refreshStartedMs=nowMs()
+ waiting.refreshDecisionLogged=nil;waiting.refreshOutcomeLogged=nil
+ waiting.lastRefreshRejection=nil;waiting.freshSelectionRowRevision=nil
+ waiting.freshSelectionRowSeen=nil;waiting.refreshTraceState=nil
+ waiting.staleSelectionRevision=waiting.rowData.selectionRevision
+ waiting.selectionTicket=nil;waiting.selectionSequence=1
+ waiting.retryOnDispatch=reason=="stale" or waiting.retryOnDispatch
+ responseDeadlineMs=nowMs()+SELECTION_REFRESH_TIMEOUT_MS;nextDispatchMs=math.huge
+ local replica=GlobalStorageSiK.NodeCatalogClient
+ local sourceNodeId=waiting.rowData.sourceNodeId
+ if not sourceNodeId and replica and replica.selectionState then
+  local view=replica.selectionState(context.playerNum,waiting.networkId)
+  if current~=waiting or not operation then return false end
+  if not sameOpening() then worker.cancelAll("selection_refresh_failed");return false end
+  if view and worker.onTerminalState(view,true) then return current~=nil end
+  if current~=waiting then return false end
+ end
+ local sent
+ if not sourceNodeId and replica and replica.requestSelectionRefresh then
+  sent=replica.requestSelectionRefresh(context.playerNum,waiting.networkId)
+ end
+ if current~=waiting then return false end
+ if not sameOpening() then worker.cancelAll("selection_refresh_failed");return false end
+ if sent==nil then
+  sent=sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex",{
+   networkId=waiting.networkId,nodeId=sourceNodeId,searchQuery=waiting.searchQuery or "",
+  })
+ end
+ if current~=waiting then return false end
+ if not sent then worker.cancelAll("selection_refresh_failed");return false end
+ return true
 end
 
 ---@param rowData table
@@ -743,7 +835,8 @@ end
 ---@param args table|nil
 ---@return boolean continuing
 function worker.onActionResult(args)
-	if not current or not args or args.withdrawId ~= current.requestId then return false end
+	if not worker.matchesResponse(args) then return false end
+	current.responsePending=false
 	responseDeadlineMs = 0
 	local transfer = args.transfer
 	if not transfer or transfer.op ~= "withdraw" then
@@ -787,42 +880,9 @@ function worker.onActionResult(args)
 			worker.cancelAll("selection_stale")
 			return false
 		end
-		current.staleRetryCount = 1
-		current.awaitingFreshSelection = true
-		current.refreshDecisionLogged = nil
-		current.refreshOutcomeLogged = nil
-		current.lastRefreshRejection = nil
-		current.freshSelectionRowRevision = nil
-		current.freshSelectionRowSeen = nil
-		current.refreshTraceState = nil
-		current.staleSelectionRevision = current.rowData.selectionRevision
-		current.selectionTicket = nil
-		current.selectionSequence = 1
-		responseDeadlineMs = nowMs() + SELECTION_REFRESH_TIMEOUT_MS
-		nextDispatchMs = math.huge
-		local sourceNodeId = current.rowData.sourceNodeId
-		local refreshSent
-		local replica = GlobalStorageSiK.NodeCatalogClient
-		if not sourceNodeId and replica and replica.requestSelectionRefresh then
-			refreshSent = replica.requestSelectionRefresh(context.playerNum, current.networkId)
-		end
-		-- nil denotes the legacy route; false means an applicable replica failed
-		-- its access/session/send fence and must not fall back to another request.
-		if refreshSent == nil then
-			refreshSent = sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex", {
-				networkId = current.networkId, nodeId = sourceNodeId, searchQuery = current.searchQuery or "",
-			})
-		end
-		if not refreshSent then
-			worker.cancelAll("selection_refresh_failed")
-			return false
-		end
-		-- En SP el bypass puede entregar terminalState de forma síncrona dentro
-		-- de sendCommand; si ese snapshot confirmó que la fila ya no existe,
-		-- onTerminalState habrá cancelado y limpiado current antes de volver aquí.
-		if not current then return false end
-		GlobalStorageSiK.Log.debug("WithdrawClient", "selection stale; explicit refresh requested")
-		return true
+		local revision=revisionNumber(transfer.inventoryRevision)
+		if operation and revision then operation.lastRevision=math.max(operation.lastRevision or 0,revision) end
+		return beginSelectionRefresh("stale")
 	end
 	if selectionMode == "exact_ids" then
 		local confirmedIds = transfer.itemIds or {}
@@ -862,7 +922,7 @@ function worker.onActionResult(args)
 		operation.totalMoved = (operation.totalMoved or 0) + moved
 		operation.inspected = (operation.inspected or 0) + moved
 		operation.batches = (operation.batches or 0) + 1
-		local revision = tonumber(transfer.inventoryRevision)
+		local revision = revisionNumber(transfer.inventoryRevision)
 		if revision then
 			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
 		end
@@ -960,7 +1020,7 @@ function worker.onActionResult(args)
 end
 
 function worker.onProgress(args)
-	if not current or not args or args.withdrawId ~= current.requestId
+	if not worker.matchesResponse(args)
 		or args.networkId ~= current.networkId then return false end
 	responseDeadlineMs = nowMs() + RESPONSE_TIMEOUT_MS
 	local moved = math.max(0, math.floor(tonumber(args.moved) or 0))
@@ -976,7 +1036,8 @@ function worker.onProgress(args)
 end
 
 function worker.matchesResponse(args)
-	return current ~= nil and args ~= nil and args.withdrawId == current.requestId
+	return current ~= nil and current.responsePending==true and current.requestId~=nil
+		and args ~= nil and args.withdrawId == current.requestId
 end
 local tick = worker.onTick
 worker.onTick = function()

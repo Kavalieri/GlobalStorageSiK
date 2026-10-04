@@ -412,6 +412,9 @@ local function applyCatalogDelta(payload,replicaRows)
 	state.viewSequence=payload.viewSequence
 	state.categories=payload.categories or state.categories
 	if replicaRows then
+		-- Replica identity accompanies the same fenced rows, including retained-row
+		-- deltas and notModified. Keep the committed selector proof reusable.
+		state.manifestToken=payload.manifestToken
 		preserveLiveScan(payload,playerNum)
 		local fields=(require "GS_ManifestProtocol").METADATA_FIELDS
 		for i=1,#fields do state[fields[i]]=payload[fields[i]] end

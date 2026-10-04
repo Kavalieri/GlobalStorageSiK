@@ -145,13 +145,38 @@ function Client.negotiate(ack)
 	end
 	return send(state,"terminalManifestRequest",args)
 end
+-- A reusable selector view is proved by the last complete, fenced Ready commit,
+-- never by an ACK revision or by cache residency alone. No rows are copied here.
+function Client.selectionState(playerNum,networkId)
+ local state=slots[playerNum]
+ if not state or state.ack.networkId~=networkId then return nil end
+ if not currentOwner(playerNum) or slots[playerNum]~=state then return nil end
+ if not context.current(playerNum,state.ack.openSeq) or not allowed(state) then return nil end
+ local proof=state.selectionCommit
+ if slots[playerNum]~=state or not proof or not state.completed or not state.hasComplete
+  or state.partial or state.phase or state.build or not cache.acceptView(state.entry)
+  or state.entry~=proof.entry or state.entry.confirmed~=proof.confirmed
+  or not state.entry.confirmed or state.entry.confirmed.token~=proof.manifestToken
+  or state.manifest.manifestToken~=proof.manifestToken
+  or state.manifest.inventoryRevision~=proof.inventoryRevision
+  or state.viewSequence~=proof.viewSequence or state.rows~=proof.rows then return nil end
+ local view=context.currentState(playerNum)
+ if not view or view.replicaPartial or view.items~=proof.rows then return nil end
+ for _,key in ipairs({"networkId","openSeq","catalogScope","replicaEpoch","topologySequence",
+  "inventoryRevision","manifestToken","viewSequence"}) do
+  if view[key]~=proof[key] then return nil end
+ end
+ return view
+end
 -- Explicit selector refresh must receive a response even when a spontaneous
 -- complete view arrived before the stale NACK. Reuse confirmed tokens/blocks;
 -- this is a new demand, not a transport failure or a global rescan.
 function Client.requestSelectionRefresh(playerNum,networkId)
 	local state=slots[playerNum]
 	if not state or state.ack.networkId~=networkId then return nil end
+	if not currentOwner(playerNum) or slots[playerNum]~=state then return false end
 	if not context.current(playerNum,state.ack.openSeq) or not allowed(state) then return false end
+	if slots[playerNum]~=state then return false end
 	return Client.negotiate(state.ack)
 end
 local function missingNode(state)
@@ -477,6 +502,13 @@ local function apply(state)
 		elseif state.manifest.inventoryRevision~=payload.inventoryRevision then reason="revision"
 		elseif state.viewSequence~=payload.viewSequence then reason="view"
 		elseif not allowed(state) then reason="access" end
+		if not reason then
+			local proof=intent(state)
+			proof.inventoryRevision=payload.inventoryRevision;proof.manifestToken=payload.manifestToken
+			proof.viewSequence=payload.viewSequence;proof.rows=state.rows
+			proof.entry=state.entry;proof.confirmed=state.entry.confirmed
+			state.selectionCommit=proof
+		end
 		if not reason and context.committed then
 			local ok, err = pcall(context.committed, payload)
 			if not ok then GlobalStorageSiK.Log.error("NodeCatalogClient", "committed callback", tostring(err)) end
