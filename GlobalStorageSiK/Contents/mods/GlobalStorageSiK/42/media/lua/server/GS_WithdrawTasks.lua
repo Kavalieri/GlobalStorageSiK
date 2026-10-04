@@ -103,9 +103,21 @@ end
 
 local function runSlice(task)
 	local player = task.player
-	local dest, targetReason = GlobalStorageSiK.DepositSources.resolveExternalTarget(
+	local dest, targetReason, targetStage = GlobalStorageSiK.DepositSources.resolveExternalTarget(
 		player, task.targetKey)
-	if not dest then return nil, targetReason or "target_unavailable" end
+	if not dest then
+		local trace = GlobalStorageSiK.NetTrace
+		if trace and trace.isEnabled() then
+			trace.write("Withdraw: destination rejected",
+				"withdrawId=" .. tostring(task.meta.withdrawId)
+				.. " targetKey=" .. tostring(task.targetKey):gsub("[%c]", " "):sub(1,192)
+				.. " targetStage=" .. tostring(targetStage or "resolver")
+				.. " reason=" .. tostring(targetReason)
+				.. " selectionRevision=" .. tostring(task.meta.selectionRevision)
+				.. " currentRevision=" .. tostring(GlobalStorageSiK.Index.getInventoryRevision(task.networkId)))
+		end
+		return nil, targetReason or "target_unavailable"
+	end
 	local remainingLimit = math.max(0, task.limit - task.summary.moved)
 	if remainingLimit == 0 then return { complete = true } end
 	local batch, reason = GlobalStorageSiK.WithdrawSelectionTickets.take(
@@ -236,6 +248,7 @@ function Tasks.start(player, args, networkId)
 		limit = limit, touchedSet = {},
 		snapshotSession = GlobalStorageSiK.Transfer.createSnapshotSession(networkId),
 		meta = {
+			selectionRevision = args.selectionRevision,
 			withdrawId = args.withdrawId, pacingKey = pacingKey,
 			searchQuery = type(args.searchQuery) == "string" and args.searchQuery or "",
 			selectionCount = ticket.count, requested = limit,

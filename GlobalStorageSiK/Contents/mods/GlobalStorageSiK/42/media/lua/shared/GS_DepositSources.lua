@@ -596,6 +596,11 @@ function GlobalStorageSiK.DepositSources.buildContainerKey(player, container)
 	if not container then
 		return nil
 	end
+	-- Exact personal identity takes precedence over any parent/world wrapper.
+	-- The key must stay stable when this player moves between squares.
+	if player and player.getInventory and container == player:getInventory() then
+		return "player:main"
+	end
 	-- Item identity survives equipping, dropping and picking up this same bag.
 	local item = container.getContainingItem and container:getContainingItem() or nil
 	if item and item.getInventory and item:getInventory() == container then
@@ -620,10 +625,6 @@ function GlobalStorageSiK.DepositSources.buildContainerKey(player, container)
 				tostring(part:getId())
 			)
 		end
-	end
-
-	if player and player.getInventory and container == player:getInventory() then
-		return "player:main"
 	end
 
 	if player then
@@ -665,6 +666,11 @@ function GlobalStorageSiK.DepositSources.resolveContainerKey(player, key)
 	if not player or not key or key == "" then
 		return nil
 	end
+	-- This explicit key denotes this player's exact main inventory. It does
+	-- not require enumerating its items, bags or nearby world containers.
+	if key == "player:main" then
+		return player.getInventory and player:getInventory() or nil
+	end
 
 	local candidates = {}
 	for _, c in ipairs(collectInventoryTargets(player)) do
@@ -693,19 +699,19 @@ end
 ---@return string|nil reason
 function GlobalStorageSiK.DepositSources.resolveExternalTarget(player, key)
 	if type(key) ~= "string" or key == "" then
-		return nil, "invalid_target"
+		return nil, "invalid_target", "key_schema"
 	end
 	local container = GlobalStorageSiK.DepositSources.resolveContainerKey(player, key)
 	if not container then
-		return nil, "target_unavailable"
+		return nil, "target_unavailable", "key_unresolved"
 	end
 	if GlobalStorageSiK.DepositSources.isNetworkNodeContainer(container) then
 		-- Incluye tanto la red abierta como cualquier otra: la transferencia
 		-- entre redes sigue diferida y el agregado GS no es un contenedor físico.
-		return nil, "network_node"
+		return nil, "network_node", "network_node"
 	end
 	if not GlobalStorageSiK.DepositSources.canPlayerAccessContainer(player, container) then
-		return nil, "target_unavailable"
+		return nil, "target_unavailable", "access_denied"
 	end
 	return container, nil
 end

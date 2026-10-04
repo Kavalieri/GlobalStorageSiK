@@ -459,6 +459,14 @@ local function apply(state)
 	end
 	payload._gsAwaitReplicaReady=nil
 	if ready then publishProgress(state,true) end
+	if ready and slots[payload.playerNum]==state and context.committed
+		and context.current(payload.playerNum,payload.openSeq)
+		and state.manifest.manifestToken==payload.manifestToken
+		and state.manifest.inventoryRevision==payload.inventoryRevision
+		and state.viewSequence==payload.viewSequence and allowed(state) then
+		local ok, err = pcall(context.committed, payload)
+		if not ok then GlobalStorageSiK.Log.error("NodeCatalogClient", "committed callback", tostring(err)) end
+	end
 	return ready
 end
 local function applyChecked(state,n)

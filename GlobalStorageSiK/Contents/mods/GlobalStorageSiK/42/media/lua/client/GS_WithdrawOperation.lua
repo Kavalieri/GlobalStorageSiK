@@ -437,6 +437,7 @@ end
 function worker.onTerminalState(state)
 	if not current or current.awaitingFreshSelection ~= true or not state then return false end
 	if state.networkId ~= current.networkId then return false end
+	if state.replicaPartial == true then return false end
 	if state.snapshotCertified == false then return false end
 	local freshRevision = tonumber(state.inventoryRevision)
 	local staleRevision = tonumber(current.staleSelectionRevision)
@@ -468,6 +469,19 @@ function worker.onTerminalState(state)
 		return true
 	end
 	local previousExpected = current.expectedCount or 0
+	-- Retained replica parents keep their materialization revision. Only this
+	-- consumed selector gets the accepted complete view revision; shared rows
+	-- and exact child IDs remain untouched, and the server still revalidates.
+	local rowRevision = tonumber(freshRow.selectionRevision)
+	if not rowRevision or rowRevision ~= math.floor(rowRevision)
+		or rowRevision < 0 or rowRevision > freshRevision then return false end
+	if rowRevision ~= freshRevision then
+		if state.snapshotCertified ~= true then return false end
+		local selector = {}
+		for key, value in pairs(freshRow) do selector[key] = value end
+		selector.selectionRevision = freshRevision
+		freshRow = selector
+	end
 	current.rowData = freshRow
 	current.selectionTicket = nil
 	current.selectionSequence = 1

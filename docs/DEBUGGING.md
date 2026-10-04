@@ -683,3 +683,34 @@ required; existing scan/replica revisions do not certify universal physical fres
 Local fixtures and compiler checks establish technical behavior only. Dedicated
 deposit destinations, no-op duration, pressure, custody and final replication
 remain runtime checks. Keep issue #1 open and credit iceriny.
+
+## Routing candidate r3: mixed withdrawal selectors and personal targets
+
+The local/server footer identifies `routing-r3-20261004`. This correction keeps
+the r2 routing rules, movement budgets and codec. A retained exact-group row is
+copied for the waiting withdrawal only when it belongs to the newly accepted,
+complete certified view. Its old integer revision may adopt that view revision;
+missing, future, negative or fractional revisions cannot. Shared catalog rows
+and exact physical child IDs remain unchanged. The existing single stale retry
+and server-side exact validation remain in force.
+
+Withdrawal consumers receive full/notModified/delta catalog changes after their
+transaction succeeds. Node replicas defer notification and completed-revision
+accounting until the physical replica cache commits and emits Ready. Partial,
+rejected or superseded views cannot wake a waiting withdrawal. Observer failure
+does not roll back an already committed catalog.
+
+`player:main` is captured by exact identity before world-wrapper classification
+and resolves directly to the requesting player's current physical inventory.
+The network-node and access checks still follow resolution. Other explicit
+targets keep their identity and failure behavior; there is no destination
+fallback. Existing bounded NetTrace lines now include `rowKey`,
+`selectionRevision` and `targetKey`. A rejected withdrawal destination emits one
+debug-only `Withdraw: destination rejected` summary with `targetStage`:
+`key_schema`, `key_unresolved`, `network_node` or `access_denied`.
+
+SYS23 establishes two stale gestures and a later pre-slice target rejection. Its
+trace lacks the actual key and resolver stage, so this correction does not
+attribute the failure to r2 or claim that the defensive main-identity case
+reproduces vanilla runtime. Offline fixture conservation and compiler checks
+are technical evidence only; candidate TEST and acceptance remain pending.

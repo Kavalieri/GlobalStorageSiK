@@ -67,6 +67,7 @@ local SUMMARY_KEYS = {
 	"expectedRoutingRevision", "routingRevision", "requestSeq", "configEpoch",
 	"baseRevision", "routingConfigRevision", "inventoryRevision", "catalogScope",
 	"jobType", "jobState", "withdrawId", "fullType", "amount",
+	"targetKey", "rowKey", "selectionRevision",
 	"requested", "moved", "notModified", "catalogDelta", "manifestNotModified",
 	"nodeRevision", "nodeViewSeq", "knownNodeRevision", "manifestToken",
 }

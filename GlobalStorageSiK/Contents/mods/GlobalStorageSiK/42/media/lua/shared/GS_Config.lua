@@ -115,7 +115,7 @@ GlobalStorageSiK.Config = {
 	-- 0.10.x-preprod aparte, lo que dificultaba saber que build produjo un
 	-- error en el log). A partir de aqui suben siempre juntas.
 	MOD_VERSION = "1.5.8-dev3",
-	CANDIDATE_ID = "routing-r2-20261004",
+	CANDIDATE_ID = "routing-r3-20261004",
 	-- Esquema de la cache persistida por nodo. Se incrementa cuando cambia la
 	-- identidad/estado serializado de filas y obliga a reconstruir snapshots.
 	ITEM_SNAPSHOT_SCHEMA = "3",
