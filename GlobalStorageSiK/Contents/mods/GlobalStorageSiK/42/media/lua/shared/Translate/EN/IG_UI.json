@@ -886,6 +886,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Only the network owner or an administrator can use Auto-sort.",
 	"IGUI_GS_RedistributeIdle": "Ready to auto-sort",
 	"IGUI_GS_RedistributeProgressIndex": "Auto-sort - Phase 1/2 Snapshot: {1}/{2} | Moved: {3} | Skipped: {4} | Failed: {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Auto-sort - Replication: {1}/{2} containers | Moved: {3} | Skipped: {4} | Failed: {5}",
 	"IGUI_GS_RedistributeProgressMove": "Auto-sort - Phase 2/2 Movement: {1}/{2} | Moved: {3} | Skipped: {4} | Failed: {5}",
 	"IGUI_GS_RedistributeConfigLocked": "Auto-sort is running. Node, zone, filter and priority changes are temporarily disabled.",
 	"IGUI_GS_RedistributeRunning": "Sorting...",

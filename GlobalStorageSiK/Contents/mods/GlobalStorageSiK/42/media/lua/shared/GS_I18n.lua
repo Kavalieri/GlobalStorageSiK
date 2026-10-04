@@ -660,6 +660,7 @@ GlobalStorageSiK.I18n.DEFAULTS = {
 	IGUI_GS_RedistributeHint = "CAUTION! Experimental tool for large networks. It moves misplaced items to compatible containers according to rules, priorities and affinity. Scanning and moves run in small background steps and may take several minutes; use it when server load is low.",
 	IGUI_GS_RedistributeIdle = "Ready to auto-sort",
 	IGUI_GS_RedistributeProgressIndex = "Auto-sort: preparing snapshot {1}/{2} items ({3} moved)",
+	IGUI_GS_RedistributeProgressReplica = "Auto-sort: reconciling {1}/{2} containers ({3} moved)",
 	IGUI_GS_RedistributeProgressMove = "Auto-sort: checking {1}/{2} items ({3} moved)",
 	IGUI_GS_RedistributeConfigLocked = "Auto-sort is running. Node, zone, filter and priority changes are temporarily disabled.",
 	IGUI_GS_RedistributeRunning = "Sorting...",

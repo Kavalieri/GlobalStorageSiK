@@ -24,6 +24,50 @@ Al iniciar una partida, cada proceso escribe siempre una única identidad de run
 
 ## Core
 
+### Routing y AutoSort en candidata routing-r1
+
+El pie identifica `Core 1.5.8-dev3 [routing-r1-20261004]`; si el servidor difiere,
+añade `/ SRV:<candidata>` (o `unknown` mientras falta su estado). La versión
+pública y las versiones de addons siguen siendo independientes de esta identidad.
+
+Con DEBUG de Inventory, AutoSort emite inicio, cambios de fase, progreso agregado
+cada cinco segundos y cierre. No genera una línea por unidad. `activeMs` mide
+los pasos de selección/movimiento y su batch físico; `waitMs = durationMs-activeMs`
+incluye esperas, planificación y reconciliación, no es CPU o tiempo ocioso puro.
+`plannedWaitMs` suma las pausas programadas; `replicaMs` mide la espera final de
+verificación. `maxStepMs` y `overruns` exponen los excesos del presupuesto blando
+de 5 ms: una llamada física atómica o una búsqueda de afinidad pueden excederlo.
+
+`optimal` identifica origen óptimo; `noDestination`, `full`, `absent` y
+`sourceUnavailable` son omisiones distintas y no significan «ya bien colocado».
+`planBuilds/planHits/matching/candidateVisits/affinityReads/physicalValidations`
+explican qué trabajo se reutilizó y cuál fue necesario. `publicationNodes` cuenta
+nodos únicos tocados, `publicationWindows` ventanas liberadas: ninguno equivale
+a snapshots enviados ni a recargas completas. La réplica mantiene sus trazas,
+tokens y créditos existentes; correlacionar revisiones y pedidos para medirla.
+
+DEBUG de Router añade un resumen `depositComplete` por tarea de depósito, con
+movidos/omitidos/fallidos y los contadores del plan vigente. Una reconstrucción
+por cambio de reglas reinicia esos contadores; no son un acumulado histórico.
+Los tiers explícitos 1–3 y afinidades 4–6 conservan su significado; `priority`
+indica que una prioridad sin empate decidió sin necesitar consultar afinidad.
+
+Las capturas diferidas se liberan en checkpoints de tres segundos, y al cerrar
+el trabajo físico. La publicación y verificación siguen sujetas al presupuesto
+global y pueden tardar más. El job no anuncia éxito hasta verificar sus nodos,
+incluidos snapshots sin cambios; un nodo ausente o no cargado produce fallo
+explícito. `snapshotCertified` no certifica toda la red por terminar el journal.
+`globalRecovery=true` agenda una única recuperación incremental global tras un
+job con mutaciones, sin incrementar otra vez la revisión. Conserva la intención
+si el jugador se desconecta; la siguiente sesión autorizada permite reanudarla.
+Los jobs sin movimientos no la agendan. Esta captura usa el presupuesto existente
+de ZoneScanJob (7 ms), separado del deadline compartido de 5 ms; duración y
+replicaMs del journal no incluyen su terminación. Confirmar además
+`snapshotCertified=true/reconcilePending=false` para acreditar el cierre global.
+La sesión ordena las referencias capturadas; nuevas altas externas pueden quedar
+para otra pasada, aunque sí cuentan al decidir destinos por afinidad actual.
+Cerrar la ventana conserva el job existente; esta candidata no añade cancelación.
+
 ### Network traces (Core 1.5.5-dev1 work in progress)
 
 `Modo depuración (debug)` / `Debug mode` plus `>> Trazas de red` /

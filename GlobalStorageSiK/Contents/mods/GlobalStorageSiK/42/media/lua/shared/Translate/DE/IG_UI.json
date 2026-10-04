@@ -797,6 +797,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Nur der Netzwerkbesitzer oder ein Administrator kann die automatische Sortierung verwenden.",
 	"IGUI_GS_RedistributeIdle": "Bereit zum automatischen Sortieren",
 	"IGUI_GS_RedistributeProgressIndex": "Auto-Sortierung - Phase 1/2 Snapshot: {1}/{2} | Verschoben: {3} | Übersprungen: {4} | Fehlgeschlagen: {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Automatisch sortieren - Replikation: {1}/{2} Behälter | Verschoben: {3} | Übersprungen: {4} | Fehlgeschlagen: {5}",
 	"IGUI_GS_RedistributeProgressMove": "Auto-Sortierung - Phase 2/2 Verschieben: {1}/{2} | Verschoben: {3} | Übersprungen: {4} | Fehlgeschlagen: {5}",
 	"IGUI_GS_RedistributeConfigLocked": "Auto-Sortierung läuft. Änderungen an Knoten, Zonen, Filtern und Prioritäten sind vorübergehend deaktiviert.",
 	"IGUI_GS_RedistributeRunning": "Sortierung läuft...",

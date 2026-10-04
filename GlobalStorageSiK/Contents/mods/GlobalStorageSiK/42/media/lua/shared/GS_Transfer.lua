@@ -15,6 +15,8 @@
 require "GS_Network"
 
 require "GS_Router"
+require "GS_RoutingPlan"
+require "GS_RoutingProtocol"
 
 require "GS_Power"
 
@@ -436,10 +438,31 @@ end
 function GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 	local live = GlobalStorageSiK.Permissions.filterLiveContainers(
 		player, networkId, GlobalStorageSiK.Network.getLiveContainers(networkId))
+    local indexed = GlobalStorageSiK.Sandbox.autoSortEnabled()
+    local affinityIndex = indexed and { exactByNode = {}, taxonomyByNode = {}, nodeIndexById = {} }
+        or GlobalStorageSiK.Router.buildAffinityIndex(live)
+    for i = 1, #live do
+        if live[i].entry and live[i].entry.id then affinityIndex.nodeIndexById[tostring(live[i].entry.id)] = i end
+    end
 	return {
 		networkId = networkId,
 		liveNodes = live,
-		affinityIndex = GlobalStorageSiK.Router.buildAffinityIndex(live),
+        routingRevision = GlobalStorageSiK.RoutingProtocol.revision(networkId),
+        indexedRouting = indexed,
+        routingPlan = indexed and GlobalStorageSiK.RoutingPlan.new(live) or nil,
+        validate = function(candidate)
+            if not GlobalStorageSiK.Permissions.canAccess(player, networkId) then return false end
+            local registry = GlobalStorageSiK.Zones.getRegistry()
+            local entry = candidate.entry and registry.nodes and registry.nodes[candidate.entry.id]
+            local zone = entry and registry.zones and registry.zones[entry.zoneId]
+            if not entry or not zone or zone.networkId ~= networkId or zone.enabled == false
+                or entry.enabled == false or entry.membership == "excluded"
+                or not GlobalStorageSiK.Permissions.canAccessZone(player, networkId, entry.zoneId) then return false end
+            local object = GlobalStorageSiK.Network.findWorldObject(entry)
+            return object ~= nil and GlobalStorageSiK.Utils.getObjectContainer(object, entry.containerIndex) == candidate.container
+                and GlobalStorageSiK.Utils.isNetworkStorageContainer(object, entry.containerIndex)
+        end,
+		affinityIndex = affinityIndex,
 		pendingSnapshotByNodeId = {},
 		pendingSnapshotOrder = {},
 	}
@@ -556,10 +579,18 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 	if not session or session.networkId ~= networkId then
 		session = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
 	end
+    if session.routingRevision ~= GlobalStorageSiK.RoutingProtocol.revision(networkId)
+        or session.indexedRouting ~= GlobalStorageSiK.Sandbox.autoSortEnabled() then
+        local fresh = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
+        session.liveNodes, session.affinityIndex = fresh.liveNodes, fresh.affinityIndex
+        session.routingPlan, session.routingRevision, session.validate = fresh.routingPlan, fresh.routingRevision, fresh.validate
+        session.indexedRouting = fresh.indexedRouting
+    end
 	local live = session.liveNodes or {}
 
 	local target, targetReason = GlobalStorageSiK.Router.pickDepositTarget(item, live, character, {
 		affinityIndex = session.affinityIndex,
+		routingPlan = session.routingPlan, validate = session.validate,
 		preferredNodeId = options.preferredNodeId,
 	})
 
@@ -580,7 +611,8 @@ function GlobalStorageSiK.Transfer.depositItem(player, item, networkId, options)
 		end
 		local targetId = target.entry and target.entry.id or nil
 		local targetIndex = targetId and session.affinityIndex.nodeIndexById[tostring(targetId)] or nil
-		GlobalStorageSiK.Router.updateAffinityIndex(session.affinityIndex, targetIndex, item, 1)
+		if session.routingPlan then GlobalStorageSiK.RoutingPlan.afterMove(session.routingPlan)
+		else GlobalStorageSiK.Router.updateAffinityIndex(session.affinityIndex, targetIndex, item, 1) end
 
 		local units = 1
 

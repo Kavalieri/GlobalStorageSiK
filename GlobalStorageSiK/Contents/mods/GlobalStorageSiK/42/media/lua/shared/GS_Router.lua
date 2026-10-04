@@ -462,6 +462,23 @@ function GlobalStorageSiK.Router.pickDepositTarget(item, liveNodes, character, o
 	-- una regla de categoria/filtro que el jugador SI configuro a mano
 	-- siempre gana, esto no la pisa.
 	options = options or {}
+    if options.routingPlan and GlobalStorageSiK.Sandbox.autoSortEnabled() then
+        local plan = options.routingPlan
+        GlobalStorageSiK.RoutingPlan.beginSlice(plan)
+        if options.preferredNodeId then
+            local wanted = tostring(options.preferredNodeId)
+            for i = 1, #liveNodes do
+                local live = liveNodes[i]
+                if tostring((live.entry or {}).id) == wanted and (not options.validate or options.validate(live))
+                    and GlobalStorageSiK.Router.matchWithZoneGate(live.entry or {}, live.zoneRules, live.zoneEnabled, item)
+                    and GlobalStorageSiK.Router.containerHasSpace(live.container, item, character) then return live end
+            end
+        end
+        local live, _, tier, reason = GlobalStorageSiK.RoutingPlan.pick(plan, liveNodes, item, character, options)
+        -- Aggregate per session, no per-item or per-node log allocation.
+        plan.lastTier, plan.lastReason = tier, reason
+        return live, reason == "no_compatible_destination" and "no_match" or nil
+    end
 	local fullType = item.getFullType and item:getFullType() or nil
 	local affinityIndex = options.affinityIndex or GlobalStorageSiK.Router.buildAffinityIndex(liveNodes)
 	local preferredNodeId = options.preferredNodeId and tostring(options.preferredNodeId) or nil

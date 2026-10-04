@@ -797,6 +797,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Somente o proprietário da rede ou um administrador pode usar a organização automática.",
 	"IGUI_GS_RedistributeIdle": "Pronto para auto-organizar",
 	"IGUI_GS_RedistributeProgressIndex": "Auto-organização - Fase 1/2 Snapshot: {1}/{2} | Movidos: {3} | Ignorados: {4} | Falhas: {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Ordenar automaticamente - Réplica: {1}/{2} contêineres | Movidos: {3} | Ignorados: {4} | Falhas: {5}",
 	"IGUI_GS_RedistributeProgressMove": "Auto-organização - Fase 2/2 Movimento: {1}/{2} | Movidos: {3} | Ignorados: {4} | Falhas: {5}",
 	"IGUI_GS_RedistributeConfigLocked": "A auto-organização está em andamento. Alterações em nós, zonas, filtros e prioridades estão temporariamente desativadas.",
 	"IGUI_GS_RedistributeRunning": "Organizando...",

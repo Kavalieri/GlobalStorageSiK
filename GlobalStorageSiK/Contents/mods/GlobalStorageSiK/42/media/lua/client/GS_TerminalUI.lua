@@ -257,9 +257,13 @@ local function declaredModLine(modId, fallbackName)
 	return name .. (version and (" " .. version) or "")
 end
 
-local function resolveRuntimeVersions()
+local function resolveRuntimeVersions(state)
 	local coreVersion = GlobalStorageSiK.Config and GlobalStorageSiK.Config.MOD_VERSION
 	local visible = coreVersion and ("Core " .. tostring(coreVersion)) or "Core"
+	local candidate = GlobalStorageSiK.Config and GlobalStorageSiK.Config.CANDIDATE_ID or "unknown"
+	local server = state and state.candidateId or "unknown"
+	visible = visible .. " [" .. tostring(candidate) .. "]"
+	if server ~= candidate then visible = visible .. " / SRV:" .. tostring(server) end
 	local tooltip = { declaredModLine("SiKUIFramework", "SiK UI Framework") }
 	local ok, _, addons = GSSiK.API.Addon.listActive()
 	addons = ok and addons or {}
@@ -295,7 +299,7 @@ function GS_TerminalUI:syncHeaderChrome()
 	end
 	self:setHeader(spec)
 	if self.setVersions then
-		local visible, tooltip = resolveRuntimeVersions()
+		local visible, tooltip = resolveRuntimeVersions(self.terminalState)
 		self:setVersions(visible, tooltip)
 	end
 end

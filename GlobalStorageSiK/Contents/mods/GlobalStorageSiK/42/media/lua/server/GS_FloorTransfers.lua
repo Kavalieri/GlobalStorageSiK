@@ -39,7 +39,7 @@ function GlobalStorageSiK.FloorTransfers.depositOne(player, networkId, sourceKey
             local session = GlobalStorageSiK.Transfer.createDepositSession(player, networkId)
             local targetReason
             target, targetReason = GlobalStorageSiK.Router.pickDepositTarget(item, session.liveNodes, player,
-                { affinityIndex = session.affinityIndex })
+                { affinityIndex = session.affinityIndex, routingPlan = session.routingPlan, validate = session.validate })
             if not target then return false, targetReason or 'no_space', false end
             return GlobalStorageSiK.FloorMutation.fromFloor(player, target.container, sourceKey, itemId, fullType)
         end, visitOnlinePlayers)

@@ -886,6 +886,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Solo el propietario o un administrador de la red puede usar Auto-ordenar.",
 	"IGUI_GS_RedistributeIdle": "Listo para auto-ordenar",
 	"IGUI_GS_RedistributeProgressIndex": "Auto-ordenar - Fase 1/2 Captura: {1}/{2} | Movidos: {3} | Omitidos: {4} | Fallidos: {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Auto-ordenar - Réplica: {1}/{2} contenedores | Movidos: {3} | Omitidos: {4} | Fallidos: {5}",
 	"IGUI_GS_RedistributeProgressMove": "Auto-ordenar - Fase 2/2 Movimiento: {1}/{2} | Movidos: {3} | Omitidos: {4} | Fallidos: {5}",
 	"IGUI_GS_RedistributeConfigLocked": "Auto-ordenar está en curso. Los cambios de nodos, zonas, filtros y prioridades están deshabilitados temporalmente.",
 	"IGUI_GS_RedistributeRunning": "Ordenando...",

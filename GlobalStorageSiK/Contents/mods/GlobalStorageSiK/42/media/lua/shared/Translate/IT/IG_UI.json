@@ -797,6 +797,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Solo il proprietario della rete o un amministratore può usare l'ordinamento automatico.",
 	"IGUI_GS_RedistributeIdle": "Pronto per l'ordinamento automatico",
 	"IGUI_GS_RedistributeProgressIndex": "Ordinamento - Fase 1/2 Snapshot: {1}/{2} | Spostati: {3} | Saltati: {4} | Falliti: {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Ordina automaticamente - Replica: {1}/{2} contenitori | Spostati: {3} | Saltati: {4} | Falliti: {5}",
 	"IGUI_GS_RedistributeProgressMove": "Ordinamento - Fase 2/2 Spostamento: {1}/{2} | Spostati: {3} | Saltati: {4} | Falliti: {5}",
 	"IGUI_GS_RedistributeConfigLocked": "L'ordinamento automatico è in corso. Le modifiche a nodi, zone, filtri e priorità sono temporaneamente disabilitate.",
 	"IGUI_GS_RedistributeRunning": "Ordinamento...",

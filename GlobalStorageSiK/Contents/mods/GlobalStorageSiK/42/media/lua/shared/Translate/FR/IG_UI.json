@@ -797,6 +797,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "Seul le propriétaire du réseau ou un administrateur peut utiliser le tri automatique.",
 	"IGUI_GS_RedistributeIdle": "Prêt pour le tri automatique",
 	"IGUI_GS_RedistributeProgressIndex": "Tri auto - Phase 1/2 Instantané : {1}/{2} | Déplacés : {3} | Ignorés : {4} | Échecs : {5}",
+	"IGUI_GS_RedistributeProgressReplica": "Tri automatique - Réplication : {1}/{2} conteneurs | Déplacés : {3} | Ignorés : {4} | Échecs : {5}",
 	"IGUI_GS_RedistributeProgressMove": "Tri auto - Phase 2/2 Déplacement : {1}/{2} | Déplacés : {3} | Ignorés : {4} | Échecs : {5}",
 	"IGUI_GS_RedistributeConfigLocked": "Le tri automatique est en cours. Les modifications des nœuds, zones, filtres et priorités sont temporairement désactivées.",
 	"IGUI_GS_RedistributeRunning": "Tri en cours...",

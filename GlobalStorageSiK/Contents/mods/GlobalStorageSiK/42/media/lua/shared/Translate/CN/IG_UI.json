@@ -797,6 +797,7 @@
 	"IGUI_GS_RedistributeAdminOnly": "只有网络所有者或管理员可以使用自动整理。",
 	"IGUI_GS_RedistributeIdle": "可以自动整理",
 	"IGUI_GS_RedistributeProgressIndex": "自动整理 - 阶段 1/2 快照：{1}/{2} | 已移动：{3} | 已跳过：{4} | 失败：{5}",
+	"IGUI_GS_RedistributeProgressReplica": "自动整理 - 同步：{1}/{2} 个容器 | 已移动：{3} | 已跳过：{4} | 失败：{5}",
 	"IGUI_GS_RedistributeProgressMove": "自动整理 - 阶段 2/2 移动：{1}/{2} | 已移动：{3} | 已跳过：{4} | 失败：{5}",
 	"IGUI_GS_RedistributeConfigLocked": "自动整理正在运行。节点、区域、过滤器和优先级暂时无法修改。",
 	"IGUI_GS_RedistributeRunning": "正在整理...",

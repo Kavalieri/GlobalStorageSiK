@@ -19,13 +19,21 @@ local MAX_UNITS = 32768
 local context = nil
 local job = nil
 local dirty, dirtyOrder = {}, {}
+local held = {}
+local releases = {}
+local retryDirty, retryCount = {}, 0
 
 local function nowMs()
 	return getTimestampMs and getTimestampMs() or 0
 end
 
 local function report(networkId, phase, stats)
-	if context and context.status then context.status(networkId, phase, stats) end
+	if context and context.status then pcall(context.status, networkId, phase, stats) end
+end
+
+local function releaseResult(nodeId, status, reason)
+    local receipt = releases[nodeId]
+    if receipt then receipt.status, receipt.reason = status, reason end
 end
 
 local function eligible(registry, networkId, nodeId, expected)
@@ -113,7 +121,7 @@ end
 local function beginCapture(candidate)
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local node = eligible(registry, candidate.networkId, candidate.nodeId, candidate.node)
-	if not node then return false end
+	if not node then releaseResult(candidate.nodeId, "failed", "node_ineligible"); return false end
 	local object, container, items = resolveContainer(node)
 	if not items then
 		-- Preserve the existing persisted snapshot across a replication-schema
@@ -123,10 +131,12 @@ local function beginCapture(candidate)
 			node.snapshotAvailability="unloaded_or_missing"
 			if context and context.changed then context.changed(candidate.networkId,candidate.nodeId) end
 		else node.snapshotAvailability="unloaded_or_missing" end
+        releaseResult(candidate.nodeId, "failed", "unloaded_or_missing")
 		return false
 	end
 	local count = items:size()
 	if count < 0 or count > MAX_UNITS then
+        releaseResult(candidate.nodeId, "failed", "units_limit")
 		report(candidate.networkId, "failure_units_limit", { nodeId = candidate.nodeId, units = count, limit = MAX_UNITS })
 		return false
 	end
@@ -165,7 +175,7 @@ local function compareStep(capture)
 	-- The same 4 ms wall budget still bounds the entire update.
 	for i=1,128 do
 		if not capture.comparison.equal or #capture.comparison.stack==0 then break end
-		if nowMs()-job.tickStarted>=MAX_TICK_MS then break end
+		if nowMs()-job.tickStarted>=MAX_TICK_MS or (job.deadline and nowMs()>=job.deadline) then break end
 		compareOne(capture.comparison)
 		job.stats.compared = job.stats.compared + 1
 	end
@@ -220,15 +230,66 @@ local function publish(capture)
 		if context and context.changed then context.changed(capture.networkId, capture.nodeId) end
 	end
 	job.stats.nodes = job.stats.nodes + 1
+    -- Queue exhaustion alone is not proof: require capture and verification,
+    -- including unchanged snapshots, and retry signals received during capture.
+    if not dirty[capture.nodeId] and not retryDirty[capture.nodeId] then
+        releaseResult(capture.nodeId, "verified")
+    end
 	job.capture = nil
 	job.nodeIndex = job.nodeIndex + 1
 end
 
 function Reconciler.markDirty(nodeId, reason)
-	if not nodeId or dirty[nodeId] then return end
-	if #dirtyOrder >= MAX_NODES then report(nil, "dirty_queue_limit", { limit=MAX_NODES }); return end
+	if not nodeId then return false end
+    releaseResult(nodeId, "pending")
+	if dirty[nodeId] or retryDirty[nodeId] then return true end
+	if #dirtyOrder >= MAX_NODES then
+		if retryCount >= MAX_NODES then report(nil, "dirty_queue_limit", { limit=MAX_NODES * 2 }); return false end
+		retryDirty[nodeId], retryCount = reason or "external_signal", retryCount + 1
+		return true
+	end
 	dirty[nodeId] = reason or "external_signal"
 	dirtyOrder[#dirtyOrder + 1] = nodeId
+	return true
+end
+
+-- A physical AutoSort journal temporarily owns capture of its touched nodes.
+-- Keep dirty signals queued; never publish an intermediate capture as final.
+function Reconciler.holdNode(nodeId, owner)
+	if held[nodeId] and held[nodeId] ~= owner then return false end
+    if releases[nodeId] and releases[nodeId].owner ~= owner then return false end
+	if not Reconciler.markDirty(nodeId, "autosort_pending") then return false end
+    held[nodeId] = owner
+	return true
+end
+
+function Reconciler.releaseNode(nodeId, owner)
+    if held[nodeId] ~= owner then return false end
+    held[nodeId] = nil
+    releases[nodeId] = { owner=owner, status="pending" }
+    return Reconciler.markDirty(nodeId, "autosort_complete")
+end
+
+function Reconciler.releaseStatus(nodeId, owner)
+    local receipt = releases[nodeId]
+    if not receipt or receipt.owner ~= owner then return "failed", "receipt_absent" end
+    return receipt.status, receipt.reason
+end
+
+function Reconciler.forgetRelease(nodeId, owner)
+    if releases[nodeId] and releases[nodeId].owner == owner then releases[nodeId] = nil end
+end
+
+function Reconciler.abandonHold(nodeId, owner)
+	if held[nodeId] == owner then
+		held[nodeId] = nil
+		Reconciler.markDirty(nodeId, "autosort_release_failed")
+	end
+end
+
+function Reconciler.pendingNode(nodeId)
+	return held[nodeId] ~= nil or dirty[nodeId] ~= nil or retryDirty[nodeId] ~= nil
+		or (job and job.capture and job.capture.nodeId == nodeId) or false
 end
 
 function Reconciler.confirmed(nodeId, revision)
@@ -240,7 +301,7 @@ function Reconciler.confirmed(nodeId, revision)
 end
 
 function Reconciler.configure(value)
-	context = value; job = nil; dirty = {}; dirtyOrder = {}
+	context = value; job = nil; dirty = {}; dirtyOrder = {}; held = {}; releases = {}; retryDirty = {}; retryCount = 0
 	GlobalStorageSiK.NodeProbe.configure({ resolve=resolveContainer, dirty=Reconciler.markDirty,
 		availability=function(node)
 			local registry=GlobalStorageSiK.Network.getRegistry()
@@ -249,27 +310,46 @@ function Reconciler.configure(value)
 		end })
 end
 
-local function takeDirty()
-	local id = table.remove(dirtyOrder, 1)
+local function takeDirty(deadline)
+	if #dirtyOrder < MAX_NODES and retryCount > 0 then
+		local chosen
+		for id in pairs(retryDirty) do chosen = id; break end
+		local reason = retryDirty[chosen]
+		retryDirty[chosen], retryCount = nil, retryCount - 1
+		dirty[chosen], dirtyOrder[#dirtyOrder + 1] = reason, chosen
+	end
+	local id
+	for i = 1, math.min(#dirtyOrder, MAX_TICK_UNITS) do
+		if deadline and nowMs() >= deadline then return end
+		local candidate = table.remove(dirtyOrder, 1)
+		if held[candidate] then dirtyOrder[#dirtyOrder + 1] = candidate
+		else id = candidate; break end
+	end
 	if not id then return end
 	local reason = dirty[id]; dirty[id] = nil
 	local registry = GlobalStorageSiK.Network.getRegistry()
 	local node = registry.nodes and registry.nodes[id]
 	local zone = node and registry.zones and registry.zones[node.zoneId]
-	if not node or not zone then return end
+	if not node or not zone then releaseResult(id, "failed", "node_absent"); return end
 	job = { nodeIndex=1, tickStarted=nowMs(), networkId=zone.networkId,
 		stats={networks=1,nodeId=id,nodes=0,units=0,compared=0,verified=0,changed=0,discarded=0,reason=reason} }
 	if not beginCapture({networkId=zone.networkId,nodeId=id,node=node}) then job=nil end
 end
 
-function Reconciler.update()
-	GlobalStorageSiK.NodeProbe.update()
+local function update(deadline)
+    if deadline and nowMs() >= deadline then return end
+	GlobalStorageSiK.NodeProbe.update(deadline)
 	local started = nowMs()
+    if job and job.capture and held[job.capture.nodeId] then
+        Reconciler.markDirty(job.capture.nodeId, "autosort_pending")
+        job = nil
+    end
 	for i = 1, MAX_TICK_UNITS do
-		if nowMs()-started >= MAX_TICK_MS then break end
-		if not job then takeDirty() end
+		if nowMs()-started >= MAX_TICK_MS or (deadline and nowMs() >= deadline) then break end
+		if not job then takeDirty(deadline) end
 		if not job then break end
 		job.tickStarted=started
+        job.deadline=deadline
 		local capture=job.capture
 		if not capture then
 			report(job.networkId, "node_complete", job.stats); job=nil
@@ -280,6 +360,18 @@ function Reconciler.update()
 		elseif capture.phase == "verify" then
 			if verifyOne(capture) and job and job.capture == capture then publish(capture) end
 		end
+	end
+end
+
+function Reconciler.update(deadline)
+	local ok, reason = pcall(update, deadline)
+	if not ok then
+		local capture = job and job.capture
+		local nodeId = capture and capture.nodeId or (job and job.stats.nodeId)
+		local networkId = capture and capture.networkId or (job and job.networkId)
+		if nodeId then releaseResult(nodeId, "failed", "capture_error") end
+		report(networkId, "capture_error", { reason=tostring(reason) })
+		job = nil
 	end
 end
 

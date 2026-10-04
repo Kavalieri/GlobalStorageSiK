@@ -114,6 +114,16 @@ local function finish(task, reason, cancelled, silent)
 		summary.cancelled = #task.itemIds - task.offset + 1
 	end
 	summary.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(task.networkId)
+	local plan = task.routingSession and task.routingSession.routingPlan
+	if plan and GlobalStorageSiK.Log and GlobalStorageSiK.Log.debug then
+		local stats = plan.stats
+		GlobalStorageSiK.Log.debug("Router", "depositComplete | networkId=" .. tostring(task.networkId)
+			.. " moved=" .. tostring(summary.moved or 0) .. " skipped=" .. tostring(summary.skipped or 0)
+			.. " failed=" .. tostring(summary.failed or 0) .. " planBuilds=" .. tostring(stats.builds)
+			.. " planHits=" .. tostring(stats.hits) .. " candidateVisits=" .. tostring(stats.visits)
+			.. " matching=" .. tostring(stats.matches) .. " affinityReads=" .. tostring(stats.affinityReads)
+			.. " physicalValidations=" .. tostring(stats.validations))
+	end
 	receipts[task.key] = { createdMs = nowMs(), summary = copySummary(summary), meta = task.meta }
 	receiptOrder[#receiptOrder + 1] = task.key
 	if not silent and callbacks.complete then callbacks.complete(task.player, task.networkId, task.meta, summary) end

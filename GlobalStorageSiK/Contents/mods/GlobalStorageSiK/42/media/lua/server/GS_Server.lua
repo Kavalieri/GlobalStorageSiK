@@ -104,6 +104,7 @@ require "GS_Debug"
 require "GS_NetTrace"
 
 GlobalStorageSiK.Server = GlobalStorageSiK.Server or {}
+GlobalStorageSiK.Server.drivesRedistributeJobs = true
 
 function GlobalStorageSiK.Server.operationPacingKey(player, operationType, operationId, networkId)
 	if type(operationId) ~= "string" or operationId == "" then return nil end
@@ -312,6 +313,11 @@ local function scheduleSnapshotSync(networkId, player, revision, reason, retryAt
 	if inventorySnapshotMeta[networkId] then
 		inventorySnapshotMeta[networkId].potentiallyStale = true
 	end
+	local recoveryMeta = inventorySnapshotMeta[networkId]
+	if recoveryMeta and recoveryMeta.autoSortRecovery then
+		retryAttempt = retryAttempt or recoveryMeta.autoSortRecoveryRetryAttempt
+		recoveryMeta.autoSortRecoveryRetryAttempt = retryAttempt or 0
+	end
 	local now = serverNowMs()
 	local pending = pendingSnapshotSync[networkId]
 	if pending then
@@ -336,6 +342,21 @@ local function scheduleSnapshotSync(networkId, player, revision, reason, retryAt
             retryAttempt = retryAttempt or 0,
 		}
 	end
+    if recoveryMeta and recoveryMeta.autoSortRecovery then
+        pendingSnapshotSync[networkId].autoSortRecovery = true
+    end
+end
+
+-- Recover the legacy aggregate certificate once after a mutated AutoSort job.
+-- Scheduling does not create another inventory revision.
+function GlobalStorageSiK.Server.recoverAutoSortSnapshot(networkId, player)
+	if not networkId then return false end
+	inventorySnapshotMeta[networkId] = inventorySnapshotMeta[networkId] or {}
+	inventorySnapshotMeta[networkId].autoSortRecovery = true
+	inventorySnapshotMeta[networkId].autoSortRecoveryRetryAttempt = 0
+	scheduleSnapshotSync(networkId, player, GlobalStorageSiK.Index.getInventoryRevision(networkId), "autosort_complete")
+	pendingSnapshotSync[networkId].autoSortRecovery = true
+	return true
 end
 
 local function flushPendingSnapshotSync()
@@ -358,6 +379,11 @@ local function flushPendingSnapshotSync()
 	end
 	local player = GlobalStorageSiK.PlayerUtils.resolveByUsername(pending.username)
 	if not player then
+		if pending.autoSortRecovery and GlobalStorageSiK.Network.getRegistry().networks[selectedId] then
+			pending.dueMs = now + 5000
+			pending.forceMs = pending.dueMs
+			return
+		end
 		-- No conservar para siempre un trabajo sin consumidor. La próxima
 		-- apertura de la red ya inicia su propio scan incremental fresco.
 		pendingSnapshotSync[selectedId] = nil
@@ -366,6 +392,12 @@ local function flushPendingSnapshotSync()
 		return
 	end
 	if not GlobalStorageSiK.Permissions.canAccess(player, selectedId) then
+		if pending.autoSortRecovery and GlobalStorageSiK.Network.getRegistry().networks[selectedId] then
+			pending.username = nil
+			pending.dueMs = now + 5000
+			pending.forceMs = pending.dueMs
+			return
+		end
 		pendingSnapshotSync[selectedId] = nil
 		return
 	end
@@ -447,6 +479,12 @@ local function setTerminalWatcher(player, networkId)
 	local key = terminalWatcherKey(player)
 	if key and networkId then
 		terminalWatchNetworkByPlayer[key] = networkId
+		local pending = pendingSnapshotSync[networkId]
+		if pending and pending.autoSortRecovery then
+			pending.username = player:getUsername()
+			pending.dueMs = serverNowMs()
+			pending.forceMs = pending.dueMs
+		end
 	end
 end
 
@@ -909,7 +947,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 		snapshotRevision = snapshotRevision,
 		snapshotAgeMs = snapshotAgeMs,
 		snapshotCertified = snapshotMeta ~= nil and snapshotRevision == inventoryRevision,
-		reconcilePending = pendingSnapshotSync[networkId] ~= nil
+		reconcilePending = GlobalStorageSiK.RedistributeJob.hasPendingReplication(networkId) or pendingSnapshotSync[networkId] ~= nil
 			or GlobalStorageSiK.ZoneScanJob.isActive(networkId),
 
 	}
@@ -1855,7 +1893,7 @@ local function pushTerminalInventorySync(player, networkId, searchQuery)
                 inventoryRevision=revision,baseRevision=base.revision,catalogDelta=true,
                 catalogSource="inventory_delta",snapshotRevision=snapshotRevision,
                 snapshotCertified=inventorySnapshotMeta[networkId]~=nil and snapshotRevision==revision,
-                reconcilePending=pendingSnapshotSync[networkId]~=nil
+                reconcilePending=GlobalStorageSiK.RedistributeJob.hasPendingReplication(networkId) or pendingSnapshotSync[networkId]~=nil
                     or GlobalStorageSiK.ZoneScanJob.isActive(networkId)},base)
         end
 		-- No valid base (cold observer/scope change) or the bounded delta does not
@@ -2241,6 +2279,7 @@ local function pushTerminalState(player, networkId, scanSummary, searchQuery, cr
 	end
 	local buildStarted = getTimestampMs and getTimestampMs() or 0
 	local payload = buildTerminalState(networkId, scanSummary, searchQuery, probe, player, requestMeta)
+	payload.candidateId = GlobalStorageSiK.Config.CANDIDATE_ID
 	payload.catalogSource = openUi == true and "openTerminal" or "terminalState_refresh"
 	GlobalStorageSiK.Log.debug("CatalogTransport", "state_envelope_built", "openSeq=" .. tostring(meta and meta.openSeq)
 		.. " buildMs=" .. tostring((getTimestampMs and getTimestampMs() or 0) - buildStarted)
@@ -2591,8 +2630,13 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
         end
 	end
 	if summary._terminalState == "FAILED" then
+		if pendingSnapshotSync[networkId] and pendingSnapshotSync[networkId].autoSortRecovery then
+			pendingSnapshotSync[networkId] = nil
+		end
 		if inventorySnapshotMeta[networkId] then
 			inventorySnapshotMeta[networkId].potentiallyStale = true
+			inventorySnapshotMeta[networkId].autoSortRecovery = nil
+			inventorySnapshotMeta[networkId].autoSortRecoveryRetryAttempt = nil
 		end
 		forEachOnlinePlayer(function(player)
 			if isTerminalWatcher(player, networkId) then
@@ -2622,7 +2666,8 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 		}
 	end
 	local pending = pendingSnapshotSync[networkId]
-	if pending and (pending.revision or 0) <= (summary._startRevision or -1) then
+	if pending and (pending.revision or 0) <= (summary._startRevision or -1)
+        and (summary._freshSnapshotScope == "network" or not pending.autoSortRecovery) then
 		-- Este scan comenzó después del último cambio conocido y ya lo cubre.
 		-- Evitar una segunda pasada idéntica al vencer la cola de snapshots.
 		pendingSnapshotSync[networkId] = nil
@@ -2665,7 +2710,7 @@ function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, reques
 	status.snapshotRevision = GlobalStorageSiK.Index.getSnapshotRevision(networkId)
 	status.snapshotCertified = inventorySnapshotMeta[networkId] ~= nil
 		and status.snapshotRevision == status.inventoryRevision
-	status.reconcilePending = status.reconcilePending == true or pendingSnapshotSync[networkId] ~= nil
+	status.reconcilePending = status.reconcilePending == true or GlobalStorageSiK.RedistributeJob.hasPendingReplication(networkId) or pendingSnapshotSync[networkId] ~= nil
 		or GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 	forEachOnlinePlayer(function(player)
 		-- Requesting a scan does not grant a subscription after access is lost.
@@ -2691,6 +2736,13 @@ function GlobalStorageSiK.Server.onNetworkScanProgress(networkId, status, reques
 end
 
 function GlobalStorageSiK.Server.onNetworkScanFailed(networkId, requestedWatchers, errorText)
+	if pendingSnapshotSync[networkId] and pendingSnapshotSync[networkId].autoSortRecovery then
+		pendingSnapshotSync[networkId] = nil
+	end
+	if inventorySnapshotMeta[networkId] then
+		inventorySnapshotMeta[networkId].autoSortRecovery = nil
+		inventorySnapshotMeta[networkId].autoSortRecoveryRetryAttempt = nil
+	end
 	forEachOnlinePlayer(function(player)
 		if isTerminalWatcher(player, networkId) then
 			gsSendServerCommand(player, "actionResult", scanResult(networkId, "FAILED", "IGUI_GS_ScanFailed", "global_error"))
@@ -2708,6 +2760,15 @@ function GlobalStorageSiK.Server.onNetworkScanCancelled(networkId, requestedWatc
 	local timedOut = reason == "timed_out"
 	if inventorySnapshotMeta[networkId] then
 		inventorySnapshotMeta[networkId].potentiallyStale = true
+		if reason == "no_player" and inventorySnapshotMeta[networkId].autoSortRecovery then
+			scheduleSnapshotSync(networkId, nil, GlobalStorageSiK.Index.getInventoryRevision(networkId), "autosort_complete")
+		else
+			inventorySnapshotMeta[networkId].autoSortRecovery = nil
+			inventorySnapshotMeta[networkId].autoSortRecoveryRetryAttempt = nil
+			if pendingSnapshotSync[networkId] and pendingSnapshotSync[networkId].autoSortRecovery then
+				pendingSnapshotSync[networkId] = nil
+			end
+		end
 	end
 	forEachOnlinePlayer(function(player)
 		if isTerminalWatcher(player, networkId) then
@@ -6023,26 +6084,24 @@ if Events and Events.OnTick then
 			end)
 		end
 		GlobalStorageSiK.WithdrawSelectionTickets.update()
-		-- Deposits and withdrawals share one global allowance: at most two slices
-		-- and 5 ms per tick. When both queues are active each receives one slice;
-		-- the first queue alternates so neither direction monopolizes the budget.
-		local depositPending = GlobalStorageSiK.DepositTasks.pendingCount() > 0
-		local withdrawPending = GlobalStorageSiK.WithdrawTasks.pendingCount() > 0
-		local transferDeadline = serverNowMs() + 5
-		if depositPending and withdrawPending then
-			transferTaskTurn = (transferTaskTurn + 1) % 2
-			if transferTaskTurn == 0 then
-				GlobalStorageSiK.DepositTasks.update(1, transferDeadline)
-				GlobalStorageSiK.WithdrawTasks.update(1, transferDeadline)
-			else
-				GlobalStorageSiK.WithdrawTasks.update(1, transferDeadline)
-				GlobalStorageSiK.DepositTasks.update(1, transferDeadline)
-			end
-		elseif depositPending then
-			GlobalStorageSiK.DepositTasks.update(2, transferDeadline)
-		elseif withdrawPending then
-			GlobalStorageSiK.WithdrawTasks.update(2, transferDeadline)
-		end
+        -- All physical transfer directions share a soft 5ms global allowance.
+        -- Rotate first queue every tick; one slice per active direction prevents
+        -- starvation without summing four independent frame budgets.
+        local transferDeadline = serverNowMs() + 5
+        transferTaskTurn = (transferTaskTurn + 1) % 4
+        for offset = 0, 3 do
+            if serverNowMs() >= transferDeadline then break end
+            local direction = (transferTaskTurn + offset) % 4
+            if direction == 0 and GlobalStorageSiK.DepositTasks.pendingCount() > 0 then
+                GlobalStorageSiK.DepositTasks.update(1, transferDeadline)
+            elseif direction == 1 and GlobalStorageSiK.WithdrawTasks.pendingCount() > 0 then
+                GlobalStorageSiK.WithdrawTasks.update(1, transferDeadline)
+            elseif direction == 2 then
+                GlobalStorageSiK.RedistributeJob.update(transferDeadline)
+            elseif direction == 3 then
+                GlobalStorageSiK.CatalogReconciler.update(transferDeadline)
+            end
+        end
 		GlobalStorageSiK.NativeWorldOverrideCommands.flushPublications(publishTaxonomyOverride)
 		flushPendingSnapshotSync()
 		if flushPendingTerminalRefreshes then
@@ -6057,7 +6116,6 @@ if Events and Events.OnTick then
 		GlobalStorageSiK.CatalogServer.update()
 		GlobalStorageSiK.NodeViewServer.update()
 		GlobalStorageSiK.CatalogPreparation.update()
-		GlobalStorageSiK.CatalogReconciler.update()
 		flushCatalogDetails()
 	end)
 end

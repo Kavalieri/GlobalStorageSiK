@@ -101,6 +101,11 @@ function GlobalStorageSiK.OperationPacing.resolve(context)
 	end
 	pacing.requestedProfile = requested
 	pacing.operationType = context and context.operationType or "unknown"
+    if pacing.operationType == "autosort" and pacing.effectiveProfile ~= "custom" then
+        -- Keep two physical moves per MP quantum; remove mandatory 1s waits.
+        pacing.moveDelayMs, pacing.schedulerDelayMs = 100, 100
+        pacing.inspectedPerStep, pacing.indexItemsPerStep = 250, 250
+    end
 	return pacing
 end
 

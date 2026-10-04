@@ -106,12 +106,13 @@ local function step()
 	active.index = active.index + 1
 end
 
-function Probe.update()
+function Probe.update(deadline)
 	if not context then return end
+	if deadline and now() >= deadline then return end
 	if now() >= rebuildAt and not active then rebuild() end
 	local started = now()
 	for i = 1, 16 do
-		if now() - started >= 1 then break end
+		if now() - started >= 1 or (deadline and now() >= deadline) then break end
 		local ok = pcall(step)
 		if not ok then
 			if active then finish(true, nil) end

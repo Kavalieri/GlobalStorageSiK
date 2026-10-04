@@ -19,14 +19,16 @@ GlobalStorageSiK.RedistributeJob = {}
 -- Cada paso ya tiene presupuesto de inspeccion, tiempo y movimientos en
 -- GS_Redistribute. La pausa adicional deja respirar al resto de simulacion y
 -- evita una rafaga continua de remove/add en servidores con muchos jugadores.
-local INDEX_DELAY_MS = 250
+local INDEX_DELAY_MS = 100
 local MOVE_DELAY_MS = 1000
-local MOVE_IDLE_DELAY_MS = 250
+local MOVE_IDLE_DELAY_MS = 100
 local BUSY_DELAY_MS = 500
 local GLOBAL_STEP_DELAY_MS = 100
 local PROGRESS_INTERVAL_MS = 5000
 local MAX_BUSY_RETRIES = 120
 local MAX_STALLED_STEPS = 5
+local JOURNAL_WINDOW_MS = 3000
+local REPLICA_TIMEOUT_MS = 300000
 
 local jobs = {}          -- networkId -> { username, nextRunMs, moved, failed, skipped, watchers }
 local tickInstalled = false
@@ -83,12 +85,13 @@ end
 
 local function tierSummary(counts)
 	local parts = {}
-	for tier = 1, 5 do
+	for tier = 1, 6 do
 		local count = counts and counts[tostring(tier)] or 0
 		if count > 0 then
 			parts[#parts + 1] = tostring(tier) .. ":" .. tostring(count)
 		end
 	end
+	if counts and counts.priority then parts[#parts + 1] = "priority:" .. tostring(counts.priority) end
 	return #parts > 0 and table.concat(parts, ",") or "none"
 end
 
@@ -103,15 +106,29 @@ local function topTypeSummary(counts, limit)
 	end)
 	local parts = {}
 	for i = 1, math.min(#rows, limit or 8) do
-		parts[#parts + 1] = rows[i].fullType .. ":" .. tostring(rows[i].count)
+		parts[#parts + 1] = rows[i].fullType:sub(1,48) .. ":" .. tostring(rows[i].count)
 	end
 	return #parts > 0 and table.concat(parts, ",") or "none"
 end
 
 local function notifyProgress(job, summary)
+	local sandbox = GlobalStorageSiK.Sandbox
+	if sandbox and sandbox.debugMode and sandbox.debugMode()
+		and sandbox.debugCategoryEnabled("Inventory") then
+		local stats = job.session and job.session.plan.stats or {}
+		GlobalStorageSiK.Log.debug("RedistributeJob", "progress | networkId=" .. tostring(job.networkId):sub(1,96)
+			.. " phase=" .. tostring(summary.phase) .. " checked=" .. tostring(summary.checked or 0)
+			.. "/" .. tostring(summary.total or 0) .. " moved=" .. tostring(job.moved)
+			.. " skipped=" .. tostring(job.skipped) .. " optimal=" .. tostring(job.skipReasons.origin_optimal or 0)
+			.. " activeMs=" .. tostring(job.activeMs) .. " wallMs=" .. tostring(nowMs()-job.startedMs)
+			.. " candidateVisits=" .. tostring(stats.visits or 0) .. " matching=" .. tostring(stats.matches or 0)
+			.. " affinityReads=" .. tostring(stats.affinityReads or 0) .. " held=" .. tostring(job.journalCount)
+			.. " publicationWindows=" .. tostring(job.publicationWindows))
+	end
 	local messageKey = summary.phase == "index"
 		and "IGUI_GS_RedistributeProgressIndex"
 		or "IGUI_GS_RedistributeProgressMove"
+	if summary.phase == "replica" then messageKey = "IGUI_GS_RedistributeProgressReplica" end
 	eachRecipient(job, function(player)
 		GlobalStorageSiK.Server.sendCommand(player, "actionResult", {
 			ok = true,
@@ -128,20 +145,92 @@ local function notifyProgress(job, summary)
 	end)
 end
 
+local function flushJournal(job)
+    local reconciler = GlobalStorageSiK.CatalogReconciler
+    local released = true
+    local retry, retryCount = {}, 0
+    job.replicationNodeIds = job.replicationNodeIds or {}
+    for id in pairs(job.dirtyNodes or {}) do
+        job.replicationNodeIds[id] = true
+        if reconciler and reconciler.releaseNode then
+            local ok, result = pcall(reconciler.releaseNode, id, job)
+            if not ok or result ~= true then
+                released = false
+                retry[id], retryCount = true, retryCount + 1
+            end
+        end
+    end
+    job.replicationNodes = job.dirtyCount or 0
+    if (job.journalCount or 0) > 0 then
+        job.publicationWindows = (job.publicationWindows or 0) + 1
+    end
+    job.dirtyNodes, job.journalCount = retry, retryCount
+    job.lastFlushMs = nowMs()
+    return released
+end
+
 local function finishJob(networkId, job, reason)
+    -- Physical failure/cancellation still needs to publish mutations already
+    -- committed. Keep single-flight ownership until their verification ends.
+    if job.phase ~= "replica" and job.dirtyCount > 0 then
+        flushJournal(job)
+        job.phase, job.finishReason, job.replicaStartedMs = "replica", reason, nowMs()
+        job.nextRunMs, job.lastProgressMs = nowMs() + GLOBAL_STEP_DELAY_MS, nowMs()
+        notifyProgress(job, { phase="replica", checked=0, total=job.replicationNodes })
+        return
+    end
+    jobs[networkId] = nil
+    uninstallTickIfIdle()
+    if not flushJournal(job) or reason == "publication_failed" then
+        reason = "publication_failed"
+        for id in pairs(job.dirtyNodes or {}) do
+            GlobalStorageSiK.CatalogReconciler.abandonHold(id, job)
+        end
+    end
+    if job.dirtyCount > 0 then
+        local recovered, queued = pcall(GlobalStorageSiK.Server.recoverAutoSortSnapshot,
+            networkId, resolvePlayer(job.username))
+        job.globalRecovery = recovered and queued == true
+        if not job.globalRecovery then reason = "publication_failed" end
+    end
+    for id in pairs(job.replicationNodeIds or {}) do
+        if GlobalStorageSiK.CatalogReconciler and GlobalStorageSiK.CatalogReconciler.forgetRelease then
+            GlobalStorageSiK.CatalogReconciler.forgetRelease(id, job)
+        end
+    end
 	local tiers = tierSummary(job.movedByTier)
 	local topTypes = topTypeSummary(job.movedByType, 8)
-	GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. tostring(networkId) .. " reason=" .. tostring(reason)
-		.. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
-		.. " skipped=" .. tostring(job.skipped) .. " inspected=" .. tostring(job.inspected or 0)
-		.. " budgetExhaustions=" .. tostring(job.budgetExhaustions or 0)
-		.. " batches=" .. tostring(job.steps or 0)
-		.. " durationMs=" .. tostring(nowMs() - (job.startedMs or nowMs()))
-		.. " cancelled=" .. tostring(reason == "no_player")
-		.. " timeout=" .. tostring(reason == "network_busy" or reason == "stalled")
-		.. " error=" .. tostring(reason == "error")
-		.. " tiers=" .. tiers .. " topTypes=" .. topTypes .. " "
-		.. GlobalStorageSiK.OperationPacing.describe(job.pacing))
+    local identity = tostring(networkId):sub(1,96)
+    GlobalStorageSiK.Log.debug("RedistributeJob", "finishJob | networkId=" .. identity .. " reason=" .. tostring(reason)
+        .. " moved=" .. tostring(job.moved) .. " failed=" .. tostring(job.failed)
+        .. " skipped=" .. tostring(job.skipped) .. " inspected=" .. tostring(job.inspected or 0)
+        .. " batches=" .. tostring(job.steps or 0) .. " budgetExhaustions=" .. tostring(job.budgetExhaustions or 0)
+        .. " optimal=" .. tostring(job.skipReasons.origin_optimal or 0)
+        .. " noDestination=" .. tostring(job.skipReasons.no_compatible_destination or 0)
+        .. " full=" .. tostring(job.skipReasons.destination_full or 0)
+        .. " absent=" .. tostring(job.skipReasons.reference_absent or 0)
+        .. " sourceUnavailable=" .. tostring(job.skipReasons.source_unavailable or 0)
+        .. " activeMs=" .. tostring(job.activeMs or 0)
+        .. " waitMs=" .. tostring(math.max(0, nowMs()-job.startedMs-(job.activeMs or 0)))
+        .. " plannedWaitMs=" .. tostring(job.plannedWaitMs or 0)
+        .. " durationMs=" .. tostring(nowMs()-job.startedMs))
+    local stats = job.session and job.session.plan.stats or {}
+    GlobalStorageSiK.Log.debug("RedistributeJob", "routingCost | networkId=" .. identity
+        .. " physicalValidations=" .. tostring(job.session and job.session.nodeValidations or 0)
+        .. " planBuilds=" .. tostring(stats.builds or 0) .. " planHits=" .. tostring(stats.hits or 0)
+        .. " candidateVisits=" .. tostring(stats.visits or 0) .. " matching=" .. tostring(stats.matches or 0)
+        .. " affinityReads=" .. tostring(stats.affinityReads or 0)
+        .. " maxStepMs=" .. tostring(job.maxStepMs or 0) .. " overruns=" .. tostring(job.overruns or 0))
+    GlobalStorageSiK.Log.debug("RedistributeJob", "replicaCost | networkId=" .. identity
+        .. " publicationNodes=" .. tostring(job.replicationNodes or 0)
+        .. " publicationWindows=" .. tostring(job.publicationWindows or 0)
+        .. " globalRecovery=" .. tostring(job.globalRecovery == true)
+        .. " replicaFailure=" .. tostring(job.replicaFailure):sub(1,128)
+        .. " replicaMs=" .. tostring(job.replicaStartedMs and nowMs()-job.replicaStartedMs or 0))
+    GlobalStorageSiK.Log.debug("RedistributeJob", "breakdown | networkId=" .. identity
+        .. " tiers=" .. tiers .. " topTypes=" .. topTypes .. " "
+        .. GlobalStorageSiK.OperationPacing.describe(job.pacing))
+
 	jobs[networkId] = nil
 	-- Liberar el tick antes de cualquier notificación/UI potencialmente falible:
 	-- un error al informar no puede dejar polling sin un job que procesar.
@@ -150,7 +239,7 @@ local function finishJob(networkId, job, reason)
 	local msg
 	if reason == "routing_changed" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RoutingSortStopped")
-	elseif reason == "network_busy" or reason == "stalled" then
+	elseif reason == "network_busy" or reason == "stalled" or reason == "publication_failed" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_InternalTransferError")
 	elseif reason == "no_permission" then
 		msg = GlobalStorageSiK.I18n.remote("IGUI_GS_RequireAdminRole")
@@ -168,6 +257,7 @@ local function finishJob(networkId, job, reason)
 		and reason ~= "no_nodes" and reason ~= "no_player" and reason ~= "error"
 		and reason ~= "network_busy" and reason ~= "stalled"
 		and reason ~= "no_permission" and reason ~= "source_unavailable"
+		and reason ~= "publication_failed"
 	-- gsSendServerCommand es local a GS_Server.lua; nunca fue global, por lo
 	-- que esta llamada fallaba SIEMPRE ("tried to call nil") sin que se
 	-- notara antes porque el error, aunque se imprimia en consola, no
@@ -182,6 +272,7 @@ local function finishJob(networkId, job, reason)
 			message = msg,
 			jobType = "redistribute",
 			jobState = "finished",
+			replicationPending = reason == "publication_failed",
 			transfer = job.options and job.options.sourceNodeId and {
 				op = "redistribute", sourceNodeId = job.options.sourceNodeId,
 				networkId = networkId, moved = job.moved, pending = job.blocked or 0,
@@ -205,8 +296,9 @@ end
 --- presupuestos y podia volver a bloquear el servidor aunque cada red
 --- individual estuviera limitada. El job procesado aplaza su siguiente turno,
 --- por lo que los demas vencidos quedan elegibles en los ticks siguientes.
-onTick = function()
+onTick = function(deadline)
 	local now = nowMs()
+	if deadline and now >= deadline then return end
 	if now < nextGlobalRunMs then return end
 	local networkId = nil
 	local job = nil
@@ -231,6 +323,38 @@ onTick = function()
 	nextGlobalRunMs = now + (job.pacing and job.pacing.schedulerDelayMs
 		or GLOBAL_STEP_DELAY_MS)
 
+	if job.phase == "replica" then
+		if job.holdFailed then
+			job.replicaFailure = "journal_hold_failed"
+			finishJob(networkId, job, "publication_failed")
+			return
+		end
+		if job.journalCount > 0 then flushJournal(job) end
+		local pending = 0
+		for id in pairs(job.replicationNodeIds or {}) do
+			local status, reason = GlobalStorageSiK.CatalogReconciler.releaseStatus(id, job)
+            if status == "failed" and not job.dirtyNodes[id] then
+                job.replicaFailure = tostring(id) .. ":" .. tostring(reason)
+                finishJob(networkId, job, "publication_failed")
+                return
+            end
+            if status ~= "verified" or GlobalStorageSiK.CatalogReconciler.pendingNode(id) then pending = pending + 1 end
+		end
+		if now - job.replicaStartedMs > REPLICA_TIMEOUT_MS then
+            job.replicaFailure = "verification_timeout"
+            finishJob(networkId, job, "publication_failed")
+        elseif pending == 0 then
+			finishJob(networkId, job, job.finishReason)
+		else
+			job.nextRunMs = now + GLOBAL_STEP_DELAY_MS
+			if now - (job.lastProgressMs or 0) >= PROGRESS_INTERVAL_MS then
+				job.lastProgressMs = now
+				notifyProgress(job, { phase="replica", checked=job.replicationNodes - pending, total=job.replicationNodes })
+			end
+		end
+		return
+	end
+
 	local player = resolvePlayer(job.username)
 	if not player then
 		GlobalStorageSiK.Log.debug("RedistributeJob", "onTick | jugador " .. tostring(job.username) .. " no resuelto, job cancelado")
@@ -254,20 +378,57 @@ onTick = function()
 		return
 	end
 	job.busyRetries = 0
+	local stepStarted = nowMs()
+	local options = { sourceNodeId = job.options and job.options.sourceNodeId, deferSnapshots = GlobalStorageSiK.CatalogReconciler and GlobalStorageSiK.CatalogReconciler.holdNode ~= nil }
+	options.deadline = deadline
+	local committed = { moved=0, movedByType={}, movedByTier={} }
+	if options.deferSnapshots then
+		options.onMutation = function(sourceId, targetId, fullType, tier)
+			committed.moved = committed.moved + 1
+			mergeCounts(committed.movedByType, { [tostring(fullType or "?")]=1 })
+			mergeCounts(committed.movedByTier, { [tostring(tier or "?")]=1 })
+			local heldAll = true
+			for _, id in ipairs({ sourceId, targetId }) do
+				if not job.dirtyNodes[id] then
+					job.dirtyNodes[id], job.journalCount = true, job.journalCount + 1
+                    if not job.allTouched[id] then
+                        job.allTouched[id], job.dirtyCount = true, job.dirtyCount + 1
+                    end
+					local heldOk, result = pcall(GlobalStorageSiK.CatalogReconciler.holdNode, id, job)
+					if not heldOk or result ~= true then heldAll, job.holdFailed = false, true end
+				end
+			end
+			return heldAll
+		end
+	end
 	local ok, summary, session = pcall(function()
 		return GlobalStorageSiK.InventorySync.withBatch(function()
-			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing, job.options)
+			return GlobalStorageSiK.Redistribute.redistributeNetwork(player, networkId, job.session, job.pacing, options)
 		end)
 	end)
 	GlobalStorageSiK.TransferLock.release(networkId, player)
+    local stepMs = math.max(0, nowMs() - stepStarted)
+    job.activeMs = (job.activeMs or 0) + stepMs
+    job.maxStepMs = math.max(job.maxStepMs or 0, stepMs)
+    if stepMs > (job.pacing.cpuBudgetMs or 5) or (deadline and nowMs() > deadline) then
+        job.overruns = (job.overruns or 0) + 1
+    end
 	if ok then
 		job.session = session
+        if GlobalStorageSiK.Sandbox and GlobalStorageSiK.Sandbox.debugDetailEnabled("RedistributeJob") then
 		GlobalStorageSiK.Log.detail("RedistributeJob", "onTick | redistributeNetwork moved=" .. tostring(summary.moved)
 			.. " failed=" .. tostring(summary.failed) .. " skipped=" .. tostring(summary.skipped)
 			.. " checked=" .. tostring(summary.checked) .. "/" .. tostring(summary.total)
 			.. " phase=" .. tostring(summary.phase) .. " reason=" .. tostring(summary.reason))
+        end
 	end
 	if not ok then
+		job.moved = job.moved + committed.moved
+		mergeCounts(job.movedByType, committed.movedByType)
+		mergeCounts(job.movedByTier, committed.movedByTier)
+		if job.dirtyCount > 0 and GlobalStorageSiK.Server.markInventoryDirty then
+			GlobalStorageSiK.Server.markInventoryDirty(networkId, player, { scheduleSnapshot=false, snapshotsUpdated=false, touchedNodeIds={} })
+		end
 		-- Sin este pcall, un error aqui dejaba el job colgado para siempre
 		-- en silencio: nunca se volvia a intentar ni se avisaba al jugador.
 		GlobalStorageSiK.Log.error("RedistributeJob", "onTick failed: " .. tostring(summary))
@@ -285,12 +446,23 @@ onTick = function()
 	job.steps = (job.steps or 0) + 1
 	mergeCounts(job.movedByTier, summary.movedByTier)
 	mergeCounts(job.movedByType, summary.movedByType)
+	mergeCounts(job.skipReasons, summary.skipReasons)
 	if (summary.moved or 0) > 0 and GlobalStorageSiK.Server
 		and GlobalStorageSiK.Server.markInventoryDirty then
-		GlobalStorageSiK.Server.markInventoryDirty(networkId, player, {
-			scheduleSnapshot=false, snapshotsUpdated=summary.snapshotsUpdated == true,
-			touchedNodeIds=summary.touchedNodeIds or {} })
+        local deferred = options.deferSnapshots
+        -- Invalidate authoritative selectors/cache immediately. Captures are
+        -- deferred while the physical journal owns a node, then reconciled once.
+        GlobalStorageSiK.Server.markInventoryDirty(networkId, player, {
+            scheduleSnapshot=false, snapshotsUpdated=summary.snapshotsUpdated == true,
+            touchedNodeIds=deferred and {} or (summary.touchedNodeIds or {}) })
 	end
+    if job.journalCount > 0 and nowMs() - job.lastFlushMs >= JOURNAL_WINDOW_MS then
+        if not flushJournal(job) then
+            job.replicaFailure = "checkpoint_release_failed"
+            finishJob(networkId, job, "publication_failed")
+            return
+        end
+    end
 	if summary.reason == "limit" then
 		local progressKey = tostring(summary.phase) .. ":" .. tostring(summary.checked or 0)
 		if progressKey == job.lastProgressKey then
@@ -310,12 +482,13 @@ onTick = function()
 		-- UI; esto evita otro payload grande repetido durante redes masivas.
 		local stepDelay = INDEX_DELAY_MS
 		if summary.phase ~= "index" then
-			-- Los remove/add replicados son lo caro y conservan la pausa larga.
+			-- Replicated moves retain their bounded quota and operation-specific pause.
 			-- Un barrido que no movió nada puede continuar antes sin generar red.
 			stepDelay = (summary.moved or 0) > 0
 				and (job.pacing and job.pacing.moveDelayMs or MOVE_DELAY_MS) or MOVE_IDLE_DELAY_MS
 		end
-		job.nextRunMs = now + stepDelay
+		job.plannedWaitMs = job.plannedWaitMs + stepDelay
+		job.nextRunMs = nowMs() + stepDelay
 		local phaseChanged = summary.phase ~= job.lastPhase
 		if phaseChanged or now - (job.lastProgressMs or 0) >= PROGRESS_INTERVAL_MS then
 			job.lastPhase = summary.phase
@@ -328,6 +501,7 @@ onTick = function()
 end
 
 local function ensureTickInstalled()
+	if GlobalStorageSiK.Server and GlobalStorageSiK.Server.drivesRedistributeJobs then return end
 	if tickInstalled then
 		return
 	end
@@ -354,6 +528,7 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId, options)
 	ensureTickInstalled()
 	local pacing = GlobalStorageSiK.OperationPacing.resolve({ operationType = "autosort" })
 	jobs[networkId] = {
+		networkId = networkId,
 		options = options and { sourceNodeId = options.sourceNodeId } or nil,
 		username  = player:getUsername(),
 		nextRunMs = 0,
@@ -374,6 +549,9 @@ function GlobalStorageSiK.RedistributeJob.start(player, networkId, options)
 		inspected = 0,
 		budgetExhaustions = 0,
 		steps = 0,
+		skipReasons = {}, dirtyNodes = {}, dirtyCount = 0,
+        allTouched = {}, journalCount = 0, lastFlushMs = nowMs(), publicationWindows = 0,
+		activeMs = 0, plannedWaitMs = 0, maxStepMs = 0, overruns = 0,
 	}
 	GlobalStorageSiK.Log.debug("RedistributeJob", "start | nuevo job para " .. tostring(networkId)
 		.. " user=" .. tostring(player:getUsername()) .. " tickInstalled=" .. tostring(tickInstalled),
@@ -398,4 +576,17 @@ end
 ---@return boolean
 function GlobalStorageSiK.RedistributeJob.isActive(networkId)
 	return jobs[networkId] ~= nil
+end
+
+-- Server tick owns the shared transfer deadline; fallback OnTick remains for
+-- standalone integrations which do not opt in to that scheduler.
+function GlobalStorageSiK.RedistributeJob.update(deadline) onTick(deadline) end
+function GlobalStorageSiK.RedistributeJob.hasPendingReplication(networkId)
+    local job = jobs[networkId]
+    return job ~= nil and job.dirtyCount > 0
+end
+function GlobalStorageSiK.RedistributeJob.pendingCount()
+    local count = 0
+    for _ in pairs(jobs) do count = count + 1 end
+    return count
 end
