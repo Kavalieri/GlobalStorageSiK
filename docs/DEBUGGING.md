@@ -1,5 +1,26 @@
 # Diagnóstico y logs
 
+## Recuperación de una retirada mixta
+
+Tras `selection_stale`, una selección global solicita `terminalManifestRequest`
+con la sesión y los tokens confirmados: incluso un manifiesto sin cambios debe
+responder. Reutiliza los bloques vigentes; no inicia un reescaneo. Las selecciones
+dirigidas a un nodo conservan `getNodeContents`; el catálogo legacy conserva su
+ruta. El servidor sigue validando revisión, permisos, IDs y destino físico.
+
+Una réplica completa comprometida puede renovar por copia el selector consumido
+aunque `snapshotCertified=false` para la captura global. Esta confirmación viaja
+sólo dentro del callback local después de commit/Ready y sus cercas de sesión y
+vista. No cambia la certificación global ni las filas compartidas; no autoriza
+vistas parciales, rechazadas o sustituidas. Se conserva un único retry.
+
+Con NetTrace habilitado, `Withdraw: selection refresh` registra como máximo el
+primer descarte y el desenlace por intento. Incluye gesto, jugador/red, etapa,
+motivo, último descarte, revisión del snapshot/inventario/fila, apertura, secuencia
+de vista, parcialidad y confirmación de réplica. `retry_scheduled` significa que
+el selector está listo; `withdrawItem` y su ACK acreditan envío y resultado.
+Los descartes del catálogo son sólo diagnóstico y nunca reanudan la retirada.
+
 Los logs de diagnóstico y el relé están desactivados por defecto. El servidor permite suscribirse y recibir únicamente a administradores; revalida en cada envío y elimina la suscripción al perder acceso o desconectarse. No debe existir ningún `print()` suelto fuera del logger o del receptor de una línea remota ya formada.
 
 ## Cómo leer una línea

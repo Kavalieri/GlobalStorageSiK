@@ -1372,22 +1372,30 @@ end
 local function currentWithdrawCatalog(payload)
 	local client, n = GlobalStorageSiK.Client, payload.playerNum
 	local state = client.terminalStateByPlayer[n]
-	if client.terminalOpenSeqByPlayer[n] ~= payload.openSeq or not state
-		or state.networkId ~= payload.networkId or state.catalogScope ~= payload.catalogScope
-		or state.inventoryRevision ~= payload.inventoryRevision
-		or state.replicaEpoch ~= payload.replicaEpoch
-		or state.viewSequence ~= payload.viewSequence or state.replicaPartial == true then return end
+	if client.terminalOpenSeqByPlayer[n] ~= payload.openSeq then return nil, "opening" end
+	if not state then return nil, "missing_state" end
+	if state.networkId ~= payload.networkId then return nil, "network" end
+	if state.catalogScope ~= payload.catalogScope then return nil, "scope" end
+	if state.inventoryRevision ~= payload.inventoryRevision then return nil, "revision" end
+	if state.replicaEpoch ~= payload.replicaEpoch then return nil, "epoch" end
+	if state.viewSequence ~= payload.viewSequence then return nil, "view" end
+	if state.replicaPartial == true then return nil, "partial" end
 	return state
 end
 
-local function notifyWithdrawCatalog(payload)
-	local state = currentWithdrawCatalog(payload)
-	if not state then return end
+local function notifyWithdrawCatalog(payload, completeReplica)
+	local state, reason = currentWithdrawCatalog(payload)
 	local withdraw = GlobalStorageSiK.WithdrawClient
+	if not state then
+		if withdraw and withdraw.onCatalogRefreshRejected then
+			pcall(withdraw.onCatalogRefreshRejected, payload, "catalog_commit", reason)
+		end
+		return
+	end
 	if withdraw and withdraw.onTerminalState then
 		-- False means no waiting gesture, not catalog failure. This callback may
 		-- request authority work, so it must never run in a rollbackable phase.
-		local ok, err = pcall(withdraw.onTerminalState, state)
+		local ok, err = pcall(withdraw.onTerminalState, state, completeReplica == true)
 		if not ok then GlobalStorageSiK.Log.error("Client", "withdraw catalog committed callback", tostring(err)) end
 	end
 end
@@ -1477,6 +1485,11 @@ local function applyCatalogTransaction(payload, delta)
 				end
 			end
 			end
+		end
+		local withdraw = GlobalStorageSiK.WithdrawClient
+		if withdraw and withdraw.onCatalogRefreshRejected then
+			pcall(withdraw.onCatalogRefreshRejected, payload, "catalog_transaction",
+				not ok and "consumer_exception" or reason or stage or "consumer_rejected")
 		end
 		if not ok then error(accepted, 0) end
 		return false, reason, stage
@@ -1842,7 +1855,13 @@ GlobalStorageSiK.NodeCatalogClient.configure({
 	committed=function(payload)
 		if not payload.replicaPartial and currentWithdrawCatalog(payload) then
 			GlobalStorageSiK.CatalogClient.replicaApplied(payload.playerNum,payload.inventoryRevision)
-			notifyWithdrawCatalog(payload)
+		end
+		notifyWithdrawCatalog(payload, true)
+	end,
+	rejected=function(payload,reason)
+		local withdraw=GlobalStorageSiK.WithdrawClient
+		if withdraw and withdraw.onCatalogRefreshRejected then
+			withdraw.onCatalogRefreshRejected(payload,"replica_commit",reason)
 		end
 	end,
 	failed=function(n,reason,meta)

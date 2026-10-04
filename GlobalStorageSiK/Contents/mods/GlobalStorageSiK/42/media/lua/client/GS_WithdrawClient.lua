@@ -284,14 +284,22 @@ function Client.onProgress(args)
 	end
 	return false
 end
-function Client.onTerminalState(state)
+function Client.onTerminalState(state, completeReplica)
 	local playerNum = state and numberOf(state.playerNum)
 	local queue = playerNum ~= nil and queues[playerNum]
 	local entry = queue and queue.entries[1]
 	if not entry or not entry.worker then return false end
-	local consumed = entry.worker.onTerminalState(state)
+	local consumed = entry.worker.onTerminalState(state, completeReplica == true)
 	afterDispatch(entry, entry.worker)
 	return consumed
+end
+
+-- Diagnostics only: a rejected catalog never supplies a selector or resumes work.
+function Client.onCatalogRefreshRejected(state, stage, reason)
+	local playerNum = state and numberOf(state.playerNum)
+	local queue = playerNum ~= nil and queues[playerNum] or nil
+	local entry = queue and queue.entries[1]
+	if entry and entry.worker then entry.worker.onCatalogRefreshRejected(state, stage, reason) end
 end
 function Client.isPending(playerNum)
 	if playerNum ~= nil then

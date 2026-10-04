@@ -145,6 +145,15 @@ function Client.negotiate(ack)
 	end
 	return send(state,"terminalManifestRequest",args)
 end
+-- Explicit selector refresh must receive a response even when a spontaneous
+-- complete view arrived before the stale NACK. Reuse confirmed tokens/blocks;
+-- this is a new demand, not a transport failure or a global rescan.
+function Client.requestSelectionRefresh(playerNum,networkId)
+	local state=slots[playerNum]
+	if not state or state.ack.networkId~=networkId then return nil end
+	if not context.current(playerNum,state.ack.openSeq) or not allowed(state) then return false end
+	return Client.negotiate(state.ack)
+end
 local function missingNode(state)
 	local missing=cache.missing(state.entry,1)
 	if not missing[1] then
@@ -446,6 +455,7 @@ local function apply(state)
 	state.phase=nil;state.previous=state.rows;state.view=nil;state.completed=true
 	if not state.notModified and (state.partial or state.buildVersion~=state.blockVersion) then
 		state.completed=false
+		if context.rejected then pcall(context.rejected,payload,state.partial and "partial" or "view_changed") end
 		-- Tras publicar la primera ventana parcial hay que pedir inmediatamente el
 		-- siguiente nodo. Dejar el estado sin build, phase ni request lo aparcaba
 		-- hasta el watchdog de 10 s y mantenia capacidad en «Cargando».
@@ -459,13 +469,18 @@ local function apply(state)
 	end
 	payload._gsAwaitReplicaReady=nil
 	if ready then publishProgress(state,true) end
-	if ready and slots[payload.playerNum]==state and context.committed
-		and context.current(payload.playerNum,payload.openSeq)
-		and state.manifest.manifestToken==payload.manifestToken
-		and state.manifest.inventoryRevision==payload.inventoryRevision
-		and state.viewSequence==payload.viewSequence and allowed(state) then
-		local ok, err = pcall(context.committed, payload)
-		if not ok then GlobalStorageSiK.Log.error("NodeCatalogClient", "committed callback", tostring(err)) end
+	if ready then
+		local reason
+		if slots[payload.playerNum]~=state then reason="slot"
+		elseif not context.current(payload.playerNum,payload.openSeq) then reason="opening"
+		elseif state.manifest.manifestToken~=payload.manifestToken then reason="manifest"
+		elseif state.manifest.inventoryRevision~=payload.inventoryRevision then reason="revision"
+		elseif state.viewSequence~=payload.viewSequence then reason="view"
+		elseif not allowed(state) then reason="access" end
+		if not reason and context.committed then
+			local ok, err = pcall(context.committed, payload)
+			if not ok then GlobalStorageSiK.Log.error("NodeCatalogClient", "committed callback", tostring(err)) end
+		elseif reason and context.rejected then pcall(context.rejected,payload,reason) end
 	end
 	return ready
 end

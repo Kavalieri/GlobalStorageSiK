@@ -42,6 +42,7 @@ local tickInstalled = false
 local nextDispatchMs = 0
 local responseDeadlineMs = 0
 local operation = nil
+local traceSelectionRefresh
 
 local function copyItemIds(itemIds, limit)
 	local copied = {}
@@ -383,6 +384,9 @@ end
 
 --- Cancela el retiro activo y toda la cola local. No inicia otro trabajo.
 function worker.cancelAll(reason)
+	if traceSelectionRefresh then
+		traceSelectionRefresh(current and current.refreshTraceState, "selector", reason or "cancelled", true)
+	end
 	local cancelledOperation = operation
 	local cancelledCurrent = current
 	local cancelledQueue = queue
@@ -434,26 +438,73 @@ end
 --- acotado ya gestionado por onTick cancela la espera si nunca llega.
 ---@param state table|nil
 ---@return boolean consumed
-function worker.onTerminalState(state)
+traceSelectionRefresh = function(state, stage, reason, final, completeReplica)
+	if not current or current.awaitingFreshSelection ~= true then return end
+	current.lastRefreshRejection = not final and reason or current.lastRefreshRejection
+	local trace = GlobalStorageSiK.NetTrace
+	if not trace or not trace.isEnabled then return end
+	local enabledOk, enabled = pcall(trace.isEnabled)
+	if not enabledOk or not enabled then return end
+	state = state or {}
+	current.refreshTraceState = current.refreshTraceState or {}
+	for _, key in ipairs({"snapshotCertified", "snapshotRevision", "inventoryRevision", "openSeq", "viewSequence", "replicaPartial"}) do
+		current.refreshTraceState[key] = state[key]
+	end
+	if current.refreshOutcomeLogged or current.refreshDecisionLogged and not final then return end
+	current.refreshDecisionLogged = true
+	if final then current.refreshOutcomeLogged = true end
+	local rowRevision = current.rowData.selectionRevision
+	if current.freshSelectionRowSeen then rowRevision = current.freshSelectionRowRevision end
+	pcall(trace.write, "Withdraw: selection refresh",
+		"operationId=" .. tostring(context.operationId) .. " withdrawId=" .. tostring(current.requestId)
+		.. " player=" .. tostring(context.playerNum) .. " network=" .. tostring(current.networkId)
+		.. " rowKey=" .. tostring(current.rowData.rowKey) .. " fullType=" .. tostring(current.rowData.fullType)
+		.. " sourceNodeId=" .. tostring(current.rowData.sourceNodeId)
+		.. " worker=true stage=" .. tostring(stage) .. " reason=" .. tostring(reason)
+		.. " lastRejected=" .. tostring(current.lastRefreshRejection)
+		.. " snapshotCertified=" .. tostring(state.snapshotCertified)
+		.. " snapshotRevision=" .. tostring(state.snapshotRevision)
+		.. " inventoryRevision=" .. tostring(state.inventoryRevision)
+		.. " staleRevision=" .. tostring(current.staleSelectionRevision)
+		.. " rowRevision=" .. tostring(rowRevision)
+		.. " openSeq=" .. tostring(state.openSeq) .. " viewSequence=" .. tostring(state.viewSequence)
+		.. " replicaPartial=" .. tostring(state.replicaPartial)
+		.. " completeReplica=" .. tostring(completeReplica == true))
+end
+
+function worker.onCatalogRefreshRejected(state, stage, reason)
+	traceSelectionRefresh(state, stage, reason, false)
+end
+
+function worker.onTerminalState(state, completeReplica)
 	if not current or current.awaitingFreshSelection ~= true or not state then return false end
-	if state.networkId ~= current.networkId then return false end
-	if state.replicaPartial == true then return false end
-	if state.snapshotCertified == false then return false end
+	local function reject(reason)
+		traceSelectionRefresh(state, "selector", reason, false, completeReplica)
+		return false
+	end
+	-- The transient proof comes only from the complete replica's fenced commit
+	-- callback. It is never inferred from a server payload or stored on a row.
+	local selectorCertified = state.snapshotCertified == true or completeReplica == true
+	if state.networkId ~= current.networkId then return reject("network") end
+	if state.replicaPartial == true then return reject("partial") end
+	if state.snapshotCertified == false and not selectorCertified then return reject("uncertified") end
 	local freshRevision = tonumber(state.inventoryRevision)
 	local staleRevision = tonumber(current.staleSelectionRevision)
-	if not freshRevision or (staleRevision and freshRevision < staleRevision) then return false end
-	if staleRevision == freshRevision and state.snapshotCertified ~= true then return false end
+	if not freshRevision or (staleRevision and freshRevision < staleRevision) then return reject("revision") end
+	if staleRevision == freshRevision and not selectorCertified then return reject("uncertified") end
 	if state.sourceNodeId ~= current.rowData.sourceNodeId then
 		if current.rowData.sourceNodeId and state.sourceNodeId == nil
-			and state.snapshotCertified == true and not current.freshNodeRequested then
+			and selectorCertified and not current.freshNodeRequested then
 			current.freshNodeRequested = true
 			sendCommand("getNodeContents", {
 				networkId = current.networkId, nodeId = current.rowData.sourceNodeId,
 			})
 		end
-		return false
+		return reject("source_node")
 	end
 	local freshRow = nil
+	current.freshSelectionRowSeen = true
+	current.freshSelectionRowRevision = nil
 	for i = 1, #(state.items or {}) do
 		local candidate = state.items[i]
 		if candidate and candidate.rowKey == current.rowData.rowKey then
@@ -462,6 +513,7 @@ function worker.onTerminalState(state)
 		end
 	end
 	if not freshRow then
+		traceSelectionRefresh(state, "selector", "selection_not_found", true, completeReplica)
 		GlobalStorageSiK.Log.warn("WithdrawClient", "fresh selection missing",
 			"rowKey=" .. tostring(current.rowData.rowKey)
 				.. " revision=" .. tostring(freshRevision))
@@ -473,10 +525,11 @@ function worker.onTerminalState(state)
 	-- consumed selector gets the accepted complete view revision; shared rows
 	-- and exact child IDs remain untouched, and the server still revalidates.
 	local rowRevision = tonumber(freshRow.selectionRevision)
+	current.freshSelectionRowRevision = rowRevision
 	if not rowRevision or rowRevision ~= math.floor(rowRevision)
-		or rowRevision < 0 or rowRevision > freshRevision then return false end
+		or rowRevision < 0 or rowRevision > freshRevision then return reject("row_revision") end
 	if rowRevision ~= freshRevision then
-		if state.snapshotCertified ~= true then return false end
+		if not selectorCertified then return reject("uncertified_retained_row") end
 		local selector = {}
 		for key, value in pairs(freshRow) do selector[key] = value end
 		selector.selectionRevision = freshRevision
@@ -492,6 +545,7 @@ function worker.onTerminalState(state)
 		operation.totalExpected = math.max(0,
 			(operation.totalExpected or 0) - previousExpected + current.expectedCount)
 	end
+	traceSelectionRefresh(state, "selector", "retry_scheduled", true, completeReplica)
 	current.awaitingFreshSelection = false
 	current.staleSelectionRevision = nil
 	responseDeadlineMs = 0
@@ -735,15 +789,30 @@ function worker.onActionResult(args)
 		end
 		current.staleRetryCount = 1
 		current.awaitingFreshSelection = true
+		current.refreshDecisionLogged = nil
+		current.refreshOutcomeLogged = nil
+		current.lastRefreshRejection = nil
+		current.freshSelectionRowRevision = nil
+		current.freshSelectionRowSeen = nil
+		current.refreshTraceState = nil
 		current.staleSelectionRevision = current.rowData.selectionRevision
 		current.selectionTicket = nil
 		current.selectionSequence = 1
 		responseDeadlineMs = nowMs() + SELECTION_REFRESH_TIMEOUT_MS
 		nextDispatchMs = math.huge
 		local sourceNodeId = current.rowData.sourceNodeId
-		local refreshSent = sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex", {
-			networkId = current.networkId, nodeId = sourceNodeId, searchQuery = current.searchQuery or "",
-		})
+		local refreshSent
+		local replica = GlobalStorageSiK.NodeCatalogClient
+		if not sourceNodeId and replica and replica.requestSelectionRefresh then
+			refreshSent = replica.requestSelectionRefresh(context.playerNum, current.networkId)
+		end
+		-- nil denotes the legacy route; false means an applicable replica failed
+		-- its access/session/send fence and must not fall back to another request.
+		if refreshSent == nil then
+			refreshSent = sendCommand(sourceNodeId and "getNodeContents" or "requestItemIndex", {
+				networkId = current.networkId, nodeId = sourceNodeId, searchQuery = current.searchQuery or "",
+			})
+		end
 		if not refreshSent then
 			worker.cancelAll("selection_refresh_failed")
 			return false
