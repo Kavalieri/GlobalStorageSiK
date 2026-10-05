@@ -213,6 +213,22 @@ local function authorizedCatalogScope(player, networkId)
 	return table.concat(zoneIds, "\31")
 end
 
+-- One record per authoritative revision, never per inventory object. Diagnostic
+-- failures must not change a committed transfer or its receipt.
+local function bumpInventoryRevision(networkId, reason, operationId)
+	local previous = GlobalStorageSiK.Index.getInventoryRevision(networkId)
+	local revision = GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+	pcall(function()
+		local trace = GlobalStorageSiK.NetTrace
+		if trace and trace.isEnabled and trace.isEnabled() then
+			trace.write("Inventory: revision", "network=" .. tostring(networkId):gsub("[%c]", " "):sub(1, 96)
+				.. " previous=" .. tostring(previous) .. " revision=" .. tostring(revision)
+				.. " cause=" .. tostring(reason):gsub("[%c]", " "):sub(1, 96) .. " operation=" .. tostring(operationId):gsub("[%c]", " "):sub(1, 96))
+		end
+	end)
+	return revision
+end
+
 local function catalogScopeSignature(player, networkId)
 	local registry = GlobalStorageSiK.Zones.getRegistry()
 	local zoneIds = {}
@@ -238,13 +254,13 @@ local function catalogScopeSignature(player, networkId)
 	local signature = table.concat(topology, "\31")
 	local previous = inventoryTopologySignatures[networkId]
 	if previous ~= nil and previous ~= signature then
-		GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+		bumpInventoryRevision(networkId, "topology")
 		if inventorySnapshotMeta[networkId] then inventorySnapshotMeta[networkId].potentiallyStale = true end
 	end
 	inventoryTopologySignatures[networkId] = signature
 	local stamp = GlobalStorageSiK.Index.getClassificationStamp()
 	if inventoryClassificationStamps[networkId] and inventoryClassificationStamps[networkId] ~= stamp then
-		GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+		bumpInventoryRevision(networkId, "classification")
 	end
 	inventoryClassificationStamps[networkId] = stamp
 	table.sort(zoneIds)
@@ -432,7 +448,8 @@ function GlobalStorageSiK.Server.markInventoryDirty(networkId, player, options)
 	end
 	local previousRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	local previouslyStable = GlobalStorageSiK.Index.getSnapshotRevision(networkId) == previousRevision
-	local ok, revision = pcall(GlobalStorageSiK.Index.bumpInventoryRevision, networkId, false)
+	local ok, revision = pcall(bumpInventoryRevision, networkId,
+		options and options.mutationReason or "inventory_dirty", options and options.operationId)
 	if not ok then
 		GlobalStorageSiK.Log.error("Server", "inventoryRevision", tostring(revision))
 		revision = 0
@@ -1957,7 +1974,7 @@ local function publishTaxonomyOverride(fullType, revision, job)
 			local stable = complete and GlobalStorageSiK.Index.getSnapshotRevision(networkId) == oldRevision
 				and not pendingSnapshotSync[networkId] and not GlobalStorageSiK.ZoneScanJob.isActive(networkId)
 			invalidateCatalogCache(networkId)
-			local updated = GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+			local updated = bumpInventoryRevision(networkId, "classification_override")
 			job.updated[networkId] = updated
 			-- Only the classification changed. Carry forward an already complete
 			-- physical snapshot; never certify an incomplete or pending capture.
@@ -2021,6 +2038,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 		scheduleSnapshot = false,
 		snapshotsUpdated = options.snapshotsUpdated == true,
 		touchedNodeIds = options.touchedNodeIds,
+		mutationReason = options.mutationReason or "transfer", operationId = options.operationId,
 	})
 	if options.suppressUi == true then
 		-- Una linea por microlote solo resulta util al diagnosticar la
@@ -2044,7 +2062,7 @@ local function afterTransferSync(actor, networkId, searchQuery, options)
 	-- mergeInventorySyncState) sin resetear scroll/busqueda/filtros. Solo al
 	-- actor de forma inmediata; los demas watchers se agrupan despues mediante
 	-- la cola diferida existente, sin emitir una actualizacion por objeto.
-	if actor then
+	if actor and options.silentActor ~= true then
 		-- BUG REAL encontrado 2026-08-21: pushTerminalInventorySync ->
 		-- buildRows() lee node.itemSnapshot (la CACHE en memoria), no el
 		-- contenedor en vivo, y esa cache solo se refrescaba en el
@@ -2150,23 +2168,26 @@ GlobalStorageSiK.DepositTasks.configure({
 local function completeWithdrawTask(player, networkId, meta, summary, silent)
 	meta, summary = meta or {}, summary or {}
 	GlobalStorageSiK.OperationPacing.release(meta.pacingKey)
-	if not silent and (summary.moved or 0) > 0 then
+	if (summary.moved or 0) > 0 then
 		afterTransferSync(player, networkId, meta.searchQuery, {
 			snapshotsUpdated = summary.snapshotsUpdated,
 			touchedNodeIds = summary.touchedNodeIds,
+			mutationReason = "withdraw_task", operationId = meta.withdrawId, silentActor = silent == true,
 		})
 	end
+	-- Tasks has already flushed the physical snapshots. Seal after our own
+	-- invalidation, before receipt capture or synchronous client dispatch.
+	summary.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	local reason = summary.reason
 	local ok = (summary.moved or 0) > 0
 		and reason ~= "cancelled" and reason ~= "player_dead"
-		and reason ~= "terminal_closed"
+		and reason ~= "terminal_closed" and reason ~= "player_unavailable"
 	GlobalStorageSiK.Log.info("WithdrawTasks", "complete withdrawId="
 		.. tostring(meta.withdrawId) .. " requested=" .. tostring(meta.requested)
 		.. " moved=" .. tostring(summary.moved or 0)
 		.. " slices=" .. tostring(summary.slices or 0)
 		.. " reason=" .. tostring(reason))
-	if silent then return end
-	gsSendServerCommand(player, "actionResult", {
+	local payload = {
 		ok = ok,
 		message = ok
 			and GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(summary.moved or 0))
@@ -2175,14 +2196,19 @@ local function completeWithdrawTask(player, networkId, meta, summary, silent)
 		transfer = {
 			op = "withdraw", networkId = networkId, fullType = summary.fullType,
 			requested = meta.requested or 0, moved = summary.moved or 0,
-			inventoryRevision = summary.inventoryRevision
-				or GlobalStorageSiK.Index.getInventoryRevision(networkId),
+			inventoryRevision = summary.inventoryRevision,
 			reason = reason, selectionMode = "exact_group",
 			deferInventoryPull = true, serverOwned = true,
 			ticketRemaining = 0, selectionCount = meta.selectionCount,
 			slices = summary.slices or 0,
 		},
-	})
+	}
+	if silent then
+		payload.playerNum = player and player.getPlayerNum and player:getPlayerNum() or 0
+		GlobalStorageSiK.WithdrawReceipts.capture(player, payload)
+		return
+	end
+	gsSendServerCommand(player, "actionResult", payload)
 end
 
 GlobalStorageSiK.WithdrawTasks.configure({
@@ -2653,7 +2679,7 @@ function GlobalStorageSiK.Server.onNetworkScanComplete(networkId, summary, reque
 	local finalContentSignature = GlobalStorageSiK.Index.contentSignature(networkId)
 	local contentChanged = finalContentSignature ~= summary._startContentSignature
 	if contentChanged then
-		currentRevision = GlobalStorageSiK.Index.bumpInventoryRevision(networkId, false)
+		currentRevision = bumpInventoryRevision(networkId, "scan_content")
 		invalidateCatalogCache(networkId)
 	end
 	summary.contentChanged = contentChanged
@@ -6017,7 +6043,7 @@ require "GS_CatalogReconciler"
 GlobalStorageSiK.CatalogReconciler.configure({
 	changed=function(networkId, nodeId)
 		GlobalStorageSiK.Server.markInventoryDirty(networkId, nil, {
-			scheduleSnapshot=false, snapshotsUpdated=true, touchedNodeIds={nodeId}})
+			scheduleSnapshot=false, snapshotsUpdated=true, touchedNodeIds={nodeId}, mutationReason="reconcile"})
 		pushTerminalStateToNetworkWatchers(nil, networkId)
 	end,
 	status=function(networkId, phase, stats)

@@ -289,6 +289,15 @@ end
 
 local function dispatchCurrent()
 	if not current then return end
+	-- A retained row can predate the complete view even in a new gesture.
+	-- This is only a revision floor; beginSelectionRefresh still requires
+	-- a fenced complete view before copying the consumed selector.
+	if current.selectionMode=="exact_group" and not current.selectionTicket and operation then
+		local live=catalogState()
+		local revision=live and live.networkId==current.networkId
+			and sameOpening(live) and revisionNumber(live.inventoryRevision)
+		if revision then operation.lastRevision=math.max(operation.lastRevision or 0,revision) end
+	end
 	-- An ACK proves that the inventory changed, not the contents of another row.
 	-- Reuse a complete current view or wait before sending an avoidable stale intent.
 	if current.selectionMode=="exact_group" and not current.selectionTicket

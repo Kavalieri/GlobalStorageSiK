@@ -748,3 +748,36 @@ trace lacks the actual key and resolver stage, so this correction does not
 attribute the failure to r2 or claim that the defensive main-identity case
 reproduces vanilla runtime. Offline fixture conservation and compiler checks
 are technical evidence only; candidate TEST and acceptance remain pending.
+
+## Routing candidate r6: authoritative withdrawal receipt
+
+The local/server footer identifies `routing-r6-20261005`. Withdrawal tasks flush
+exact node snapshots, apply their own inventory invalidation, then seal the final
+`transfer.inventoryRevision` before receipt capture and delivery. Replaying the
+receipt preserves that revision and never repeats a physical movement or adopts
+later mutations. A partial task that finishes after death/disconnection still
+invalidates its confirmed movements and queues authorized watchers; silent close
+suppresses the actor response while preserving the final receipt. Unavailability
+is a failure with the actual moved count retained.
+
+Under Network NetTrace, ACK/NACK summaries expose the nested
+`transfer.inventoryRevision`, `transfer.reason`, `transfer.moved`,
+`transfer.slices` and `transfer.selectionMode`. `Inventory: revision` emits one
+bounded record per authoritative revision with network, previous/new revision,
+cause and operation. Causes distinguish `withdraw_task`, other `transfer`,
+`reconcile`, `scan_content`, `topology`, `classification`, `classification_override`
+and generic `inventory_dirty`. The generic cause does not identify its individual
+caller. Trace identifiers sanitize controls and are length bounded; diagnostic
+failure in the revision trace cannot change the committed mutation.
+
+Before dispatching an unticketed exact group, the worker reads the current view
+revision from the same opening and network as a minimum floor. Retained rows in
+a new gesture, including views committed between enqueue and dispatch, reuse the
+existing fenced complete-view path to copy only the consumed selector. A revision
+floor does not certify a partial view. Shared rows, exact IDs and tickets remain
+untouched. The single stale retry, capacity, permissions, quotas and routing rules
+remain unchanged. This correction
+retains serial requests between selected types; it does not implement a new
+heterogeneous server batch. Technical fixtures do not establish dedicated runtime
+acceptance or a measured latency gain. Keep the failed runtime evidence and test
+only the corrected candidate.

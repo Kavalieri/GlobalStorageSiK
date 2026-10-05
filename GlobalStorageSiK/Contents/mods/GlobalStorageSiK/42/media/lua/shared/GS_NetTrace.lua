@@ -86,6 +86,17 @@ local function commandSummary(payload)
 			parts[#parts + 1] = key .. "=" .. tostring(value):gsub("[%c]", " "):sub(1, 120)
 		end
 	end
+	local transfer = type(payload.transfer) == "table" and payload.transfer or nil
+	if transfer then
+		-- The receipt revision is nested; the top-level allowlist cannot expose it.
+		for _, key in ipairs({ "inventoryRevision", "reason", "moved", "slices", "selectionMode" }) do
+			local value = transfer[key]
+			local kind = type(value)
+			if kind == "string" or kind == "number" or kind == "boolean" then
+				parts[#parts + 1] = "transfer." .. key .. "=" .. tostring(value):gsub("[%c]", " "):sub(1, 120)
+			end
+		end
+	end
 	return table.concat(parts, " ")
 end
 
