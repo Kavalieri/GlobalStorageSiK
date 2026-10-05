@@ -113,6 +113,9 @@ local function finish(task, reason, cancelled, silent)
 	if cancelled and task.offset <= #task.itemIds then
 		summary.cancelled = #task.itemIds - task.offset + 1
 	end
+	-- Preparation may invalidate the catalog. Seal its resulting revision before
+	-- retaining a receipt or entering a synchronous SP delivery callback.
+	if callbacks.prepare then callbacks.prepare(task.player, task.networkId, task.meta, summary, silent == true) end
 	summary.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(task.networkId)
 	local plan = task.routingSession and task.routingSession.routingPlan
 	if plan and GlobalStorageSiK.Log and GlobalStorageSiK.Log.debug then
@@ -140,7 +143,7 @@ end
 
 local function processTask(task)
 	local player = GlobalStorageSiK.PlayerUtils.resolveByUsername(task.username)
-	if not player or (player.getPlayerNum and player:getPlayerNum() or -1) ~= task.playerNum then
+	if player ~= task.player or (player and player.getPlayerNum and player:getPlayerNum() or -1) ~= task.playerNum then
 		finish(task, "player_unavailable", true, true)
 		return
 	end

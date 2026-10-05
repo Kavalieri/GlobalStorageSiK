@@ -915,6 +915,7 @@ local function buildTerminalState(networkId, scanSummary, searchQuery, craftProb
 
 		networkName = GlobalStorageSiK.Network.getDisplayName(networkId),
 		configEpoch = GlobalStorageSiK.RoutingTransactions.epoch(player),
+		withdrawBatchVersion = 1,
 		routingRevision = GlobalStorageSiK.RoutingProtocol.revision(networkId),
 
 		powered = GlobalStorageSiK.Power.networkPowered(networkId),
@@ -2103,6 +2104,20 @@ end
 -- Cierre unico de una seleccion de deposito retenida por el servidor. Conserva
 -- el actionResult historico para que clientes 1.5.6 entiendan el resultado final,
 -- pero ya no intercambia remainingIds ni necesita un RTT por slice.
+local function prepareDepositTask(player, networkId, meta, summary, silent)
+	meta, summary = meta or {}, summary or {}
+	GlobalStorageSiK.OperationPacing.release(meta.pacingKey)
+	if not summary.replay and ((summary.moved or 0) > 0 or summary.reconcile) then
+		afterTransferSync(player, networkId, meta.searchQuery, {
+			snapshotsUpdated = summary.snapshotsUpdated,
+			touchedNodeIds = summary.touchedNodeIds, silentActor = silent == true,
+			mutationReason = "deposit_task", operationId = meta.depositId or meta.operationId,
+		})
+	end
+	summary.inventoryRevision = summary.replay and summary.inventoryRevision
+		or GlobalStorageSiK.Index.getInventoryRevision(networkId)
+end
+
 local function completeDepositTask(player, networkId, meta, summary)
 	meta, summary = meta or {}, summary or {}
 	local msg = GlobalStorageSiK.Deposit.formatSummaryMessage(summary)
@@ -2118,13 +2133,6 @@ local function completeDepositTask(player, networkId, meta, summary)
 		.. " cancelled=" .. tostring(summary.cancelled or 0)
 		.. " reason=" .. tostring(summary.reason),
 		GlobalStorageSiK.OperationPacing.describe(meta.pacing))
-	GlobalStorageSiK.OperationPacing.release(meta.pacingKey)
-	if not summary.replay and ((summary.moved or 0) > 0 or summary.reconcile) then
-		afterTransferSync(player, networkId, meta.searchQuery, {
-			snapshotsUpdated = summary.snapshotsUpdated,
-			touchedNodeIds = summary.touchedNodeIds,
-		})
-	end
 	summary.touchedNodeIds = nil
 	gsSendServerCommand(player, "actionResult", {
 		ok = (summary.moved or 0) > 0 and summary.reconcile ~= true
@@ -2162,6 +2170,7 @@ GlobalStorageSiK.DepositTasks.configure({
 			moved = summary and summary.moved or 0, total = total,
 		})
 	end,
+	prepare = prepareDepositTask,
 	complete = completeDepositTask,
 })
 
@@ -2180,12 +2189,23 @@ local function completeWithdrawTask(player, networkId, meta, summary, silent)
 	summary.inventoryRevision = GlobalStorageSiK.Index.getInventoryRevision(networkId)
 	local reason = summary.reason
 	local ok = (summary.moved or 0) > 0
+		and reason ~= "partial:not_found"
 		and reason ~= "cancelled" and reason ~= "player_dead"
 		and reason ~= "terminal_closed" and reason ~= "player_unavailable"
 	GlobalStorageSiK.Log.info("WithdrawTasks", "complete withdrawId="
 		.. tostring(meta.withdrawId) .. " requested=" .. tostring(meta.requested)
 		.. " moved=" .. tostring(summary.moved or 0)
 		.. " slices=" .. tostring(summary.slices or 0)
+		.. " selectors=" .. tostring(summary.selectors and #summary.selectors or 1)
+		.. " nodesVisited=" .. tostring(summary.admissionStats and summary.admissionStats.nodes or 0)
+		.. " rowsVisited=" .. tostring(summary.admissionStats and summary.admissionStats.rows or 0)
+		.. " idsVisited=" .. tostring(summary.admissionStats and summary.admissionStats.ids or 0)
+		.. " refs=" .. tostring(summary.admissionStats and summary.admissionStats.refs or 0)
+		.. " checkpoints=" .. tostring(summary.checkpoints or 0)
+		.. " elapsedMs=" .. tostring(summary.elapsedMs or 0)
+		.. " admissionElapsedMs=" .. tostring(summary.admissionElapsedMs or 0)
+		.. " activeWorkMs=" .. tostring(summary.activeWorkMs or 0)
+		.. " waitMs=" .. tostring(summary.waitMs or 0)
 		.. " reason=" .. tostring(reason))
 	local payload = {
 		ok = ok,
@@ -2197,7 +2217,10 @@ local function completeWithdrawTask(player, networkId, meta, summary, silent)
 			op = "withdraw", networkId = networkId, fullType = summary.fullType,
 			requested = meta.requested or 0, moved = summary.moved or 0,
 			inventoryRevision = summary.inventoryRevision,
-			reason = reason, selectionMode = "exact_group",
+			reason = reason, selectionMode = meta.selectionMode or "exact_group",
+			selectors = summary.selectors,
+			unfulfilledSelectors = summary.unfulfilledSelectors,
+			unmovedCount = summary.selectors and math.max(0,(meta.requested or 0)-(summary.moved or 0)) or nil,
 			deferInventoryPull = true, serverOwned = true,
 			ticketRemaining = 0, selectionCount = meta.selectionCount,
 			slices = summary.slices or 0,
@@ -2212,6 +2235,32 @@ local function completeWithdrawTask(player, networkId, meta, summary, silent)
 end
 
 GlobalStorageSiK.WithdrawTasks.configure({
+	captureBatch = function(player,networkId,args)
+		local scope=catalogScopeSignature(player,networkId)
+		local opening=GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)
+		local epoch=GlobalStorageSiK.RoutingTransactions.epoch(player)
+		if args.catalogScope~=scope or args.openSeq~=opening or args.replicaEpoch~=epoch
+			or type(scope)~="string" or #scope>512 then return nil,"selection_stale" end
+		local anchor=GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		local destination,targetReason=GlobalStorageSiK.DepositSources.resolveExternalTarget(player,args.targetKey)
+		if not destination then return nil,targetReason or "target_unavailable" end
+		return {scope=scope,opening=opening,epoch=epoch,anchor=anchor,destination=destination,
+			x=anchor and anchor.x,y=anchor and anchor.y,z=anchor and anchor.z}
+	end,
+	validateBatch = function(player,networkId,binding,admitting)
+		local anchor=GlobalStorageSiK.TerminalAccess.getSessionAnchor(player)
+		if GlobalStorageSiK.RoutingTransactions.epoch(player)~=binding.epoch
+			or GlobalStorageSiK.TerminalCommandOrder.activeSequence(player)~=binding.opening
+			or anchor~=binding.anchor or (anchor and anchor.x)~=binding.x
+			or (anchor and anchor.y)~=binding.y or (anchor and anchor.z)~=binding.z then return false,"terminal_access_changed" end
+		-- A topology sequence is a replication notification, not this proof.
+		if not admitting and catalogScopeSignature(player,networkId)~=binding.scope then return false,"selection_stale" end
+		return true
+	end,
+	checkpoint = function(player,networkId,meta,summary)
+		afterTransferSync(player,networkId,meta.searchQuery,{snapshotsUpdated=summary.snapshotsUpdated,
+			touchedNodeIds=summary.touchedNodeIds,mutationReason="withdraw_checkpoint",operationId=meta.withdrawId})
+	end,
 	validate = function(player, networkId)
 		if select(1, GlobalStorageSiK.Permissions.canAccess(player, networkId)) ~= true then
 			return false, "no_access"

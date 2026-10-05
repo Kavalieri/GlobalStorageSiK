@@ -781,3 +781,30 @@ retains serial requests between selected types; it does not implement a new
 heterogeneous server batch. Technical fixtures do not establish dedicated runtime
 acceptance or a measured latency gain. Keep the failed runtime evidence and test
 only the corrected candidate.
+
+## Routing candidate r7: heterogeneous gesture
+
+Footer identity is `routing-r7-20261005`; public version and initial-load codec
+are unchanged. Supported multi-row gestures issue one `withdrawItem/exact_batch`
+and one aggregate ACK. `WithdrawTasks` logs request ID, selectors, nodes/rows/IDs
+visited, refs, slices, checkpoints, elapsedMs, admissionElapsedMs, activeWorkMs and
+waitMs. Times are aggregated wall-clock measurements through the final task flush,
+before Server completion invalidation, revision sealing and delivery. activeWorkMs
+measures advanceTask and final flush; waitMs is the residual elapsed time. These
+are neither strict CPU measurements nor admission-to-ACK timing. No per-object
+diagnostic is added. Long tasks checkpoint at a one-second window. Finish is
+flush -> invalidation -> revision -> receipt -> delivery, also for deposit/SP.
+
+Admission runs under existing shared `update(1,deadline)` and its 5-ms target;
+maximum movement remains ten units/slice. Legacy tickets and batches share four
+selection slots per player. The 100,000 batch-reference quota is shared between
+batch jobs and released after cancel/error/expiry; admission expires after 30s,
+and a sealed task without physical progress expires after 30s. Original actor,
+opening/epoch, source snapshot/scope/access/routing and physical destination remain
+authority fences. Other networks cannot invalidate admission. Local missing
+selectors continue siblings; global failures stop with confirmed moves retained.
+
+Offline control: two four-type gestures use two requests versus eight in r6,
+with zero stale NACKs and zero explicit refreshes in that fixture. Physical/world,
+access and wire leaves are simulated. Dedicated CPU, latency and runtime/visual
+acceptance remain pending Systems; these counters do not establish those claims.

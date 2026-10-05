@@ -13,7 +13,7 @@ end
 Protocol.METADATA_FIELDS={"networkName","configEpoch","routingRevision","powered","fuelConsumption",
 	"scan","scanActive","scanStatus","zones","terminals","nodes","permissions","redistributeActive",
 	"craftProbe","capacity","proximityRange","wirelessRange","readLoans","installedAddons",
-	"craftTabEnabled","buildTabEnabled","networks","activeNetworkId","categories","candidateId"}
+	"craftTabEnabled","buildTabEnabled","networks","activeNetworkId","categories","candidateId","withdrawBatchVersion"}
 
 function Protocol.integer(value, minimum, maximum)
 	return type(value) == "number" and value == value and value >= minimum

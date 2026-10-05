@@ -28,6 +28,9 @@ function Feedback.showResult(args)
 	local reason = transfer and tostring(transfer.reason or "") or ""
 	if string.sub(reason, 1, 8) == "partial:" then reason = string.sub(reason, 9) end
 	local key = reasonKeys[reason]
+	if transfer and transfer.selectionMode=="exact_batch" and reason=="not_found" then
+		key="IGUI_GS_TransferSourceUnavailable"
+	end
 	if transfer and (transfer.reconcile == true or args.deposit and args.deposit.reconcile == true) then
 		key = "IGUI_GS_TransferUncertain"
 	end
@@ -35,6 +38,9 @@ function Feedback.showResult(args)
 	if transfer.op == "redistribute" and reason == "destination_full" then key = "IGUI_GS_TransferCompatibleFull" end
 	local playerNum = tonumber(args.playerNum) or 0
 	local message = text(key)
+	if transfer.selectionMode=="exact_batch" and reason=="not_found" and (transfer.moved or 0)>0 then
+		message=GlobalStorageSiK.I18n.text("IGUI_GS_WithdrawnCount",tostring(transfer.moved)).."; "..message
+	end
 	local player = getSpecificPlayer and getSpecificPlayer(playerNum)
 	if not player and GlobalStorageSiK.NetClient and GlobalStorageSiK.NetClient.getPlayer then
 		player = GlobalStorageSiK.NetClient.getPlayer(playerNum)

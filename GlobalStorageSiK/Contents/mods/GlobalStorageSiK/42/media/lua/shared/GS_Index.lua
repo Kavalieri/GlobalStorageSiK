@@ -2093,6 +2093,220 @@ end
 ---@param networkId string|nil
 ---@param revision number|nil
 ---@return number
+-- A batch admission is a cursor, never a loop of resolveExactGroup calls.
+-- Quantities are applied to each selector before the physical union. Its
+-- lifetime belongs to WithdrawTasks and every step runs on its shared deadline.
+local batchReservedRefs=0
+local function reserveBatchRef(job)
+	if batchReservedRefs>=100000 then return false end
+	batchReservedRefs=batchReservedRefs+1;job.reservedRefs=(job.reservedRefs or 0)+1;return true
+end
+function GlobalStorageSiK.Index.beginExactBatch(networkId, player, selectors, revision)
+	if type(selectors) ~= "table" or #selectors < 1 or #selectors > 16 then return nil, "invalid_request" end
+	local job = { networkId=networkId, player=player, revision=revision,
+		routingRevision=GlobalStorageSiK.RoutingProtocol.revision(networkId),
+		selectors={}, groups={}, refs={}, candidates={}, union={}, seen={}, captured={}, capturedById={},
+		stats={nodes=0,rows=0,ids=0,refs=0,steps=0}, phase="nodes", createdMs=getTimestampMs(), explicit=0 }
+	for i=1,#selectors do
+		local s=selectors[i]
+		if type(s)~="table" or type(s.amount)~="number" or s.amount<0
+			or s.amount~=math.floor(s.amount) or s.amount==math.huge then return nil,"invalid_request" end
+		local record={index=i,mode=s.mode,amount=s.amount,rowKey=s.rowKey,
+			sourceNodeId=s.sourceNodeId,refs={},seen={},moved=0,overlap=0}
+		if s.mode=="exact_group" then
+			if type(s.rowKey)~="string" or #s.rowKey<1 or #s.rowKey>500
+				or s.sourceNodeId~=nil and (type(s.sourceNodeId)~="string" or #s.sourceNodeId>240) then return nil,"invalid_request" end
+			job.groups[s.rowKey]=job.groups[s.rowKey] or {}
+			job.groups[s.rowKey][#job.groups[s.rowKey]+1]=record
+			job.hasGroups=true
+		elseif s.mode=="exact_ids" then
+			if type(s.fullType)~="string" or #s.fullType<1 or #s.fullType>512
+				or type(s.itemIds)~="table" or #s.itemIds<1 then return nil,"invalid_request" end
+			job.explicit=job.explicit+#s.itemIds
+			if job.explicit>32 then return nil,"selection_too_large" end
+			for j=1,#s.itemIds do
+				local id=s.itemIds[j]
+				if type(id)~="number" or id<0 or id~=math.floor(id) or id==math.huge then return nil,"invalid_request" end
+				if not record.seen[id] then
+					record.seen[id]=true
+					if record.amount==0 or (record.explicitCount or 0)<record.amount then
+						record.explicitCount=(record.explicitCount or 0)+1
+						local ref=job.union[id]
+						if ref and ref.fullType~=s.fullType then return nil,"item_id_duplicate" end
+						if not ref then ref={itemId=id,fullType=s.fullType,matches={}};job.union[id]=ref;job.candidates[#job.candidates+1]=ref end
+						ref.matches[#ref.matches+1]=i
+					end
+				end
+			end
+		else return nil,"invalid_request" end
+		job.selectors[i]=record
+	end
+	if job.hasGroups and revision~=GlobalStorageSiK.Index.getInventoryRevision(networkId) then return nil,"selection_stale" end
+	-- Explicit IDs are tiny; reserve only after the complete request validated.
+	if batchReservedRefs+#job.candidates>100000 then return nil,"selection_too_large" end
+	batchReservedRefs=batchReservedRefs+#job.candidates;job.reservedRefs=#job.candidates
+	local registry=GlobalStorageSiK.Zones.getRegistry()
+	job.registry=registry
+	job.nodeIter,job.nodeState,job.nodeKey=pairs(registry.nodes or {})
+	if not job.hasGroups then job.phase="sort" end
+	return job
+end
+
+local function batchNodeEligible(job,node)
+	local zone=node and job.registry.zones and job.registry.zones[node.zoneId]
+	return zone and zone.networkId==job.networkId and zone.enabled~=false
+		and node.enabled~=false and node.offline~=true and node.membership~="excluded"
+		and GlobalStorageSiK.Permissions.canAccessZone(job.player,job.networkId,node.zoneId)
+end
+
+local function batchAdmissionUnit(job)
+	if job.phase=="nodes" then
+		local key,node=job.nodeIter(job.nodeState,job.nodeKey);job.nodeKey=key
+		if key==nil then job.phase="sort";return end
+		job.stats.nodes=job.stats.nodes+1
+		local eligible=batchNodeEligible(job,node)==true
+		local zone=job.registry.zones and job.registry.zones[node.zoneId]
+		-- Other networks cannot contribute to this admission. Do not retain their
+		-- snapshot references or let unrelated publications invalidate the gesture.
+		if not zone or zone.networkId~=job.networkId then return end
+		job.captured[#job.captured+1]={node=node,id=key,zone=zone,zoneId=node.zoneId,
+			enabled=node.enabled,offline=node.offline,membership=node.membership,
+			zoneEnabled=zone and zone.enabled,networkId=zone and zone.networkId,
+			eligible=eligible,snapshot=eligible and node.itemSnapshot or nil}
+		job.capturedById[key]=job.captured[#job.captured]
+		if eligible then
+			if node.snapshotSchema~=GlobalStorageSiK.NodeSnapshots.SCHEMA or type(node.itemSnapshot)~="table" then return "selection_stale" end
+			job.node=node;job.rowIter,job.rowState,job.rowKey=pairs(node.itemSnapshot);job.phase="rows"
+		end
+	elseif job.phase=="rows" then
+		local key,row=job.rowIter(job.rowState,job.rowKey);job.rowKey=key
+		if key==nil then job.phase="nodes";return end
+		job.stats.rows=job.stats.rows+1
+		job.matches=job.groups[parentKeyForRow(row)]
+		if not job.matches then return end
+		job.row=row;job.id=1;job.phase="ids"
+		if job.matches and #(row.itemIds or {})<(tonumber(row.count) or 0) then return "selection_stale" end
+	elseif job.phase=="ids" then
+		local id=job.row.itemIds and job.row.itemIds[job.id]
+		if id==nil then job.phase="rows";return end
+		job.id=job.id+1;job.stats.ids=job.stats.ids+1
+		if job.stats.ids>100000 then return "selection_too_large" end
+		if type(id)~="number" or id<0 or id~=math.floor(id) or id==math.huge then return "selection_stale" end
+		if job.seen[id] then return "item_id_duplicate" end
+		job.seen[id]=true
+		local ref=job.union[id]
+		if ref and ref.fullType~=job.row.fullType then return "item_id_duplicate" end
+		if not ref then
+			if not reserveBatchRef(job) then return "selection_too_large" end
+			ref={itemId=id,fullType=job.row.fullType,matches={},nodeId=job.node.id,snapshot=job.node.itemSnapshot}
+			job.union[id]=ref;job.candidates[#job.candidates+1]=ref
+		end
+		ref.nodeId=job.node.id
+		if #job.candidates>100000 then return "selection_too_large" end
+		for i=1,#(job.matches or {}) do
+			local s=job.matches[i]
+			if s.sourceNodeId==nil or s.sourceNodeId==job.node.id then
+				ref.matches[#ref.matches+1]=s.index
+			end
+		end
+	elseif job.phase=="sort" then
+		if not job.sort then job.sort=beginMergeSort(job.candidates,function(a,b)
+			if a.fullType==b.fullType then return a.itemId<b.itemId end
+			return tostring(a.fullType)<tostring(b.fullType)
+		end) end
+		if stepMergeSort(job.sort) then job.sort=nil;job.phase="union";job.ref=1 end
+	elseif job.phase=="fence" then
+		local c=job.captured[job.fence]
+		if not c then
+			job.finalIter,job.finalState,job.finalKey=pairs(job.registry.nodes or {})
+			job.phase="new_nodes";return
+		end
+		job.fence=job.fence+1
+		local node=job.registry.nodes and job.registry.nodes[c.id]
+		local zone=node and job.registry.zones and job.registry.zones[node.zoneId]
+		if node~=c.node or zone~=c.zone or node.zoneId~=c.zoneId or node.enabled~=c.enabled
+			or node.offline~=c.offline or node.membership~=c.membership or c.eligible and node.itemSnapshot~=c.snapshot
+			or (zone and zone.enabled)~=c.zoneEnabled or (zone and zone.networkId)~=c.networkId
+			or (batchNodeEligible(job,node)==true)~=c.eligible then return "selection_stale" end
+	elseif job.phase=="new_nodes" then
+		local key,node=job.finalIter(job.finalState,job.finalKey);job.finalKey=key
+		if key==nil then job.phase="done";return end
+		local zone=job.registry.zones and job.registry.zones[node.zoneId]
+		if zone and zone.networkId==job.networkId
+			and (not job.capturedById[key] or job.capturedById[key].node~=node) then return "selection_stale" end
+	elseif job.phase=="union" then
+		local ref=job.candidates[job.ref]
+		if not ref then
+			for i=1,#job.selectors do
+				local s=job.selectors[i];s.selected=s.selected or 0
+				s.reason=s.selected==0 and "not_found" or nil;s.refs=nil;s.seen=nil
+			end
+			job.phase=job.hasGroups and "fence" or "done";job.fence=1;return
+		end
+		job.ref=job.ref+1
+		ref.selectors={};local exact=false
+		table.sort(ref.matches)
+		for i=1,#ref.matches do
+			local s=job.selectors[ref.matches[i]]
+			if s.mode=="exact_ids" or s.amount==0 or (s.selected or 0)<s.amount then
+				s.selected=(s.selected or 0)+1
+				if #ref.selectors>0 then s.overlap=s.overlap+1 end
+				ref.selectors[#ref.selectors+1]=s.index
+				if s.mode=="exact_ids" or s.sourceNodeId==nil then exact=true else ref.sourceNodeId=s.sourceNodeId end
+			end
+		end
+		if exact then ref.sourceNodeId=nil end
+		ref.matches=nil
+		if #ref.selectors>0 then job.refs[#job.refs+1]=ref;job.stats.refs=job.stats.refs+1 end
+	end
+end
+
+function GlobalStorageSiK.Index.stepExactBatch(job,deadlineMs)
+	if not job or job.phase=="released" then return nil,"selection_expired" end
+	if getTimestampMs()-job.createdMs>30000 then return nil,"selection_expired" end
+	if job.hasGroups and job.revision~=GlobalStorageSiK.Index.getInventoryRevision(job.networkId)
+		or job.routingRevision~=GlobalStorageSiK.RoutingProtocol.revision(job.networkId) then return nil,"selection_stale" end
+	local units=0
+	while job.phase~="done" and units<4096 and getTimestampMs()<deadlineMs do
+		local reason=batchAdmissionUnit(job)
+		if reason then return nil,reason end
+		units=units+1;job.stats.steps=job.stats.steps+1
+	end
+	return job.phase=="done",nil
+end
+
+function GlobalStorageSiK.Index.releaseExactBatch(job)
+	if not job then return end
+	batchReservedRefs=math.max(0,batchReservedRefs-(job.reservedRefs or 0));job.reservedRefs=0
+	job.phase="released";job.refs=nil;job.candidates=nil;job.union=nil;job.seen=nil;job.captured=nil;job.capturedById=nil;job.sort=nil
+	job.groups=nil;job.row=nil;job.node=nil;job.registry=nil
+	for i=1,#(job.selectors or {}) do job.selectors[i].refs=nil;job.selectors[i].seen=nil end
+end
+
+function GlobalStorageSiK.Index.validateExactBatchRefs(job,refs)
+	local registry=GlobalStorageSiK.Zones.getRegistry()
+	for i=1,#refs do
+		local ref=refs[i]
+		local group=false
+		for j=1,#ref.selectors do if job.selectors[ref.selectors[j]].mode=="exact_group" then group=true end end
+		if group and ref.nodeId then
+			local captured=job.capturedById[ref.nodeId]
+			local node=registry.nodes and registry.nodes[ref.nodeId]
+			if not captured or node~=captured.node or node.itemSnapshot~=captured.snapshot
+				or not batchNodeEligible(job,node) then return false,"selection_changed" end
+		end
+	end
+	return true
+end
+
+function GlobalStorageSiK.Index.checkpointExactBatch(job,nodeIds)
+	local registry=GlobalStorageSiK.Zones.getRegistry()
+	for i=1,#(nodeIds or {}) do
+		local id=nodeIds[i];local captured=job.capturedById[id];local node=registry.nodes and registry.nodes[id]
+		if captured and node==captured.node then captured.snapshot=node.itemSnapshot end
+	end
+end
+
 function GlobalStorageSiK.Index.setSnapshotRevision(networkId, revision)
 	networkId = networkId or GlobalStorageSiK.Network.getDefaultNetworkId()
 	if not networkId then

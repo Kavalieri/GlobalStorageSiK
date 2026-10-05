@@ -462,7 +462,7 @@ function sync.onActionResult(args)
 	local alreadyApplied = state and state.networkId == networkId
 		and type(state.items) == "table" and transfer.inventoryRevision
 		and (tonumber(state._gsAppliedCatalogRevision or state.inventoryRevision) or -1) >= transfer.inventoryRevision
-	local exact = transfer.selectionMode == "exact_group" or transfer.selectionMode == "exact_ids"
+	local exact = transfer.selectionMode == "exact_group" or transfer.selectionMode == "exact_ids" or transfer.selectionMode == "exact_batch"
 	if args.ok and transfer.op == "withdraw" and not exact and transfer.fullType and (transfer.moved or 0) > 0 and not alreadyApplied then
 		sync.applyWithdrawDelta(networkId, transfer.fullType, transfer.moved)
 	end

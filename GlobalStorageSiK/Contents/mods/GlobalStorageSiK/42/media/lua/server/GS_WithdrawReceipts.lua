@@ -42,7 +42,15 @@ function R.begin(player,args,networkId)
     if sequence<=state.high then return "request_retired" end
     local bytes=#signature+4096
     while #state.order>0 and (#state.order>=64 or state.bytes+bytes>131072) do
-        local id=table.remove(state.order,1)
+        -- Physical work owns its reservation until final capture. Pressure may
+        -- retire completed history only; it never discards a pending mutation.
+        local retired=nil
+        for i=1,#state.order do
+            local old=state.entries[state.order[i]]
+            if old and old.result then retired=i;break end
+        end
+        if not retired then return "receipt_limit" end
+        local id=table.remove(state.order,retired)
         local old=state.entries[id]
         if old then state.bytes=state.bytes-old.bytes;state.entries[id]=nil end
     end

@@ -9,6 +9,7 @@ local MAX_TICKETS_PER_PLAYER = 4
 local MAX_REFS = 100000
 local serial = 0
 local records = {}
+local taskReservations = {}
 local nextSweepMs = 0
 
 local function nowMs()
@@ -43,7 +44,26 @@ local function countForPlayer(key)
 	for _, ticket in pairs(records) do
 		if ticket.playerKey == key then count = count + 1 end
 	end
+	for _, reservation in pairs(taskReservations) do
+		if reservation.playerKey == key then count = count + 1 end
+	end
 	return count
+end
+
+-- Batch tasks occupy the same selection slot as legacy tickets. The owner
+-- releases this reservation on every finish path; it is never TTL-evicted while
+-- the physical task may still be pending.
+function Tickets.reserveTask(player, ownerId)
+	sweepExpired(nowMs())
+	if taskReservations[ownerId] or countForPlayer(playerKey(player))>=MAX_TICKETS_PER_PLAYER then return false,"ticket_limit" end
+	taskReservations[ownerId]={player=player,playerKey=playerKey(player)}
+	return true
+end
+
+function Tickets.releaseTask(player,ownerId)
+	local record=taskReservations[ownerId]
+	if record and record.player==player then taskReservations[ownerId]=nil;return true end
+	return false
 end
 
 --- Called by the existing authoritative scheduler; no additional event hook.

@@ -512,3 +512,28 @@ and cannot release a tape from device custody.
 Terminal catalog delivery is privately fragmented and atomically reassembled. Existing public inventory consumers retain their complete-state contract. See [CATALOG_TRANSPORT.md](CATALOG_TRANSPORT.md). No addon action, permission or persistence API changes.
 
 Correlated routing results for `updateNode` and `updateZoneRules` include `confirmedRules` when rules changed. This is the persisted, server-normalized representation; consumers apply it only for the matching request/epoch and never over a newer routing revision. The complete result is checked against the protocol budget before committing. The `expectedRule` stale-identity fence remains mandatory for deletion.
+
+### Routing r7 withdrawal compatibility
+
+Multi-row gestures opt into private `withdrawItem/exact_batch` only when terminal
+metadata advertises `withdrawBatchVersion=1`. They keep one destination, opening,
+epoch, receipt and aggregate callback. InventoryView `onChanged(ok,result)` keeps
+unique physical `moved` and the sealed `inventoryRevision`; a localized missing
+selector produces a partial callback after siblings complete. Optional `selectors`
+contains compact index/selected/moved/applied/overlap counts, granting no authority.
+
+Limits remain 16 selectors, 32 explicit IDs, subordinate to 512 fields, depth 6,
+512 bytes per string, 16 KiB of string bytes in total, and a 4-KiB aggregate
+receipt. The string budget includes protocol metadata. Group amounts
+follow historical fullType/ID order; exact-ID amounts preserve input order before
+the physical union. ID zero stays valid. Exact IDs are revalidated without a
+historical node/media/dynamic restriction. Unsupported capability, floor/read-loan
+targets, ID-return callbacks, different group source scopes and over-budget
+requests fall back to r6 before sending. Individual withdrawals stay unchanged.
+Legacy tickets and batch tasks share the existing four selection slots per actor.
+
+An identical timeout retry replays its receipt; a pending duplicate never moves
+items. One premutation stale result permits a joint fenced complete-view refresh.
+Deposit prepares invalidation/revision before receipt storage and delivery,
+including synchronous local delivery and silent cleanup. Replay retains that
+historical revision and never invalidates again.

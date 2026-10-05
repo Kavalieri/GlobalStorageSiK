@@ -12,6 +12,7 @@ require "GS_PlayerUtils"
 require "GS_Sandbox"
 require "GS_UI_Feedback"
 require "GS_OperationPacing"
+require "GS_RoutingProtocol"
 
 -- Private worker: one captured gesture, one player, one physical destination.
 -- Scheduling and routing belong to GS_WithdrawClient; no shared queue state.
@@ -109,6 +110,8 @@ local function failQueuedCompletions(cancelledCurrent, cancelledQueue, reason)
 			unmovedItemIds = cancelledCurrent.pendingItemIds or {},
 			unmovedCount = math.max(0,
 				math.floor(tonumber(cancelledCurrent.remaining) or 0)),
+			selectors = cancelledCurrent.selectorResults,
+			inventoryRevision = cancelledCurrent.lastInventoryRevision,
 		})
 	end
 	for i = 1, #cancelledQueue do
@@ -292,7 +295,8 @@ local function dispatchCurrent()
 	-- A retained row can predate the complete view even in a new gesture.
 	-- This is only a revision floor; beginSelectionRefresh still requires
 	-- a fenced complete view before copying the consumed selector.
-	if current.selectionMode=="exact_group" and not current.selectionTicket and operation then
+	if (current.selectionMode=="exact_group" or current.selectionMode=="exact_batch" and current.rowData.selectionRevision~=nil)
+		and not current.selectionTicket and operation then
 		local live=catalogState()
 		local revision=live and live.networkId==current.networkId
 			and sameOpening(live) and revisionNumber(live.inventoryRevision)
@@ -300,7 +304,7 @@ local function dispatchCurrent()
 	end
 	-- An ACK proves that the inventory changed, not the contents of another row.
 	-- Reuse a complete current view or wait before sending an avoidable stale intent.
-	if current.selectionMode=="exact_group" and not current.selectionTicket
+	if (current.selectionMode=="exact_group" or current.selectionMode=="exact_batch" and current.rowData.selectionRevision~=nil) and not current.selectionTicket
 		and operation and operation.lastRevision
 		and (revisionNumber(current.rowData.selectionRevision) or -1)<operation.lastRevision then
 		beginSelectionRefresh("continuation")
@@ -386,6 +390,13 @@ local function dispatchCurrent()
 		returnItemIds = current.returnItemIds == true,
 		readLoanId = current.readLoanId,
 	}
+	if current.batchSelectors then
+		payload={selectionMode="exact_batch",batchVersion=1,selectors=current.batchSelectors,
+			selectionRevision=current.rowData.selectionRevision,networkId=current.networkId,
+			targetKey=current.targetKey,searchQuery=current.searchQuery or "",withdrawId=current.requestId,
+			openSeq=current.batchIdentity.openSeq,catalogScope=current.batchIdentity.catalogScope,
+			replicaEpoch=current.batchIdentity.replicaEpoch}
+	end
 	current.sentPayload, current.responseRetries = payload, 0
 	local sent = sendCommand("withdrawItem", payload)
 	if not sent and current and current.requestId == expectedRequestId then
@@ -448,7 +459,8 @@ function worker.cancelAll(reason)
 	local cancelledQueue = queue
 	GlobalStorageSiK.UIFeedback.finishOperation(context.playerNum, context.operationId)
 	if cancelledCurrent and (cancelledCurrent.selectionTicket
-		or cancelledCurrent.sentPayload and cancelledCurrent.sentPayload.taskAmount ~= nil) then
+		or cancelledCurrent.sentPayload and (cancelledCurrent.sentPayload.taskAmount ~= nil
+			or cancelledCurrent.sentPayload.selectionMode=="exact_batch")) then
 		sendCommand("cancelWithdrawSelection", {
 			networkId = cancelledCurrent.networkId,
 			selectionTicket = cancelledCurrent.selectionTicket,
@@ -563,6 +575,26 @@ function worker.onTerminalState(state, completeReplica)
 			})
 		end
 		return reject("source_node")
+	end
+	if current.batchSelectors then
+		local rows={}
+		for i=1,#(state.items or {}) do rows[state.items[i].rowKey]=state.items[i] end
+		for i=1,#current.batchSelectors do
+			local s=current.batchSelectors[i]
+			if s.mode=="exact_group" then
+				local row=rows[s.rowKey]
+				local revision=row and revisionNumber(row.selectionRevision)
+				if row and (not revision or revision>freshRevision
+					or revision<freshRevision and not selectorCertified) then return reject("row_revision") end
+			end
+		end
+		-- The complete fenced view certifies the joint intent. A missing row is
+		-- kept as a selector so local not_found cannot erase its sibling rows.
+		current.rowData.selectionRevision=freshRevision
+		current.batchIdentity={openSeq=state.openSeq,catalogScope=state.catalogScope,replicaEpoch=state.replicaEpoch}
+		current.awaitingFreshSelection=false;current.staleSelectionRevision=nil
+		responseDeadlineMs=0;nextDispatchMs=nowMs();ensureTickInstalled()
+		return true
 	end
 	local freshRow = nil
 	current.freshSelectionRowSeen = true
@@ -797,6 +829,66 @@ end
 ---@return boolean
 function worker.sendWithdrawBatch(rows, amount, targetKey, searchQuery, options)
 	if not rows or #rows == 0 then return false end
+	local live=catalogState()
+	local networkId=options and options.networkId or activeNetworkId()
+	local batchAllowed=#rows>1 and #rows<=16 and live and live.networkId==networkId
+		and live.withdrawBatchVersion==1 and type(live.catalogScope)=="string" and #live.catalogScope<=512
+		and live.openSeq~=nil and live.replicaEpoch~=nil and type(targetKey)=="string"
+		and not (GlobalStorageSiK.FloorTargets and GlobalStorageSiK.FloorTargets.isKey(targetKey))
+		and not (options and (options.returnItemIds or options.readLoanId))
+	local selectors,total,explicit,revision,source,sourceCaptured={},0,0,nil,nil,false
+	if batchAllowed then
+		for i=1,#rows do
+			local row=rows[i]
+			local mode=row.selectionMode or (row.itemIds and #row.itemIds>0 and "exact_ids" or "aggregate")
+			local requested=tonumber(amount) or (mode=="exact_group" and 0 or 1)
+			if requested<0 then requested=0 end
+			if requested~=math.floor(requested) or requested==math.huge then batchAllowed=false;break end
+			if mode=="exact_group" then
+				local r=revisionNumber(row.selectionRevision)
+				if not r or revision and r~=revision or sourceCaptured and source~=row.sourceNodeId then batchAllowed=false;break end
+				revision=r;source=row.sourceNodeId;sourceCaptured=true
+				selectors[i]={mode=mode,rowKey=row.rowKey,sourceNodeId=row.sourceNodeId,amount=requested}
+			elseif mode=="exact_ids" then
+				-- Preserve the caller's original quantity before any ID union.
+				local ids=copyItemIds(row.itemIds)
+				explicit=explicit+#ids
+				if explicit>32 or #ids==0 then batchAllowed=false;break end
+				selectors[i]={mode=mode,fullType=row.fullType,itemIds=ids,amount=requested}
+			else batchAllowed=false;break end
+			total=total+(requested>0 and requested or tonumber(row.count) or #(row.itemIds or {}))
+		end
+	end
+	if batchAllowed then
+		local proof={selectionMode="exact_batch",batchVersion=1,selectors=selectors,
+			selectionRevision=revision,networkId=networkId,targetKey=targetKey,searchQuery=searchQuery or "",
+			withdrawId=string.rep("x",96),withdrawEpoch=live.configEpoch or live.replicaEpoch,
+			withdrawSequence=2147483647,playerNum=context.playerNum,openSeq=live.openSeq,
+			catalogScope=live.catalogScope,replicaEpoch=live.replicaEpoch}
+		batchAllowed=GlobalStorageSiK.RoutingProtocol.copy(proof)~=nil
+		-- Receipts retain a compact aggregate, never selector strings or physical
+		-- IDs. Include recipient metadata and worst counters in the preflight.
+		local counters={}
+		for i=1,#selectors do counters[i]={index=i,selected=100000,moved=100000,applied=100000,overlap=100000,reason=string.rep("x",48)} end
+		local reply={ok=false,withdrawId=proof.withdrawId,transferOp="withdrawItem",playerNum=context.playerNum,
+			message={key="IGUI_GS_WithdrawErrorReason",args={string.rep("x",48)}},
+			transfer={op="withdraw",networkId=networkId,requested=100000,moved=100000,
+				inventoryRevision=2147483647,reason=string.rep("x",48),selectionMode="exact_batch",
+				unfulfilledSelectors=16,unmovedCount=100000,
+				deferInventoryPull=true,serverOwned=true,ticketRemaining=0,selectionCount=100000,slices=100000,selectors=counters}}
+		local _,signature=GlobalStorageSiK.RoutingProtocol.copy(reply)
+		batchAllowed=batchAllowed and signature~=nil and #signature<=4096
+	end
+	if batchAllowed then
+		local synthetic={fullType=rows[1].fullType,selectionMode="exact_batch",count=total,
+			selectionRevision=revision,sourceNodeId=source}
+		if not enqueueWithdraw(synthetic,total,targetKey,searchQuery,options) then return false end
+		local request=queue[#queue]
+		request.batchSelectors=selectors;request.batchRows=rows
+		request.batchIdentity={openSeq=live.openSeq,catalogScope=live.catalogScope,replicaEpoch=live.replicaEpoch}
+		if not current then startNext() end
+		showProgress(true);return true
+	end
 	local coalescedRows = coalesceExactRows(rows)
 	if #queue + (current and 1 or 0) + #coalescedRows > MAX_QUEUED_REQUESTS then
 		GlobalStorageSiK.Log.error("WithdrawClient", "batch queue limit reached",
@@ -882,7 +974,7 @@ function worker.onActionResult(args)
 			current.expectedCount = selectionCount
 		end
 	end
-	if reason == "selection_stale" and selectionMode == "exact_group" then
+	if reason == "selection_stale" and (selectionMode == "exact_group" or selectionMode=="exact_batch") and moved==0 then
 		if (current.staleRetryCount or 0) >= 1 then
 			GlobalStorageSiK.Log.warn("WithdrawClient", "selection stale after explicit retry",
 				"rowKey=" .. tostring(current.rowData.rowKey))
@@ -893,7 +985,30 @@ function worker.onActionResult(args)
 		if operation and revision then operation.lastRevision=math.max(operation.lastRevision or 0,revision) end
 		return beginSelectionRefresh("stale")
 	end
-	if selectionMode == "exact_ids" then
+	if selectionMode=="exact_batch" then
+		local results=transfer.selectors
+		if results==nil and moved==0 and args.ok==false then
+			-- Early receipt/admission/access rejections never had selector results.
+			-- Preserve the authoritative reason without trying another protocol.
+			worker.cancelAll(reason or "invalid_response");return false
+		end
+		if type(results)~="table" or #results~=#current.batchSelectors then worker.cancelAll("invalid_response");return false end
+		local applied=0
+		for i=1,#results do
+			local r=results[i]
+			if r.index~=i or not revisionNumber(r.selected) or not revisionNumber(r.moved)
+				or not revisionNumber(r.applied) or r.moved>r.selected or r.applied>r.moved then worker.cancelAll("invalid_response");return false end
+			applied=applied+r.applied
+			if r.selected==0 or r.moved<r.selected then current.completionOk=false end
+		end
+		if applied~=moved then worker.cancelAll("identity_mismatch");return false end
+		current.selectorResults=results
+		current.remaining=math.max(0,tonumber(transfer.unmovedCount) or 0)
+		for i=1,#results do
+			if GlobalStorageSiK.CatalogOverlay then GlobalStorageSiK.CatalogOverlay.record(context.playerNum,
+				current.networkId,current.batchRows[i].rowKey,tonumber(transfer.inventoryRevision),results[i].applied,current.requestId..":"..i) end
+		end
+	elseif selectionMode == "exact_ids" then
 		local confirmedIds = transfer.itemIds or {}
 		local pending, consumed, identitiesValid = consumeConfirmedItemIds(
 			current.pendingItemIds, current.batchItemIds, confirmedIds)
@@ -923,6 +1038,7 @@ function worker.onActionResult(args)
 	-- Solo contabilizar después de validar que cada unidad movida pertenece al
 	-- microlote y a la operación/red que siguen en vuelo.
 	current.totalMoved = (current.totalMoved or 0) + moved
+	current.lastInventoryRevision=tonumber(transfer.inventoryRevision)
 	if GlobalStorageSiK.CatalogOverlay and moved > 0 then
 		GlobalStorageSiK.CatalogOverlay.record(context.playerNum, current.networkId,
 			current.rowData.rowKey, tonumber(transfer.inventoryRevision), moved, current.requestId)
@@ -936,7 +1052,7 @@ function worker.onActionResult(args)
 			operation.lastRevision = math.max(operation.lastRevision or 0, revision)
 		end
 	end
-	if selectionMode ~= "exact_group" and selectionMode ~= "exact_ids" and not current.all then
+	if selectionMode ~= "exact_group" and selectionMode ~= "exact_ids" and selectionMode~="exact_batch" and not current.all then
 		current.remaining = math.max(0, (current.remaining or 0) - moved)
 	end
 	-- not_found (tambien parcial) significa que la captura visible se agoto o
@@ -966,7 +1082,7 @@ function worker.onActionResult(args)
 		return false
 	end
 	local shouldContinue = exactHasMore and moved > 0 and (args.ok == true or exhausted)
-		or (selectionMode ~= "exact_group" and args.ok == true and moved > 0 and not exhausted
+		or (selectionMode ~= "exact_group" and selectionMode~="exact_batch" and args.ok == true and moved > 0 and not exhausted
 				and ((current.all) or (not current.all and (current.remaining or 0) > 0)))
 	if shouldContinue then
 		showProgress(false)
@@ -984,7 +1100,7 @@ function worker.onActionResult(args)
 		})
 	end
 	local completionResult = {
-		reason = reason,
+		reason = reason or (completedRequest.completionOk==false and "partial:not_found" or nil),
 		moved = completedRequest and completedRequest.totalMoved or moved,
 		itemIds = completedRequest.movedItemIds or {},
 		unmovedItemIds = completedRequest.pendingItemIds or {},
@@ -993,10 +1109,12 @@ function worker.onActionResult(args)
 		networkId = transfer.networkId,
 		fullType = transfer.fullType,
 		inventoryRevision = transfer.inventoryRevision,
+		selectors = transfer.selectors,
+		unfulfilledSelectors = transfer.unfulfilledSelectors,
 	}
 	local hasNext = finishCurrent(true)
 	if hasNext then
-		runCompletion(completedRequest, completionResult.moved > 0, completionResult)
+		runCompletion(completedRequest, completedRequest.completionOk~=false and completionResult.moved > 0, completionResult)
 		showProgress(false)
 		-- No mostrar un "Extraidos: 0" por cada tipo ya agotado; toda la
 		-- selección es una sola operación visible y tendrá un único resultado.
@@ -1004,7 +1122,7 @@ function worker.onActionResult(args)
 	end
 	local totalMoved = operation and operation.totalMoved or moved
 	local elapsed = operation and (nowMs() - (operation.startedMs or nowMs())) or 0
-	args.ok = totalMoved > 0
+	args.ok = totalMoved > 0 and completedRequest.completionOk~=false
 	args.message = GlobalStorageSiK.I18n.remote("IGUI_GS_WithdrawnCount", tostring(totalMoved))
 	GlobalStorageSiK.Log.info("WithdrawClient", "operation complete moved="
 		.. tostring(totalMoved)
@@ -1024,7 +1142,7 @@ function worker.onActionResult(args)
 	end
 	operation = nil
 	GlobalStorageSiK.UIFeedback.finishOperation(context.playerNum, context.operationId)
-	runCompletion(completedRequest, completionResult.moved > 0, completionResult)
+	runCompletion(completedRequest, completedRequest.completionOk~=false and completionResult.moved > 0, completionResult)
 	return false
 end
 
