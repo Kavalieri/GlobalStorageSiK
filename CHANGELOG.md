@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.5.8 - 2026-10-05
+
+### Global Storage SiK
+
+- Improves initial loading/reopening with compact catalog encoding, reused size
+  accounting and progressive confirmed replication.
+- Reuses valid routing plans and capacity pruning for individual/grouped deposits,
+  preserving filters, zone/container priorities, affinity and physical checks.
+- Reduces redundant auto-sort work and coalesces affected-container publications;
+  aggregate diagnostics distinguish skip reasons, active work and waits.
+- Groups compatible heterogeneous withdrawals into one negotiated request/task/
+  receipt per gesture with bounded incremental admission and legacy fallback.
+- Fixes retained-selector freshness, recovery retry ordering and the personal
+  inventory destination; shows partial withdrawals and preserves confirmed moves.
+- Seals deposit/withdrawal receipts after their own inventory revision changes;
+  replay does not move items again. Identifies the stable build in the terminal.
+- Thanks to iceriny for [Issue #1](https://github.com/Kavalieri/GlobalStorageSiK/issues/1).
+  See [ES/EN release notes](docs/releases/1.5.8.md) for directed observations,
+  implemented/partial/deferred proposals and coverage limits.
+  Framework and official addon versions are unchanged.
+
 ## 1.5.6 - 2026-09-15
 
 ### Global Storage SiK
