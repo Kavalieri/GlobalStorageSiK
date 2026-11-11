@@ -58,9 +58,9 @@ Al iniciar una partida, cada proceso escribe siempre una única identidad de run
 
 ## Core
 
-### Routing y AutoSort en candidata routing-r1
+### Identidad de versión, routing y AutoSort
 
-El pie identifica `Core 1.5.8-dev3 [routing-r1-20261004]`; si el servidor difiere,
+El pie identifica `Core 1.5.9 [release-1.5.9]`; si el servidor difiere,
 añade `/ SRV:<candidata>` (o `unknown` mientras falta su estado). La versión
 pública y las versiones de addons siguen siendo independientes de esta identidad.
 

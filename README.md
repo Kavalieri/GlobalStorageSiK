@@ -11,10 +11,10 @@ physical instances and auto-sort them through an authoritative SP/MP path.
 
 | Product | Version | Mod ID | Workshop ID | Dependency |
 | --- | --- | --- | --- | --- |
-| Core | 1.5.8 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
+| Core | 1.5.9 | GlobalStorageSiK | [3750612158](https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158) | SiKUIFramework |
 | Craft | 1.5.3 | GSSiK_Addon_Craft | [3752379654](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379654) | SiKUIFramework, GlobalStorageSiK |
 | Builder | 1.5.3 | GSSiK_Addon_Builder | [3752437465](https://steamcommunity.com/sharedfiles/filedetails/?id=3752437465) | SiKUIFramework, GlobalStorageSiK |
-| Tablet | 1.5.2 | GSSiK_Addon_Tablet | [3752379947](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947) | SiKUIFramework, GlobalStorageSiK |
+| Tablet | 1.5.3 | GSSiK_Addon_Tablet | [3752379947](https://steamcommunity.com/sharedfiles/filedetails/?id=3752379947) | SiKUIFramework, GlobalStorageSiK |
 | Multimedia | 0.1.1 | GSSiK_Addon_Multimedia | [3798890105](https://steamcommunity.com/sharedfiles/filedetails/?id=3798890105) | SiKUIFramework, GlobalStorageSiK |
 
 <a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3750612158"><img src="docs/assets/global-storage-sik-banner.png" alt="Global Storage SiK" width="180"></a>
@@ -28,6 +28,11 @@ All five target Project Zomboid Build 42.20+ and are maintained. Load
 singleplayer, hosted games and dedicated multiplayer paths. Project Cook
 integration remains optional and requires runtime confirmation in the
 installed environment.
+
+Core 1.5.9 and Tablet 1.5.3 include the zone-quota and network-selector fixes
+validated on a copy of an existing save with a Project Zomboid 42.22.2 dedicated
+server/client pair and SiK UI Framework 1.0.6. See the
+[release notes and coverage limits](docs/releases/1.5.9.md).
 
 ## Features
 

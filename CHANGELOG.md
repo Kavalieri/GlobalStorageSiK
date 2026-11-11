@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.9 - 2026-11-11
+
+### Global Storage SiK
+
+- Fixes new-container admission across networks: a full network no longer uses
+  the quota of another network. The default remains 128 containers per network
+  and the global new-admission guard remains 8192.
+- Distinguishes zone, network and global registry limits in rescan results.
+
+### Tablet 1.5.3
+
+- Fixes the network selector's missing child host using the Framework block
+  host and its content geometry.
+- The reported format-conversion exception remains unattributed.
+
+See [ES/EN release notes](docs/releases/1.5.9.md) for changes and PZ 42.22.2
+validation coverage. Framework and the other official addons are unchanged.
+
 ## 1.5.8 - 2026-10-05
 
 ### Global Storage SiK
