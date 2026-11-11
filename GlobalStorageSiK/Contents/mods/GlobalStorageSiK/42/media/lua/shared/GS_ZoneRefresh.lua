@@ -10,6 +10,7 @@ require "GS_Zones"
 require "GS_ZoneScanner"
 require "GS_Sandbox"
 require "GS_ZonePriority"
+local ManifestProtocol = require "GS_ManifestProtocol"
 -- GS_Network.lua ya requiere este fichero (GS_ZoneRefresh) - NO se puede
 -- añadir "require GS_Network" aqui arriba sin crear un require circular en
 -- la carga inicial. GlobalStorageSiK.Network se usa mas abajo solo dentro
@@ -45,9 +46,8 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 	}
 	local myArea = zoneAreaTiles or GlobalStorageSiK.ZonePriority.zoneArea(zone)
 
+	local zones = registry.zones or {}
 	local maxNodes = GlobalStorageSiK.Sandbox.getMaxNodes()
-	local existingCount = 0
-	for _ in pairs(registry.nodes) do existingCount = existingCount + 1 end
 
 	-- Contenedores demasiado lejos del terminal activo mas cercano de la red
 	-- se descartan del escaneo (no se registran ni se actualizan). Una zona
@@ -85,24 +85,47 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 		end
 	end
 
+	-- Cuenta también los nodos offline, deshabilitados o excluidos que siguen
+	-- registrados en esta red. Las bajas del escaneo ya liberaron sus plazas.
+	local networkCount, registryCount = 0, 0
+	for _, node in pairs(registry.nodes) do
+		registryCount = registryCount + 1
+		local nodeZone = zones[node.zoneId]
+		if node.zoneId == zone.id or (nodeZone and nodeZone.networkId == zone.networkId) then
+			networkCount = networkCount + 1
+		end
+	end
+
 	for id, entry in pairs(detectedById) do
 		if not (protectedEntryIds and protectedEntryIds[id]) then
 		local existing = registry.nodes[id]
 		if not existing then
-			if existingCount + summary.added >= maxNodes then
-				summary.limitHit = true
+			-- El manifiesto recorre el registro global antes de filtrar por red.
+			local networkFull = networkCount >= maxNodes
+			local registryFull = registryCount >= ManifestProtocol.MAX_NODES
+			if networkFull or registryFull then
+				summary.networkLimitHit = summary.networkLimitHit or networkFull
+				summary.registryLimitHit = summary.registryLimitHit or registryFull
 			else
 				entry.membership = entry.membership or "auto"
 				entry.discoveredAtMs = scanMs
 				entry.lastSeenMs = scanMs
 				registry.nodes[id] = entry
+				networkCount = networkCount + 1
+				registryCount = registryCount + 1
 				if entry.itemSnapshot then GlobalStorageSiK.NodeSnapshots.commit(entry, entry.itemSnapshot, "bootstrap") end
 				summary.added = summary.added + 1
 			end
 		else
-			local existingZone = registry.zones and registry.zones[existing.zoneId]
+			local existingZone = zones[existing.zoneId]
 			local existingArea = existingZone and GlobalStorageSiK.ZonePriority.zoneArea(existingZone) or math.huge
-			if existing.zoneId == zone.id or myArea <= existingArea then
+			local alreadyInNetwork = existing.zoneId == zone.id
+				or (existingZone and existingZone.networkId == zone.networkId)
+			local canUpdate = existing.zoneId == zone.id or myArea <= existingArea
+			if canUpdate and not alreadyInNetwork and networkCount >= maxNodes then
+				summary.networkLimitHit = true
+			elseif canUpdate then
+				if not alreadyInNetwork then networkCount = networkCount + 1 end
 				existing.zoneId = zone.id
 				existing.x = entry.x
 				existing.y = entry.y
@@ -157,6 +180,7 @@ function GlobalStorageSiK.ZoneRefresh.mergeScanResults(registry, zone, detected,
 		end
 	end
 
+	summary.limitHit = summary.networkLimitHit == true or summary.registryLimitHit == true
 	zone.lastScanMs = getTimestampMs and getTimestampMs() or 0
 	return summary
 end
@@ -187,7 +211,8 @@ function GlobalStorageSiK.ZoneRefresh.refreshZone(networkId, zoneId)
 	-- Marca interna consumida por GS_Index al construir inmediatamente el
 	-- terminalState: solo esta zona tiene snapshots recién capturados.
 	summary._freshSnapshotScope = zoneId
-	summary.limitHit = limitHit == true
+	summary.zoneLimitHit = limitHit == true
+	summary.limitHit = summary.limitHit or summary.zoneLimitHit
 	-- Un reescaneo actualiza snapshots autoritativos, pero no debe difundir el
 	-- Global ModData completo (incluye todas las redes/nodos). GS_Server envia
 	-- terminalState dirigido y RegistryStore persiste el catalogo por separado.
@@ -226,7 +251,10 @@ function GlobalStorageSiK.ZoneRefresh.refreshNetworkOnTerminalOpen(networkId)
 			totals.offline = totals.offline + summary.offline
 			totals.outOfRange = totals.outOfRange + (summary.outOfRange or 0)
 			totals.removedIneligible = totals.removedIneligible + (summary.removedIneligible or 0)
-			if limitHit then totals.limitHit = true end
+			totals.zoneLimitHit = totals.zoneLimitHit or limitHit == true
+			totals.networkLimitHit = totals.networkLimitHit or summary.networkLimitHit == true
+			totals.registryLimitHit = totals.registryLimitHit or summary.registryLimitHit == true
+			totals.limitHit = totals.limitHit or totals.zoneLimitHit or summary.limitHit
 		end
 	end
 

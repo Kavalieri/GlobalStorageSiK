@@ -211,7 +211,8 @@ local function completeZone(job)
 	job.totals.cookingContainersExcluded = job.totals.cookingContainersExcluded
 		+ (state.metrics.cookingContainersExcluded or 0)
 	job.totals.zones = job.totals.zones + 1
-	job.totals.limitHit = job.totals.limitHit or state.limitHit == true
+	job.totals.zoneLimitHit = job.totals.zoneLimitHit or state.limitHit == true
+	job.totals.limitHit = job.totals.limitHit or job.totals.zoneLimitHit
 	job.totals.squaresVisited = job.totals.squaresVisited + (state.metrics.squaresVisited or 0)
 	job.totals.loadedSquares = job.totals.loadedSquares + (state.metrics.loadedSquares or 0)
 	job.totals.nodesScanned = job.totals.nodesScanned + (state.metrics.nodesDetected or 0)
@@ -245,6 +246,9 @@ local function commitStaged(job)
 		job.totals.added = job.totals.added + (summary.added or 0)
 		job.totals.updated = job.totals.updated + (summary.updated or 0)
 		job.totals.offline = job.totals.offline + (summary.offline or 0)
+		job.totals.limitHit = job.totals.limitHit or summary.limitHit == true
+		job.totals.networkLimitHit = job.totals.networkLimitHit or summary.networkLimitHit == true
+		job.totals.registryLimitHit = job.totals.registryLimitHit or summary.registryLimitHit == true
 		job.totals.outOfRange = job.totals.outOfRange + (summary.outOfRange or 0)
 		job.totals.removedIneligible = job.totals.removedIneligible
 			+ (summary.removedIneligible or 0)
@@ -274,6 +278,7 @@ end
 
 local function recordTerminalState(networkId, job, state, reason)
 	local zone = currentZone(job)
+	local totals = job.totals
 	setTerminalState(networkId, {
 		state = state, reason = reason, phase = job.phase or "finalizing",
 		reasonCode = GlobalStorageSiK.I18n and GlobalStorageSiK.I18n.scanReasonCode
@@ -281,7 +286,11 @@ local function recordTerminalState(networkId, job, state, reason)
 		zoneId = zone and zone.id or nil, zoneName = zone and zone.name or nil,
 		zonesDone = math.max(0, (job.zoneIndex or 1) - 1), zonesTotal = #(job.zones or {}),
 		startedMs = job.startedMs or 0, lastProgressMs = job.lastProgressMs or 0,
-		finishedMs = nowMs(), failedZones = job.totals and job.totals.failedZones or 0,
+		finishedMs = nowMs(), failedZones = totals and totals.failedZones or 0,
+		limitHit = totals and totals.limitHit == true,
+		zoneLimitHit = totals and totals.zoneLimitHit == true,
+		networkLimitHit = totals and totals.networkLimitHit == true,
+		registryLimitHit = totals and totals.registryLimitHit == true,
 	})
 end
 

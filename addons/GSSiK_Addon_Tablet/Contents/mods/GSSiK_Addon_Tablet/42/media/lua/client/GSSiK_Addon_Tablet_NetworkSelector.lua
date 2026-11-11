@@ -16,7 +16,6 @@ local RemoteAccess = ProductAPI.RemoteAccess
 local Modal = UI.Modal
 local Controls = UI.Controls
 local Block = UI.Block
-local Card = UI.Card
 local Scroll = UI.Scroll
 local REQUEST_TIMEOUT_MS = 12000
 
@@ -155,7 +154,6 @@ local function removeStateWidgets(panel)
 		if widget and widget.dispose then widget:dispose() end
 	end
 	panel._stateWidgets = {}
-	panel.stateCard = nil
 	panel.feedback = nil
 	panel.cancelButton = nil
 	panel.openButton = nil
@@ -289,13 +287,6 @@ local function createActions(panel, y)
 	return y + metrics.buttonHeight
 end
 
-local function createHeader(parent, x, y, width, titleKey, helpKey)
-	return Controls.blockHeader(parent, {
-		x = x, y = y, w = width,
-		text = T(titleKey), tooltip = T(helpKey),
-	})
-end
-
 local function fitStateContent(panel, bottom)
 	local body = panel._stateBody
 	if body and body.setHeight then body:setHeight(bottom) end
@@ -313,21 +304,25 @@ function Selector.renderState(panel)
 	local metrics = controlMetrics()
 	local pad = 8
 	local y = content.y
+	local available = panel.state == "available"
+	local copy = STATE_COPY[panel.state] or STATE_COPY.error
+	local bodyHeight = available and 176 or metrics.statusHeight + 8
+	local blockHeight = pad * 2 + metrics.sectionHeight + metrics.rowGap + bodyHeight
+	local stateBlock = trackStateWidget(panel, Block.create({
+		parent = panel._stateBody, x = content.x, y = y,
+		w = content.w, h = blockHeight, paddingX = pad, paddingY = pad,
+		title = T(available and "IGUI_GSSiK_RemoteNetworksTitle" or copy.titleKey),
+		tooltip = T(available and "IGUI_GSSiK_RemoteNetworksHelp" or copy.helpKey),
+		headerHeight = metrics.sectionHeight, headerGap = metrics.rowGap,
+		playerNum = panel.playerNum,
+	}))
+	local host, rect = stateBlock.childParent, stateBlock:getContentRect()
+	y = y + blockHeight + metrics.rowGap
 
-	if panel.state == "available" then
-		local blockH = pad * 2 + metrics.sectionHeight + metrics.rowGap + 176
-		panel.stateCard = trackStateWidget(panel, Card.create({
-			parent = panel._stateBody, x = content.x, y = y,
-			w = content.w, h = blockH, scrollable = false,
-		}))
-		local host = panel.stateCard.content
-		local rect = { x = 0, y = 0, w = host.width, h = host.height }
-		local header = createHeader(host, rect.x, rect.y, rect.w,
-			"IGUI_GSSiK_RemoteNetworksTitle", "IGUI_GSSiK_RemoteNetworksHelp")
-		local listY = rect.y + (header.height or metrics.sectionHeight) + metrics.rowGap
-		trackStateWidget(panel, header)
-		panel.listBlock = Block.create({ parent = host, x = rect.x, y = listY,
-			w = rect.w, h = 176, contentHeight = 0,
+	if available then
+		panel.listBlock = Block.create({ parent = host, x = rect.x, y = rect.y,
+			w = rect.w, h = rect.h, contentHeight = 0,
+			playerNum = panel.playerNum,
 			metrics = { block = { padding = 0 } },
 		})
 		panel.listScroll = Scroll.create({ parent = panel.listBlock.panel,
@@ -338,7 +333,6 @@ function Selector.renderState(panel)
 		panel.listBlock:attachScroll(panel.listScroll, true)
 		panel.listBlock:subscribe(function() layoutRows(panel) end)
 		refreshRows(panel)
-		y = y + blockH + metrics.rowGap
 		local feedbackText, feedbackKind = feedbackFor(panel)
 		panel.feedback = trackStateWidget(panel, Controls.feedback(panel._stateBody, {
 			x = content.x, y = y, w = content.w,
@@ -346,23 +340,10 @@ function Selector.renderState(panel)
 		}))
 		y = y + metrics.statusHeight + 8 + metrics.rowGap
 	else
-		local copy = STATE_COPY[panel.state] or STATE_COPY.error
-		local feedbackH = metrics.statusHeight + 8
-		local blockH = pad * 2 + metrics.sectionHeight + metrics.rowGap + feedbackH
-		panel.stateCard = trackStateWidget(panel, Card.create({
-			parent = panel._stateBody, x = content.x, y = y,
-			w = content.w, h = blockH, scrollable = false,
-		}))
-		local host = panel.stateCard.content
-		local rect = { x = 0, y = 0, w = host.width, h = host.height }
-		local header = trackStateWidget(panel,
-			createHeader(host, rect.x, rect.y, rect.w, copy.titleKey, copy.helpKey))
-		local feedbackY = rect.y + (header.height or metrics.sectionHeight) + metrics.rowGap
 		panel.feedback = trackStateWidget(panel, Controls.feedback(host, {
-			x = rect.x, y = feedbackY, w = rect.w,
+			x = rect.x, y = rect.y, w = rect.w,
 			text = T(copy.feedbackKey), tone = copy.feedbackKind,
 		}))
-		y = y + blockH + metrics.rowGap
 	end
 
 	y = createActions(panel, y)
